@@ -280,6 +280,9 @@ class MainActivity : Activity() {
             }, matchWidth())
             return
         }
+        val rowHeight = dp(52)
+        val tagWidth = dp(112)
+        val tagHeight = dp(32)
         entries.forEach { entry ->
             container.addView(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -290,7 +293,10 @@ class MainActivity : Activity() {
                     setOnCheckedChangeListener { _, checked ->
                         if (checked) selectedIds += entry.id else selectedIds -= entry.id
                     }
-                })
+                }, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                ))
                 addView(Button(context).apply {
                     text = entry.title
                     isAllCaps = false
@@ -302,7 +308,7 @@ class MainActivity : Activity() {
                                 .putExtra(PacketHistoryActivity.EXTRA_SAVED_ENTRY, saved),
                         )
                     }
-                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
                 addView(TextView(context).apply {
                     text = PayloadCatalog.tag(entry.payloadType)
                     textSize = 12f
@@ -311,7 +317,7 @@ class MainActivity : Activity() {
                     setPadding(dp(8), dp(5), dp(8), dp(5))
                     background = GradientDrawable().apply {
                         shape = GradientDrawable.RECTANGLE
-                        cornerRadius = dp(12).toFloat()
+                        cornerRadius = tagHeight / 2f
                         setColor(Color.rgb(49, 93, 168))
                     }
                     contentDescription = getString(
@@ -320,10 +326,10 @@ class MainActivity : Activity() {
                         entry.payloadType?.toString() ?: getString(R.string.unknown_payload_type),
                     )
                 }, LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    tagWidth,
+                    tagHeight,
                 ).apply { marginStart = dp(8) })
-            }, matchWidth())
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rowHeight))
         }
     }
 

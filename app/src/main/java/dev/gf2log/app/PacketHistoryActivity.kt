@@ -38,7 +38,7 @@ class PacketHistoryActivity : Activity() {
                 setTypeface(typeface, Typeface.BOLD)
             }, matchWidth())
             addView(Button(context).apply {
-                text = "Copy parsed packet"
+                text = getString(R.string.copy_parsed_packet)
                 setOnClickListener { copyToClipboard(content) }
             }, matchWidth())
             addView(TextView(context).apply {
@@ -55,8 +55,8 @@ class PacketHistoryActivity : Activity() {
 
     private fun copyToClipboard(content: String) {
         getSystemService(ClipboardManager::class.java)
-            .setPrimaryClip(ClipData.newPlainText("GF2log parsed packet", content))
-        Toast.makeText(this, "Parsed packet copied", Toast.LENGTH_SHORT).show()
+            .setPrimaryClip(ClipData.newPlainText(getString(R.string.clipboard_label), content))
+        Toast.makeText(this, getString(R.string.status_packet_copied), Toast.LENGTH_SHORT).show()
     }
 
     private fun matchWidth(): ViewGroup.LayoutParams = ViewGroup.LayoutParams(

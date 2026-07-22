@@ -36,7 +36,8 @@ jobs:
         run: chmod +x gradlew
 
       - name: Install required CMake
-        run: "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "cmake;3.22.1"
+        run: |
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "cmake;3.22.1"
 
       - name: Test, lint, and build release
         run: >

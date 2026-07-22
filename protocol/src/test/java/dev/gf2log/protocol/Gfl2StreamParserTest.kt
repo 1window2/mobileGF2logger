@@ -10,6 +10,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+@OptIn(ExperimentalUnsignedTypes::class)
 class Gfl2StreamParserTest {
     @Test
     fun fragmentedOuterHeaderIsRetained() {
@@ -122,6 +123,35 @@ class Gfl2StreamParserTest {
 
         assertEquals(listOf("First", "Second"), members.map { it.name })
         assertEquals(listOf(1u, 2u), members.map { it.uid })
+    }
+
+    @Test
+    fun pendingContinuationIsEmittedWhenFlowFinishes() {
+        val parser = Gfl2StreamParser()
+        val first = outerMessage(
+            0,
+            payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, guildMembersPayload("Only", 7uL)),
+        )
+
+        assertTrue(parser.accept(first).isEmpty())
+        val event = parser.finish().singlePayload()
+
+        assertEquals(0, event.value.messageId)
+        assertEquals(listOf("Only"), (event.value.data as GuildMembersData).members.map { it.name })
+        assertTrue(parser.finish().isEmpty())
+    }
+
+    @Test
+    fun bufferOverflowAlsoClearsPendingContinuation() {
+        val parser = Gfl2StreamParser(maximumBufferedBytes = 256)
+        val first = outerMessage(
+            0,
+            payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, guildMembersPayload("Stale", 8uL)),
+        )
+
+        assertTrue(parser.accept(first).isEmpty())
+        assertEquals(1, parser.accept(ByteArray(257)).filterIsInstance<ParseEvent.Warning>().size)
+        assertTrue(parser.finish().isEmpty())
     }
 
     private fun weaponsPayload(): ByteArray {

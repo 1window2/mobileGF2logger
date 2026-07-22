@@ -3,6 +3,9 @@ package dev.gf2log.app.history
 import dev.gf2log.protocol.ParsedPayloadTextFormatter
 import dev.gf2log.protocol.model.ParsedPayload
 import java.io.File
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -15,14 +18,26 @@ class CaptureHistoryStore(
 ) {
     @Synchronized
     fun save(payload: ParsedPayload): Entry {
-        directory.mkdirs()
+        check(directory.isDirectory || directory.mkdirs()) { "Unable to create history directory" }
         val instant = Instant.now(clock)
         val capturedAt = LOG_TIME_FORMAT.format(instant)
         val id = "${instant.toEpochMilli()}_${payload.payloadType}_${sequence.incrementAndGet()}.txt"
         val destination = File(directory, id)
         val temporary = File.createTempFile("packet_", ".tmp", directory)
-        temporary.writeText(ParsedPayloadTextFormatter.format(payload, capturedAt), Charsets.UTF_8)
-        check(temporary.renameTo(destination)) { "Unable to finalize history entry" }
+        try {
+            temporary.writeText(ParsedPayloadTextFormatter.format(payload, capturedAt), Charsets.UTF_8)
+            try {
+                Files.move(
+                    temporary.toPath(),
+                    destination.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                )
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(temporary.toPath(), destination.toPath())
+            }
+        } finally {
+            temporary.delete()
+        }
         destination.setLastModified(instant.toEpochMilli())
         trimToLimit()
         return destination.toEntry()

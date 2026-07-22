@@ -9,6 +9,8 @@ object NativeCaptureBridge {
         fun onFlowClosed(flowId: Long)
 
         fun onTraffic(sentBytes: Long, receivedBytes: Long, inspectedBytes: Long)
+
+        fun onCaptureStopped()
     }
 
     val isAvailable: Boolean = try {

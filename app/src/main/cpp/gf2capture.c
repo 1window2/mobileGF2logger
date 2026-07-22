@@ -41,6 +41,7 @@ typedef struct capture_context {
     jmethodID payload_method;
     jmethodID flow_closed_method;
     jmethodID traffic_method;
+    jmethodID stopped_method;
     pthread_t thread;
     atomic_bool running;
     int tun_fd;
@@ -375,6 +376,13 @@ static void *capture_thread_main(void *argument) {
     LOGI("Native packet loop stopped");
 
 detach:
+    if (context->env != NULL && context->listener != NULL && context->stopped_method != NULL) {
+        (*context->env)->CallVoidMethod(
+                context->env,
+                context->listener,
+                context->stopped_method);
+        clear_java_exception(context, "capture stopped notification");
+    }
     (*context->vm)->DetachCurrentThread(context->vm);
     context->env = NULL;
 
@@ -434,11 +442,13 @@ Java_dev_gf2log_app_capture_NativeCaptureBridge_nativeStart(
     context->payload_method = (*env)->GetMethodID(env, listener_class, "onPayload", "(JZ[B)V");
     context->flow_closed_method = (*env)->GetMethodID(env, listener_class, "onFlowClosed", "(J)V");
     context->traffic_method = (*env)->GetMethodID(env, listener_class, "onTraffic", "(JJJ)V");
+    context->stopped_method = (*env)->GetMethodID(env, listener_class, "onCaptureStopped", "()V");
     (*env)->DeleteLocalRef(env, service_class);
     (*env)->DeleteLocalRef(env, listener_class);
 
     if (context->protect_method == NULL || context->payload_method == NULL ||
             context->flow_closed_method == NULL || context->traffic_method == NULL ||
+            context->stopped_method == NULL ||
             (*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env);
         context->env = env;

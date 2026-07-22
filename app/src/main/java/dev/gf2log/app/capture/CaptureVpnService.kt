@@ -9,13 +9,17 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
+import dev.gf2log.app.R
 import dev.gf2log.app.history.CaptureHistoryStore
 import dev.gf2log.protocol.Gfl2StreamParser
 import dev.gf2log.protocol.model.ParseEvent
-import java.util.concurrent.ArrayBlockingQueue
 import java.io.File
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -26,6 +30,9 @@ class CaptureVpnService : VpnService() {
     private val decodedPayloadCount = AtomicLong()
     private val observedPayloadBytes = AtomicLong()
     private val reportedTrafficBucket = AtomicLong()
+    private val parseWarningCount = AtomicLong()
+    private val droppedParserTaskCount = AtomicLong()
+    private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var guildMembersWriter: GuildMembersCsvWriter
     private lateinit var historyStore: CaptureHistoryStore
     private val parserExecutor = ThreadPoolExecutor(
@@ -35,7 +42,7 @@ class CaptureVpnService : VpnService() {
         TimeUnit.MILLISECONDS,
         ArrayBlockingQueue(PARSER_QUEUE_CAPACITY),
         { runnable -> Thread(runnable, "GF2ProtocolParser") },
-        ThreadPoolExecutor.DiscardPolicy(),
+        ThreadPoolExecutor.AbortPolicy(),
     )
 
     override fun onCreate() {
@@ -63,7 +70,9 @@ class CaptureVpnService : VpnService() {
     }
 
     override fun onDestroy() {
-        stopCapture()
+        releaseCaptureResources()
+        if (CaptureStatus.isRunning) CaptureStatus.markStopped()
+        mainHandler.removeCallbacksAndMessages(null)
         parserExecutor.shutdownNow()
         guildMembersWriter.close()
         super.onDestroy()
@@ -71,12 +80,13 @@ class CaptureVpnService : VpnService() {
 
     private fun startCapture(targetPackage: String) {
         if (tunnel != null) {
-            CaptureStatus.write(this, "Capture is already running")
+            CaptureStatus.markRunning("Capture is already running")
             updateNotification("Capturing selected game traffic")
             return
         }
 
         startInForeground("Preparing capture")
+        CaptureStatus.update("Preparing capture")
         if (targetPackage.isBlank()) {
             failStart("Enter the installed game package name")
             return
@@ -88,7 +98,7 @@ class CaptureVpnService : VpnService() {
 
         val descriptor = try {
             Builder()
-                .setSession("GF2log")
+                .setSession("GF2logger")
                 .setMtu(VPN_MTU)
                 .addAddress(VPN_ADDRESS, VPN_PREFIX_LENGTH)
                 .addRoute("0.0.0.0", 0)
@@ -112,7 +122,10 @@ class CaptureVpnService : VpnService() {
         decodedPayloadCount.set(0)
         observedPayloadBytes.set(0)
         reportedTrafficBucket.set(0)
+        parseWarningCount.set(0)
+        droppedParserTaskCount.set(0)
 
+        CaptureStatus.markRunning("Starting native capture")
         val started = try {
             NativeCaptureBridge.start(
                 descriptor.fd,
@@ -123,7 +136,7 @@ class CaptureVpnService : VpnService() {
                     }
 
                     override fun onFlowClosed(flowId: Long) {
-                        parsers.remove(flowId)
+                        enqueueFlowClosed(flowId)
                     }
 
                     override fun onTraffic(
@@ -132,6 +145,10 @@ class CaptureVpnService : VpnService() {
                         inspectedBytes: Long,
                     ) {
                         recordTraffic(sentBytes + receivedBytes, inspectedBytes)
+                    }
+
+                    override fun onCaptureStopped() {
+                        handleNativeCaptureStopped()
                     }
                 },
             )
@@ -143,34 +160,61 @@ class CaptureVpnService : VpnService() {
             return
         }
 
-        CaptureStatus.write(this, "Capturing only $targetPackage")
+        CaptureStatus.markRunning("Capturing only $targetPackage")
         updateNotification("Capturing selected game traffic")
     }
 
     private fun enqueuePayload(flowId: Long, isSent: Boolean, payload: ByteArray) {
         if (payload.isEmpty()) return
         if (isSent) return
-        parserExecutor.execute {
+        submitParserTask {
             val parser = parsers.computeIfAbsent(flowId) { Gfl2StreamParser() }
-            val events = parser.accept(payload)
-            val decoded = events.filterIsInstance<ParseEvent.Payload>()
-            decoded.forEach { event ->
-                runCatching { historyStore.save(event.value) }
-                    .onFailure {
-                        CaptureStatus.write(this, "Unable to save parsed-packet history")
-                    }
-                val saved = guildMembersWriter.accept(event.value)
-                if (saved != null) {
-                    CaptureStatus.write(
-                        this,
-                        "Saved ${saved.rowCount} guild members to ${saved.file.name}",
-                    )
-                }
+            processEvents(parser.accept(payload))
+        }
+    }
+
+    private fun enqueueFlowClosed(flowId: Long) {
+        if (!submitParserTask {
+                val parser = parsers.remove(flowId) ?: return@submitParserTask
+                processEvents(parser.finish())
             }
-            if (decoded.isNotEmpty()) {
-                decodedPayloadCount.addAndGet(decoded.size.toLong())
+        ) {
+            parsers.remove(flowId)
+        }
+    }
+
+    private fun submitParserTask(task: () -> Unit): Boolean = try {
+        parserExecutor.execute {
+            runCatching(task).onFailure {
+                CaptureStatus.update("Protocol processing failed: ${it.javaClass.simpleName}")
             }
         }
+        true
+    } catch (_: RejectedExecutionException) {
+        val dropped = droppedParserTaskCount.incrementAndGet()
+        CaptureStatus.update("Parser overloaded; dropped $dropped queued chunks")
+        false
+    }
+
+    private fun processEvents(events: List<ParseEvent>) {
+        val warnings = events.filterIsInstance<ParseEvent.Warning>()
+        if (warnings.isNotEmpty()) parseWarningCount.addAndGet(warnings.size.toLong())
+
+        val decoded = events.filterIsInstance<ParseEvent.Payload>()
+        decoded.forEach { event ->
+            runCatching { historyStore.save(event.value) }
+                .onFailure { CaptureStatus.update("Unable to save parsed-packet history") }
+            runCatching { guildMembersWriter.accept(event.value) }
+                .onSuccess { saved ->
+                    if (saved != null) {
+                        CaptureStatus.update(
+                            "Saved ${saved.rowCount} guild members to ${saved.file.name}",
+                        )
+                    }
+                }
+                .onFailure { CaptureStatus.update("Unable to save guild CSV") }
+        }
+        if (decoded.isNotEmpty()) decodedPayloadCount.addAndGet(decoded.size.toLong())
     }
 
     private fun recordTraffic(observed: Long, inspected: Long) {
@@ -178,32 +222,47 @@ class CaptureVpnService : VpnService() {
         val bucket = observed / TRAFFIC_REPORT_BYTES
         val previousBucket = reportedTrafficBucket.get()
         if (bucket > previousBucket && reportedTrafficBucket.compareAndSet(previousBucket, bucket)) {
-            CaptureStatus.write(
-                this,
+            CaptureStatus.update(
                 "Forwarded ${observed / 1024} KiB; inspected ${inspected / 1024} KiB; " +
-                    "decoded ${decodedPayloadCount.get()} payloads",
+                    "decoded ${decodedPayloadCount.get()} payloads; " +
+                    "warnings ${parseWarningCount.get()}; dropped ${droppedParserTaskCount.get()}",
             )
         }
     }
 
+    private fun handleNativeCaptureStopped() {
+        mainHandler.post {
+            if (!CaptureStatus.isRunning) return@post
+            tunnel?.close()
+            tunnel = null
+            parsers.clear()
+            parserExecutor.queue.clear()
+            CaptureStatus.markStopped("Capture stopped unexpectedly; press Prepare capture to retry")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
+    }
+
     private fun failStart(message: String) {
-        CaptureStatus.write(this, message)
-        NativeCaptureBridge.stop()
-        tunnel?.close()
-        tunnel = null
+        CaptureStatus.markStopped(message)
+        releaseCaptureResources()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     private fun stopCapture() {
+        CaptureStatus.markStopped()
+        releaseCaptureResources()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun releaseCaptureResources() {
         NativeCaptureBridge.stop()
         tunnel?.close()
         tunnel = null
         parsers.clear()
         parserExecutor.queue.clear()
-        CaptureStatus.write(this, "Capture is stopped")
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
     }
 
     private fun startInForeground(content: String) {
@@ -226,8 +285,8 @@ class CaptureVpnService : VpnService() {
 
     private fun buildNotification(content: String): Notification =
         Notification.Builder(this, NOTIFICATION_CHANNEL)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
-            .setContentTitle("GF2log")
+            .setSmallIcon(R.drawable.ic_launcher)
+            .setContentTitle(getString(R.string.app_name))
             .setContentText(content)
             .setOngoing(true)
             .build()
@@ -235,7 +294,7 @@ class CaptureVpnService : VpnService() {
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             NOTIFICATION_CHANNEL,
-            "Capture status",
+            getString(R.string.notification_channel),
             NotificationManager.IMPORTANCE_LOW,
         )
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)

@@ -58,6 +58,37 @@ class GuildMembersCsvWriterTest {
         )
     }
 
+    @Test
+    fun messageZeroBatchClosesWhenItsFlowEnds() {
+        val output = temporaryFolder.newFolder("flow-ended-batches")
+        val clock = Clock.fixed(Instant.parse("2026-07-21T19:11:09Z"), ZoneOffset.UTC)
+        val writer = GuildMembersCsvWriter(output, clock)
+
+        writer.accept(
+            payload(messageId = 0, uid = 1u, name = "First", end = true),
+            flowEnded = true,
+        )
+        writer.accept(payload(messageId = 42, uid = 2u, name = "Second", end = true))
+        writer.close()
+
+        val files = output.listFiles().orEmpty().sortedBy { it.name }
+        assertEquals(2, files.size)
+        assertEquals(
+            listOf(
+                GuildMembersCsv.HEADER,
+                "1,First,60,3750,313832,10398,51661,1784639347,2026-07-21T19:11:09Z",
+            ),
+            files[0].readLines(Charsets.UTF_8),
+        )
+        assertEquals(
+            listOf(
+                GuildMembersCsv.HEADER,
+                "2,Second,60,3750,313832,10398,51661,1784639347,2026-07-21T19:11:09Z",
+            ),
+            files[1].readLines(Charsets.UTF_8),
+        )
+    }
+
     private fun payload(messageId: Int, uid: UInt, name: String, end: Boolean): ParsedPayload =
         ParsedPayload(
             messageId = messageId,

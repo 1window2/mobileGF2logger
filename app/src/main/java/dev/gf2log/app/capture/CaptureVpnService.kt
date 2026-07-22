@@ -176,7 +176,7 @@ class CaptureVpnService : VpnService() {
     private fun enqueueFlowClosed(flowId: Long) {
         if (!submitParserTask {
                 val parser = parsers.remove(flowId) ?: return@submitParserTask
-                processEvents(parser.finish())
+                processEvents(parser.finish(), flowEnded = true)
             }
         ) {
             parsers.remove(flowId)
@@ -196,7 +196,7 @@ class CaptureVpnService : VpnService() {
         false
     }
 
-    private fun processEvents(events: List<ParseEvent>) {
+    private fun processEvents(events: List<ParseEvent>, flowEnded: Boolean = false) {
         val warnings = events.filterIsInstance<ParseEvent.Warning>()
         if (warnings.isNotEmpty()) parseWarningCount.addAndGet(warnings.size.toLong())
 
@@ -204,7 +204,7 @@ class CaptureVpnService : VpnService() {
         decoded.forEach { event ->
             runCatching { historyStore.save(event.value) }
                 .onFailure { CaptureStatus.update("Unable to save parsed-packet history") }
-            runCatching { guildMembersWriter.accept(event.value) }
+            runCatching { guildMembersWriter.accept(event.value, flowEnded) }
                 .onSuccess { saved ->
                     if (saved != null) {
                         CaptureStatus.update(

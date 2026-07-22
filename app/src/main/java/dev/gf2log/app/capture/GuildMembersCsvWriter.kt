@@ -20,7 +20,7 @@ class GuildMembersCsvWriter(
     private var activeBatch: Batch? = null
 
     @Synchronized
-    fun accept(payload: ParsedPayload): SaveResult? {
+    fun accept(payload: ParsedPayload, flowEnded: Boolean = false): SaveResult? {
         if (payload.payloadType != Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS) {
             closeActiveBatch()
             return null
@@ -42,7 +42,7 @@ class GuildMembersCsvWriter(
         batch.previousMessageId = payload.messageId
 
         val result = SaveResult(batch.file, batch.rows)
-        if (payload.messageId != 0 && payload.isEndOfMessage) {
+        if (flowEnded || (payload.messageId != 0 && payload.isEndOfMessage)) {
             closeActiveBatch()
         }
         return result

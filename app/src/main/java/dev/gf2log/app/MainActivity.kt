@@ -32,7 +32,7 @@ class MainActivity : Activity() {
     private val statusHandler = Handler(Looper.getMainLooper())
     private val refreshStatus = object : Runnable {
         override fun run() {
-            statusText.text = CaptureStatus.read(this@MainActivity)
+            statusText.text = CaptureStatus.read()
             statusHandler.postDelayed(this, STATUS_REFRESH_MILLIS)
         }
     }
@@ -49,7 +49,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        statusText.text = CaptureStatus.read(this)
+        statusText.text = CaptureStatus.read()
         refreshHistory()
         statusHandler.postDelayed(refreshStatus, STATUS_REFRESH_MILLIS)
     }
@@ -64,13 +64,22 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         when {
             requestCode == REQUEST_VPN && resultCode == RESULT_OK -> startCaptureService()
-            requestCode == REQUEST_EXPORT && resultCode == RESULT_OK && data?.data != null -> {
-                val source = pendingExport ?: return
-                contentResolver.openOutputStream(data.data!!)?.use { output ->
-                    source.inputStream().use { input -> input.copyTo(output) }
-                }
-                statusText.text = "Exported ${source.name}"
+            requestCode == REQUEST_EXPORT -> {
+                val source = pendingExport
                 pendingExport = null
+                if (resultCode != RESULT_OK || data?.data == null || source == null) return
+                val exported = runCatching {
+                    val output = contentResolver.openOutputStream(data.data!!)
+                        ?: error("Document provider did not open an output stream")
+                    output.use { stream ->
+                        source.inputStream().use { input -> input.copyTo(stream) }
+                    }
+                }.isSuccess
+                statusText.text = if (exported) {
+                    getString(R.string.status_exported, source.name)
+                } else {
+                    getString(R.string.status_export_failed)
+                }
             }
         }
     }
@@ -82,18 +91,18 @@ class MainActivity : Activity() {
             setPadding(spacing, spacing, spacing, spacing)
 
             addView(TextView(context).apply {
-                text = "GF2log"
+                text = getString(R.string.app_name)
                 textSize = 28f
                 setTypeface(typeface, Typeface.BOLD)
             })
             addView(TextView(context).apply {
-                text = "On-device protocol capture for one explicitly selected game package. Raw traffic is not stored."
+                text = getString(R.string.app_description)
                 textSize = 16f
                 setPadding(0, spacing / 2, 0, spacing)
             })
 
             packageNameInput = EditText(context).apply {
-                hint = "Installed game package name"
+                hint = getString(R.string.target_package_hint)
                 setSingleLine(true)
                 setText(
                     getPreferences(MODE_PRIVATE)
@@ -103,23 +112,23 @@ class MainActivity : Activity() {
             addView(packageNameInput, matchWidth())
 
             addView(Button(context).apply {
-                text = "Prepare capture"
+                text = getString(R.string.prepare_capture)
                 setOnClickListener { requestVpnAndStart() }
             }, matchWidth())
             addView(Button(context).apply {
-                text = "Stop"
+                text = getString(R.string.stop_capture)
                 setOnClickListener { stopCaptureService() }
             }, matchWidth())
 
             statusText = TextView(context).apply {
-                text = CaptureStatus.read(context)
+                text = CaptureStatus.read()
                 textSize = 15f
                 setPadding(0, spacing, 0, 0)
             }
             addView(statusText, matchWidth())
 
             addView(TextView(context).apply {
-                text = "Recent parsed packets (latest 100)"
+                text = getString(R.string.recent_packets, CaptureHistoryStore.MAX_ENTRIES)
                 textSize = 20f
                 setTypeface(typeface, Typeface.BOLD)
                 setPadding(0, spacing, 0, spacing / 2)
@@ -129,11 +138,11 @@ class MainActivity : Activity() {
             }
             addView(historyContainer, matchWidth())
             addView(Button(context).apply {
-                text = "Delete selected history"
+                text = getString(R.string.delete_selected_history)
                 setOnClickListener { deleteSelectedHistory() }
             }, matchWidth())
             addView(Button(context).apply {
-                text = "Export latest guild CSV"
+                text = getString(R.string.export_latest_guild_csv)
                 setOnClickListener { exportLatestGuildCsv() }
             }, matchWidth())
         }
@@ -157,14 +166,15 @@ class MainActivity : Activity() {
             .setAction(CaptureVpnService.ACTION_START)
             .putExtra(CaptureVpnService.EXTRA_TARGET_PACKAGE, packageNameInput.text.toString().trim())
         startForegroundService(intent)
-        statusText.text = "Preparing capture"
+        statusText.text = getString(R.string.status_preparing)
     }
 
     private fun stopCaptureService() {
         val intent = Intent(this, CaptureVpnService::class.java)
             .setAction(CaptureVpnService.ACTION_STOP)
         startService(intent)
-        statusText.text = "Capture is stopped"
+        CaptureStatus.markStopped()
+        statusText.text = CaptureStatus.read()
     }
 
     private fun requestNotificationPermissionIfNeeded() {
@@ -183,7 +193,7 @@ class MainActivity : Activity() {
             .filter { it.isFile && it.extension.equals("csv", ignoreCase = true) }
             .maxByOrNull(File::lastModified)
         if (latest == null) {
-            statusText.text = "No guild CSV has been captured yet"
+            statusText.text = getString(R.string.status_no_guild_csv)
             return
         }
 
@@ -200,7 +210,7 @@ class MainActivity : Activity() {
         val entries = historyStore.list()
         if (entries.isEmpty()) {
             historyContainer.addView(TextView(this).apply {
-                text = "No parsed packets captured yet"
+                text = getString(R.string.no_parsed_packets)
             }, matchWidth())
             return
         }
@@ -209,7 +219,7 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.HORIZONTAL
                 addView(CheckBox(context).apply {
                     isChecked = entry.id in selectedHistoryIds
-                    contentDescription = "Select ${entry.title}"
+                    contentDescription = getString(R.string.select_history_entry, entry.title)
                     setOnCheckedChangeListener { _, checked ->
                         if (checked) selectedHistoryIds += entry.id else selectedHistoryIds -= entry.id
                     }
@@ -231,12 +241,16 @@ class MainActivity : Activity() {
 
     private fun deleteSelectedHistory() {
         if (selectedHistoryIds.isEmpty()) {
-            statusText.text = "Select one or more history entries first"
+            statusText.text = getString(R.string.status_select_history_first)
             return
         }
         val deleted = historyStore.delete(selectedHistoryIds)
         selectedHistoryIds.clear()
-        statusText.text = "Deleted $deleted history ${if (deleted == 1) "entry" else "entries"}"
+        statusText.text = resources.getQuantityString(
+            R.plurals.status_deleted_history,
+            deleted,
+            deleted,
+        )
         refreshHistory()
     }
 

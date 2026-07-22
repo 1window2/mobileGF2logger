@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GF2logger</string>
+    <string name="app_description">On-device protocol capture for one explicitly selected game package. Raw traffic is not stored.</string>
+    <string name="target_package_hint">Installed game package name</string>
+    <string name="prepare_capture">Prepare capture</string>
+    <string name="stop_capture">Stop</string>
+    <string name="recent_packets">Recent parsed packets (latest %1$d)</string>
+    <string name="delete_selected_history">Delete selected history</string>
+    <string name="export_latest_guild_csv">Export latest guild CSV</string>
+    <string name="no_parsed_packets">No parsed packets captured yet</string>
+    <string name="select_history_entry">Select %1$s</string>
+    <string name="copy_parsed_packet">Copy parsed packet</string>
+    <string name="clipboard_label">GF2logger parsed packet</string>
+    <string name="status_packet_copied">Parsed packet copied</string>
+    <string name="status_preparing">Preparing capture</string>
+    <string name="status_exported">Exported %1$s</string>
+    <string name="status_export_failed">Unable to export guild CSV</string>
+    <string name="status_no_guild_csv">No guild CSV has been captured yet</string>
+    <string name="status_select_history_first">Select one or more history entries first</string>
+    <string name="notification_channel">Capture status</string>
+    <plurals name="status_deleted_history">
+        <item quantity="one">Deleted %1$d history entry</item>
+        <item quantity="other">Deleted %1$d history entries</item>
+    </plurals>
+</resources>

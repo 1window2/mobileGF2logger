@@ -6,6 +6,7 @@ import dev.gf2log.protocol.model.ParsedPayload
 import java.nio.file.Files
 import java.time.Clock
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -23,10 +24,10 @@ class CaptureHistoryStoreTest {
                     Instant.parse("2026-07-22T08:00:00Z").plusSeconds(index.toLong()),
                     ZoneOffset.UTC,
                 )
-                CaptureHistoryStore(directory, clock).save(payload(index))
+                CaptureHistoryStore(directory, clock, ZoneOffset.UTC).save(payload(index))
             }
 
-            val store = CaptureHistoryStore(directory)
+            val store = CaptureHistoryStore(directory, displayZone = ZoneOffset.UTC)
             val entries = store.list()
             assertEquals(CaptureHistoryStore.MAX_ENTRIES, entries.size)
             assertEquals("26/07/22 08:01:40", entries.first().title)
@@ -38,6 +39,22 @@ class CaptureHistoryStoreTest {
             val deleted = store.delete(listOf(entries.first().id, "../outside.txt"))
             assertEquals(1, deleted)
             assertEquals(99, store.list().size)
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun formatsHistoryTitlesInTheConfiguredDeviceZone() {
+        val directory = Files.createTempDirectory("gf2log-history-zone-test").toFile()
+        try {
+            val clock = Clock.fixed(Instant.parse("2026-07-22T08:00:00Z"), ZoneOffset.UTC)
+            val store = CaptureHistoryStore(directory, clock, ZoneId.of("Asia/Seoul"))
+
+            val entry = store.save(payload(1))
+
+            assertEquals("26/07/22 17:00:00", entry.title)
+            assertTrue(store.read(entry.id)?.contains("capturedAt=2026-07-22T08:00:00Z") == true)
         } finally {
             directory.deleteRecursively()
         }

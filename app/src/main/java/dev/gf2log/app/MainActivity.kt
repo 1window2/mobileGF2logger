@@ -21,14 +21,18 @@ import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.capture.CaptureVpnService
 import dev.gf2log.app.capture.GuildMembersCsvWriter
 import dev.gf2log.app.history.CaptureHistoryStore
+import dev.gf2log.app.history.SavedHistoryStore
 import java.io.File
 
 class MainActivity : Activity() {
     private lateinit var packageNameInput: EditText
     private lateinit var statusText: TextView
     private lateinit var historyContainer: LinearLayout
+    private lateinit var savedHistoryContainer: LinearLayout
     private lateinit var historyStore: CaptureHistoryStore
+    private lateinit var savedHistoryStore: SavedHistoryStore
     private val selectedHistoryIds = linkedSetOf<String>()
+    private val selectedSavedHistoryIds = linkedSetOf<String>()
     private val statusHandler = Handler(Looper.getMainLooper())
     private val refreshStatus = object : Runnable {
         override fun run() {
@@ -42,6 +46,9 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         historyStore = CaptureHistoryStore(
             File(filesDir, CaptureHistoryStore.HISTORY_DIRECTORY),
+        )
+        savedHistoryStore = SavedHistoryStore(
+            File(filesDir, SavedHistoryStore.SAVED_HISTORY_DIRECTORY),
         )
         setContentView(buildContentView())
         requestNotificationPermissionIfNeeded()
@@ -142,6 +149,25 @@ class MainActivity : Activity() {
                 setOnClickListener { deleteSelectedHistory() }
             }, matchWidth())
             addView(Button(context).apply {
+                text = getString(R.string.save_selected_history)
+                setOnClickListener { saveSelectedHistory() }
+            }, matchWidth())
+
+            addView(TextView(context).apply {
+                text = getString(R.string.saved_packets, SavedHistoryStore.MAX_ENTRIES)
+                textSize = 20f
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, spacing, 0, spacing / 2)
+            }, matchWidth())
+            savedHistoryContainer = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            addView(savedHistoryContainer, matchWidth())
+            addView(Button(context).apply {
+                text = getString(R.string.delete_selected_saved_history)
+                setOnClickListener { deleteSelectedSavedHistory() }
+            }, matchWidth())
+            addView(Button(context).apply {
                 text = getString(R.string.export_latest_guild_csv)
                 setOnClickListener { exportLatestGuildCsv() }
             }, matchWidth())
@@ -206,22 +232,44 @@ class MainActivity : Activity() {
     }
 
     private fun refreshHistory() {
-        historyContainer.removeAllViews()
-        val entries = historyStore.list()
+        renderHistoryEntries(
+            container = historyContainer,
+            entries = historyStore.list(),
+            selectedIds = selectedHistoryIds,
+            saved = false,
+            emptyMessage = R.string.no_parsed_packets,
+        )
+        renderHistoryEntries(
+            container = savedHistoryContainer,
+            entries = savedHistoryStore.list(),
+            selectedIds = selectedSavedHistoryIds,
+            saved = true,
+            emptyMessage = R.string.no_saved_packets,
+        )
+    }
+
+    private fun renderHistoryEntries(
+        container: LinearLayout,
+        entries: List<CaptureHistoryStore.Entry>,
+        selectedIds: MutableSet<String>,
+        saved: Boolean,
+        emptyMessage: Int,
+    ) {
+        container.removeAllViews()
         if (entries.isEmpty()) {
-            historyContainer.addView(TextView(this).apply {
-                text = getString(R.string.no_parsed_packets)
+            container.addView(TextView(this).apply {
+                text = getString(emptyMessage)
             }, matchWidth())
             return
         }
         entries.forEach { entry ->
-            historyContainer.addView(LinearLayout(this).apply {
+            container.addView(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 addView(CheckBox(context).apply {
-                    isChecked = entry.id in selectedHistoryIds
+                    isChecked = entry.id in selectedIds
                     contentDescription = getString(R.string.select_history_entry, entry.title)
                     setOnCheckedChangeListener { _, checked ->
-                        if (checked) selectedHistoryIds += entry.id else selectedHistoryIds -= entry.id
+                        if (checked) selectedIds += entry.id else selectedIds -= entry.id
                     }
                 })
                 addView(Button(context).apply {
@@ -231,7 +279,8 @@ class MainActivity : Activity() {
                         startActivity(
                             Intent(this@MainActivity, PacketHistoryActivity::class.java)
                                 .putExtra(PacketHistoryActivity.EXTRA_ENTRY_ID, entry.id)
-                                .putExtra(PacketHistoryActivity.EXTRA_ENTRY_TITLE, entry.title),
+                                .putExtra(PacketHistoryActivity.EXTRA_ENTRY_TITLE, entry.title)
+                                .putExtra(PacketHistoryActivity.EXTRA_SAVED_ENTRY, saved),
                         )
                     }
                 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -248,6 +297,53 @@ class MainActivity : Activity() {
         selectedHistoryIds.clear()
         statusText.text = resources.getQuantityString(
             R.plurals.status_deleted_history,
+            deleted,
+            deleted,
+        )
+        refreshHistory()
+    }
+
+    private fun saveSelectedHistory() {
+        if (selectedHistoryIds.isEmpty()) {
+            statusText.text = getString(R.string.status_select_history_first)
+            return
+        }
+        val result = runCatching {
+            savedHistoryStore.saveFrom(historyStore, selectedHistoryIds)
+        }.getOrElse {
+            statusText.text = getString(R.string.status_save_history_failed)
+            return
+        }
+        selectedHistoryIds.clear()
+        statusText.text = when {
+            result.saved > 0 && result.limitReached -> getString(
+                R.string.status_saved_history_at_limit,
+                result.saved,
+                SavedHistoryStore.MAX_ENTRIES,
+            )
+            result.saved > 0 -> resources.getQuantityString(
+                R.plurals.status_saved_history,
+                result.saved,
+                result.saved,
+            )
+            result.limitReached -> getString(
+                R.string.status_saved_history_limit,
+                SavedHistoryStore.MAX_ENTRIES,
+            )
+            else -> getString(R.string.status_history_already_saved)
+        }
+        refreshHistory()
+    }
+
+    private fun deleteSelectedSavedHistory() {
+        if (selectedSavedHistoryIds.isEmpty()) {
+            statusText.text = getString(R.string.status_select_saved_history_first)
+            return
+        }
+        val deleted = savedHistoryStore.delete(selectedSavedHistoryIds)
+        selectedSavedHistoryIds.clear()
+        statusText.text = resources.getQuantityString(
+            R.plurals.status_deleted_saved_history,
             deleted,
             deleted,
         )

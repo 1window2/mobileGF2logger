@@ -7,8 +7,12 @@
     <string name="stop_capture">Stop</string>
     <string name="recent_packets">Recent parsed packets (latest %1$d)</string>
     <string name="delete_selected_history">Delete selected history</string>
+    <string name="save_selected_history">Save selected history</string>
+    <string name="saved_packets">Saved packets (up to %1$d)</string>
+    <string name="delete_selected_saved_history">Delete selected saved history</string>
     <string name="export_latest_guild_csv">Export latest guild CSV</string>
     <string name="no_parsed_packets">No parsed packets captured yet</string>
+    <string name="no_saved_packets">No packets saved yet</string>
     <string name="select_history_entry">Select %1$s</string>
     <string name="copy_parsed_packet">Copy parsed packet</string>
     <string name="clipboard_label">GF2logger parsed packet</string>
@@ -18,9 +22,22 @@
     <string name="status_export_failed">Unable to export guild CSV</string>
     <string name="status_no_guild_csv">No guild CSV has been captured yet</string>
     <string name="status_select_history_first">Select one or more history entries first</string>
+    <string name="status_select_saved_history_first">Select one or more saved entries first</string>
+    <string name="status_save_history_failed">Unable to save selected history</string>
+    <string name="status_history_already_saved">Selected history is already saved</string>
+    <string name="status_saved_history_limit">Saved-history limit reached (%1$d)</string>
+    <string name="status_saved_history_at_limit">Saved %1$d entries; saved-history limit reached (%2$d)</string>
     <string name="notification_channel">Capture status</string>
     <plurals name="status_deleted_history">
         <item quantity="one">Deleted %1$d history entry</item>
         <item quantity="other">Deleted %1$d history entries</item>
+    </plurals>
+    <plurals name="status_saved_history">
+        <item quantity="one">Saved %1$d history entry</item>
+        <item quantity="other">Saved %1$d history entries</item>
+    </plurals>
+    <plurals name="status_deleted_saved_history">
+        <item quantity="one">Deleted %1$d saved entry</item>
+        <item quantity="other">Deleted %1$d saved entries</item>
     </plurals>
 </resources>

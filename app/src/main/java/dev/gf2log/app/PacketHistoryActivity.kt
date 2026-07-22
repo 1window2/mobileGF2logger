@@ -12,6 +12,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import dev.gf2log.app.history.CaptureHistoryStore
+import dev.gf2log.app.history.SavedHistoryStore
 import java.io.File
 
 class PacketHistoryActivity : Activity() {
@@ -20,9 +21,15 @@ class PacketHistoryActivity : Activity() {
 
         val entryId = intent.getStringExtra(EXTRA_ENTRY_ID).orEmpty()
         val title = intent.getStringExtra(EXTRA_ENTRY_TITLE).orEmpty()
-        val content = CaptureHistoryStore(
-            File(filesDir, CaptureHistoryStore.HISTORY_DIRECTORY),
-        ).read(entryId)
+        val content = if (intent.getBooleanExtra(EXTRA_SAVED_ENTRY, false)) {
+            SavedHistoryStore(
+                File(filesDir, SavedHistoryStore.SAVED_HISTORY_DIRECTORY),
+            ).read(entryId)
+        } else {
+            CaptureHistoryStore(
+                File(filesDir, CaptureHistoryStore.HISTORY_DIRECTORY),
+            ).read(entryId)
+        }
         if (content == null) {
             finish()
             return
@@ -67,5 +74,6 @@ class PacketHistoryActivity : Activity() {
     companion object {
         const val EXTRA_ENTRY_ID = "entry_id"
         const val EXTRA_ENTRY_TITLE = "entry_title"
+        const val EXTRA_SAVED_ENTRY = "saved_entry"
     }
 }

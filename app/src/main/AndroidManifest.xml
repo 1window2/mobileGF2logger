@@ -29,6 +29,10 @@
             android:name=".PacketHistoryActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".OptionsActivity"
+            android:exported="false" />
+
         <service
             android:name=".capture.CaptureVpnService"
             android:exported="false"

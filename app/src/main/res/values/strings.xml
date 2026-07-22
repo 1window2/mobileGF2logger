@@ -5,6 +5,13 @@
     <string name="target_package_hint">Installed game package name</string>
     <string name="prepare_capture">Prepare capture</string>
     <string name="stop_capture">Stop</string>
+    <string name="open_options">Open payload options</string>
+    <string name="payload_options">Payload options</string>
+    <string name="payload_options_description">Choose which decoded payloads are added to future packet history. Existing history is unchanged.</string>
+    <string name="payload_option_label">%1$s (payloadType = %2$d)</string>
+    <string name="required_payload_description">Required and always enabled. %1$s</string>
+    <string name="payload_tag_description">%1$s, payload type %2$s</string>
+    <string name="unknown_payload_type">unknown</string>
     <string name="recent_packets">Recent parsed packets (latest %1$d)</string>
     <string name="delete_selected_history">Delete selected history</string>
     <string name="save_selected_history">Save selected history</string>

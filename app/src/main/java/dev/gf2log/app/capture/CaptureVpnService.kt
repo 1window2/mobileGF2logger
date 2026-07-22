@@ -14,6 +14,7 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import dev.gf2log.app.R
 import dev.gf2log.app.history.CaptureHistoryStore
+import dev.gf2log.app.settings.PayloadHistoryPreferences
 import dev.gf2log.protocol.Gfl2StreamParser
 import dev.gf2log.protocol.model.ParseEvent
 import java.io.File
@@ -35,6 +36,7 @@ class CaptureVpnService : VpnService() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var guildMembersWriter: GuildMembersCsvWriter
     private lateinit var historyStore: CaptureHistoryStore
+    private lateinit var payloadHistoryPreferences: PayloadHistoryPreferences
     private val parserExecutor = ThreadPoolExecutor(
         1,
         1,
@@ -53,6 +55,7 @@ class CaptureVpnService : VpnService() {
         historyStore = CaptureHistoryStore(
             File(filesDir, CaptureHistoryStore.HISTORY_DIRECTORY),
         )
+        payloadHistoryPreferences = PayloadHistoryPreferences(this)
         createNotificationChannel()
     }
 
@@ -201,8 +204,10 @@ class CaptureVpnService : VpnService() {
 
         val decoded = events.filterIsInstance<ParseEvent.Payload>()
         decoded.forEach { event ->
-            runCatching { historyStore.save(event.value) }
-                .onFailure { CaptureStatus.update("Unable to save parsed-packet history") }
+            if (payloadHistoryPreferences.isEnabled(event.value.payloadType)) {
+                runCatching { historyStore.save(event.value) }
+                    .onFailure { CaptureStatus.update("Unable to save parsed-packet history") }
+            }
             runCatching { guildMembersWriter.accept(event.value, flowEnded) }
                 .onSuccess { saved ->
                     if (saved != null) {

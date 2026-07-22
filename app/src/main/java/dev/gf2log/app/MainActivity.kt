@@ -4,16 +4,20 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.ViewGroup
+import android.view.Gravity
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -22,6 +26,7 @@ import dev.gf2log.app.capture.CaptureVpnService
 import dev.gf2log.app.capture.GuildMembersCsvWriter
 import dev.gf2log.app.history.CaptureHistoryStore
 import dev.gf2log.app.history.SavedHistoryStore
+import dev.gf2log.protocol.PayloadCatalog
 import java.io.File
 
 class MainActivity : Activity() {
@@ -97,11 +102,24 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(spacing, spacing, spacing, spacing)
 
-            addView(TextView(context).apply {
-                text = getString(R.string.app_name)
-                textSize = 28f
-                setTypeface(typeface, Typeface.BOLD)
-            })
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(TextView(context).apply {
+                    text = getString(R.string.app_name)
+                    textSize = 28f
+                    setTypeface(typeface, Typeface.BOLD)
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(ImageButton(context).apply {
+                    setImageResource(R.drawable.ic_settings)
+                    contentDescription = getString(R.string.open_options)
+                    setBackgroundColor(Color.TRANSPARENT)
+                    setPadding(dp(10), dp(10), dp(10), dp(10))
+                    setOnClickListener {
+                        startActivity(Intent(this@MainActivity, OptionsActivity::class.java))
+                    }
+                }, LinearLayout.LayoutParams(dp(48), dp(48)))
+            }, matchWidth())
             addView(TextView(context).apply {
                 text = getString(R.string.app_description)
                 textSize = 16f
@@ -265,6 +283,7 @@ class MainActivity : Activity() {
         entries.forEach { entry ->
             container.addView(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
                 addView(CheckBox(context).apply {
                     isChecked = entry.id in selectedIds
                     contentDescription = getString(R.string.select_history_entry, entry.title)
@@ -284,6 +303,26 @@ class MainActivity : Activity() {
                         )
                     }
                 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(TextView(context).apply {
+                    text = PayloadCatalog.tag(entry.payloadType)
+                    textSize = 12f
+                    setTextColor(Color.WHITE)
+                    gravity = Gravity.CENTER
+                    setPadding(dp(8), dp(5), dp(8), dp(5))
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        cornerRadius = dp(12).toFloat()
+                        setColor(Color.rgb(49, 93, 168))
+                    }
+                    contentDescription = getString(
+                        R.string.payload_tag_description,
+                        PayloadCatalog.tag(entry.payloadType),
+                        entry.payloadType?.toString() ?: getString(R.string.unknown_payload_type),
+                    )
+                }, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { marginStart = dp(8) })
             }, matchWidth())
         }
     }
@@ -355,6 +394,8 @@ class MainActivity : Activity() {
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.WRAP_CONTENT,
     )
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private companion object {
         const val REQUEST_VPN = 100

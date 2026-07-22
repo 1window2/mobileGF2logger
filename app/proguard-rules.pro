@@ -5,4 +5,5 @@
     public void onPayload(long, boolean, byte[]);
     public void onFlowClosed(long);
     public void onTraffic(long, long, long);
+    public void onCaptureStopped();
 }

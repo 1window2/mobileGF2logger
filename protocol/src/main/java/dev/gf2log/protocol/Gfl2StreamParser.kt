@@ -21,7 +21,7 @@ class Gfl2StreamParser(
         try {
             buffer.append(bytes)
         } catch (error: ProtocolException) {
-            buffer.clear()
+            reset()
             return listOf(ParseEvent.Warning(error.message ?: "Stream buffer overflow"))
         }
 
@@ -40,6 +40,13 @@ class Gfl2StreamParser(
             parseMessage(messageId, message, events)
         }
 
+        return events
+    }
+
+    fun finish(): List<ParseEvent> {
+        val events = mutableListOf<ParseEvent>()
+        emitPending(events)
+        buffer.clear()
         return events
     }
 

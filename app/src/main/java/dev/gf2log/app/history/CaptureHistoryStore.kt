@@ -8,6 +8,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.time.Clock
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.atomic.AtomicLong
@@ -15,6 +16,7 @@ import java.util.concurrent.atomic.AtomicLong
 class CaptureHistoryStore(
     private val directory: File,
     private val clock: Clock = Clock.systemUTC(),
+    private val displayZone: ZoneId? = null,
 ) {
     @Synchronized
     fun save(payload: ParsedPayload): Entry {
@@ -80,7 +82,9 @@ class CaptureHistoryStore(
 
     private fun File.toEntry(): Entry = Entry(
         id = name,
-        title = TITLE_TIME_FORMAT.format(Instant.ofEpochMilli(lastModified())),
+        title = TITLE_TIME_FORMAT
+            .withZone(displayZone ?: ZoneId.systemDefault())
+            .format(Instant.ofEpochMilli(lastModified())),
         payloadType = name.split('_').getOrNull(1)?.toIntOrNull(),
     )
 
@@ -99,6 +103,5 @@ class CaptureHistoryStore(
             .withZone(ZoneOffset.UTC)
         private val TITLE_TIME_FORMAT = DateTimeFormatter
             .ofPattern("yy/MM/dd HH:mm:ss")
-            .withZone(ZoneOffset.UTC)
     }
 }

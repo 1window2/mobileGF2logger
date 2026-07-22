@@ -21,6 +21,7 @@ All notable changes to mobileGF2logger are documented here.
 
 ### Fixed
 
+- Display history timestamps in the Android device timezone while keeping CSV timestamps in UTC.
 - Prevent unsigned underflow in zdtun's open-socket counter.
 - Drain queued flow-close parser work before clearing capture state.
 - Keep message-zero payload batches separate when a TCP flow closes.

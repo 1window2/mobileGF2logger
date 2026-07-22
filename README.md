@@ -11,6 +11,7 @@ mobileGF2logger is a lightweight, non-root app for Platoon masters who want to r
 
 - Captures and parses the Platoon member response without a computer or root access.
 - Shows the latest 100 parsed packets in `yy/MM/dd HH:mm:ss` format with fixed-size payload-role tags.
+- Displays history times in the Android device timezone while keeping exported CSV timestamps in UTC.
 - Provides a gear-shaped payload-options screen for Weapons, Attachments, Common Keys, and Formations; optional history capture is off by default while Platoon Members is always enabled.
 - Keeps up to 50 selected packets in a separate saved collection until manually deleted.
 - Opens parsed results as a clean table, with access to the complete raw CSV text and clipboard copy.

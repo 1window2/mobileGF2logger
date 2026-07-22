@@ -282,7 +282,8 @@ static void close_socket(zdtun_t *tun, socket_t sock) {
   FD_CLR(sock, &tun->all_fds);
   FD_CLR(sock, &tun->write_fds);
 
-  tun->stats.num_open_sockets = max(tun->stats.num_open_sockets-1, 0);
+  if(tun->stats.num_open_sockets > 0)
+    tun->stats.num_open_sockets--;
 }
 
 /* ******************************************************* */

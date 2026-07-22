@@ -4,16 +4,20 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.ViewGroup
+import android.view.Gravity
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -21,14 +25,19 @@ import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.capture.CaptureVpnService
 import dev.gf2log.app.capture.GuildMembersCsvWriter
 import dev.gf2log.app.history.CaptureHistoryStore
+import dev.gf2log.app.history.SavedHistoryStore
+import dev.gf2log.protocol.PayloadCatalog
 import java.io.File
 
 class MainActivity : Activity() {
     private lateinit var packageNameInput: EditText
     private lateinit var statusText: TextView
     private lateinit var historyContainer: LinearLayout
+    private lateinit var savedHistoryContainer: LinearLayout
     private lateinit var historyStore: CaptureHistoryStore
+    private lateinit var savedHistoryStore: SavedHistoryStore
     private val selectedHistoryIds = linkedSetOf<String>()
+    private val selectedSavedHistoryIds = linkedSetOf<String>()
     private val statusHandler = Handler(Looper.getMainLooper())
     private val refreshStatus = object : Runnable {
         override fun run() {
@@ -42,6 +51,9 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         historyStore = CaptureHistoryStore(
             File(filesDir, CaptureHistoryStore.HISTORY_DIRECTORY),
+        )
+        savedHistoryStore = SavedHistoryStore(
+            File(filesDir, SavedHistoryStore.SAVED_HISTORY_DIRECTORY),
         )
         setContentView(buildContentView())
         requestNotificationPermissionIfNeeded()
@@ -90,11 +102,24 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(spacing, spacing, spacing, spacing)
 
-            addView(TextView(context).apply {
-                text = getString(R.string.app_name)
-                textSize = 28f
-                setTypeface(typeface, Typeface.BOLD)
-            })
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(TextView(context).apply {
+                    text = getString(R.string.app_name)
+                    textSize = 28f
+                    setTypeface(typeface, Typeface.BOLD)
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(ImageButton(context).apply {
+                    setImageResource(R.drawable.ic_settings)
+                    contentDescription = getString(R.string.open_options)
+                    setBackgroundColor(Color.TRANSPARENT)
+                    setPadding(dp(10), dp(10), dp(10), dp(10))
+                    setOnClickListener {
+                        startActivity(Intent(this@MainActivity, OptionsActivity::class.java))
+                    }
+                }, LinearLayout.LayoutParams(dp(48), dp(48)))
+            }, matchWidth())
             addView(TextView(context).apply {
                 text = getString(R.string.app_description)
                 textSize = 16f
@@ -142,8 +167,27 @@ class MainActivity : Activity() {
                 setOnClickListener { deleteSelectedHistory() }
             }, matchWidth())
             addView(Button(context).apply {
-                text = getString(R.string.export_latest_guild_csv)
-                setOnClickListener { exportLatestGuildCsv() }
+                text = getString(R.string.save_selected_history)
+                setOnClickListener { saveSelectedHistory() }
+            }, matchWidth())
+
+            addView(TextView(context).apply {
+                text = getString(R.string.saved_packets, SavedHistoryStore.MAX_ENTRIES)
+                textSize = 20f
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, spacing, 0, spacing / 2)
+            }, matchWidth())
+            savedHistoryContainer = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            addView(savedHistoryContainer, matchWidth())
+            addView(Button(context).apply {
+                text = getString(R.string.delete_selected_saved_history)
+                setOnClickListener { deleteSelectedSavedHistory() }
+            }, matchWidth())
+            addView(Button(context).apply {
+                text = getString(R.string.export_latest_platoon_csv)
+                setOnClickListener { exportLatestPlatoonCsv() }
             }, matchWidth())
         }
         return ScrollView(this).apply { addView(container, matchWidth()) }
@@ -186,14 +230,14 @@ class MainActivity : Activity() {
     }
 
     @Suppress("DEPRECATION")
-    private fun exportLatestGuildCsv() {
+    private fun exportLatestPlatoonCsv() {
         val directory = File(filesDir, GuildMembersCsvWriter.OUTPUT_DIRECTORY)
         val latest = directory.listFiles()
             .orEmpty()
             .filter { it.isFile && it.extension.equals("csv", ignoreCase = true) }
             .maxByOrNull(File::lastModified)
         if (latest == null) {
-            statusText.text = getString(R.string.status_no_guild_csv)
+            statusText.text = getString(R.string.status_no_platoon_csv)
             return
         }
 
@@ -206,24 +250,53 @@ class MainActivity : Activity() {
     }
 
     private fun refreshHistory() {
-        historyContainer.removeAllViews()
-        val entries = historyStore.list()
+        renderHistoryEntries(
+            container = historyContainer,
+            entries = historyStore.list(),
+            selectedIds = selectedHistoryIds,
+            saved = false,
+            emptyMessage = R.string.no_parsed_packets,
+        )
+        renderHistoryEntries(
+            container = savedHistoryContainer,
+            entries = savedHistoryStore.list(),
+            selectedIds = selectedSavedHistoryIds,
+            saved = true,
+            emptyMessage = R.string.no_saved_packets,
+        )
+    }
+
+    private fun renderHistoryEntries(
+        container: LinearLayout,
+        entries: List<CaptureHistoryStore.Entry>,
+        selectedIds: MutableSet<String>,
+        saved: Boolean,
+        emptyMessage: Int,
+    ) {
+        container.removeAllViews()
         if (entries.isEmpty()) {
-            historyContainer.addView(TextView(this).apply {
-                text = getString(R.string.no_parsed_packets)
+            container.addView(TextView(this).apply {
+                text = getString(emptyMessage)
             }, matchWidth())
             return
         }
+        val rowHeight = dp(52)
+        val tagWidth = dp(112)
+        val tagHeight = dp(32)
         entries.forEach { entry ->
-            historyContainer.addView(LinearLayout(this).apply {
+            container.addView(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
                 addView(CheckBox(context).apply {
-                    isChecked = entry.id in selectedHistoryIds
+                    isChecked = entry.id in selectedIds
                     contentDescription = getString(R.string.select_history_entry, entry.title)
                     setOnCheckedChangeListener { _, checked ->
-                        if (checked) selectedHistoryIds += entry.id else selectedHistoryIds -= entry.id
+                        if (checked) selectedIds += entry.id else selectedIds -= entry.id
                     }
-                })
+                }, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                ))
                 addView(Button(context).apply {
                     text = entry.title
                     isAllCaps = false
@@ -231,11 +304,32 @@ class MainActivity : Activity() {
                         startActivity(
                             Intent(this@MainActivity, PacketHistoryActivity::class.java)
                                 .putExtra(PacketHistoryActivity.EXTRA_ENTRY_ID, entry.id)
-                                .putExtra(PacketHistoryActivity.EXTRA_ENTRY_TITLE, entry.title),
+                                .putExtra(PacketHistoryActivity.EXTRA_ENTRY_TITLE, entry.title)
+                                .putExtra(PacketHistoryActivity.EXTRA_SAVED_ENTRY, saved),
                         )
                     }
-                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            }, matchWidth())
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+                addView(TextView(context).apply {
+                    text = PayloadCatalog.tag(entry.payloadType)
+                    textSize = 12f
+                    setTextColor(Color.WHITE)
+                    gravity = Gravity.CENTER
+                    setPadding(dp(8), dp(5), dp(8), dp(5))
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        cornerRadius = tagHeight / 2f
+                        setColor(Color.rgb(49, 93, 168))
+                    }
+                    contentDescription = getString(
+                        R.string.payload_tag_description,
+                        PayloadCatalog.tag(entry.payloadType),
+                        entry.payloadType?.toString() ?: getString(R.string.unknown_payload_type),
+                    )
+                }, LinearLayout.LayoutParams(
+                    tagWidth,
+                    tagHeight,
+                ).apply { marginStart = dp(8) })
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rowHeight))
         }
     }
 
@@ -254,10 +348,60 @@ class MainActivity : Activity() {
         refreshHistory()
     }
 
+    private fun saveSelectedHistory() {
+        if (selectedHistoryIds.isEmpty()) {
+            statusText.text = getString(R.string.status_select_history_first)
+            return
+        }
+        val result = runCatching {
+            savedHistoryStore.saveFrom(historyStore, selectedHistoryIds)
+        }.getOrElse {
+            statusText.text = getString(R.string.status_save_history_failed)
+            return
+        }
+        selectedHistoryIds.clear()
+        statusText.text = when {
+            result.saved > 0 && result.limitReached -> resources.getQuantityString(
+                R.plurals.status_saved_history_at_limit,
+                result.saved,
+                result.saved,
+                SavedHistoryStore.MAX_ENTRIES,
+            )
+            result.saved > 0 -> resources.getQuantityString(
+                R.plurals.status_saved_history,
+                result.saved,
+                result.saved,
+            )
+            result.limitReached -> getString(
+                R.string.status_saved_history_limit,
+                SavedHistoryStore.MAX_ENTRIES,
+            )
+            else -> getString(R.string.status_history_already_saved)
+        }
+        refreshHistory()
+    }
+
+    private fun deleteSelectedSavedHistory() {
+        if (selectedSavedHistoryIds.isEmpty()) {
+            statusText.text = getString(R.string.status_select_saved_history_first)
+            return
+        }
+        val deleted = savedHistoryStore.delete(selectedSavedHistoryIds)
+        selectedSavedHistoryIds.clear()
+        statusText.text = resources.getQuantityString(
+            R.plurals.status_deleted_saved_history,
+            deleted,
+            deleted,
+        )
+        refreshHistory()
+    }
+
     private fun matchWidth(): ViewGroup.LayoutParams = ViewGroup.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.WRAP_CONTENT,
     )
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private companion object {
         const val REQUEST_VPN = 100

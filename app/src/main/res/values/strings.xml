@@ -5,22 +5,50 @@
     <string name="target_package_hint">Installed game package name</string>
     <string name="prepare_capture">Prepare capture</string>
     <string name="stop_capture">Stop</string>
+    <string name="open_options">Open payload options</string>
+    <string name="payload_options">Payload options</string>
+    <string name="payload_options_description">Choose which decoded payloads are added to future packet history. Existing history is unchanged.</string>
+    <string name="payload_option_label">%1$s (payloadType = %2$d)</string>
+    <string name="required_payload_description">Required and always enabled. %1$s</string>
+    <string name="payload_tag_description">%1$s, payload type %2$s</string>
+    <string name="unknown_payload_type">unknown</string>
     <string name="recent_packets">Recent parsed packets (latest %1$d)</string>
     <string name="delete_selected_history">Delete selected history</string>
-    <string name="export_latest_guild_csv">Export latest guild CSV</string>
+    <string name="save_selected_history">Save selected history</string>
+    <string name="saved_packets">Saved packets (up to %1$d)</string>
+    <string name="delete_selected_saved_history">Delete selected saved history</string>
+    <string name="export_latest_platoon_csv">Export latest Platoon CSV</string>
     <string name="no_parsed_packets">No parsed packets captured yet</string>
+    <string name="no_saved_packets">No packets saved yet</string>
     <string name="select_history_entry">Select %1$s</string>
+    <string name="show_raw_csv_file">Show raw CSV file</string>
     <string name="copy_parsed_packet">Copy parsed packet</string>
     <string name="clipboard_label">GF2logger parsed packet</string>
     <string name="status_packet_copied">Parsed packet copied</string>
     <string name="status_preparing">Preparing capture</string>
     <string name="status_exported">Exported %1$s</string>
-    <string name="status_export_failed">Unable to export guild CSV</string>
-    <string name="status_no_guild_csv">No guild CSV has been captured yet</string>
+    <string name="status_export_failed">Unable to export Platoon CSV</string>
+    <string name="status_no_platoon_csv">No Platoon CSV has been captured yet</string>
     <string name="status_select_history_first">Select one or more history entries first</string>
+    <string name="status_select_saved_history_first">Select one or more saved entries first</string>
+    <string name="status_save_history_failed">Unable to save selected history</string>
+    <string name="status_history_already_saved">Selected history is already saved</string>
+    <string name="status_saved_history_limit">Saved-history limit reached (%1$d)</string>
     <string name="notification_channel">Capture status</string>
     <plurals name="status_deleted_history">
         <item quantity="one">Deleted %1$d history entry</item>
         <item quantity="other">Deleted %1$d history entries</item>
+    </plurals>
+    <plurals name="status_saved_history">
+        <item quantity="one">Saved %1$d history entry</item>
+        <item quantity="other">Saved %1$d history entries</item>
+    </plurals>
+    <plurals name="status_saved_history_at_limit">
+        <item quantity="one">Saved %1$d entry; saved-history limit reached (%2$d)</item>
+        <item quantity="other">Saved %1$d entries; saved-history limit reached (%2$d)</item>
+    </plurals>
+    <plurals name="status_deleted_saved_history">
+        <item quantity="one">Deleted %1$d saved entry</item>
+        <item quantity="other">Deleted %1$d saved entries</item>
     </plurals>
 </resources>

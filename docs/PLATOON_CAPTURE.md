@@ -1,10 +1,10 @@
-# Guild-member capture
+# Platoon-member capture
 
 This implementation is based on `blead/gfl2logger` v0.2.5 at commit `f2baf77c9d86cd9d2b232671680ea8ff905d3658`.
 
 ## Reference behavior
 
-The desktop logger creates one parser for every TCP flow and ignores client-to-server messages. Its `IgnoreTls` addon tells mitmproxy to pass TLS connections through unchanged. Guild data is therefore obtained from a plaintext server-to-client TCP stream, not by decrypting HTTPS.
+The desktop logger creates one parser for every TCP flow and ignores client-to-server messages. Its `IgnoreTls` addon tells mitmproxy to pass TLS connections through unchanged. Platoon data is therefore obtained from a plaintext server-to-client TCP stream, not by decrypting HTTPS.
 
 The stream contains a five-byte outer header followed by one or more four-byte inner payload headers. Inner type `21917` selects `GuildMembersData`. The protobuf schema is:
 
@@ -24,7 +24,7 @@ PlayerInfo.level = field 3
 
 The reference may receive one logical dataset across multiple inner payloads. It continues when the payload type matches and the previous outer message id is `0`, or when both outer message ids match. mobileGF2logger preserves that batching rule when writing CSV files.
 
-The reference reports guild data during login, sometimes twice during login, after reconnection, and on Platoon pages.
+The reference reports Platoon data during login, sometimes twice during login, after reconnection, and on Platoon pages.
 
 ## Output
 
@@ -34,4 +34,4 @@ mobileGF2logger writes UTF-8 CSV with this exact column order:
 uid,name,level,weeklyMerit,totalMerit,highScore,totalScore,lastLogin,logTime
 ```
 
-`logTime` is the UTC instant at which the first guild payload in the batch was received. CSV quoting is applied to names containing commas, quotes, or line breaks.
+`logTime` is the UTC instant at which the first Platoon payload in the batch was received. CSV quoting is applied to names containing commas, quotes, or line breaks.

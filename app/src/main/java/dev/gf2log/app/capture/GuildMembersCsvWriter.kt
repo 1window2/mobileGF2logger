@@ -56,12 +56,22 @@ class GuildMembersCsvWriter(
     private fun openBatch(): Batch {
         outputDirectory.mkdirs()
         val instant = Instant.now(clock)
-        val filename = "gf2log_guildmembers_${FILE_TIME_FORMAT.format(instant)}.csv"
-        val file = File(outputDirectory, filename)
+        val filenameStem = "gf2log_guildmembers_${FILE_TIME_FORMAT.format(instant)}"
+        val file = uniqueFile(filenameStem)
         val writer = BufferedWriter(OutputStreamWriter(FileOutputStream(file), Charsets.UTF_8))
         writer.appendLine(GuildMembersCsv.HEADER)
         writer.flush()
         return Batch(file, LOG_TIME_FORMAT.format(instant), writer)
+    }
+
+    private fun uniqueFile(filenameStem: String): File {
+        var suffix = 1
+        var candidate = File(outputDirectory, "$filenameStem.csv")
+        while (candidate.exists()) {
+            suffix += 1
+            candidate = File(outputDirectory, "${filenameStem}_$suffix.csv")
+        }
+        return candidate
     }
 
     private fun closeActiveBatch() {

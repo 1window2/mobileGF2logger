@@ -39,6 +39,25 @@ class GuildMembersCsvWriterTest {
         )
     }
 
+    @Test
+    fun completedBatchesWithinOneSecondUseDistinctFiles() {
+        val output = temporaryFolder.newFolder("same-second-batches")
+        val clock = Clock.fixed(Instant.parse("2026-07-21T19:11:09Z"), ZoneOffset.UTC)
+        val writer = GuildMembersCsvWriter(output, clock)
+
+        writer.accept(payload(messageId = 41, uid = 1u, name = "First", end = true))
+        writer.accept(payload(messageId = 42, uid = 2u, name = "Second", end = true))
+        writer.close()
+
+        assertEquals(
+            listOf(
+                "gf2log_guildmembers_20260721T191109Z.csv",
+                "gf2log_guildmembers_20260721T191109Z_2.csv",
+            ),
+            output.listFiles().orEmpty().map { it.name }.sorted(),
+        )
+    }
+
     private fun payload(messageId: Int, uid: UInt, name: String, end: Boolean): ParsedPayload =
         ParsedPayload(
             messageId = messageId,

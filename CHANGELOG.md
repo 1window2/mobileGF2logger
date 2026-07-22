@@ -2,6 +2,19 @@
 
 All notable changes to mobileGF2logger are documented here.
 
+## Unreleased
+
+### Added
+
+- A separate saved-packet collection that retains up to 50 manually selected history entries.
+- A cleaned, horizontally scrollable table as the default packet-detail view.
+- Access to the complete raw CSV text and clipboard copy from the table view.
+
+### Changed
+
+- User-facing Circle and Guild terminology now consistently uses the official term Platoon.
+- Newly generated member exports use `gf2log_platoonmembers_*.csv` filenames.
+
 ## 1.0.0 - 2026-07-22
 
 ### Added

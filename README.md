@@ -10,8 +10,9 @@ mobileGF2logger is a lightweight, non-root app for Platoon masters who want to r
 
 - Captures and parses the Platoon member response without a computer or root access.
 - Shows the latest 100 parsed packets in `yy/MM/dd HH:mm:ss` format.
-- Opens complete parsed results in field order and copies them to the clipboard.
-- Supports selecting and deleting history entries.
+- Keeps up to 50 selected packets in a separate saved collection until manually deleted.
+- Opens parsed results as a clean table, with access to the complete raw CSV text and clipboard copy.
+- Supports selecting and deleting recent or saved history entries.
 - Creates exportable UTF-8 CSV files with this column order:
 
 ```text

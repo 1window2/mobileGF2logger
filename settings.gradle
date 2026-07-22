@@ -14,6 +14,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "GF2log"
+rootProject.name = "mobileGF2logger"
 include ':app'
 include ':protocol'

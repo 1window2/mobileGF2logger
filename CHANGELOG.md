@@ -2,18 +2,33 @@
 
 All notable changes to mobileGF2logger are documented here.
 
-## Unreleased
+## 1.1.0 - 2026-07-23
 
 ### Added
 
 - A separate saved-packet collection that retains up to 50 manually selected history entries.
 - A cleaned, horizontally scrollable table as the default packet-detail view.
 - Access to the complete raw CSV text and clipboard copy from the table view.
+- Payload-type labels for recent and saved packet history.
+- A payload-options screen for Weapons, Attachments, Common Keys, and Formations while keeping Platoon Members permanently enabled.
+- C/C++ CodeQL analysis with the extended security query suite.
 
 ### Changed
 
 - User-facing Circle and Guild terminology now consistently uses the official term Platoon.
 - Newly generated member exports use `gf2log_platoonmembers_*.csv` filenames.
+- Optional non-Platoon payloads are excluded from packet history unless explicitly enabled.
+
+### Fixed
+
+- Prevent unsigned underflow in zdtun's open-socket counter.
+- Drain queued flow-close parser work before clearing capture state.
+- Keep message-zero payload batches separate when a TCP flow closes.
+
+### Verified
+
+- Unit tests, Android lint, ARM64 native compilation, R8 shrinking, resource optimization, and release assembly pass.
+- Standalone device capture, payload options, history tags, saved history, table/raw views, clipboard copy, and deletion were verified on a Samsung SM-N976N running Android 12.
 
 ## 1.0.0 - 2026-07-22
 

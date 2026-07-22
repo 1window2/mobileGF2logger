@@ -14,6 +14,7 @@
     <string name="no_parsed_packets">No parsed packets captured yet</string>
     <string name="no_saved_packets">No packets saved yet</string>
     <string name="select_history_entry">Select %1$s</string>
+    <string name="show_raw_csv_file">Show raw CSV file</string>
     <string name="copy_parsed_packet">Copy parsed packet</string>
     <string name="clipboard_label">GF2logger parsed packet</string>
     <string name="status_packet_copied">Parsed packet copied</string>

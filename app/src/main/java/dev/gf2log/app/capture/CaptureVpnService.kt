@@ -73,7 +73,6 @@ class CaptureVpnService : VpnService() {
         releaseCaptureResources()
         if (CaptureStatus.isRunning) CaptureStatus.markStopped()
         mainHandler.removeCallbacksAndMessages(null)
-        parserExecutor.shutdownNow()
         guildMembersWriter.close()
         super.onDestroy()
     }
@@ -235,8 +234,8 @@ class CaptureVpnService : VpnService() {
             if (!CaptureStatus.isRunning) return@post
             tunnel?.close()
             tunnel = null
+            drainParserTasks()
             parsers.clear()
-            parserExecutor.queue.clear()
             CaptureStatus.markStopped("Capture stopped unexpectedly; press Prepare capture to retry")
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -244,15 +243,15 @@ class CaptureVpnService : VpnService() {
     }
 
     private fun failStart(message: String) {
-        CaptureStatus.markStopped(message)
         releaseCaptureResources()
+        CaptureStatus.markStopped(message)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     private fun stopCapture() {
-        CaptureStatus.markStopped()
         releaseCaptureResources()
+        CaptureStatus.markStopped()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -261,8 +260,22 @@ class CaptureVpnService : VpnService() {
         NativeCaptureBridge.stop()
         tunnel?.close()
         tunnel = null
+        drainParserTasks()
         parsers.clear()
-        parserExecutor.queue.clear()
+    }
+
+    private fun drainParserTasks() {
+        parserExecutor.shutdown()
+        val completed = try {
+            parserExecutor.awaitTermination(PARSER_DRAIN_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
+        }
+        if (!completed) {
+            val dropped = parserExecutor.shutdownNow().size
+            droppedParserTaskCount.addAndGet(dropped.toLong())
+        }
     }
 
     private fun startInForeground(content: String) {
@@ -312,6 +325,7 @@ class CaptureVpnService : VpnService() {
         private const val VPN_IPV6_PREFIX_LENGTH = 120
         private const val VPN_MTU = 1500
         private const val PARSER_QUEUE_CAPACITY = 256
+        private const val PARSER_DRAIN_TIMEOUT_SECONDS = 3L
         private const val TRAFFIC_REPORT_BYTES = 64 * 1024
     }
 }

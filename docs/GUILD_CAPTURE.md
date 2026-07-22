@@ -22,13 +22,13 @@ PlayerInfo.name = field 2
 PlayerInfo.level = field 3
 ```
 
-The reference may receive one logical dataset across multiple inner payloads. It continues when the payload type matches and the previous outer message id is `0`, or when both outer message ids match. GF2log preserves that batching rule when writing CSV files.
+The reference may receive one logical dataset across multiple inner payloads. It continues when the payload type matches and the previous outer message id is `0`, or when both outer message ids match. mobileGF2logger preserves that batching rule when writing CSV files.
 
 The reference reports guild data during login, sometimes twice during login, after reconnection, and on Platoon pages.
 
 ## Output
 
-GF2log writes UTF-8 CSV with this exact column order:
+mobileGF2logger writes UTF-8 CSV with this exact column order:
 
 ```text
 uid,name,level,weeklyMerit,totalMerit,highScore,totalScore,lastLogin,logTime

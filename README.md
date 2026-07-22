@@ -1,6 +1,8 @@
 # mobileGF2logger
 
-This is a Platoon (서클) member logger for the Android client of [GIRLS' FRONTLINE 2: EXILIUM](https://gf2exilium.sunborngame.com/). It is Android-only; an iOS release is not planned.
+[![Android](https://github.com/1window2/mobileGF2logger/actions/workflows/android.yml/badge.svg)](https://github.com/1window2/mobileGF2logger/actions/workflows/android.yml)
+
+This is a **Platoon(서클)** member logger for the Android client of [GIRLS' FRONTLINE 2: EXILIUM](https://gf2exilium.sunborngame.com/). It is Android-only; an iOS release is not planned.
 
 mobileGF2logger is a lightweight, non-root app for Platoon masters who want to review member merit data. It uses Android's per-app VPN permission to observe only the selected game, parses supported plaintext server responses entirely on the phone, and never stores raw traffic.
 
@@ -21,7 +23,7 @@ uid,name,level,weeklyMerit,totalMerit,highScore,totalScore,lastLogin,logTime
 1. Install the ARM64 APK on Android 8.0 or newer.
 2. Open **GF2logger**, confirm the game package, and select **Prepare capture**.
 3. Approve Android's VPN prompt, then open the game.
-4. Enter **Circle (서클)** and open **Members (멤버)**.
+4. Enter **Platoon(서클)** and open **Members(멤버)**.
 5. Return to GF2logger to view, copy, delete, or export the captured result.
 
 The app keeps parsed history and generated CSV files in private on-device storage. It does not bypass TLS, certificate pinning, or anti-cheat systems, and it does not modify game traffic.

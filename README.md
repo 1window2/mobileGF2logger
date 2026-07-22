@@ -2,6 +2,7 @@
 
 [![Android](https://github.com/1window2/mobileGF2logger/actions/workflows/android.yml/badge.svg)](https://github.com/1window2/mobileGF2logger/actions/workflows/android.yml)
 [![CodeQL](https://github.com/1window2/mobileGF2logger/actions/workflows/codeql.yml/badge.svg)](https://github.com/1window2/mobileGF2logger/actions/workflows/codeql.yml)
+[![Dependabot](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Fsearch%2Fissues%3Fq%3Drepo%253A1window2%252FmobileGF2logger%2520is%253Apr%2520is%253Aopen%2520author%253Aapp%252Fdependabot&query=%24.total_count&label=Dependabot&suffix=%20open&color=yellow)](https://github.com/1window2/mobileGF2logger/pulls?q=is%3Apr+is%3Aopen+author%3Aapp%2Fdependabot)
 
 This is a **Platoon(서클)** member logger for the Android client of [GIRLS' FRONTLINE 2: EXILIUM](https://gf2exilium.sunborngame.com/). It is Android-only; an iOS release is not planned.
 

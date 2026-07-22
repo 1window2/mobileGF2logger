@@ -13,9 +13,9 @@ class CaptureStatusTest {
         assertEquals("Capture is stopped", CaptureStatus.read())
 
         CaptureStatus.markRunning("Capturing selected package")
-        CaptureStatus.update("Decoded guild members")
+        CaptureStatus.update("Decoded Platoon members")
         assertTrue(CaptureStatus.isRunning)
-        assertEquals("Decoded guild members", CaptureStatus.read())
+        assertEquals("Decoded Platoon members", CaptureStatus.read())
 
         CaptureStatus.markStopped("Capture failed")
         assertFalse(CaptureStatus.isRunning)

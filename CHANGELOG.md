@@ -7,8 +7,8 @@ All notable changes to mobileGF2logger are documented here.
 ### Added
 
 - Lightweight, non-root, per-app Android VPN capture for the supported game package.
-- On-device parsing of the five known game response types, including Circle member payload type `21917`.
-- UTF-8 guild-member CSV generation with collision-safe filenames.
+- On-device parsing of the five known game response types, including Platoon member payload type `21917`.
+- UTF-8 Platoon-member CSV generation with collision-safe filenames.
 - Private, newest-first history for the latest 100 parsed packets, including detail, copy, export, selection, and manual deletion actions.
 - Android backup exclusions for captured data and a dedicated launcher icon.
 
@@ -24,4 +24,4 @@ All notable changes to mobileGF2logger are documented here.
 ### Verified
 
 - Unit tests, Android lint, R8 shrinking, and the release build pass with JDK 17 and Android SDK 36.
-- Standalone end-to-end capture was verified on a Samsung SM-N976N running Android 12 with ADB disconnected: the app forwarded live game traffic and parsed a 40-member Circle response.
+- Standalone end-to-end capture was verified on a Samsung SM-N976N running Android 12 with ADB disconnected: the app forwarded live game traffic and parsed a 40-member Platoon response.

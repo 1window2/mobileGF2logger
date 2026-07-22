@@ -17,4 +17,4 @@ zdtun is dynamically packaged as `libzdtun.so`; mobileGF2logger's JNI integratio
 - Revision: `f2baf77c9d86cd9d2b232671680ea8ff905d3658`
 - License declaration: MIT
 
-mobileGF2logger reproduces the documented framing, recognized payload identifiers, protobuf field mappings, and guild CSV column order. It does not bundle the Python application or generated Python protobuf runtime.
+mobileGF2logger reproduces the documented framing, recognized payload identifiers, protobuf field mappings, and Platoon CSV column order. It does not bundle the Python application or generated Python protobuf runtime.

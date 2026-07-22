@@ -23,7 +23,7 @@ Gfl2StreamParser (one bounded instance per live TCP flow)
 Gfl2PayloadDecoder (five recognized protobuf message types)
         |
         v
-Typed GameData events -> guild CSV exporter
+Typed GameData events -> Platoon CSV exporter
 ```
 
 ## Protocol framing
@@ -53,7 +53,7 @@ Recognized inner types:
 | 11021 | Weapons |
 | 11061 | Attachments |
 | 11138 | Common keys |
-| 21917 | Guild members |
+| 21917 | Platoon members |
 | 23201 | Formations |
 
 Unknown payload types are skipped without allocation. A recognized but malformed protobuf payload produces a warning event and does not terminate parsing of later messages.
@@ -87,4 +87,4 @@ An Android VPN can observe packet metadata, but it cannot automatically read TLS
 
 ## Parsed-packet history
 
-Every completed recognized payload is formatted in protocol order and written atomically to the app's private `files/capture-history` directory. `CaptureHistoryStore` returns entries newest-first, trims the oldest files once the count exceeds 100, rejects path-like identifiers, and supports explicit deletion of user-selected entries. The main activity renders timestamp-only titles in `yy/MM/dd HH:mm:ss` UTC format; selecting a title opens a separate selectable text view with a clipboard action. Backup rules exclude both packet history and generated guild CSV files so inspected data does not leave the device through Android backup.
+Every completed recognized payload is formatted in protocol order and written atomically to the app's private `files/capture-history` directory. `CaptureHistoryStore` returns entries newest-first, trims the oldest files once the count exceeds 100, rejects path-like identifiers, and supports explicit deletion of user-selected entries. The main activity renders timestamp-only titles in `yy/MM/dd HH:mm:ss` UTC format; selecting a title opens a separate selectable text view with a clipboard action. Backup rules exclude both packet history and generated Platoon CSV files so inspected data does not leave the device through Android backup.

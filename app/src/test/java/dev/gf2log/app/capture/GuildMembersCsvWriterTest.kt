@@ -28,7 +28,7 @@ class GuildMembersCsvWriterTest {
         writer.close()
 
         val file = output.listFiles().orEmpty().single()
-        assertEquals("gf2log_guildmembers_20260721T191109Z.csv", file.name)
+        assertEquals("gf2log_platoonmembers_20260721T191109Z.csv", file.name)
         assertEquals(
             listOf(
                 GuildMembersCsv.HEADER,
@@ -51,8 +51,8 @@ class GuildMembersCsvWriterTest {
 
         assertEquals(
             listOf(
-                "gf2log_guildmembers_20260721T191109Z.csv",
-                "gf2log_guildmembers_20260721T191109Z_2.csv",
+                "gf2log_platoonmembers_20260721T191109Z.csv",
+                "gf2log_platoonmembers_20260721T191109Z_2.csv",
             ),
             output.listFiles().orEmpty().map { it.name }.sorted(),
         )

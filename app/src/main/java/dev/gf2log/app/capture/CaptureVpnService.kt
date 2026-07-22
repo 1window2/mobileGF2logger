@@ -207,11 +207,11 @@ class CaptureVpnService : VpnService() {
                 .onSuccess { saved ->
                     if (saved != null) {
                         CaptureStatus.update(
-                            "Saved ${saved.rowCount} guild members to ${saved.file.name}",
+                            "Saved ${saved.rowCount} Platoon members to ${saved.file.name}",
                         )
                     }
                 }
-                .onFailure { CaptureStatus.update("Unable to save guild CSV") }
+                .onFailure { CaptureStatus.update("Unable to save Platoon CSV") }
         }
         if (decoded.isNotEmpty()) decodedPayloadCount.addAndGet(decoded.size.toLong())
     }

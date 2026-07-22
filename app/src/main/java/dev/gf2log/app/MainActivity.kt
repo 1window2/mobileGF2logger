@@ -168,8 +168,8 @@ class MainActivity : Activity() {
                 setOnClickListener { deleteSelectedSavedHistory() }
             }, matchWidth())
             addView(Button(context).apply {
-                text = getString(R.string.export_latest_guild_csv)
-                setOnClickListener { exportLatestGuildCsv() }
+                text = getString(R.string.export_latest_platoon_csv)
+                setOnClickListener { exportLatestPlatoonCsv() }
             }, matchWidth())
         }
         return ScrollView(this).apply { addView(container, matchWidth()) }
@@ -212,14 +212,14 @@ class MainActivity : Activity() {
     }
 
     @Suppress("DEPRECATION")
-    private fun exportLatestGuildCsv() {
+    private fun exportLatestPlatoonCsv() {
         val directory = File(filesDir, GuildMembersCsvWriter.OUTPUT_DIRECTORY)
         val latest = directory.listFiles()
             .orEmpty()
             .filter { it.isFile && it.extension.equals("csv", ignoreCase = true) }
             .maxByOrNull(File::lastModified)
         if (latest == null) {
-            statusText.text = getString(R.string.status_no_guild_csv)
+            statusText.text = getString(R.string.status_no_platoon_csv)
             return
         }
 
@@ -316,8 +316,9 @@ class MainActivity : Activity() {
         }
         selectedHistoryIds.clear()
         statusText.text = when {
-            result.saved > 0 && result.limitReached -> getString(
-                R.string.status_saved_history_at_limit,
+            result.saved > 0 && result.limitReached -> resources.getQuantityString(
+                R.plurals.status_saved_history_at_limit,
+                result.saved,
                 result.saved,
                 SavedHistoryStore.MAX_ENTRIES,
             )

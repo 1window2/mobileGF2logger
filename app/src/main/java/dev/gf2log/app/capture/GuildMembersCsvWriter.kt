@@ -56,7 +56,7 @@ class GuildMembersCsvWriter(
     private fun openBatch(): Batch {
         outputDirectory.mkdirs()
         val instant = Instant.now(clock)
-        val filenameStem = "gf2log_guildmembers_${FILE_TIME_FORMAT.format(instant)}"
+        val filenameStem = "gf2log_platoonmembers_${FILE_TIME_FORMAT.format(instant)}"
         val file = uniqueFile(filenameStem)
         val writer = BufferedWriter(OutputStreamWriter(FileOutputStream(file), Charsets.UTF_8))
         writer.appendLine(GuildMembersCsv.HEADER)

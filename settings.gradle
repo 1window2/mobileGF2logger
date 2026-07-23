@@ -6,31 +6,37 @@ pluginManagement {
     }
 }
 
-def secureToolingVersions = [
-    'io.netty'                              : ['4.1.135.Final', 'known Netty vulnerabilities'],
-    'org.bouncycastle'                     : ['1.84', 'known Bouncy Castle vulnerabilities'],
-    'org.bitbucket.b_c:jose4j'             : ['0.9.6', 'vulnerable compressed JWE handling'],
-    'org.jdom:jdom2'                       : ['2.0.6.1', 'vulnerable XML parsing'],
-    'org.apache.commons:commons-lang3'      : ['3.18.0', 'uncontrolled recursion'],
-    'org.apache.httpcomponents:httpclient' : ['4.5.14', 'vulnerable legacy HttpClient behavior'],
+// Pins known-vulnerable transitive dependencies pulled in by the Android Gradle
+// Plugin's own build/lint tooling (not shipped in the app). AGP resolves its
+// plugin classpath outside of a normal buildscript {} block, so this is forced
+// here rather than in a project build.gradle.
+def forcedSecureVersions = [
+    'org.bouncycastle:bcprov-jdk18on:1.84',
+    'org.bouncycastle:bcpkix-jdk18on:1.84',
+    'org.bouncycastle:bcutil-jdk18on:1.84',
+    'org.bitbucket.b_c:jose4j:0.9.6',
+    'org.jdom:jdom2:2.0.6.1',
+    'org.apache.commons:commons-lang3:3.18.0',
+    'org.apache.httpcomponents:httpclient:4.5.14',
+    'io.netty:netty-common:4.1.135.Final',
+    'io.netty:netty-buffer:4.1.135.Final',
+    'io.netty:netty-codec:4.1.135.Final',
+    'io.netty:netty-codec-http:4.1.135.Final',
+    'io.netty:netty-codec-http2:4.1.135.Final',
+    'io.netty:netty-codec-socks:4.1.135.Final',
+    'io.netty:netty-handler:4.1.135.Final',
+    'io.netty:netty-handler-proxy:4.1.135.Final',
+    'io.netty:netty-resolver:4.1.135.Final',
+    'io.netty:netty-transport:4.1.135.Final',
+    'io.netty:netty-transport-native-unix-common:4.1.135.Final',
 ]
 
-def secureTooling = { configurations ->
-    configurations.configureEach {
-        resolutionStrategy.eachDependency { details ->
-            def coordinate = "${details.requested.group}:${details.requested.name}"
-            def policy = secureToolingVersions[coordinate] ?: secureToolingVersions[details.requested.group]
-            if (policy != null) {
-                details.useVersion policy[0]
-                details.because "Keep Android build tooling above ${policy[1]}"
-            }
+gradle.beforeProject { project ->
+    [project.buildscript.configurations, project.configurations].each { configurations ->
+        configurations.configureEach {
+            resolutionStrategy.force(forcedSecureVersions)
         }
     }
-}
-
-gradle.beforeProject { project ->
-    secureTooling project.buildscript.configurations
-    secureTooling project.configurations
 }
 
 dependencyResolutionManagement {

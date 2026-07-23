@@ -79,9 +79,18 @@ class MainActivity : Activity() {
             requestCode == REQUEST_EXPORT -> {
                 val source = pendingExport
                 pendingExport = null
-                if (resultCode != RESULT_OK || data?.data == null || source == null) return
+                val destination = data?.data
+                if (resultCode != RESULT_OK || destination == null || source == null) return
+                val destinationScheme = destination.scheme
+                val destinationAuthority = destination.authority
+                if (destinationScheme != "content") return
+                if (destinationAuthority.isNullOrBlank()) return
+                if (!TRUSTED_DOCUMENT_AUTHORITIES.contains(destinationAuthority)) return
                 val exported = runCatching {
-                    val output = contentResolver.openOutputStream(data.data!!)
+                    // destination is a content:// URI returned by the document picker for our
+                    // ACTION_CREATE_DOCUMENT request; we additionally enforce an authority
+                    // allowlist to avoid resolving attacker-controlled content providers.
+                    val output = contentResolver.openOutputStream(destination)
                         ?: error("Document provider did not open an output stream")
                     output.use { stream ->
                         source.inputStream().use { input -> input.copyTo(stream) }
@@ -410,5 +419,12 @@ class MainActivity : Activity() {
         const val KEY_TARGET_PACKAGE = "target_package"
         const val DEFAULT_TARGET_PACKAGE = "com.haoplay.game.and.exilium"
         const val STATUS_REFRESH_MILLIS = 1_000L
+        val TRUSTED_DOCUMENT_AUTHORITIES = setOf(
+            "com.android.externalstorage.documents",
+            "com.android.providers.downloads.documents",
+            "com.android.providers.media.documents",
+            "com.google.android.apps.docs.storage",
+            "com.google.android.apps.nbu.files.provider",
+        )
     }
 }

@@ -81,7 +81,10 @@ class MainActivity : Activity() {
                 pendingExport = null
                 val destination = data?.data
                 if (resultCode != RESULT_OK || destination == null || source == null) return
-                val exported = destination.scheme == "content" && runCatching {
+                val destinationText = destination.toString()
+                if (destinationText.contains("..")) return
+                if (!destinationText.startsWith("content://")) return
+                val exported = runCatching {
                     val output = contentResolver.openOutputStream(destination)
                         ?: error("Document provider did not open an output stream")
                     output.use { stream ->

@@ -88,7 +88,6 @@ class MainActivity : Activity() {
                     // destination is the content:// URI the system document picker returned for
                     // our own ACTION_CREATE_DOCUMENT request, already checked above to reject
                     // non-content schemes and path traversal sequences.
-                    // codeql[java/android/unsafe-content-uri-resolution]
                     val output = contentResolver.openOutputStream(destination)
                         ?: error("Document provider did not open an output stream")
                     output.use { stream ->

@@ -6,6 +6,33 @@ pluginManagement {
     }
 }
 
+def secureToolingVersions = [
+    'io.netty'                              : ['4.1.135.Final', 'known Netty vulnerabilities'],
+    'org.bouncycastle'                     : ['1.84', 'known Bouncy Castle vulnerabilities'],
+    'org.bitbucket.b_c:jose4j'             : ['0.9.6', 'vulnerable compressed JWE handling'],
+    'org.jdom:jdom2'                       : ['2.0.6.1', 'vulnerable XML parsing'],
+    'org.apache.commons:commons-lang3'      : ['3.18.0', 'uncontrolled recursion'],
+    'org.apache.httpcomponents:httpclient' : ['4.5.14', 'vulnerable legacy HttpClient behavior'],
+]
+
+def secureTooling = { configurations ->
+    configurations.configureEach {
+        resolutionStrategy.eachDependency { details ->
+            def coordinate = "${details.requested.group}:${details.requested.name}"
+            def policy = secureToolingVersions[coordinate] ?: secureToolingVersions[details.requested.group]
+            if (policy != null) {
+                details.useVersion policy[0]
+                details.because "Keep Android build tooling above ${policy[1]}"
+            }
+        }
+    }
+}
+
+gradle.beforeProject { project ->
+    secureTooling project.buildscript.configurations
+    secureTooling project.configurations
+}
+
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {

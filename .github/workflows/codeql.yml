@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  analyze:
+  analyze-cpp:
     name: Analyze C/C++
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -65,3 +65,48 @@ jobs:
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:c-cpp"
+
+  analyze-kotlin:
+    name: Analyze Kotlin
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: java-kotlin
+          build-mode: manual
+          queries: security-extended
+
+      - name: Compile Kotlin sources
+        run: >
+          ./gradlew
+          :app:compileDebugKotlin
+          :protocol:compileDebugKotlin
+          --no-daemon
+          --stacktrace
+
+      - name: Analyze Kotlin
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:java-kotlin"

@@ -81,13 +81,15 @@ class MainActivity : Activity() {
                 pendingExport = null
                 val destination = data?.data
                 if (resultCode != RESULT_OK || destination == null || source == null) return
-                val destinationText = destination.toString()
-                if (destinationText.contains("..")) return
-                if (!destinationText.startsWith("content://")) return
+                val destinationScheme = destination.scheme
+                val destinationAuthority = destination.authority
+                if (destinationScheme != "content") return
+                if (destinationAuthority.isNullOrBlank()) return
+                if (!TRUSTED_DOCUMENT_AUTHORITIES.contains(destinationAuthority)) return
                 val exported = runCatching {
-                    // destination is the content:// URI the system document picker returned for
-                    // our own ACTION_CREATE_DOCUMENT request, already checked above to reject
-                    // non-content schemes and path traversal sequences.
+                    // destination is a content:// URI returned by the document picker for our
+                    // ACTION_CREATE_DOCUMENT request; we additionally enforce an authority
+                    // allowlist to avoid resolving attacker-controlled content providers.
                     val output = contentResolver.openOutputStream(destination)
                         ?: error("Document provider did not open an output stream")
                     output.use { stream ->
@@ -417,5 +419,12 @@ class MainActivity : Activity() {
         const val KEY_TARGET_PACKAGE = "target_package"
         const val DEFAULT_TARGET_PACKAGE = "com.haoplay.game.and.exilium"
         const val STATUS_REFRESH_MILLIS = 1_000L
+        val TRUSTED_DOCUMENT_AUTHORITIES = setOf(
+            "com.android.externalstorage.documents",
+            "com.android.providers.downloads.documents",
+            "com.android.providers.media.documents",
+            "com.google.android.apps.docs.storage",
+            "com.google.android.apps.nbu.files.provider",
+        )
     }
 }

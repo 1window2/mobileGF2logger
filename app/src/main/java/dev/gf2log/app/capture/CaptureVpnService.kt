@@ -378,7 +378,7 @@ class CaptureVpnService : VpnService() {
 
     private fun buildNotification(content: String): Notification =
         Notification.Builder(this, NOTIFICATION_CHANNEL)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_launcher_monochrome)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(content)
             .setOngoing(true)

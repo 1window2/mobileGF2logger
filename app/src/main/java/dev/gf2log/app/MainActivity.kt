@@ -88,9 +88,8 @@ class MainActivity : Activity() {
                 if (destinationScheme != "content") return
                 if (destinationAuthority.isNullOrBlank()) return
                 if (!TRUSTED_DOCUMENT_AUTHORITIES.contains(destinationAuthority)) return
-                val normalizedDestinationPath = runCatching {
+                val normalizedDestinationPath =
                     FileSystems.getDefault().getPath(destinationPath).normalize()
-                }.getOrNull() ?: return
                 if (normalizedDestinationPath.startsWith("/data")) return
                 val exported = runCatching {
                     // destination is a content:// URI returned by the document picker for our

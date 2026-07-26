@@ -14,6 +14,7 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import dev.gf2log.app.R
 import dev.gf2log.app.history.CaptureHistoryStore
+import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.settings.PayloadHistoryPreferences
 import dev.gf2log.protocol.Gfl2StreamParser
 import dev.gf2log.protocol.model.ParseEvent
@@ -36,6 +37,7 @@ class CaptureVpnService : VpnService() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var guildMembersWriter: GuildMembersCsvWriter
     private lateinit var historyStore: CaptureHistoryStore
+    private lateinit var platoonRepository: PlatoonRepository
     private lateinit var payloadHistoryPreferences: PayloadHistoryPreferences
     private val parserExecutor = ThreadPoolExecutor(
         1,
@@ -49,9 +51,24 @@ class CaptureVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
-        guildMembersWriter = GuildMembersCsvWriter(
+        platoonRepository = PlatoonRepository(this)
+        platoonRepository.importLegacyCsvFiles(
             File(filesDir, GuildMembersCsvWriter.OUTPUT_DIRECTORY),
         )
+        guildMembersWriter = GuildMembersCsvWriter(
+            File(filesDir, GuildMembersCsvWriter.OUTPUT_DIRECTORY),
+        ) { batch ->
+            runCatching { platoonRepository.ingest(batch) }
+                .onSuccess { result ->
+                    if (!result.duplicate) {
+                        CaptureStatus.update(
+                            "Updated Platoon roster: +${result.joined + result.rejoined}, " +
+                                "-${result.left}",
+                        )
+                    }
+                }
+                .onFailure { CaptureStatus.update("Unable to update Platoon database") }
+        }
         historyStore = CaptureHistoryStore(
             File(filesDir, CaptureHistoryStore.HISTORY_DIRECTORY),
         )

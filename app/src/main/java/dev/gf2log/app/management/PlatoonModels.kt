@@ -29,6 +29,8 @@ data class MembershipTenure(
     val leftAt: Instant?,
     val joinedPrecision: EvidencePrecision,
     val leftPrecision: EvidencePrecision?,
+    val joinedSource: EvidenceSource,
+    val leftSource: EvidenceSource?,
     val note: String,
 )
 
@@ -85,3 +87,10 @@ data class DailyActivity(
     val inference: ActivityInference.Result,
 )
 
+data class WeeklyNote(
+    val id: Long,
+    val periodStart: LocalDate,
+    val text: String,
+    val eventId: Long?,
+    val isAutomatic: Boolean,
+)

@@ -3,6 +3,7 @@ package dev.gf2log.app.capture
 import dev.gf2log.protocol.Gfl2PayloadDecoder
 import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.model.GuildMembersData
+import dev.gf2log.protocol.model.GuildMember
 import dev.gf2log.protocol.model.ParsedPayload
 import java.io.BufferedWriter
 import java.io.File
@@ -16,6 +17,7 @@ import java.time.format.DateTimeFormatter
 class GuildMembersCsvWriter(
     private val outputDirectory: File,
     private val clock: Clock = Clock.systemUTC(),
+    private val onBatchClosed: (CompletedBatch) -> Unit = {},
 ) : AutoCloseable {
     private var activeBatch: Batch? = null
 
@@ -36,6 +38,7 @@ class GuildMembersCsvWriter(
 
         data.members.forEach { member ->
             batch.writer.appendLine(GuildMembersCsv.row(member, batch.logTime))
+            batch.members[member.uid] = member
             batch.rows += 1
         }
         batch.writer.flush()
@@ -75,16 +78,33 @@ class GuildMembersCsvWriter(
     }
 
     private fun closeActiveBatch() {
-        activeBatch?.writer?.close()
+        val batch = activeBatch ?: return
         activeBatch = null
+        batch.writer.close()
+        if (batch.members.isNotEmpty()) {
+            onBatchClosed(
+                CompletedBatch(
+                    file = batch.file,
+                    logTime = batch.logTime,
+                    members = batch.members.values.toList(),
+                ),
+            )
+        }
     }
 
     data class SaveResult(val file: File, val rowCount: Int)
+
+    data class CompletedBatch(
+        val file: File,
+        val logTime: String,
+        val members: List<GuildMember>,
+    )
 
     private data class Batch(
         val file: File,
         val logTime: String,
         val writer: BufferedWriter,
+        val members: LinkedHashMap<UInt, GuildMember> = linkedMapOf(),
         var previousMessageId: Int = -1,
         var rows: Int = 0,
     )

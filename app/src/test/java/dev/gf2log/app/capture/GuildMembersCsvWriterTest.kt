@@ -9,6 +9,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -87,6 +88,22 @@ class GuildMembersCsvWriterTest {
             ),
             files[1].readLines(Charsets.UTF_8),
         )
+    }
+
+    @Test
+    fun completionCallbackReceivesTheWholeDeduplicatedBatch() {
+        val output = temporaryFolder.newFolder("completed-batch")
+        val clock = Clock.fixed(Instant.parse("2026-07-21T19:11:09Z"), ZoneOffset.UTC)
+        val completed = mutableListOf<GuildMembersCsvWriter.CompletedBatch>()
+        val writer = GuildMembersCsvWriter(output, clock, completed::add)
+
+        writer.accept(payload(messageId = 0, uid = 1u, name = "Old", end = true))
+        writer.accept(payload(messageId = 44, uid = 1u, name = "Current", end = true))
+
+        assertEquals(1, completed.size)
+        assertEquals("2026-07-21T19:11:09Z", completed.single().logTime)
+        assertEquals("Current", completed.single().members.single().name)
+        assertTrue(completed.single().file.exists())
     }
 
     private fun payload(messageId: Int, uid: UInt, name: String, end: Boolean): ParsedPayload =

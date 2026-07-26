@@ -1,6 +1,5 @@
 package dev.gf2log.app
 
-import android.app.Activity
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
@@ -8,12 +7,14 @@ import android.os.Bundle
 import android.view.ViewGroup
 import android.widget.CheckBox
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 import dev.gf2log.app.settings.PayloadHistoryPreferences
 import dev.gf2log.protocol.PayloadCatalog
 
-class OptionsActivity : Activity() {
+class OptionsActivity : LocalizedActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         title = getString(R.string.payload_options)
@@ -36,6 +37,34 @@ class OptionsActivity : Activity() {
                 text = getString(R.string.payload_options_description)
                 textSize = 15f
                 setPadding(0, dp(8), 0, spacing)
+            }, matchWidth())
+
+            addView(TextView(context).apply {
+                text = getString(R.string.language)
+                textSize = 20f
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, 0, 0, dp(4))
+            }, matchWidth())
+            addView(RadioGroup(context).apply {
+                orientation = RadioGroup.HORIZONTAL
+                val current = LanguagePreferences.get(context)
+                addView(RadioButton(context).apply {
+                    text = getString(R.string.language_english)
+                    isChecked = current == LanguagePreferences.DEFAULT_LANGUAGE
+                    setOnClickListener { changeLanguage(LanguagePreferences.DEFAULT_LANGUAGE) }
+                })
+                addView(RadioButton(context).apply {
+                    text = getString(R.string.language_korean)
+                    isChecked = current == LanguagePreferences.KOREAN
+                    setOnClickListener { changeLanguage(LanguagePreferences.KOREAN) }
+                })
+            }, matchWidth())
+
+            addView(TextView(context).apply {
+                text = getString(R.string.payload_history)
+                textSize = 20f
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, spacing, 0, dp(4))
             }, matchWidth())
 
             PayloadCatalog.categories.forEach { category ->
@@ -70,6 +99,12 @@ class OptionsActivity : Activity() {
             }
         }
         return ScrollView(this).apply { addView(container, matchWidth()) }
+    }
+
+    private fun changeLanguage(language: String) {
+        if (LanguagePreferences.get(this) == language) return
+        LanguagePreferences.set(this, language)
+        recreate()
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

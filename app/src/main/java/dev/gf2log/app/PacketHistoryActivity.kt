@@ -1,6 +1,5 @@
 package dev.gf2log.app
 
-import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.graphics.Color
@@ -22,7 +21,7 @@ import dev.gf2log.app.history.SavedHistoryStore
 import dev.gf2log.protocol.ParsedPacketTableParser
 import java.io.File
 
-class PacketHistoryActivity : Activity() {
+class PacketHistoryActivity : LocalizedActivity() {
     private lateinit var actionButton: Button
     private lateinit var contentContainer: LinearLayout
     private lateinit var rawContent: String

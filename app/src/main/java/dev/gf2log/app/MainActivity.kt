@@ -29,7 +29,7 @@ import dev.gf2log.app.history.SavedHistoryStore
 import dev.gf2log.protocol.PayloadCatalog
 import java.io.File
 
-class MainActivity : Activity() {
+class MainActivity : LocalizedActivity() {
     private lateinit var packageNameInput: EditText
     private lateinit var statusText: TextView
     private lateinit var historyContainer: LinearLayout
@@ -155,6 +155,12 @@ class MainActivity : Activity() {
                 setPadding(0, spacing, 0, 0)
             }
             addView(statusText, matchWidth())
+            addView(Button(context).apply {
+                text = getString(R.string.open_platoon_management)
+                setOnClickListener {
+                    startActivity(Intent(this@MainActivity, PlatoonActivity::class.java))
+                }
+            }, matchWidth())
 
             addView(TextView(context).apply {
                 text = getString(R.string.recent_packets, CaptureHistoryStore.MAX_ENTRIES)

@@ -120,6 +120,13 @@ class PlatoonRepository(context: Context) {
                 databaseInstance?.close()
             }
         }
+
+        internal fun markLegacyImportComplete(context: Context) {
+            context.applicationContext.getSharedPreferences(
+                MIGRATION_PREFERENCES,
+                Context.MODE_PRIVATE,
+            ).edit().putBoolean(LEGACY_IMPORT_COMPLETE, true).apply()
+        }
     }
 }
 

@@ -77,6 +77,7 @@ class PlatoonBackupManager(context: Context) {
         ) { "Backup checksum does not match" }
         validateDatabase(stagedDatabase)
         replaceDatabase(stagedDatabase)
+        PlatoonRepository.markLegacyImportComplete(appContext)
     }
 
     private fun validateDatabase(file: File) {

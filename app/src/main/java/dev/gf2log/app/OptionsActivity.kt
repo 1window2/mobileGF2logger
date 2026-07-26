@@ -14,6 +14,7 @@ import android.widget.TextView
 import dev.gf2log.app.settings.PayloadHistoryPreferences
 import dev.gf2log.app.settings.CapturePreferences
 import dev.gf2log.app.capture.CaptureDiagnosticsStore
+import dev.gf2log.protocol.Gfl2PayloadDecoder
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import dev.gf2log.protocol.PayloadCatalog
@@ -89,7 +90,7 @@ class OptionsActivity : LocalizedActivity() {
                 addView(CheckBox(context).apply {
                     text = getString(
                         R.string.payload_option_label,
-                        category.name,
+                        payloadName(category.payloadType),
                         category.payloadType,
                     )
                     textSize = 17f
@@ -107,9 +108,12 @@ class OptionsActivity : LocalizedActivity() {
                 }, matchWidth())
                 addView(TextView(context).apply {
                     text = if (category.isRequired) {
-                        getString(R.string.required_payload_description, category.description)
+                        getString(
+                            R.string.required_payload_description,
+                            payloadDescription(category.payloadType),
+                        )
                     } else {
-                        category.description
+                        payloadDescription(category.payloadType)
                     }
                     textSize = 14f
                     setPadding(dp(48), 0, 0, spacing)
@@ -149,6 +153,28 @@ class OptionsActivity : LocalizedActivity() {
         LanguagePreferences.set(this, language)
         recreate()
     }
+
+    private fun payloadName(payloadType: Int): String = getString(
+        when (payloadType) {
+            Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS -> R.string.payload_name_platoon_members
+            Gfl2PayloadDecoder.TYPE_WEAPONS -> R.string.payload_name_weapons
+            Gfl2PayloadDecoder.TYPE_ATTACHMENTS -> R.string.payload_name_attachments
+            Gfl2PayloadDecoder.TYPE_COMMON_KEYS -> R.string.payload_name_common_keys
+            Gfl2PayloadDecoder.TYPE_FORMATIONS -> R.string.payload_name_formations
+            else -> R.string.unknown_payload_type
+        },
+    )
+
+    private fun payloadDescription(payloadType: Int): String = getString(
+        when (payloadType) {
+            Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS -> R.string.payload_description_platoon_members
+            Gfl2PayloadDecoder.TYPE_WEAPONS -> R.string.payload_description_weapons
+            Gfl2PayloadDecoder.TYPE_ATTACHMENTS -> R.string.payload_description_attachments
+            Gfl2PayloadDecoder.TYPE_COMMON_KEYS -> R.string.payload_description_common_keys
+            Gfl2PayloadDecoder.TYPE_FORMATIONS -> R.string.payload_description_formations
+            else -> R.string.unknown_payload_type
+        },
+    )
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 

@@ -85,6 +85,16 @@
     <string name="required_payload_description">Required and always enabled. %1$s</string>
     <string name="payload_tag_description">%1$s, payload type %2$s</string>
     <string name="unknown_payload_type">unknown</string>
+    <string name="payload_name_platoon_members">PLATOON MEMBERS</string>
+    <string name="payload_name_weapons">WEAPONS</string>
+    <string name="payload_name_attachments">ATTACHMENTS</string>
+    <string name="payload_name_common_keys">COMMON KEYS</string>
+    <string name="payload_name_formations">FORMATIONS</string>
+    <string name="payload_description_platoon_members">Platoon members, merit totals, scores, and last-login times.</string>
+    <string name="payload_description_weapons">Owned weapons and their upgrade data.</string>
+    <string name="payload_description_attachments">Owned weapon attachments and their attributes.</string>
+    <string name="payload_description_common_keys">Owned Common Keys. The uid is an inventory-instance ID, not a player UID.</string>
+    <string name="payload_description_formations">Saved team formations and their equipped items.</string>
     <string name="recent_packets">Recent parsed packets (latest %1$d)</string>
     <string name="delete_selected_history">Delete selected history</string>
     <string name="save_selected_history">Save selected history</string>

@@ -28,6 +28,7 @@ import dev.gf2log.app.history.CaptureHistoryStore
 import dev.gf2log.app.history.SavedHistoryStore
 import dev.gf2log.protocol.PayloadCatalog
 import java.io.File
+import java.nio.file.FileSystems
 
 class MainActivity : Activity() {
     private lateinit var packageNameInput: EditText
@@ -83,9 +84,14 @@ class MainActivity : Activity() {
                 if (resultCode != RESULT_OK || destination == null || source == null) return
                 val destinationScheme = destination.scheme
                 val destinationAuthority = destination.authority
+                val destinationPath = destination.path ?: return
                 if (destinationScheme != "content") return
                 if (destinationAuthority.isNullOrBlank()) return
                 if (!TRUSTED_DOCUMENT_AUTHORITIES.contains(destinationAuthority)) return
+                val normalizedDestinationPath = runCatching {
+                    FileSystems.getDefault().getPath(destinationPath).normalize()
+                }.getOrNull() ?: return
+                if (normalizedDestinationPath.startsWith("/data")) return
                 val exported = runCatching {
                     // destination is a content:// URI returned by the document picker for our
                     // ACTION_CREATE_DOCUMENT request; we additionally enforce an authority

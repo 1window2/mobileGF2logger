@@ -4,6 +4,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.content.Intent
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
@@ -22,6 +23,7 @@ import dev.gf2log.app.management.PlatoonPeriods
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.WeeklyNote
 import dev.gf2log.app.management.WeeklyReportBuilder
+import dev.gf2log.app.management.WeeklyReportCsv
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -31,6 +33,7 @@ class WeeklyReportActivity : LocalizedActivity() {
     private lateinit var repository: PlatoonRepository
     private lateinit var body: LinearLayout
     private var referenceDay: LocalDate = LocalDate.now()
+    private var pendingCsv: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -90,6 +93,10 @@ class WeeklyReportActivity : LocalizedActivity() {
                     render()
                 }
             }, LinearLayout.LayoutParams(0, wrap(), 1f))
+        }, matchWidth())
+        body.addView(Button(this).apply {
+            text = getString(R.string.export_weekly_csv)
+            setOnClickListener { exportWeeklyCsv(report) }
         }, matchWidth())
 
         if (report.members.isEmpty()) {
@@ -178,6 +185,39 @@ class WeeklyReportActivity : LocalizedActivity() {
         }, matchWidth())
     }
 
+    @Deprecated("Uses the platform document picker without an AndroidX dependency")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_EXPORT_WEEKLY) return
+        val content = pendingCsv
+        pendingCsv = null
+        val destination = data?.data
+        if (resultCode != RESULT_OK || destination == null || content == null) return
+        val exported = runCatching {
+            val output = TrustedExportDestination.openOutputStream(contentResolver, destination)
+                ?: error("Document provider did not open an output stream")
+            output.writer(Charsets.UTF_8).use { it.write(content) }
+        }.isSuccess
+        Toast.makeText(
+            this,
+            getString(if (exported) R.string.weekly_csv_exported else R.string.status_export_failed),
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun exportWeeklyCsv(report: WeeklyReportBuilder.Report) {
+        pendingCsv = WeeklyReportCsv.format(report)
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("text/csv")
+            .putExtra(
+                Intent.EXTRA_TITLE,
+                "GF2logger-week-${report.periodStart.format(FILE_DATE)}.csv",
+            )
+        startActivityForResult(intent, REQUEST_EXPORT_WEEKLY)
+    }
+
     private fun addNoteEditor(report: WeeklyReportBuilder.Report) {
         val day = Spinner(this).apply {
             adapter = ArrayAdapter(
@@ -251,5 +291,7 @@ class WeeklyReportActivity : LocalizedActivity() {
     companion object {
         private val DATE = DateTimeFormatter.ofPattern("yy/MM/dd")
         private val DAY = DateTimeFormatter.ofPattern("MM/dd")
+        private val FILE_DATE = DateTimeFormatter.BASIC_ISO_DATE
+        private const val REQUEST_EXPORT_WEEKLY = 201
     }
 }

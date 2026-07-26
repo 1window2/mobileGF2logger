@@ -8,6 +8,13 @@
     <string name="stop_capture">중지</string>
     <string name="open_options">설정 열기</string>
     <string name="open_platoon_management">서클 관리 열기</string>
+    <string name="export_platoon_backup">서클 관리 백업 내보내기</string>
+    <string name="import_platoon_backup">서클 관리 백업 가져오기</string>
+    <string name="import_backup_warning">현재의 구조화된 서클 기록, 가입·탈퇴 시각, 비고를 대체합니다. 캡처를 중지한 상태로 유지하세요.</string>
+    <string name="stop_capture_before_backup">백업을 내보내거나 가져오기 전에 캡처를 중지하세요.</string>
+    <string name="status_backup_exported">서클 관리 백업을 내보냈습니다</string>
+    <string name="status_backup_restored">서클 관리 백업을 복원했습니다</string>
+    <string name="status_backup_failed">서클 관리 백업을 내보내거나 복원할 수 없습니다</string>
     <string name="language">언어</string>
     <string name="language_english">English</string>
     <string name="language_korean">한국어</string>
@@ -63,6 +70,8 @@
     <string name="notes">비고</string>
     <string name="note_hint">선택한 게임 날짜의 비고 추가</string>
     <string name="add_note">비고 추가</string>
+    <string name="export_weekly_csv">주간 CSV 내보내기</string>
+    <string name="weekly_csv_exported">주간 CSV를 내보냈습니다</string>
     <string name="joined">가입</string>
     <string name="rejoined">재가입</string>
     <string name="left">탈퇴</string>

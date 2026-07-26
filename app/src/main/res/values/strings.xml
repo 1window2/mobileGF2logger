@@ -8,6 +8,13 @@
     <string name="stop_capture">Stop</string>
     <string name="open_options">Open payload options</string>
     <string name="open_platoon_management">Open Platoon management</string>
+    <string name="export_platoon_backup">Export Platoon backup</string>
+    <string name="import_platoon_backup">Import Platoon backup</string>
+    <string name="import_backup_warning">This replaces current structured Platoon history, membership dates, and notes. Capture must remain stopped.</string>
+    <string name="stop_capture_before_backup">Stop capture before exporting or importing a backup.</string>
+    <string name="status_backup_exported">Platoon backup exported</string>
+    <string name="status_backup_restored">Platoon backup restored</string>
+    <string name="status_backup_failed">Unable to export or restore the Platoon backup</string>
     <string name="language">Language</string>
     <string name="language_english">English</string>
     <string name="language_korean">Korean</string>
@@ -63,6 +70,8 @@
     <string name="notes">Notes</string>
     <string name="note_hint">Add a note for the selected game day</string>
     <string name="add_note">Add note</string>
+    <string name="export_weekly_csv">Export weekly CSV</string>
+    <string name="weekly_csv_exported">Weekly CSV exported</string>
     <string name="joined">Joined</string>
     <string name="rejoined">Rejoined</string>
     <string name="left">Left</string>

@@ -9,7 +9,7 @@ import java.time.Instant
 
 class PlatoonRepository(context: Context) {
     private val appContext = context.applicationContext
-    private val database = PlatoonDatabase(appContext)
+    private val database = database(appContext)
     private val migrationPreferences = appContext.getSharedPreferences(
         MIGRATION_PREFERENCES,
         Context.MODE_PRIVATE,
@@ -105,6 +105,21 @@ class PlatoonRepository(context: Context) {
     companion object {
         private const val MIGRATION_PREFERENCES = "platoon_migrations"
         private const val LEGACY_IMPORT_COMPLETE = "legacy_csv_v1"
+        private val databaseLock = Any()
+
+        @Volatile
+        private var databaseInstance: PlatoonDatabase? = null
+
+        private fun database(context: Context): PlatoonDatabase =
+            databaseInstance ?: synchronized(databaseLock) {
+                databaseInstance ?: PlatoonDatabase(context).also { databaseInstance = it }
+            }
+
+        internal fun closeDatabaseForFileCopy() {
+            synchronized(databaseLock) {
+                databaseInstance?.close()
+            }
+        }
     }
 }
 

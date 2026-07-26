@@ -16,9 +16,11 @@ import dev.gf2log.app.R
 import dev.gf2log.app.history.CaptureHistoryStore
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.settings.PayloadHistoryPreferences
+import dev.gf2log.app.settings.CapturePreferences
 import dev.gf2log.protocol.Gfl2StreamParser
 import dev.gf2log.protocol.model.ParseEvent
 import java.io.File
+import java.time.Instant
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.RejectedExecutionException
@@ -31,6 +33,7 @@ class CaptureVpnService : VpnService() {
     private val parsers = ConcurrentHashMap<Long, Gfl2StreamParser>()
     private val decodedPayloadCount = AtomicLong()
     private val observedPayloadBytes = AtomicLong()
+    private val inspectedPayloadBytes = AtomicLong()
     private val reportedTrafficBucket = AtomicLong()
     private val parseWarningCount = AtomicLong()
     private val droppedParserTaskCount = AtomicLong()
@@ -39,6 +42,10 @@ class CaptureVpnService : VpnService() {
     private lateinit var historyStore: CaptureHistoryStore
     private lateinit var platoonRepository: PlatoonRepository
     private lateinit var payloadHistoryPreferences: PayloadHistoryPreferences
+    private lateinit var capturePreferences: CapturePreferences
+    private lateinit var diagnosticsStore: CaptureDiagnosticsStore
+    private var sessionStartedAt: Instant? = null
+    private var captureOnce = false
     private val parserExecutor = ThreadPoolExecutor(
         1,
         1,
@@ -68,18 +75,30 @@ class CaptureVpnService : VpnService() {
                     }
                 }
                 .onFailure { CaptureStatus.update("Unable to update Platoon database") }
+            if (captureOnce && CaptureStatus.isRunning) {
+                mainHandler.post {
+                    if (captureOnce && CaptureStatus.isRunning) {
+                        stopCapture("Captured one complete Platoon roster")
+                    }
+                }
+            }
         }
         historyStore = CaptureHistoryStore(
             File(filesDir, CaptureHistoryStore.HISTORY_DIRECTORY),
         )
         payloadHistoryPreferences = PayloadHistoryPreferences(this)
+        capturePreferences = CapturePreferences(this)
+        diagnosticsStore = CaptureDiagnosticsStore(this)
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> stopCapture()
-            ACTION_START -> startCapture(intent.getStringExtra(EXTRA_TARGET_PACKAGE).orEmpty())
+            ACTION_START -> {
+                captureOnce = intent.getBooleanExtra(EXTRA_CAPTURE_ONCE, false)
+                startCapture(intent.getStringExtra(EXTRA_TARGET_PACKAGE).orEmpty())
+            }
         }
         return Service.START_NOT_STICKY
     }
@@ -140,9 +159,11 @@ class CaptureVpnService : VpnService() {
         tunnel = descriptor
         decodedPayloadCount.set(0)
         observedPayloadBytes.set(0)
+        inspectedPayloadBytes.set(0)
         reportedTrafficBucket.set(0)
         parseWarningCount.set(0)
         droppedParserTaskCount.set(0)
+        sessionStartedAt = Instant.now()
 
         CaptureStatus.markRunning("Starting native capture")
         val started = try {
@@ -240,6 +261,7 @@ class CaptureVpnService : VpnService() {
 
     private fun recordTraffic(observed: Long, inspected: Long) {
         observedPayloadBytes.set(observed)
+        inspectedPayloadBytes.set(inspected)
         val bucket = observed / TRAFFIC_REPORT_BYTES
         val previousBucket = reportedTrafficBucket.get()
         if (bucket > previousBucket && reportedTrafficBucket.compareAndSet(previousBucket, bucket)) {
@@ -271,9 +293,9 @@ class CaptureVpnService : VpnService() {
         stopSelf()
     }
 
-    private fun stopCapture() {
+    private fun stopCapture(message: String = "") {
         releaseCaptureResources()
-        CaptureStatus.markStopped()
+        if (message.isBlank()) CaptureStatus.markStopped() else CaptureStatus.markStopped(message)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -284,6 +306,24 @@ class CaptureVpnService : VpnService() {
         tunnel = null
         drainParserTasks()
         parsers.clear()
+        saveDiagnostics()
+    }
+
+    private fun saveDiagnostics() {
+        if (sessionStartedAt == null) return
+        diagnosticsStore.save(
+            CaptureDiagnosticsStore.Diagnostics(
+                startedAt = sessionStartedAt,
+                stoppedAt = Instant.now(),
+                forwardedBytes = observedPayloadBytes.get(),
+                inspectedBytes = inspectedPayloadBytes.get(),
+                decodedPayloads = decodedPayloadCount.get(),
+                warnings = parseWarningCount.get(),
+                droppedChunks = droppedParserTaskCount.get(),
+                finalStatus = CaptureStatus.read(),
+            ),
+        )
+        sessionStartedAt = null
     }
 
     private fun drainParserTasks() {
@@ -315,7 +355,16 @@ class CaptureVpnService : VpnService() {
 
     private fun updateNotification(content: String) {
         getSystemService(NotificationManager::class.java)
-            .notify(NOTIFICATION_ID, buildNotification(content))
+            .notify(
+                NOTIFICATION_ID,
+                buildNotification(
+                    if (capturePreferences.detailedNotifications) {
+                        content
+                    } else {
+                        getString(R.string.notification_capture_active)
+                    },
+                ),
+            )
     }
 
     private fun buildNotification(content: String): Notification =
@@ -339,6 +388,7 @@ class CaptureVpnService : VpnService() {
         const val ACTION_START = "dev.gf2log.action.START"
         const val ACTION_STOP = "dev.gf2log.action.STOP"
         const val EXTRA_TARGET_PACKAGE = "target_package"
+        const val EXTRA_CAPTURE_ONCE = "capture_once"
         private const val NOTIFICATION_CHANNEL = "capture"
         private const val NOTIFICATION_ID = 1
         private const val VPN_ADDRESS = "10.77.0.1"

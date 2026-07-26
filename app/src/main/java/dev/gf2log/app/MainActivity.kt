@@ -46,6 +46,7 @@ class MainActivity : LocalizedActivity() {
         }
     }
     private var pendingExport: File? = null
+    private var captureOnceRequested = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -142,7 +143,11 @@ class MainActivity : LocalizedActivity() {
 
             addView(Button(context).apply {
                 text = getString(R.string.prepare_capture)
-                setOnClickListener { requestVpnAndStart() }
+                setOnClickListener { requestVpnAndStart(captureOnce = false) }
+            }, matchWidth())
+            addView(Button(context).apply {
+                text = getString(R.string.capture_one_roster)
+                setOnClickListener { requestVpnAndStart(captureOnce = true) }
             }, matchWidth())
             addView(Button(context).apply {
                 text = getString(R.string.stop_capture)
@@ -204,8 +209,9 @@ class MainActivity : LocalizedActivity() {
     }
 
     @Suppress("DEPRECATION")
-    private fun requestVpnAndStart() {
+    private fun requestVpnAndStart(captureOnce: Boolean) {
         val targetPackage = packageNameInput.text.toString().trim()
+        captureOnceRequested = captureOnce
         getPreferences(MODE_PRIVATE).edit().putString(KEY_TARGET_PACKAGE, targetPackage).apply()
         val permissionIntent = VpnService.prepare(this)
         if (permissionIntent == null) {
@@ -219,7 +225,9 @@ class MainActivity : LocalizedActivity() {
         val intent = Intent(this, CaptureVpnService::class.java)
             .setAction(CaptureVpnService.ACTION_START)
             .putExtra(CaptureVpnService.EXTRA_TARGET_PACKAGE, packageNameInput.text.toString().trim())
+            .putExtra(CaptureVpnService.EXTRA_CAPTURE_ONCE, captureOnceRequested)
         startForegroundService(intent)
+        captureOnceRequested = false
         statusText.text = getString(R.string.status_preparing)
     }
 

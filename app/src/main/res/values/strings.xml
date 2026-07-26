@@ -4,6 +4,7 @@
     <string name="app_description">On-device protocol capture for one explicitly selected game package. Raw traffic is not stored.</string>
     <string name="target_package_hint">Installed game package name</string>
     <string name="prepare_capture">Prepare capture</string>
+    <string name="capture_one_roster">Capture one Platoon roster</string>
     <string name="stop_capture">Stop</string>
     <string name="open_options">Open payload options</string>
     <string name="open_platoon_management">Open Platoon management</string>
@@ -94,6 +95,12 @@
     <string name="status_history_already_saved">Selected history is already saved</string>
     <string name="status_saved_history_limit">Saved-history limit reached (%1$d)</string>
     <string name="notification_channel">Capture status</string>
+    <string name="notification_capture_active">GF2logger capture is active</string>
+    <string name="detailed_notifications">Show detailed capture progress</string>
+    <string name="notification_required_explanation">Android requires a foreground notification while VPN capture is active. This option controls its detail, not whether it exists.</string>
+    <string name="last_capture_diagnostics">Last capture diagnostics</string>
+    <string name="no_capture_diagnostics">No completed capture session yet.</string>
+    <string name="capture_diagnostics">%1$s\nForwarded: %2$d KiB · inspected: %3$d KiB\nDecoded: %4$d · warnings: %5$d · dropped chunks: %6$d</string>
     <plurals name="status_deleted_history">
         <item quantity="one">Deleted %1$d history entry</item>
         <item quantity="other">Deleted %1$d history entries</item>

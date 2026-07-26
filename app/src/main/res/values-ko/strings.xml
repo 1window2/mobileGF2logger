@@ -4,6 +4,7 @@
     <string name="app_description">선택한 게임 앱 하나의 프로토콜을 기기에서 캡처합니다. 원본 트래픽은 저장하지 않습니다.</string>
     <string name="target_package_hint">설치된 게임 패키지 이름</string>
     <string name="prepare_capture">캡처 준비</string>
+    <string name="capture_one_roster">서클 명단 한 번 캡처</string>
     <string name="stop_capture">중지</string>
     <string name="open_options">설정 열기</string>
     <string name="open_platoon_management">서클 관리 열기</string>
@@ -94,6 +95,12 @@
     <string name="status_history_already_saved">선택한 기록은 이미 보관되어 있습니다</string>
     <string name="status_saved_history_limit">보관 한도에 도달했습니다 (%1$d)</string>
     <string name="notification_channel">캡처 상태</string>
+    <string name="notification_capture_active">GF2logger 캡처 실행 중</string>
+    <string name="detailed_notifications">상세 캡처 진행 상황 표시</string>
+    <string name="notification_required_explanation">VPN 캡처 중에는 Android가 포그라운드 알림을 요구합니다. 이 설정은 알림 표시 여부가 아니라 상세 수준을 조절합니다.</string>
+    <string name="last_capture_diagnostics">최근 캡처 진단</string>
+    <string name="no_capture_diagnostics">완료된 캡처 세션이 없습니다.</string>
+    <string name="capture_diagnostics">%1$s\n전달: %2$d KiB · 검사: %3$d KiB\n디코딩: %4$d · 경고: %5$d · 누락 청크: %6$d</string>
     <plurals name="status_deleted_history">
         <item quantity="other">기록 %1$d개를 삭제했습니다</item>
     </plurals>

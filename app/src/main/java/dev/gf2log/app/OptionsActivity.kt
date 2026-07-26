@@ -12,6 +12,10 @@ import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 import dev.gf2log.app.settings.PayloadHistoryPreferences
+import dev.gf2log.app.settings.CapturePreferences
+import dev.gf2log.app.capture.CaptureDiagnosticsStore
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import dev.gf2log.protocol.PayloadCatalog
 
 class OptionsActivity : LocalizedActivity() {
@@ -67,6 +71,20 @@ class OptionsActivity : LocalizedActivity() {
                 setPadding(0, spacing, 0, dp(4))
             }, matchWidth())
 
+            val capturePreferences = CapturePreferences(context)
+            addView(CheckBox(context).apply {
+                text = getString(R.string.detailed_notifications)
+                isChecked = capturePreferences.detailedNotifications
+                setOnCheckedChangeListener { _, enabled ->
+                    capturePreferences.detailedNotifications = enabled
+                }
+            }, matchWidth())
+            addView(TextView(context).apply {
+                text = getString(R.string.notification_required_explanation)
+                textSize = 13f
+                setPadding(dp(48), 0, 0, spacing)
+            }, matchWidth())
+
             PayloadCatalog.categories.forEach { category ->
                 addView(CheckBox(context).apply {
                     text = getString(
@@ -97,6 +115,30 @@ class OptionsActivity : LocalizedActivity() {
                     setPadding(dp(48), 0, 0, spacing)
                 }, matchWidth())
             }
+
+            addView(TextView(context).apply {
+                text = getString(R.string.last_capture_diagnostics)
+                textSize = 20f
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, spacing, 0, dp(4))
+            }, matchWidth())
+            addView(TextView(context).apply {
+                val diagnostics = CaptureDiagnosticsStore(context).read()
+                text = if (diagnostics == null) {
+                    getString(R.string.no_capture_diagnostics)
+                } else {
+                    getString(
+                        R.string.capture_diagnostics,
+                        diagnostics.stoppedAt.atZone(ZoneId.systemDefault()).format(DIAGNOSTIC_TIME),
+                        diagnostics.forwardedBytes / 1024,
+                        diagnostics.inspectedBytes / 1024,
+                        diagnostics.decodedPayloads,
+                        diagnostics.warnings,
+                        diagnostics.droppedChunks,
+                    )
+                }
+                setTextIsSelectable(true)
+            }, matchWidth())
         }
         return ScrollView(this).apply { addView(container, matchWidth()) }
     }
@@ -113,4 +155,8 @@ class OptionsActivity : LocalizedActivity() {
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.WRAP_CONTENT,
     )
+
+    companion object {
+        private val DIAGNOSTIC_TIME = DateTimeFormatter.ofPattern("yy/MM/dd HH:mm:ss")
+    }
 }

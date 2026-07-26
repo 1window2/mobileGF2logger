@@ -93,6 +93,7 @@ class PlatoonDatabase(context: Context) :
             CREATE TABLE weekly_notes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 period_start INTEGER NOT NULL,
+                game_day INTEGER NOT NULL,
                 text TEXT NOT NULL,
                 event_id INTEGER REFERENCES member_events(id) ON DELETE SET NULL,
                 is_automatic INTEGER NOT NULL DEFAULT 0
@@ -339,19 +340,55 @@ class PlatoonDatabase(context: Context) :
     }
 
     @Synchronized
-    fun addWeeklyNote(periodStartEpochDay: Long, text: String): Long {
+    fun addWeeklyNote(periodStartEpochDay: Long, gameDayEpochDay: Long, text: String): Long {
         require(text.isNotBlank())
         return writableDatabase.insertOrThrow(
             "weekly_notes",
             null,
             ContentValues().apply {
                 put("period_start", periodStartEpochDay)
+                put("game_day", gameDayEpochDay)
                 put("text", text.trim())
                 putNull("event_id")
                 put("is_automatic", 0)
             },
         )
     }
+
+    @Synchronized
+    fun listWeeklyNotes(periodStartEpochDay: Long): List<WeeklyNote> =
+        readableDatabase.query(
+            "weekly_notes",
+            WEEKLY_NOTE_COLUMNS,
+            "period_start = ?",
+            arrayOf(periodStartEpochDay.toString()),
+            null,
+            null,
+            "game_day, id",
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        WeeklyNote(
+                            id = cursor.getLong(0),
+                            periodStart = java.time.LocalDate.ofEpochDay(cursor.getLong(1)),
+                            gameDay = java.time.LocalDate.ofEpochDay(cursor.getLong(2)),
+                            text = cursor.getString(3),
+                            eventId = cursor.getNullableLong(4),
+                            isAutomatic = cursor.getInt(5) != 0,
+                        ),
+                    )
+                }
+            }
+        }
+
+    @Synchronized
+    fun deleteWeeklyNote(id: Long): Boolean =
+        writableDatabase.delete(
+            "weekly_notes",
+            "id = ? AND is_automatic = 0",
+            arrayOf(id.toString()),
+        ) == 1
 
     private fun insertSnapshotMember(
         db: SQLiteDatabase,
@@ -465,7 +502,13 @@ class PlatoonDatabase(context: Context) :
             null,
             ContentValues().apply {
                 val gameDay = PlatoonPeriods.gameDay(observedAt, ZoneId.systemDefault())
-                put("period_start", PlatoonPeriods.meritWeekStart(gameDay).toEpochDay())
+                val periodStart = if (PlatoonPeriods.isGunsmokeWeek(gameDay)) {
+                    PlatoonPeriods.gunsmokeWeekStart(gameDay)
+                } else {
+                    PlatoonPeriods.meritWeekStart(gameDay)
+                }
+                put("period_start", periodStart.toEpochDay())
+                put("game_day", gameDay.toEpochDay())
                 put("text", "${type.name}:${member.name}:${member.uid}")
                 put("event_id", eventId)
                 put("is_automatic", 1)
@@ -657,6 +700,14 @@ class PlatoonDatabase(context: Context) :
             "joined_source",
             "left_source",
             "note",
+        )
+        private val WEEKLY_NOTE_COLUMNS = arrayOf(
+            "id",
+            "period_start",
+            "game_day",
+            "text",
+            "event_id",
+            "is_automatic",
         )
     }
 }

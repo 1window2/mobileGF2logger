@@ -90,6 +90,7 @@ data class DailyActivity(
 data class WeeklyNote(
     val id: Long,
     val periodStart: LocalDate,
+    val gameDay: LocalDate,
     val text: String,
     val eventId: Long?,
     val isAutomatic: Boolean,

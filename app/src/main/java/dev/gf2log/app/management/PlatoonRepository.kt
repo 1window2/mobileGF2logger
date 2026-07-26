@@ -87,8 +87,13 @@ class PlatoonRepository(context: Context) {
         note: String,
     ): Boolean = database.updateTenure(tenureId, joinedAt, leftAt, note)
 
-    fun addWeeklyNote(periodStartEpochDay: Long, text: String): Long =
-        database.addWeeklyNote(periodStartEpochDay, text)
+    fun addWeeklyNote(periodStartEpochDay: Long, gameDayEpochDay: Long, text: String): Long =
+        database.addWeeklyNote(periodStartEpochDay, gameDayEpochDay, text)
+
+    fun listWeeklyNotes(periodStartEpochDay: Long): List<WeeklyNote> =
+        database.listWeeklyNotes(periodStartEpochDay)
+
+    fun deleteWeeklyNote(id: Long): Boolean = database.deleteWeeklyNote(id)
 
     data class ImportResult(
         val alreadyComplete: Boolean,

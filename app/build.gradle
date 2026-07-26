@@ -2,6 +2,16 @@ plugins {
     id 'com.android.application'
 }
 
+def releaseSigningProperties = new Properties()
+def releaseSigningFile = rootProject.file('keystore.properties')
+if (releaseSigningFile.isFile()) {
+    releaseSigningFile.withInputStream { releaseSigningProperties.load(it) }
+}
+def releaseSigningKeys = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword']
+def hasReleaseSigning = releaseSigningKeys.every {
+    releaseSigningProperties.getProperty(it)?.trim()
+}
+
 android {
     namespace = 'dev.gf2log.app'
     compileSdk = 36
@@ -24,11 +34,28 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile = rootProject.file(releaseSigningProperties.getProperty('storeFile'))
+                storePassword = releaseSigningProperties.getProperty('storePassword')
+                keyAlias = releaseSigningProperties.getProperty('keyAlias')
+                keyPassword = releaseSigningProperties.getProperty('keyPassword')
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled = true
             shrinkResources = true
-            signingConfig = signingConfigs.debug
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.release
+            }
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }

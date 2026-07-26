@@ -10,5 +10,8 @@ local.properties
 *.csv
 *.json
 *.log
+*.jks
+*.keystore
+keystore.properties
 .tmp-*/
 .tmp-*

@@ -61,7 +61,15 @@ object WeeklyReportBuilder {
                 totalScore = cells.sumOf { it.scoreDelta ?: 0 },
             )
         }.filter { row -> row.days.any { it.meritDelta != null } }
-            .sortedWith(compareByDescending<MemberRow> { it.totalMerit }.thenBy { it.name })
+            .sortedWith(
+                if (isGunsmoke) {
+                    compareByDescending<MemberRow> { it.totalScore }
+                        .thenByDescending { it.totalMerit }
+                        .thenBy { it.name }
+                } else {
+                    compareByDescending<MemberRow> { it.totalMerit }.thenBy { it.name }
+                },
+            )
 
         return Report(start, start.plusDays(6), isGunsmoke, days, rows)
     }

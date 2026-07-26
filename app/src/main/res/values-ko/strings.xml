@@ -70,7 +70,12 @@
     <string name="next_week">다음 주</string>
     <string name="no_weekly_data">이 주간에는 비교 가능한 일일 스냅샷 쌍이 없습니다.</string>
     <string name="member">멤버</string>
+    <string name="rank">순위</string>
     <string name="total">합계</string>
+    <string name="weekly_cell_standard">공적 %1$d\n출석 %2$s · 과업 %3$s</string>
+    <string name="weekly_cell_gunsmoke">공적 %1$d\n%2$d점 · %3$s회\n출석 %4$s · 과업 %5$s</string>
+    <string name="weekly_total_standard">공적 %1$d</string>
+    <string name="weekly_total_gunsmoke">공적 %1$d\n%2$d점 · %3$s회</string>
     <string name="notes">비고</string>
     <string name="note_hint">선택한 게임 날짜의 비고 추가</string>
     <string name="add_note">비고 추가</string>

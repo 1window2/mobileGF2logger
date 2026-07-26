@@ -18,7 +18,6 @@ import android.widget.TableLayout
 import android.widget.TableRow
 import android.widget.TextView
 import android.widget.Toast
-import dev.gf2log.app.management.EvidencePrecision
 import dev.gf2log.app.management.PlatoonPeriods
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.WeeklyNote
@@ -109,40 +108,26 @@ class WeeklyReportActivity : LocalizedActivity() {
                 addView(TableLayout(context).apply {
                     addView(
                         row(
-                            listOf(getString(R.string.member)) +
+                            listOfNotNull(
+                                if (report.isGunsmokeWeek) getString(R.string.rank) else null,
+                                getString(R.string.member),
+                            ) +
                                 report.days.map { it.format(DAY) } +
                                 getString(R.string.total),
                             header = true,
                         ),
                     )
-                    report.members.forEach { member ->
+                    report.members.forEachIndexed { index, member ->
                         addView(
                             row(
-                                listOf("${member.name}\n#${member.uid}") +
-                                    member.days.map { cell ->
-                                        when {
-                                            cell.meritDelta == null -> "-"
-                                            !report.isGunsmokeWeek -> cell.meritDelta.toString()
-                                            else -> buildString {
-                                                append(cell.meritDelta)
-                                                append("\n")
-                                                append(cell.scoreDelta)
-                                                append("pt")
-                                                val selected = cell.inference?.selected
-                                                if (selected != null) {
-                                                    append(" / ")
-                                                    append(selected.attempts)
-                                                    append("x")
-                                                } else if (
-                                                    cell.inference?.precision ==
-                                                    EvidencePrecision.AMBIGUOUS
-                                                ) {
-                                                    append(" / ?")
-                                                }
-                                            }
-                                        }
+                                listOfNotNull(
+                                    if (report.isGunsmokeWeek) (index + 1).toString() else null,
+                                    "${member.name}\n#${member.uid}",
+                                ) +
+                                    member.days.map {
+                                        formatDayCell(it, report.isGunsmokeWeek)
                                     } +
-                                    member.totalMerit.toString(),
+                                    formatTotalCell(member, report.isGunsmokeWeek),
                                 header = false,
                             ),
                         )
@@ -280,6 +265,57 @@ class WeeklyReportActivity : LocalizedActivity() {
             })
         }
     }
+
+    private fun formatDayCell(
+        cell: WeeklyReportBuilder.DayCell,
+        gunsmokeWeek: Boolean,
+    ): String {
+        val merit = cell.meritDelta ?: return "-"
+        val selected = cell.inference?.selected
+        val attendance = selected?.attended?.let(::mark) ?: "?"
+        val patrol = selected?.dailyPatrol?.let(::mark) ?: "?"
+        if (!gunsmokeWeek) {
+            return getString(
+                R.string.weekly_cell_standard,
+                merit,
+                attendance,
+                patrol,
+            )
+        }
+        return getString(
+            R.string.weekly_cell_gunsmoke,
+            merit,
+            cell.scoreDelta ?: 0,
+            selected?.attempts?.toString() ?: "?",
+            attendance,
+            patrol,
+        )
+    }
+
+    private fun formatTotalCell(
+        member: WeeklyReportBuilder.MemberRow,
+        gunsmokeWeek: Boolean,
+    ): String {
+        if (!gunsmokeWeek) {
+            return getString(R.string.weekly_total_standard, member.totalMerit)
+        }
+        val observedCells = member.days.filter { it.meritDelta != null }
+        val attempts = observedCells
+            .map { it.inference?.selected?.attempts }
+            .takeIf { values -> values.all { it != null } }
+            ?.filterNotNull()
+            ?.sum()
+            ?.toString()
+            ?: "?"
+        return getString(
+            R.string.weekly_total_gunsmoke,
+            member.totalMerit,
+            member.totalScore,
+            attempts,
+        )
+    }
+
+    private fun mark(value: Boolean): String = if (value) "✓" else "–"
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private fun wrap() = ViewGroup.LayoutParams.WRAP_CONTENT

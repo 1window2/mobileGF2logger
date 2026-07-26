@@ -41,10 +41,38 @@ class WeeklyReportBuilderTest {
         assertEquals(LocalDate.of(2026, 7, 27), report.periodStart)
     }
 
+    @Test
+    fun gunsmokeRowsRankByScoreBeforeMerit() {
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 22),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers(
+                    "2026-07-19T20:00:00Z",
+                    member(uid = 1, name = "Merit", weekly = 100, score = 1_000),
+                    member(uid = 2, name = "Score", weekly = 100, score = 1_000),
+                ),
+                snapshotWithMembers(
+                    "2026-07-20T19:59:00Z",
+                    member(uid = 1, name = "Merit", weekly = 300, score = 1_050),
+                    member(uid = 2, name = "Score", weekly = 200, score = 1_500),
+                ),
+            ),
+        )
+
+        assertEquals(listOf(2L, 1L), report.members.map { it.uid })
+    }
+
     private fun snapshot(time: String, weekly: Long, score: Long) =
         PlatoonSnapshot(
             id = 0,
             capturedAt = Instant.parse(time),
             members = listOf(SnapshotMember(1, "One", 60, weekly, weekly, 0, score, 0)),
         )
+
+    private fun snapshotWithMembers(time: String, vararg members: SnapshotMember) =
+        PlatoonSnapshot(0, Instant.parse(time), members.toList())
+
+    private fun member(uid: Long, name: String, weekly: Long, score: Long) =
+        SnapshotMember(uid, name, 60, weekly, weekly, 0, score, 0)
 }

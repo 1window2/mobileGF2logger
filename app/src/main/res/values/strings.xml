@@ -70,7 +70,12 @@
     <string name="next_week">Next week</string>
     <string name="no_weekly_data">No complete daily snapshot pairs are available for this week.</string>
     <string name="member">Member</string>
+    <string name="rank">Rank</string>
     <string name="total">Total</string>
+    <string name="weekly_cell_standard">%1$d merit\nLogin %2$s · Patrol %3$s</string>
+    <string name="weekly_cell_gunsmoke">%1$d merit\n%2$d pt · %3$s attempts\nLogin %4$s · Patrol %5$s</string>
+    <string name="weekly_total_standard">%1$d merit</string>
+    <string name="weekly_total_gunsmoke">%1$d merit\n%2$d pt · %3$s attempts</string>
     <string name="notes">Notes</string>
     <string name="note_hint">Add a note for the selected game day</string>
     <string name="add_note">Add note</string>

@@ -22,6 +22,10 @@
     <string name="platoon_management">서클 관리</string>
     <string name="weekly_table">주간표</string>
     <string name="compare_latest_snapshots">최근 스냅샷 비교</string>
+    <string name="export_selected_members">선택 멤버 내보내기</string>
+    <string name="select_member">%1$s 선택</string>
+    <string name="select_members_first">먼저 멤버를 하나 이상 선택하세요</string>
+    <string name="members_exported">선택 멤버를 내보냈습니다</string>
     <string name="search_members">이름 또는 UID 검색</string>
     <string name="filter_all">전체 멤버</string>
     <string name="filter_active">재적</string>

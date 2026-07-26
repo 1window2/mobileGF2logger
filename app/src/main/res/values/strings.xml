@@ -22,6 +22,10 @@
     <string name="platoon_management">Platoon management</string>
     <string name="weekly_table">Weekly table</string>
     <string name="compare_latest_snapshots">Compare latest snapshots</string>
+    <string name="export_selected_members">Export selected members</string>
+    <string name="select_member">Select %1$s</string>
+    <string name="select_members_first">Select one or more members first</string>
+    <string name="members_exported">Selected members exported</string>
     <string name="search_members">Search name or UID</string>
     <string name="filter_all">All members</string>
     <string name="filter_active">Active</string>

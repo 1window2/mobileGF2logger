@@ -8,13 +8,16 @@ import android.text.TextWatcher
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import android.widget.Toast
 import dev.gf2log.app.management.MemberStatus
 import dev.gf2log.app.management.PlatoonRepository
+import dev.gf2log.app.management.PlatoonMemberCsv
 import dev.gf2log.app.management.SnapshotMember
 import java.io.File
 import java.time.ZoneId
@@ -29,6 +32,8 @@ class PlatoonActivity : LocalizedActivity() {
     private lateinit var sortSpinner: Spinner
     private var statuses = emptyList<MemberStatus>()
     private var latestMembers = emptyMap<Long, SnapshotMember>()
+    private val selectedUids = linkedSetOf<Long>()
+    private var pendingMemberCsv: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,6 +77,10 @@ class PlatoonActivity : LocalizedActivity() {
                         Intent(this@PlatoonActivity, SnapshotComparisonActivity::class.java),
                     )
                 }
+            }, matchWidth())
+            addView(Button(context).apply {
+                text = getString(R.string.export_selected_members)
+                setOnClickListener { exportSelectedMembers() }
             }, matchWidth())
             searchInput = EditText(context).apply {
                 hint = getString(R.string.search_members)
@@ -169,32 +178,81 @@ class PlatoonActivity : LocalizedActivity() {
         }
         sorted.forEach { status ->
             val latest = latestMembers[status.uid]
-            memberContainer.addView(Button(this).apply {
-                isAllCaps = false
-                text = buildString {
-                    append(if (status.isActive) "● " else "○ ")
-                    append(status.name)
-                    append("  #")
-                    append(status.uid)
-                    if (latest != null) {
-                        append("\n")
-                        append(getString(R.string.merit_this_week))
-                        append(": ")
-                        append(latest.weeklyMerit)
-                        append(" · ")
-                        append(getString(R.string.total_merit))
-                        append(": ")
-                        append(latest.totalMerit)
+            memberContainer.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(CheckBox(context).apply {
+                    isChecked = status.uid in selectedUids
+                    contentDescription = getString(R.string.select_member, status.name)
+                    setOnCheckedChangeListener { _, checked ->
+                        if (checked) selectedUids += status.uid else selectedUids -= status.uid
                     }
-                }
-                setOnClickListener {
-                    startActivity(
-                        Intent(this@PlatoonActivity, MemberDetailActivity::class.java)
-                            .putExtra(MemberDetailActivity.EXTRA_UID, status.uid),
-                    )
-                }
+                }, LinearLayout.LayoutParams(wrap(), ViewGroup.LayoutParams.MATCH_PARENT))
+                addView(Button(context).apply {
+                    isAllCaps = false
+                    text = buildString {
+                        append(if (status.isActive) "● " else "○ ")
+                        append(status.name)
+                        append("  #")
+                        append(status.uid)
+                        if (latest != null) {
+                            append("\n")
+                            append(getString(R.string.merit_this_week))
+                            append(": ")
+                            append(latest.weeklyMerit)
+                            append(" · ")
+                            append(getString(R.string.total_merit))
+                            append(": ")
+                            append(latest.totalMerit)
+                        }
+                    }
+                    setOnClickListener {
+                        startActivity(
+                            Intent(this@PlatoonActivity, MemberDetailActivity::class.java)
+                                .putExtra(MemberDetailActivity.EXTRA_UID, status.uid),
+                        )
+                    }
+                }, LinearLayout.LayoutParams(0, wrap(), 1f))
             }, matchWidth())
         }
+    }
+
+    @Deprecated("Uses the platform document picker without an AndroidX dependency")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_EXPORT_MEMBERS) return
+        val content = pendingMemberCsv
+        pendingMemberCsv = null
+        val destination = data?.data
+        if (resultCode != RESULT_OK || destination == null || content == null) return
+        val exported = runCatching {
+            val output = TrustedExportDestination.openOutputStream(contentResolver, destination)
+                ?: error("Document provider did not open an output stream")
+            output.writer(Charsets.UTF_8).use { it.write(content) }
+        }.isSuccess
+        Toast.makeText(
+            this,
+            getString(if (exported) R.string.members_exported else R.string.status_export_failed),
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun exportSelectedMembers() {
+        val selected = statuses.filter { it.uid in selectedUids }
+        if (selected.isEmpty()) {
+            Toast.makeText(this, R.string.select_members_first, Toast.LENGTH_SHORT).show()
+            return
+        }
+        pendingMemberCsv = PlatoonMemberCsv.format(
+            statuses = selected,
+            latestMembers = latestMembers,
+            zoneId = ZoneId.systemDefault(),
+        )
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("text/csv")
+            .putExtra(Intent.EXTRA_TITLE, "GF2logger-members.csv")
+        startActivityForResult(intent, REQUEST_EXPORT_MEMBERS)
     }
 
     private fun spinner(items: List<String>) = Spinner(this).apply {
@@ -214,5 +272,6 @@ class PlatoonActivity : LocalizedActivity() {
 
     companion object {
         private val DISPLAY_TIME = DateTimeFormatter.ofPattern("yy/MM/dd HH:mm:ss")
+        private const val REQUEST_EXPORT_MEMBERS = 301
     }
 }

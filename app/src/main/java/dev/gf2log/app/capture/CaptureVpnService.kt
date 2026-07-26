@@ -37,6 +37,7 @@ class CaptureVpnService : VpnService() {
     private val reportedTrafficBucket = AtomicLong()
     private val parseWarningCount = AtomicLong()
     private val droppedParserTaskCount = AtomicLong()
+    private val unknownPayloadCounts = ConcurrentHashMap<Int, AtomicLong>()
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var guildMembersWriter: GuildMembersCsvWriter
     private lateinit var historyStore: CaptureHistoryStore
@@ -163,6 +164,7 @@ class CaptureVpnService : VpnService() {
         reportedTrafficBucket.set(0)
         parseWarningCount.set(0)
         droppedParserTaskCount.set(0)
+        unknownPayloadCounts.clear()
         sessionStartedAt = Instant.now()
 
         CaptureStatus.markRunning("Starting native capture")
@@ -241,6 +243,9 @@ class CaptureVpnService : VpnService() {
         if (warnings.isNotEmpty()) parseWarningCount.addAndGet(warnings.size.toLong())
 
         val decoded = events.filterIsInstance<ParseEvent.Payload>()
+        events.filterIsInstance<ParseEvent.UnknownPayload>().forEach { event ->
+            unknownPayloadCounts.computeIfAbsent(event.payloadType) { AtomicLong() }.incrementAndGet()
+        }
         decoded.forEach { event ->
             if (payloadHistoryPreferences.isEnabled(event.value.payloadType)) {
                 runCatching { historyStore.save(event.value) }
@@ -320,6 +325,9 @@ class CaptureVpnService : VpnService() {
                 decodedPayloads = decodedPayloadCount.get(),
                 warnings = parseWarningCount.get(),
                 droppedChunks = droppedParserTaskCount.get(),
+                unknownPayloads = unknownPayloadCounts.entries
+                    .sortedBy { it.key }
+                    .joinToString { "${it.key}:${it.value.get()}" },
                 finalStatus = CaptureStatus.read(),
             ),
         )

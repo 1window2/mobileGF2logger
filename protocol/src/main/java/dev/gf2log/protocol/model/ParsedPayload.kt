@@ -10,4 +10,10 @@ data class ParsedPayload(
 sealed interface ParseEvent {
     data class Payload(val value: ParsedPayload) : ParseEvent
     data class Warning(val description: String) : ParseEvent
+    data class UnknownPayload(
+        val messageId: Int,
+        val payloadType: Int,
+        val payloadBytes: Int,
+        val isEndOfMessage: Boolean,
+    ) : ParseEvent
 }

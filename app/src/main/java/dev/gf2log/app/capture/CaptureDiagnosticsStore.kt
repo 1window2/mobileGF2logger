@@ -18,6 +18,7 @@ class CaptureDiagnosticsStore(context: Context) {
             .putLong(KEY_DECODED_PAYLOADS, diagnostics.decodedPayloads)
             .putLong(KEY_WARNINGS, diagnostics.warnings)
             .putLong(KEY_DROPPED_CHUNKS, diagnostics.droppedChunks)
+            .putString(KEY_UNKNOWN_PAYLOADS, diagnostics.unknownPayloads)
             .putString(KEY_FINAL_STATUS, diagnostics.finalStatus)
             .apply()
     }
@@ -34,6 +35,7 @@ class CaptureDiagnosticsStore(context: Context) {
             decodedPayloads = preferences.getLong(KEY_DECODED_PAYLOADS, 0),
             warnings = preferences.getLong(KEY_WARNINGS, 0),
             droppedChunks = preferences.getLong(KEY_DROPPED_CHUNKS, 0),
+            unknownPayloads = preferences.getString(KEY_UNKNOWN_PAYLOADS, "").orEmpty(),
             finalStatus = preferences.getString(KEY_FINAL_STATUS, "").orEmpty(),
         )
     }
@@ -46,6 +48,7 @@ class CaptureDiagnosticsStore(context: Context) {
         val decodedPayloads: Long,
         val warnings: Long,
         val droppedChunks: Long,
+        val unknownPayloads: String,
         val finalStatus: String,
     )
 
@@ -58,6 +61,7 @@ class CaptureDiagnosticsStore(context: Context) {
         private const val KEY_DECODED_PAYLOADS = "decoded_payloads"
         private const val KEY_WARNINGS = "warnings"
         private const val KEY_DROPPED_CHUNKS = "dropped_chunks"
+        private const val KEY_UNKNOWN_PAYLOADS = "unknown_payloads"
         private const val KEY_FINAL_STATUS = "final_status"
     }
 }

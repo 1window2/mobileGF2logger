@@ -135,6 +135,7 @@ class OptionsActivity : LocalizedActivity() {
                         diagnostics.decodedPayloads,
                         diagnostics.warnings,
                         diagnostics.droppedChunks,
+                        diagnostics.unknownPayloads.ifBlank { getString(R.string.none) },
                     )
                 }
                 setTextIsSelectable(true)

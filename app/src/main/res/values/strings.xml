@@ -109,7 +109,7 @@
     <string name="notification_required_explanation">Android requires a foreground notification while VPN capture is active. This option controls its detail, not whether it exists.</string>
     <string name="last_capture_diagnostics">Last capture diagnostics</string>
     <string name="no_capture_diagnostics">No completed capture session yet.</string>
-    <string name="capture_diagnostics">%1$s\nForwarded: %2$d KiB · inspected: %3$d KiB\nDecoded: %4$d · warnings: %5$d · dropped chunks: %6$d</string>
+    <string name="capture_diagnostics">%1$s\nForwarded: %2$d KiB · inspected: %3$d KiB\nDecoded: %4$d · warnings: %5$d · dropped chunks: %6$d\nUnknown payloads (type:count): %7$s</string>
     <plurals name="status_deleted_history">
         <item quantity="one">Deleted %1$d history entry</item>
         <item quantity="other">Deleted %1$d history entries</item>

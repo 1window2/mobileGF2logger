@@ -154,6 +154,22 @@ class Gfl2StreamParserTest {
         assertTrue(parser.finish().isEmpty())
     }
 
+    @Test
+    fun unknownPayloadsRemainObservableWithoutRetainingTheirBytes() {
+        val parser = Gfl2StreamParser()
+        val events = parser.accept(outerMessage(51, payload(24567, byteArrayOf(1, 2, 3))))
+
+        assertEquals(
+            ParseEvent.UnknownPayload(
+                messageId = 51,
+                payloadType = 24567,
+                payloadBytes = 3,
+                isEndOfMessage = true,
+            ),
+            events.single(),
+        )
+    }
+
     private fun weaponsPayload(): ByteArray {
         val weapon = uintField(2, 42uL) +
             uintField(6, 70uL) +

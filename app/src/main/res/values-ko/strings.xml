@@ -109,7 +109,7 @@
     <string name="notification_required_explanation">VPN 캡처 중에는 Android가 포그라운드 알림을 요구합니다. 이 설정은 알림 표시 여부가 아니라 상세 수준을 조절합니다.</string>
     <string name="last_capture_diagnostics">최근 캡처 진단</string>
     <string name="no_capture_diagnostics">완료된 캡처 세션이 없습니다.</string>
-    <string name="capture_diagnostics">%1$s\n전달: %2$d KiB · 검사: %3$d KiB\n디코딩: %4$d · 경고: %5$d · 누락 청크: %6$d</string>
+    <string name="capture_diagnostics">%1$s\n전달: %2$d KiB · 검사: %3$d KiB\n디코딩: %4$d · 경고: %5$d · 누락 청크: %6$d\n알 수 없는 페이로드 (유형:횟수): %7$s</string>
     <plurals name="status_deleted_history">
         <item quantity="other">기록 %1$d개를 삭제했습니다</item>
     </plurals>

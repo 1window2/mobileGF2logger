@@ -106,6 +106,20 @@ class GuildMembersCsvWriterTest {
         assertTrue(completed.single().file.exists())
     }
 
+    @Test
+    fun shutdownDiscardsAnUnterminatedContinuation() {
+        val output = temporaryFolder.newFolder("incomplete-batch")
+        val clock = Clock.fixed(Instant.parse("2026-07-21T19:11:09Z"), ZoneOffset.UTC)
+        val completed = mutableListOf<GuildMembersCsvWriter.CompletedBatch>()
+        val writer = GuildMembersCsvWriter(output, clock, completed::add)
+
+        writer.accept(payload(messageId = 0, uid = 1u, name = "Partial", end = false))
+        writer.close()
+
+        assertTrue(completed.isEmpty())
+        assertTrue(output.listFiles().orEmpty().isEmpty())
+    }
+
     private fun payload(messageId: Int, uid: UInt, name: String, end: Boolean): ParsedPayload =
         ParsedPayload(
             messageId = messageId,

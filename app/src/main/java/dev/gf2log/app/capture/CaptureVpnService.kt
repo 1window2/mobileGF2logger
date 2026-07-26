@@ -349,7 +349,7 @@ class CaptureVpnService : VpnService() {
     }
 
     private fun startInForeground(content: String) {
-        val notification = buildNotification(content)
+        val notification = buildNotification(notificationContent(content))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 NOTIFICATION_ID,
@@ -365,15 +365,16 @@ class CaptureVpnService : VpnService() {
         getSystemService(NotificationManager::class.java)
             .notify(
                 NOTIFICATION_ID,
-                buildNotification(
-                    if (capturePreferences.detailedNotifications) {
-                        content
-                    } else {
-                        getString(R.string.notification_capture_active)
-                    },
-                ),
+                buildNotification(notificationContent(content)),
             )
     }
+
+    private fun notificationContent(content: String): String =
+        if (capturePreferences.detailedNotifications) {
+            content
+        } else {
+            getString(R.string.notification_capture_active)
+        }
 
     private fun buildNotification(content: String): Notification =
         Notification.Builder(this, NOTIFICATION_CHANNEL)

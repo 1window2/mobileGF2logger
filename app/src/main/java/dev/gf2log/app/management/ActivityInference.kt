@@ -96,4 +96,3 @@ object ActivityInference {
     const val MERIT_PER_ATTEMPT = 30L
     const val SCORE_POINTS_PER_MERIT = 10L
 }
-

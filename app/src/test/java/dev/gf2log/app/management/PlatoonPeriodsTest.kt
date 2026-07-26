@@ -41,4 +41,3 @@ class PlatoonPeriodsTest {
         assertTrue(PlatoonPeriods.isGunsmokeWeek(LocalDate.of(2026, 8, 9)))
     }
 }
-

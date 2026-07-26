@@ -33,4 +33,3 @@ object PlatoonPeriods {
 
     private const val GUNSMOKE_CYCLE_WEEKS = 3L
 }
-

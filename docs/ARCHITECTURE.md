@@ -23,7 +23,11 @@ Gfl2StreamParser (one bounded instance per live TCP flow)
 Gfl2PayloadDecoder (five recognized protobuf message types)
         |
         v
-Typed GameData events -> Platoon CSV exporter
+Typed GameData events
+        |
+        +--> Parsed-packet history / CSV exporter
+        |
+        +--> Structured Platoon repository / weekly reports
 ```
 
 ## Protocol framing
@@ -89,4 +93,4 @@ An Android VPN can observe packet metadata, but it cannot automatically read TLS
 
 Every completed recognized payload is formatted in protocol order and written atomically to the app's private `files/capture-history` directory. `CaptureHistoryStore` returns entries newest-first, trims the oldest files once the count exceeds 100, rejects path-like identifiers, and supports explicit deletion of user-selected entries. `SavedHistoryStore` atomically copies selected entries into `files/saved-history`, rejects duplicates, caps the collection at 50 without FIFO deletion, and keeps saved entries independent from recent-history rotation.
 
-The main activity renders both collections with timestamp-only titles in `yy/MM/dd HH:mm:ss` UTC format. Selecting a title opens a cleaned table parsed from the stored CSV body; the same screen can reveal the complete raw stored text and copy it to the clipboard. Backup rules exclude all private files, including recent history, saved history, and generated Platoon CSV files, so inspected data does not leave the device through Android backup.
+The main activity renders both collections with timestamp-only titles in `yy/MM/dd HH:mm:ss` using the Android device timezone. Selecting a title opens a cleaned table parsed from the stored CSV body; the same screen can reveal the complete raw stored text and copy it to the clipboard. Android backup rules exclude all private files, including recent history, saved history, generated Platoon CSV files, and the structured management database. A user can separately invoke the explicit Platoon backup export, which contains parsed management data but never raw traffic.

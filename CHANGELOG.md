@@ -2,6 +2,42 @@
 
 All notable changes to mobileGF2logger are documented here.
 
+## Unreleased
+
+### Added
+
+- One-shot Platoon roster capture with automatic VPN shutdown after a complete
+  payload type `21917` response.
+- A private structured Platoon database for snapshots, member status, repeat
+  tenures, roster events, manual corrections, and weekly notes.
+- Platoon-management screens for active and departed members, snapshot
+  comparison, selected-member CSV export, and explicit backup export/import.
+- Weekly activity tables for Login, Daily Patrol, merit, Gunsmoke Frontline
+  score, inferred attempts, totals, and rankings.
+- English and Korean application language selection.
+- Capture diagnostics and unknown-payload reporting.
+- A GF2-inspired Platoon launcher icon using orange, off-white, and black.
+
+### Changed
+
+- Weekly calculations use the Android device timezone by default, a 05:00 game
+  reset, Monday merit weeks, and the verified three-week Gunsmoke cycle.
+- Gunsmoke tables rank members by score before merit and name.
+- Native build caches are excluded from version control.
+
+### Fixed
+
+- Discard incomplete roster batches instead of persisting partial member lists.
+- Preserve restored Platoon history during backup migration.
+- Localize payload-option labels and descriptions.
+
+### Verified
+
+- A Samsung SM-N976N running Android 12 captured a live Platoon Members
+  response, persisted a new history entry and structured snapshot, and stopped
+  one-shot capture without computer-side packet processing.
+- The launcher icon and weekly table were visually checked on the same device.
+
 ## 1.1.0 - 2026-07-23
 
 ### Added

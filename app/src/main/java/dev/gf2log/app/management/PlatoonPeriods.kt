@@ -16,14 +16,11 @@ object PlatoonPeriods {
     fun gameDay(instant: Instant, zoneId: ZoneId): LocalDate =
         instant.atZone(zoneId).minusHours(RESET_HOUR.toLong()).toLocalDate()
 
-    fun meritWeekStart(gameDay: LocalDate): LocalDate =
-        gameDay.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-
-    fun gunsmokeWeekStart(gameDay: LocalDate): LocalDate =
+    fun weekStart(gameDay: LocalDate): LocalDate =
         gameDay.with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY))
 
     fun isGunsmokeWeek(gameDay: LocalDate): Boolean {
-        val sunday = gunsmokeWeekStart(gameDay)
+        val sunday = weekStart(gameDay)
         val weeks = ChronoUnit.WEEKS.between(GUNSMOKE_ANCHOR, sunday)
         return Math.floorMod(weeks, GUNSMOKE_CYCLE_WEEKS) == 0L
     }

@@ -57,6 +57,20 @@ class ActivityInferenceTest {
     }
 
     @Test
+    fun zeroScoreGunsmokeBaselineMeansZeroAttempts() {
+        listOf(50L, 90L).forEach { merit ->
+            val result = ActivityInference.infer(
+                meritDelta = merit,
+                scoreDelta = 0,
+                gunsmokeActive = true,
+            )
+
+            assertEquals(EvidencePrecision.INFERRED, result.precision)
+            assertEquals(0, result.selected!!.attempts)
+        }
+    }
+
+    @Test
     fun handlesCounterReset() {
         assertEquals(140, ActivityInference.counterDelta(previous = 220_000, current = 140))
         assertEquals(90, ActivityInference.counterDelta(previous = 220_000, current = 220_090))

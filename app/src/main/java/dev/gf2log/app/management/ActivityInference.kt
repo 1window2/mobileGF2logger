@@ -10,7 +10,7 @@ object ActivityInference {
 
     fun infer(meritDelta: Long, scoreDelta: Long, gunsmokeActive: Boolean): Result {
         if (meritDelta < 0 || scoreDelta < 0) return Result.invalid()
-        if (!gunsmokeActive) {
+        if (!gunsmokeActive || scoreDelta == 0L) {
             val baseline = dailyBaselines.singleOrNull { it.merit == meritDelta }
                 ?: return Result(
                     precision = EvidencePrecision.AMBIGUOUS,

@@ -102,7 +102,35 @@ class PlatoonDatabase(context: Context) :
         )
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            val correctedPeriods = mutableListOf<Pair<Long, Long>>()
+            db.query(
+                "weekly_notes",
+                arrayOf("id", "game_day"),
+                null,
+                null,
+                null,
+                null,
+                null,
+            ).use { cursor ->
+                while (cursor.moveToNext()) {
+                    correctedPeriods += cursor.getLong(0) to
+                        PlatoonPeriods.weekStart(
+                            java.time.LocalDate.ofEpochDay(cursor.getLong(1)),
+                        ).toEpochDay()
+                }
+            }
+            correctedPeriods.forEach { (id, periodStart) ->
+                db.update(
+                    "weekly_notes",
+                    ContentValues().apply { put("period_start", periodStart) },
+                    "id = ?",
+                    arrayOf(id.toString()),
+                )
+            }
+        }
+    }
 
     @Synchronized
     fun ingestSnapshot(
@@ -502,11 +530,7 @@ class PlatoonDatabase(context: Context) :
             null,
             ContentValues().apply {
                 val gameDay = PlatoonPeriods.gameDay(observedAt, ZoneId.systemDefault())
-                val periodStart = if (PlatoonPeriods.isGunsmokeWeek(gameDay)) {
-                    PlatoonPeriods.gunsmokeWeekStart(gameDay)
-                } else {
-                    PlatoonPeriods.meritWeekStart(gameDay)
-                }
+                val periodStart = PlatoonPeriods.weekStart(gameDay)
                 put("period_start", periodStart.toEpochDay())
                 put("game_day", gameDay.toEpochDay())
                 put("text", "${type.name}:${member.name}:${member.uid}")
@@ -660,7 +684,7 @@ class PlatoonDatabase(context: Context) :
 
     companion object {
         private const val DATABASE_NAME = "platoon.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 2
         private val SNAPSHOT_COLUMNS = arrayOf("id", "captured_at", "source_file", "game_version")
         private val MEMBER_COLUMNS = arrayOf(
             "uid",

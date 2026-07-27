@@ -4,6 +4,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -30,15 +31,61 @@ class WeeklyReportBuilderTest {
     }
 
     @Test
-    fun offWeekReportUsesMonday() {
+    fun everySelectedStandardDayUsesItsContainingSundayToSaturdayPeriod() {
+        listOf(
+            LocalDate.of(2026, 7, 26),
+            LocalDate.of(2026, 7, 27),
+            LocalDate.of(2026, 8, 1),
+        ).forEach { selectedDay ->
+            val report = WeeklyReportBuilder.build(
+                referenceDay = selectedDay,
+                zoneId = zone,
+                snapshots = emptyList(),
+            )
+
+            assertTrue(!report.isGunsmokeWeek)
+            assertEquals(LocalDate.of(2026, 7, 26), report.periodStart)
+            assertEquals(LocalDate.of(2026, 8, 1), report.periodEnd)
+        }
+    }
+
+    @Test
+    fun everySelectedGunsmokeDayUsesTheSameGunsmokePeriod() {
+        listOf(
+            LocalDate.of(2026, 7, 19),
+            LocalDate.of(2026, 7, 22),
+            LocalDate.of(2026, 7, 25),
+        ).forEach { selectedDay ->
+            val report = WeeklyReportBuilder.build(
+                referenceDay = selectedDay,
+                zoneId = zone,
+                snapshots = emptyList(),
+            )
+
+            assertTrue(report.isGunsmokeWeek)
+            assertEquals(LocalDate.of(2026, 7, 19), report.periodStart)
+            assertEquals(LocalDate.of(2026, 7, 25), report.periodEnd)
+        }
+    }
+
+    @Test
+    fun newcomerHasUnobservedCellsBeforeJoiningInsteadOfMissedActivity() {
+        val incumbent = member(uid = 1, name = "Incumbent", weekly = 100, score = 1_000)
+        val newcomer = member(uid = 2, name = "Newcomer", weekly = 50, score = 0)
         val report = WeeklyReportBuilder.build(
             referenceDay = LocalDate.of(2026, 7, 27),
             zoneId = zone,
-            snapshots = emptyList(),
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-25T20:00:00Z", incumbent),
+                snapshotWithMembers("2026-07-26T19:59:00Z", incumbent),
+                snapshotWithMembers("2026-07-27T03:00:00Z", incumbent, newcomer),
+            ),
         )
 
-        assertTrue(!report.isGunsmokeWeek)
-        assertEquals(LocalDate.of(2026, 7, 27), report.periodStart)
+        val newcomerRow = report.members.single { it.uid == newcomer.uid }
+        assertEquals(LocalDate.of(2026, 7, 26), newcomerRow.days.first().gameDay)
+        assertNull(newcomerRow.days.first().meritDelta)
+        assertNull(newcomerRow.days.first().inference)
     }
 
     @Test

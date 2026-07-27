@@ -24,11 +24,15 @@ class PlatoonPeriodsTest {
     }
 
     @Test
-    fun meritWeekStartsOnMondayButGunsmokeStartsOnSunday() {
-        val sunday = LocalDate.of(2026, 7, 19)
-        assertEquals(LocalDate.of(2026, 7, 13), PlatoonPeriods.meritWeekStart(sunday))
-        assertEquals(sunday, PlatoonPeriods.gunsmokeWeekStart(sunday))
-        assertEquals(LocalDate.of(2026, 7, 20), PlatoonPeriods.meritWeekStart(sunday.plusDays(1)))
+    fun everyWeeklyTableRunsFromSundayThroughSaturday() {
+        val gunsmokeSunday = LocalDate.of(2026, 7, 19)
+        val standardSunday = LocalDate.of(2026, 7, 26)
+
+        assertEquals(gunsmokeSunday, PlatoonPeriods.weekStart(gunsmokeSunday))
+        assertEquals(gunsmokeSunday, PlatoonPeriods.weekStart(LocalDate.of(2026, 7, 25)))
+        assertEquals(standardSunday, PlatoonPeriods.weekStart(standardSunday))
+        assertEquals(standardSunday, PlatoonPeriods.weekStart(LocalDate.of(2026, 7, 27)))
+        assertEquals(standardSunday, PlatoonPeriods.weekStart(LocalDate.of(2026, 8, 1)))
     }
 
     @Test

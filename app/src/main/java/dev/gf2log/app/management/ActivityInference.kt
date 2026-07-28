@@ -3,7 +3,6 @@ package dev.gf2log.app.management
 object ActivityInference {
     private val dailyBaselines = listOf(
         Baseline(merit = 0, attended = false, dailyPatrol = false),
-        Baseline(merit = 40, attended = false, dailyPatrol = true),
         Baseline(merit = 50, attended = true, dailyPatrol = false),
         Baseline(merit = 90, attended = true, dailyPatrol = true),
     )

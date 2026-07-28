@@ -122,7 +122,7 @@ object WeeklyReportBuilder {
             val cells = if (isGunsmoke) {
                 derivedCells
             } else {
-                inferSparseStandardCells(
+                inferStandardWeekCells(
                     uid = latestKnown.uid,
                     days = days,
                     zoneId = zoneId,
@@ -261,121 +261,186 @@ object WeeklyReportBuilder {
         lastOrNull { it.capturedAt.isBefore(instant) }
 
     /**
-     * Allocates a standard-week aggregate across otherwise unknown days.
+     * Reconciles Monday-through-Saturday cells with the latest weekly counter.
      *
-     * Total Merit is monotonic, so two sparse captures still constrain the
-     * aggregate earned between them. The exact daily placement does not. The
-     * deterministic 90/50/0 allocation favors complete login-and-patrol
-     * days, follows Monday-through-Sunday order, and is always marked as
-     * SPARSE_INFERRED for transparent UI/CSV handling.
+     * The game's weekly counter resets on Monday while this report starts on
+     * Sunday. Every standard-week merit day is one of 0/50/90, so the
+     * captured cumulative counter can be solved into all compatible daily
+     * sequences. Values shared by every sequence are exact; ambiguous values
+     * use the documented Monday-first estimate instead of remaining unknown.
+     * The latest in-progress day remains a lower bound until it reaches the
+     * daily maximum or a boundary capture closes it.
      */
-    private fun inferSparseStandardCells(
+    private fun inferStandardWeekCells(
         uid: Long,
         days: List<LocalDate>,
         zoneId: ZoneId,
         snapshots: List<PlatoonSnapshot>,
         cells: List<DayCell>,
     ): List<DayCell> {
-        val mutable = cells.toMutableList()
+        val mutable = inferSundayMerit(
+            uid = uid,
+            days = days,
+            zoneId = zoneId,
+            snapshots = snapshots,
+            cells = cells,
+        ).toMutableList()
         val observations = snapshots.mapNotNull { snapshot ->
             snapshot.member(uid)?.let { snapshot to it }
         }
-        observations.zipWithNext().forEach { (earlier, later) ->
-            val totalDelta = later.second.totalMerit - earlier.second.totalMerit
-            if (totalDelta < 0L) return@forEach
+        val monday = days.first().plusDays(1)
+        val observationsInCounterWeek = observations.mapNotNull { observation ->
+            val day = PlatoonPeriods.gameDay(observation.first.capturedAt, zoneId)
+            observation.takeIf { day in monday..days.last() }?.let { day to it }
+        }
+        val latest = observationsInCounterWeek.maxByOrNull { it.second.first.capturedAt }
+            ?: return mutable
+        val latestDay = latest.first
+        val latestCounter = latest.second.second.weeklyMerit
+        val firstObserved = observationsInCounterWeek.minBy { it.second.first.capturedAt }
+        val knownAbsentBeforeFirstObservation = snapshots.any { snapshot ->
+            val gameDay = PlatoonPeriods.gameDay(snapshot.capturedAt, zoneId)
+            !gameDay.isBefore(monday) &&
+                gameDay.isBefore(firstObserved.first) &&
+                snapshot.capturedAt.isBefore(firstObserved.second.first.capturedAt) &&
+                snapshot.member(uid) == null
+        }
+        val activeStart = if (knownAbsentBeforeFirstObservation) firstObserved.first else monday
+        val activeIndexes = days.indices.filter { index -> days[index] in activeStart..latestDay }
+        if (activeIndexes.isEmpty()) return mutable
 
-            val earlierDay = PlatoonPeriods.gameDay(earlier.first.capturedAt, zoneId)
-            val earlierBoundary = PlatoonPeriods.periodStartInstant(earlierDay.plusDays(1), zoneId)
-            val intervalStart = if (
-                earlier.first.capturedAt.isBefore(earlierBoundary) &&
-                !earlier.first.capturedAt.isBefore(
-                    earlierBoundary.minus(BOUNDARY_WINDOW_MINUTES, ChronoUnit.MINUTES),
-                )
-            ) {
-                earlierDay.plusDays(1)
-            } else {
-                earlierDay
-            }
-            val laterDay = PlatoonPeriods.gameDay(later.first.capturedAt, zoneId)
-            val laterBoundary = PlatoonPeriods.periodStartInstant(laterDay.plusDays(1), zoneId)
-            val intervalEnd = if (
-                later.first.capturedAt.isBefore(laterBoundary) &&
-                !later.first.capturedAt.isBefore(
-                    laterBoundary.minus(BOUNDARY_WINDOW_MINUTES, ChronoUnit.MINUTES),
-                )
-            ) {
-                laterDay
-            } else {
-                laterDay.minusDays(1)
-            }
-            if (intervalEnd.isBefore(intervalStart)) return@forEach
-            if (intervalStart.isBefore(days.first()) || intervalEnd.isAfter(days.last())) {
-                return@forEach
-            }
+        val lowerBoundsByDay = observationsInCounterWeek
+            .groupBy({ it.first }, { it.second.second.weeklyMerit })
+            .mapValues { (_, values) -> values.max() }
+        val compatible = compatibleStandardAllocations(
+            indexes = activeIndexes,
+            days = days,
+            cells = mutable,
+            lowerBoundsByDay = lowerBoundsByDay,
+            target = latestCounter,
+        )
+        if (compatible.isEmpty()) return mutable
 
-            val intervalIndexes = days.indices.filter { index ->
-                !days[index].isBefore(intervalStart) && !days[index].isAfter(intervalEnd)
+        val selected = compatible.first()
+        activeIndexes.forEachIndexed { position, index ->
+            val existing = mutable[index]
+            if (existing.manualOverride != null) return@forEachIndexed
+            val merit = selected[position]
+            val exactAcrossCandidates = compatible.all { it[position] == merit }
+            val isLatestObservedDay = days[index] == latestDay
+            val latestDayClosed = existing.evidence == DailyEvidence.ATTRIBUTED ||
+                merit == MAX_STANDARD_DAILY_MERIT
+            val evidence = when {
+                isLatestObservedDay && exactAcrossCandidates && !latestDayClosed ->
+                    DailyEvidence.PARTIAL_DAY
+                exactAcrossCandidates -> DailyEvidence.ATTRIBUTED
+                else -> DailyEvidence.SPARSE_INFERRED
             }
-            if (intervalIndexes.isEmpty()) return@forEach
-            if (intervalIndexes.any { mutable[it].evidence == DailyEvidence.PARTIAL_DAY }) {
-                return@forEach
-            }
-
-            val knownMerit = intervalIndexes.sumOf { index ->
-                mutable[index].meritDelta ?: 0L
-            }
-            val unknownIndexes = intervalIndexes.filter { index ->
-                mutable[index].evidence == DailyEvidence.NO_OBSERVATION ||
-                    mutable[index].evidence == DailyEvidence.INCOMPLETE_BOUNDARY
-            }.sortedBy { index -> days[index].dayOfWeek.value }
-            if (unknownIndexes.isEmpty()) return@forEach
-
-            val mondayReset = days.first().plusDays(1)
-            val resetAdjustedDelta = if (
-                !intervalStart.isAfter(days.first()) &&
-                intervalEnd.isBefore(mondayReset) &&
-                !laterDay.isBefore(mondayReset)
-            ) {
-                // A Monday packet's weekly counter contains Monday only. Remove
-                // it from the monotonic Total Merit interval before assigning
-                // the preceding Sunday.
-                totalDelta - later.second.weeklyMerit
-            } else {
-                totalDelta
-            }
-            val remaining = resetAdjustedDelta - knownMerit
-            val allocation = allocateSparseMerit(remaining, unknownIndexes.size)
-                ?: return@forEach
-            unknownIndexes.zip(allocation).forEach { (index, merit) ->
-                mutable[index] = mutable[index].copy(
+            mutable[index] = existing.copy(
+                meritDelta = merit,
+                scoreDelta = 0L,
+                inference = ActivityInference.infer(
                     meritDelta = merit,
                     scoreDelta = 0L,
-                    inference = ActivityInference.infer(
-                        meritDelta = merit,
-                        scoreDelta = 0L,
-                        gunsmokeActive = false,
-                    ),
-                    evidence = DailyEvidence.SPARSE_INFERRED,
-                )
-            }
+                    gunsmokeActive = false,
+                ),
+                evidence = evidence,
+            )
         }
         return mutable
     }
 
-    private fun allocateSparseMerit(total: Long, slots: Int): List<Long>? {
-        if (total < 0L || slots <= 0) return null
-        val result = mutableListOf<Long>()
-        fun allocate(remaining: Long, openSlots: Int): Boolean {
-            if (openSlots == 0) return remaining == 0L
-            for (candidate in SPARSE_DAILY_MERIT) {
-                if (candidate > remaining) continue
-                result += candidate
-                if (allocate(remaining - candidate, openSlots - 1)) return true
-                result.removeAt(result.lastIndex)
-            }
-            return false
+    private fun inferSundayMerit(
+        uid: Long,
+        days: List<LocalDate>,
+        zoneId: ZoneId,
+        snapshots: List<PlatoonSnapshot>,
+        cells: List<DayCell>,
+    ): List<DayCell> {
+        val sundayCell = cells.first()
+        if (sundayCell.manualOverride != null || sundayCell.evidence == DailyEvidence.ATTRIBUTED) {
+            return cells
         }
-        return result.takeIf { allocate(total, slots) }?.toList()
+        val monday = days.first().plusDays(1)
+        val mondayStart = PlatoonPeriods.periodStartInstant(monday, zoneId)
+        val sundayObservation = snapshots.lastOrNull { snapshot ->
+            snapshot.capturedAt.isBefore(mondayStart) &&
+                PlatoonPeriods.gameDay(snapshot.capturedAt, zoneId) == days.first() &&
+                snapshot.member(uid) != null
+        } ?: return cells
+        val laterObservation = snapshots.firstOrNull { snapshot ->
+            !snapshot.capturedAt.isBefore(mondayStart) &&
+                PlatoonPeriods.gameDay(snapshot.capturedAt, zoneId) in monday..days.last() &&
+                snapshot.member(uid) != null
+        } ?: return cells
+        val sundayMember = requireNotNull(sundayObservation.member(uid))
+        val laterMember = requireNotNull(laterObservation.member(uid))
+        val remainingSundayMerit = laterMember.totalMerit -
+            sundayMember.totalMerit -
+            laterMember.weeklyMerit
+        if (remainingSundayMerit < 0L) return cells
+
+        val merit = (sundayCell.meritDelta ?: 0L) + remainingSundayMerit
+        val evidence = if (sundayCell.meritDelta != null) {
+            DailyEvidence.ATTRIBUTED
+        } else {
+            DailyEvidence.SPARSE_INFERRED
+        }
+        return cells.toMutableList().apply {
+            this[0] = sundayCell.copy(
+                meritDelta = merit,
+                scoreDelta = 0L,
+                inference = ActivityInference.infer(
+                    meritDelta = merit,
+                    scoreDelta = 0L,
+                    gunsmokeActive = false,
+                ),
+                evidence = evidence,
+            )
+        }
+    }
+
+    private fun compatibleStandardAllocations(
+        indexes: List<Int>,
+        days: List<LocalDate>,
+        cells: List<DayCell>,
+        lowerBoundsByDay: Map<LocalDate, Long>,
+        target: Long,
+    ): List<List<Long>> {
+        if (target < 0L || target > indexes.size * MAX_STANDARD_DAILY_MERIT) {
+            return emptyList()
+        }
+        val results = mutableListOf<List<Long>>()
+        val candidate = mutableListOf<Long>()
+
+        fun search(position: Int, cumulative: Long) {
+            if (position == indexes.size) {
+                if (cumulative == target) results += candidate.toList()
+                return
+            }
+            val index = indexes[position]
+            val fixed = cells[index].manualOverride?.meritDelta
+                ?: cells[index].meritDelta?.takeIf {
+                    cells[index].evidence == DailyEvidence.ATTRIBUTED
+                }
+            val options = fixed?.let { longArrayOf(it) } ?: STANDARD_DAILY_MERIT
+            options.forEach { merit ->
+                val next = cumulative + merit
+                if (next > target) return@forEach
+                val lowerBound = lowerBoundsByDay[days[index]]
+                if (lowerBound != null && next < lowerBound) return@forEach
+                val remainingSlots = indexes.size - position - 1
+                if (next + remainingSlots * MAX_STANDARD_DAILY_MERIT < target) {
+                    return@forEach
+                }
+                candidate += merit
+                search(position + 1, next)
+                candidate.removeAt(candidate.lastIndex)
+            }
+        }
+
+        search(position = 0, cumulative = 0L)
+        return results
     }
 
     private fun PlatoonSnapshot.member(uid: Long): SnapshotMember? =
@@ -385,5 +450,6 @@ object WeeklyReportBuilder {
         if (current >= previous) current - previous else current
 
     private const val BOUNDARY_WINDOW_MINUTES = 15L
-    private val SPARSE_DAILY_MERIT = longArrayOf(90L, 50L, 0L)
+    private const val MAX_STANDARD_DAILY_MERIT = 90L
+    private val STANDARD_DAILY_MERIT = longArrayOf(90L, 50L, 0L)
 }

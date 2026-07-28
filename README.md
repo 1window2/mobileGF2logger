@@ -36,9 +36,9 @@ mobileGF2logger is a lightweight, non-root app for Platoon masters who want to r
 - Separates immutable packet-derived Join/Withdraw events from deletable manual
   Notes.
 - Marks live same-day values as partial lower bounds. When captures are sparse,
-  it uses Total Merit to preserve a supported interval total and visibly marks
-  plausible `90`/`50`/`0` daily allocations as approximate rather than
-  presenting them as measured facts.
+  it reconciles the Monday-based cumulative Weekly Merit counter and visibly
+  marks ambiguous Monday-first `90`/`50`/`0` daily allocations as
+  approximate rather than presenting them as measured facts.
 - Keeps missing Gunsmoke days unknown instead of inventing daily score or
   attempts, while using captured counters to preserve the strongest supported
   Total-column value.

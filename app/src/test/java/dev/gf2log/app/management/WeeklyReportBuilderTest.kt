@@ -89,12 +89,11 @@ class WeeklyReportBuilderTest {
         assertEquals(90L, newcomerRow.days[1].meritDelta)
         assertEquals(true, newcomerRow.days[1].inference?.selected?.attended)
         assertEquals(true, newcomerRow.days[1].inference?.selected?.dailyPatrol)
-        assertEquals(DailyEvidence.PARTIAL_DAY, newcomerRow.days[1].evidence)
-        assertTrue(report.hasIncompleteDailyEvidence)
+        assertEquals(DailyEvidence.ATTRIBUTED, newcomerRow.days[1].evidence)
     }
 
     @Test
-    fun firstDatabaseSnapshotRemainsUnknownWithoutAnEarlierRosterBaseline() {
+    fun firstDatabaseSnapshotUsesTheCapturedWeeklyCounter() {
         val report = WeeklyReportBuilder.build(
             referenceDay = LocalDate.of(2026, 7, 27),
             zoneId = zone,
@@ -107,9 +106,9 @@ class WeeklyReportBuilderTest {
         )
 
         val initial = report.members.single()
-        assertNull(initial.days[1].meritDelta)
-        assertNull(initial.days[1].inference)
-        assertEquals(DailyEvidence.INCOMPLETE_BOUNDARY, initial.days[1].evidence)
+        assertEquals(90L, initial.days[1].meritDelta)
+        assertEquals(true, initial.days[1].inference?.selected?.attended)
+        assertEquals(DailyEvidence.ATTRIBUTED, initial.days[1].evidence)
     }
 
     @Test
@@ -124,9 +123,9 @@ class WeeklyReportBuilderTest {
         )
 
         val cells = report.members.single().days
-        assertEquals(listOf(90L, 90L, null), cells.take(3).map { it.meritDelta })
-        assertTrue(cells.take(2).all { it.evidence == DailyEvidence.SPARSE_INFERRED })
-        assertEquals(DailyEvidence.INCOMPLETE_BOUNDARY, cells[2].evidence)
+        assertEquals(listOf(0L, 90L, 90L), cells.take(3).map { it.meritDelta })
+        assertEquals(DailyEvidence.SPARSE_INFERRED, cells[0].evidence)
+        assertTrue(cells.drop(1).take(2).all { it.evidence == DailyEvidence.ATTRIBUTED })
         assertTrue(report.hasIncompleteDailyEvidence)
     }
 
@@ -145,7 +144,7 @@ class WeeklyReportBuilderTest {
         )
 
         assertEquals(
-            listOf(90L, 90L, 50L),
+            listOf(90L, 50L, 0L),
             report.members.single().days
                 .filter { it.gameDay in LocalDate.of(2026, 7, 28)..LocalDate.of(2026, 7, 30) }
                 .map { it.meritDelta },
@@ -174,6 +173,50 @@ class WeeklyReportBuilderTest {
 
         assertEquals(90L, report.members.single().days.first().meritDelta)
         assertEquals(DailyEvidence.SPARSE_INFERRED, report.members.single().days.first().evidence)
+    }
+
+    @Test
+    fun latestTuesdayPacketReconcilesMondayAndTuesdayWithoutQuestionMarks() {
+        val sundayBoundary = member(uid = 1, name = "Current", weekly = 4_000, score = 0)
+            .copy(totalMerit = 20_000)
+        val monday = sundayBoundary.copy(weeklyMerit = 90, totalMerit = 20_090)
+        val tuesday = monday.copy(weeklyMerit = 180, totalMerit = 20_180)
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 28),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-26T19:59:00Z", sundayBoundary),
+                snapshotWithMembers("2026-07-27T05:06:15Z", monday),
+                snapshotWithMembers("2026-07-28T12:58:01Z", tuesday),
+            ),
+        )
+
+        val cells = report.members.single().days
+        assertEquals(90L, cells[1].meritDelta)
+        assertEquals(90L, cells[2].meritDelta)
+        assertEquals(DailyEvidence.ATTRIBUTED, cells[1].evidence)
+        assertEquals(DailyEvidence.ATTRIBUTED, cells[2].evidence)
+    }
+
+    @Test
+    fun ambiguousWeeklyCounterUsesMarkedMondayFirstValues() {
+        val monday = member(uid = 1, name = "Ambiguous", weekly = 0, score = 0)
+            .copy(totalMerit = 20_000)
+        val tuesday = monday.copy(weeklyMerit = 90, totalMerit = 20_090)
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 28),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-27T05:06:15Z", monday),
+                snapshotWithMembers("2026-07-28T12:58:01Z", tuesday),
+            ),
+        )
+
+        val cells = report.members.single().days
+        assertEquals(listOf(90L, 0L), cells.drop(1).take(2).map { it.meritDelta })
+        assertTrue(
+            cells.drop(1).take(2).all { it.evidence == DailyEvidence.SPARSE_INFERRED },
+        )
     }
 
     @Test

@@ -2,6 +2,17 @@
 
 All notable changes to mobileGF2logger are documented here.
 
+## Unreleased
+
+### Fixed
+
+- Reconcile Standard Week cells from the latest Monday-based cumulative Weekly
+  Merit counter so a newly parsed roster immediately updates the current day.
+- Render fully constrained daily merit as a plain integer, retain `≥` only for
+  genuine lower bounds, reject standalone 40-point increments as daily totals,
+  and mark ambiguous Monday-first `90`/`50`/`0`
+  allocations with `≈`.
+
 ## 2.0.0 - 2026-07-28
 
 ### Added

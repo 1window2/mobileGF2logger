@@ -185,7 +185,7 @@
     <string name="cancel">Cancel</string>
     <string name="weekly_edits_saved">Weekly table edits saved</string>
     <string name="invalid_weekly_edit">Enter non-negative numbers. Gunsmoke attempts must be between 0 and 3.</string>
-    <string name="incomplete_daily_evidence_standard">Daily values marked ≥ are partial lower bounds; ? means the available captures cannot constrain that day. Values marked ≈ are front-loaded 90/50/0 allocations from a supported sparse aggregate, so their exact daily placement may differ. A fully unobserved week remains unknown.</string>
+    <string name="incomplete_daily_evidence_standard">Daily values marked ≥ are partial lower bounds; ? means the available captures cannot constrain that day. Values marked ≈ are Monday-first 90/50/0 allocations compatible with the captured cumulative Weekly Merit, so their exact daily placement may differ. A standalone 40-point delta is not treated as a daily total because Daily Patrol follows the 50-point login reward. A fully unobserved week remains unknown.</string>
     <string name="incomplete_daily_evidence_gunsmoke">Daily values marked ≥ are partial lower bounds; ? means a 05:00 boundary is missing. Missing Gunsmoke days cannot be safely divided into score or attempts, so use the counter-backed Total and manually correct only facts you know.</string>
     <plurals name="status_deleted_history">
         <item quantity="one">Deleted %1$d history entry</item>

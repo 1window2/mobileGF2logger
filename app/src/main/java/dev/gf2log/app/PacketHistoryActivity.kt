@@ -106,6 +106,7 @@ class PacketHistoryActivity : LocalizedActivity() {
                 text = value
                 textSize = if (header) 14f else 13f
                 gravity = Gravity.CENTER_VERTICAL
+                setTextColor(Color.rgb(28, 32, 38))
                 if (header) setTypeface(typeface, Typeface.BOLD)
                 val horizontal = (10 * resources.displayMetrics.density).toInt()
                 val vertical = (8 * resources.displayMetrics.density).toInt()

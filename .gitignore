@@ -6,6 +6,7 @@ local.properties
 *.iml
 *.apk
 *.aab
+*.idsig
 *.pcap
 *.pcapng
 *.csv
@@ -16,3 +17,10 @@ local.properties
 keystore.properties
 .tmp-*/
 .tmp-*
+
+# Local device and UI verification artifacts (repository root only)
+/*.png
+/*.xml
+/*.db
+/*.db-*
+/*.err

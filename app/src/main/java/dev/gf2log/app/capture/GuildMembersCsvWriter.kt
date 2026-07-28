@@ -24,14 +24,14 @@ class GuildMembersCsvWriter(
     @Synchronized
     fun accept(payload: ParsedPayload, flowEnded: Boolean = false): SaveResult? {
         if (payload.payloadType != Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS) {
-            closeActiveBatch(completed = true)
+            closeActiveBatch(completed = false)
             return null
         }
 
         val data = payload.data as? GuildMembersData ?: return null
         var batch = activeBatch
         if (batch == null || (batch.previousMessageId != 0 && batch.previousMessageId != payload.messageId)) {
-            closeActiveBatch(completed = true)
+            closeActiveBatch(completed = false)
             batch = openBatch()
             activeBatch = batch
         }
@@ -45,8 +45,10 @@ class GuildMembersCsvWriter(
         batch.previousMessageId = payload.messageId
 
         val result = SaveResult(batch.file, batch.rows)
-        if (flowEnded || (payload.messageId != 0 && payload.isEndOfMessage)) {
+        if (payload.messageId != 0 && payload.isEndOfMessage) {
             closeActiveBatch(completed = true)
+        } else if (flowEnded) {
+            closeActiveBatch(completed = false)
         }
         return result
     }
@@ -89,7 +91,7 @@ class GuildMembersCsvWriter(
                     members = batch.members.values.toList(),
                 ),
             )
-        } else if (!completed) {
+        } else {
             batch.file.delete()
         }
     }

@@ -23,6 +23,7 @@ import java.io.File
 import java.time.Instant
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -47,6 +48,11 @@ class CaptureVpnService : VpnService() {
     private lateinit var diagnosticsStore: CaptureDiagnosticsStore
     private var sessionStartedAt: Instant? = null
     private var captureOnce = false
+    private val migrationExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "GF2LegacyImport")
+    }
+    @Volatile
+    private var captureStartPending = false
     private val parserExecutor = ThreadPoolExecutor(
         1,
         1,
@@ -60,13 +66,10 @@ class CaptureVpnService : VpnService() {
     override fun onCreate() {
         super.onCreate()
         platoonRepository = PlatoonRepository(this)
-        platoonRepository.importLegacyCsvFiles(
-            File(filesDir, GuildMembersCsvWriter.OUTPUT_DIRECTORY),
-        )
         guildMembersWriter = GuildMembersCsvWriter(
             File(filesDir, GuildMembersCsvWriter.OUTPUT_DIRECTORY),
         ) { batch ->
-            runCatching { platoonRepository.ingest(batch) }
+            val ingested = runCatching { platoonRepository.ingest(batch) }
                 .onSuccess { result ->
                     if (!result.duplicate) {
                         CaptureStatus.update(
@@ -76,7 +79,8 @@ class CaptureVpnService : VpnService() {
                     }
                 }
                 .onFailure { CaptureStatus.update("Unable to update Platoon database") }
-            if (captureOnce && CaptureStatus.isRunning) {
+                .isSuccess
+            if (ingested && captureOnce && CaptureStatus.isRunning) {
                 mainHandler.post {
                     if (captureOnce && CaptureStatus.isRunning) {
                         stopCapture("Captured one complete Platoon roster")
@@ -110,9 +114,11 @@ class CaptureVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        captureStartPending = false
         releaseCaptureResources()
         if (CaptureStatus.isRunning) CaptureStatus.markStopped()
         mainHandler.removeCallbacksAndMessages(null)
+        migrationExecutor.shutdownNow()
         guildMembersWriter.close()
         super.onDestroy()
     }
@@ -121,6 +127,10 @@ class CaptureVpnService : VpnService() {
         if (tunnel != null) {
             CaptureStatus.markRunning("Capture is already running")
             updateNotification("Capturing selected game traffic")
+            return
+        }
+        if (captureStartPending) {
+            CaptureStatus.update("Preparing capture")
             return
         }
 
@@ -135,6 +145,25 @@ class CaptureVpnService : VpnService() {
             return
         }
 
+        captureStartPending = true
+        migrationExecutor.execute {
+            val migration = runCatching {
+                platoonRepository.importLegacyCsvFiles(
+                    File(filesDir, GuildMembersCsvWriter.OUTPUT_DIRECTORY),
+                )
+            }
+            mainHandler.post {
+                if (!captureStartPending) return@post
+                captureStartPending = false
+                migration.fold(
+                    onSuccess = { startTunnel(targetPackage) },
+                    onFailure = { failStart("Unable to import previous Platoon history") },
+                )
+            }
+        }
+    }
+
+    private fun startTunnel(targetPackage: String) {
         val descriptor = try {
             Builder()
                 .setSession("GF2logger")
@@ -292,6 +321,7 @@ class CaptureVpnService : VpnService() {
     }
 
     private fun failStart(message: String) {
+        captureStartPending = false
         releaseCaptureResources()
         CaptureStatus.markStopped(message)
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -299,6 +329,7 @@ class CaptureVpnService : VpnService() {
     }
 
     private fun stopCapture(message: String = "") {
+        captureStartPending = false
         releaseCaptureResources()
         if (message.isBlank()) CaptureStatus.markStopped() else CaptureStatus.markStopped(message)
         stopForeground(STOP_FOREGROUND_REMOVE)

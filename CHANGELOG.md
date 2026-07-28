@@ -6,6 +6,9 @@ All notable changes to mobileGF2logger are documented here.
 
 ### Fixed
 
+- Project weekly rows from the latest complete active roster so withdrawn
+  members disappear immediately while their immutable Join/Withdraw records
+  remain in the weekly event section.
 - Reconcile Standard Week cells from the latest Monday-based cumulative Weekly
   Merit counter so a newly parsed roster immediately updates the current day.
 - Render fully constrained daily merit as a plain integer, retain `≥` only for

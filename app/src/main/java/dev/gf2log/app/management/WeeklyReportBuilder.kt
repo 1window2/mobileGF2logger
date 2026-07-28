@@ -157,7 +157,12 @@ object WeeklyReportBuilder {
                 },
             )
         }.filter { row ->
-            row.uid in rosterAtPeriodEnd || row.days.any(DayCell::observed)
+            // Weekly rows represent the roster that is active at the end of the
+            // selected reporting period (or the latest roster for an in-progress
+            // week). A member observed earlier in the week must disappear as soon
+            // as a later complete roster records their withdrawal; the immutable
+            // membership event remains available in the Join / Withdraw section.
+            row.uid in rosterAtPeriodEnd
         }
             .sortedWith(
                 if (isGunsmoke) {

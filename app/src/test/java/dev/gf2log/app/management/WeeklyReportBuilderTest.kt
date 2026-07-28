@@ -244,7 +244,7 @@ class WeeklyReportBuilderTest {
     }
 
     @Test
-    fun withdrawingMemberRetainsLastValueObservedWithinTheDay() {
+    fun withdrawingMemberIsRemovedFromActiveWeeklyRoster() {
         val member = member(uid = 1, name = "Withdrawing", weekly = 100, score = 1_000)
             .copy(totalMerit = 10_000)
         val report = WeeklyReportBuilder.build(
@@ -260,9 +260,29 @@ class WeeklyReportBuilderTest {
             ),
         )
 
-        val cell = report.members.single().days[1]
-        assertEquals(50L, cell.meritDelta)
-        assertEquals(DailyEvidence.PARTIAL_DAY, cell.evidence)
+        assertTrue(report.members.isEmpty())
+    }
+
+    @Test
+    fun newlyJoinedMemberAppearsInLatestWeeklyRoster() {
+        val existing = member(uid = 1, name = "Existing", weekly = 90, score = 1_000)
+            .copy(totalMerit = 10_000)
+        val newcomer = member(uid = 2, name = "New", weekly = 50, score = 0)
+            .copy(totalMerit = 50)
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 27),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-26T19:59:00Z", existing),
+                snapshotWithMembers(
+                    "2026-07-27T03:00:00Z",
+                    existing.copy(weeklyMerit = 180, totalMerit = 10_090),
+                    newcomer,
+                ),
+            ),
+        )
+
+        assertEquals(setOf(1L, 2L), report.members.map { it.uid }.toSet())
     }
 
     @Test

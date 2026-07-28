@@ -6,7 +6,7 @@ import java.time.format.DateTimeFormatter
 object PlatoonMemberCsv {
     const val HEADER =
         "uid,name,status,level,weeklyMerit,totalMerit,highScore,totalScore,lastLogin," +
-            "joinedAt,leftAt,note"
+            "joinedAt,withdrawalAt,note"
 
     fun format(
         statuses: List<MemberStatus>,
@@ -21,7 +21,7 @@ object PlatoonMemberCsv {
                 listOf(
                     status.uid,
                     status.name,
-                    if (status.isActive) "ACTIVE" else "DEPARTED",
+                    if (status.isActive) "ACTIVE" else "WITHDRAWN",
                     latest?.level ?: status.level,
                     latest?.weeklyMerit,
                     latest?.totalMerit,

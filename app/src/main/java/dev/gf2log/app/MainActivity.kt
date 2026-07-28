@@ -28,6 +28,7 @@ import dev.gf2log.app.capture.GuildMembersCsvWriter
 import dev.gf2log.app.history.CaptureHistoryStore
 import dev.gf2log.app.history.SavedHistoryStore
 import dev.gf2log.app.management.PlatoonBackupManager
+import dev.gf2log.protocol.Gfl2PayloadDecoder
 import dev.gf2log.protocol.PayloadCatalog
 import java.io.File
 import java.time.LocalDateTime
@@ -402,7 +403,8 @@ class MainActivity : LocalizedActivity() {
                     }
                 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
                 addView(TextView(context).apply {
-                    text = PayloadCatalog.tag(entry.payloadType)
+                    val localizedTag = localizedPayloadTag(entry.payloadType)
+                    text = localizedTag
                     textSize = 12f
                     setTextColor(Color.WHITE)
                     gravity = Gravity.CENTER
@@ -414,7 +416,7 @@ class MainActivity : LocalizedActivity() {
                     }
                     contentDescription = getString(
                         R.string.payload_tag_description,
-                        PayloadCatalog.tag(entry.payloadType),
+                        localizedTag,
                         entry.payloadType?.toString() ?: getString(R.string.unknown_payload_type),
                     )
                 }, LinearLayout.LayoutParams(
@@ -423,6 +425,15 @@ class MainActivity : LocalizedActivity() {
                 ).apply { marginStart = dp(8) })
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rowHeight))
         }
+    }
+
+    private fun localizedPayloadTag(payloadType: Int?): String = when (payloadType) {
+        Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS -> getString(R.string.payload_tag_platoon)
+        Gfl2PayloadDecoder.TYPE_WEAPONS -> getString(R.string.payload_tag_weapons)
+        Gfl2PayloadDecoder.TYPE_ATTACHMENTS -> getString(R.string.payload_tag_attachments)
+        Gfl2PayloadDecoder.TYPE_COMMON_KEYS -> getString(R.string.payload_tag_common_keys)
+        Gfl2PayloadDecoder.TYPE_FORMATIONS -> getString(R.string.payload_tag_formations)
+        else -> PayloadCatalog.tag(payloadType)
     }
 
     private fun deleteSelectedHistory() {

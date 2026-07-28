@@ -87,6 +87,15 @@ data class DailyActivity(
     val inference: ActivityInference.Result,
 )
 
+enum class DailyEvidence {
+    NO_OBSERVATION,
+    ATTRIBUTED,
+    PARTIAL_DAY,
+    INCOMPLETE_BOUNDARY,
+    SPARSE_INFERRED,
+    MANUAL,
+}
+
 data class WeeklyNote(
     val id: Long,
     val periodStart: LocalDate,
@@ -94,4 +103,15 @@ data class WeeklyNote(
     val text: String,
     val eventId: Long?,
     val isAutomatic: Boolean,
+)
+
+data class WeeklyCellOverride(
+    val uid: Long,
+    val periodStart: LocalDate,
+    val gameDay: LocalDate,
+    val meritDelta: Long?,
+    val scoreDelta: Long?,
+    val attempts: Int?,
+    val attended: Boolean?,
+    val dailyPatrol: Boolean?,
 )

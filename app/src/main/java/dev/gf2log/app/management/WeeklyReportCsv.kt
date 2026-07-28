@@ -3,13 +3,13 @@ package dev.gf2log.app.management
 object WeeklyReportCsv {
     const val HEADER =
         "periodStart,periodEnd,gunsmokeWeek,gameDay,uid,name,meritDelta,scoreDelta," +
-            "attempts,attendance,dailyPatrol,precision"
+            "attempts,attendance,dailyPatrol,precision,dailyEvidence,weeklyMeritTotal,weeklyScoreTotal," +
+            "weeklyAttemptsTotal,weeklyLoginDays,weeklyPatrolDays"
 
     fun format(report: WeeklyReportBuilder.Report): String = buildString {
         appendLine(HEADER)
         report.members.forEach { member ->
             member.days.forEach { cell ->
-                val selected = cell.inference?.selected
                 appendLine(
                     listOf(
                         report.periodStart,
@@ -20,10 +20,16 @@ object WeeklyReportCsv {
                         member.name,
                         cell.meritDelta,
                         cell.scoreDelta,
-                        selected?.attempts,
-                        selected?.attended,
-                        selected?.dailyPatrol,
-                        cell.inference?.precision,
+                        cell.attempts,
+                        cell.attended,
+                        cell.dailyPatrol,
+                        cell.precision,
+                        cell.evidence,
+                        member.totalMerit,
+                        member.totalScore,
+                        member.totalAttempts,
+                        member.loginDays,
+                        member.patrolDays,
                     ).joinToString(",", transform = ::escape),
                 )
             }

@@ -95,6 +95,14 @@ class PlatoonRepository(context: Context) {
 
     fun deleteWeeklyNote(id: Long): Boolean = database.deleteWeeklyNote(id)
 
+    fun listWeeklyOverrides(periodStartEpochDay: Long): List<WeeklyCellOverride> =
+        database.listWeeklyOverrides(periodStartEpochDay)
+
+    fun replaceWeeklyOverrides(
+        periodStartEpochDay: Long,
+        overrides: List<WeeklyCellOverride>,
+    ) = database.replaceWeeklyOverrides(periodStartEpochDay, overrides)
+
     data class ImportResult(
         val alreadyComplete: Boolean,
         val imported: Int,
@@ -118,6 +126,7 @@ class PlatoonRepository(context: Context) {
         internal fun closeDatabaseForFileCopy() {
             synchronized(databaseLock) {
                 databaseInstance?.close()
+                databaseInstance = null
             }
         }
 

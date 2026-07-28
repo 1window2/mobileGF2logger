@@ -89,7 +89,10 @@ class PlatoonBackupManager(context: Context) {
         }
         SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
             db.rawQuery("PRAGMA user_version", null).use { cursor ->
-                require(cursor.moveToFirst() && cursor.getInt(0) == DATABASE_VERSION) {
+                require(
+                    cursor.moveToFirst() &&
+                        cursor.getInt(0) in MIN_DATABASE_VERSION..CURRENT_DATABASE_VERSION,
+                ) {
                     "Unsupported Platoon database schema"
                 }
             }
@@ -152,7 +155,8 @@ class PlatoonBackupManager(context: Context) {
         private const val DATABASE_ENTRY = "platoon.db"
         private const val MANIFEST_ENTRY = "manifest.properties"
         private const val FORMAT_VERSION = 1
-        private const val DATABASE_VERSION = 1
+        private const val MIN_DATABASE_VERSION = 1
+        private const val CURRENT_DATABASE_VERSION = 5
         private const val MAX_DATABASE_BYTES = 50L * 1024 * 1024
         private val SQLITE_HEADER = "SQLite format 3\u0000".toByteArray(Charsets.US_ASCII)
     }

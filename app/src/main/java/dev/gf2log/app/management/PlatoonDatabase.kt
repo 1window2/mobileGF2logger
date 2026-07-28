@@ -49,6 +49,7 @@ class PlatoonDatabase(context: Context) :
             CREATE TABLE members (
                 uid INTEGER PRIMARY KEY,
                 current_name TEXT NOT NULL,
+                custom_name TEXT,
                 current_level INTEGER NOT NULL,
                 is_active INTEGER NOT NULL,
                 first_seen_at INTEGER NOT NULL,
@@ -100,6 +101,7 @@ class PlatoonDatabase(context: Context) :
             )
             """.trimIndent(),
         )
+        createWeeklyOverridesTable(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -127,6 +129,37 @@ class PlatoonDatabase(context: Context) :
                     ContentValues().apply { put("period_start", periodStart) },
                     "id = ?",
                     arrayOf(id.toString()),
+                )
+            }
+        }
+        if (oldVersion < 3) createWeeklyOverridesTable(db)
+        if (oldVersion < 4) {
+            db.execSQL("ALTER TABLE members ADD COLUMN custom_name TEXT")
+        }
+        if (oldVersion < 5) {
+            val historicalNames = mutableListOf<Pair<Long, String>>()
+            db.query(
+                "weekly_notes",
+                arrayOf("event_id", "text"),
+                "is_automatic = 1 AND event_id IS NOT NULL",
+                null,
+                null,
+                null,
+                "id",
+            ).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val parts = cursor.getString(1).split(':', limit = 3)
+                    if (parts.size == 3 && parts[1].isNotBlank()) {
+                        historicalNames += cursor.getLong(0) to parts[1]
+                    }
+                }
+            }
+            historicalNames.forEach { (eventId, name) ->
+                db.update(
+                    "member_events",
+                    ContentValues().apply { put("note", name) },
+                    "id = ? AND note = ''",
+                    arrayOf(eventId.toString()),
                 )
             }
         }
@@ -287,7 +320,7 @@ class PlatoonDatabase(context: Context) :
             null,
             null,
             null,
-            "is_active DESC, current_name COLLATE NOCASE, uid",
+            "is_active DESC, COALESCE(custom_name, current_name) COLLATE NOCASE, uid",
         ).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
@@ -331,7 +364,7 @@ class PlatoonDatabase(context: Context) :
     fun updateMember(uid: Long, name: String, note: String): Boolean {
         require(name.isNotBlank())
         val values = ContentValues().apply {
-            put("current_name", name.trim())
+            put("custom_name", name.trim())
             put("note", note.trim())
         }
         return writableDatabase.update("members", values, "uid = ?", arrayOf(uid.toString())) == 1
@@ -417,6 +450,93 @@ class PlatoonDatabase(context: Context) :
             "id = ? AND is_automatic = 0",
             arrayOf(id.toString()),
         ) == 1
+
+    @Synchronized
+    fun listWeeklyOverrides(periodStartEpochDay: Long): List<WeeklyCellOverride> =
+        readableDatabase.query(
+            "weekly_overrides",
+            WEEKLY_OVERRIDE_COLUMNS,
+            "period_start = ?",
+            arrayOf(periodStartEpochDay.toString()),
+            null,
+            null,
+            "game_day, uid",
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        WeeklyCellOverride(
+                            uid = cursor.getLong(0),
+                            periodStart = java.time.LocalDate.ofEpochDay(cursor.getLong(1)),
+                            gameDay = java.time.LocalDate.ofEpochDay(cursor.getLong(2)),
+                            meritDelta = cursor.getNullableLong(3),
+                            scoreDelta = cursor.getNullableLong(4),
+                            attempts = cursor.getNullableInt(5),
+                            attended = cursor.getNullableBoolean(6),
+                            dailyPatrol = cursor.getNullableBoolean(7),
+                        ),
+                    )
+                }
+            }
+        }
+
+    @Synchronized
+    fun replaceWeeklyOverrides(
+        periodStartEpochDay: Long,
+        overrides: List<WeeklyCellOverride>,
+    ) {
+        require(overrides.all { it.periodStart.toEpochDay() == periodStartEpochDay })
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete(
+                "weekly_overrides",
+                "period_start = ?",
+                arrayOf(periodStartEpochDay.toString()),
+            )
+            overrides.forEach { override ->
+                db.insertOrThrow(
+                    "weekly_overrides",
+                    null,
+                    ContentValues().apply {
+                        put("uid", override.uid)
+                        put("period_start", periodStartEpochDay)
+                        put("game_day", override.gameDay.toEpochDay())
+                        putNullableLong("merit_delta", override.meritDelta)
+                        putNullableLong("score_delta", override.scoreDelta)
+                        putNullableInt("attempts", override.attempts)
+                        putNullableBoolean("attended", override.attended)
+                        putNullableBoolean("daily_patrol", override.dailyPatrol)
+                    },
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    private fun createWeeklyOverridesTable(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS weekly_overrides (
+                uid INTEGER NOT NULL,
+                period_start INTEGER NOT NULL,
+                game_day INTEGER NOT NULL,
+                merit_delta INTEGER,
+                score_delta INTEGER,
+                attempts INTEGER,
+                attended INTEGER,
+                daily_patrol INTEGER,
+                PRIMARY KEY(uid, game_day)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS weekly_overrides_period " +
+                "ON weekly_overrides(period_start, game_day)",
+        )
+    }
 
     private fun insertSnapshotMember(
         db: SQLiteDatabase,
@@ -523,7 +643,7 @@ class PlatoonDatabase(context: Context) :
             observedAt,
             precision,
             source,
-            "",
+            member.name,
         )
         db.insertOrThrow(
             "weekly_notes",
@@ -684,11 +804,11 @@ class PlatoonDatabase(context: Context) :
 
     companion object {
         private const val DATABASE_NAME = "platoon.db"
-        private const val DATABASE_VERSION = 2
+        private const val DATABASE_VERSION = 5
         private val SNAPSHOT_COLUMNS = arrayOf("id", "captured_at", "source_file", "game_version")
         private val MEMBER_COLUMNS = arrayOf(
             "uid",
-            "current_name",
+            "COALESCE(custom_name, current_name)",
             "current_level",
             "is_active",
             "first_seen_at",
@@ -733,6 +853,16 @@ class PlatoonDatabase(context: Context) :
             "event_id",
             "is_automatic",
         )
+        private val WEEKLY_OVERRIDE_COLUMNS = arrayOf(
+            "uid",
+            "period_start",
+            "game_day",
+            "merit_delta",
+            "score_delta",
+            "attempts",
+            "attended",
+            "daily_patrol",
+        )
     }
 }
 
@@ -740,8 +870,22 @@ private fun ContentValues.putNullableLong(key: String, value: Long?) {
     if (value == null) putNull(key) else put(key, value)
 }
 
+private fun ContentValues.putNullableInt(key: String, value: Int?) {
+    if (value == null) putNull(key) else put(key, value)
+}
+
+private fun ContentValues.putNullableBoolean(key: String, value: Boolean?) {
+    if (value == null) putNull(key) else put(key, if (value) 1 else 0)
+}
+
 private fun Cursor.getNullableLong(index: Int): Long? =
     if (isNull(index)) null else getLong(index)
+
+private fun Cursor.getNullableInt(index: Int): Int? =
+    if (isNull(index)) null else getInt(index)
+
+private fun Cursor.getNullableBoolean(index: Int): Boolean? =
+    if (isNull(index)) null else getInt(index) != 0
 
 private fun Cursor.getNullableString(index: Int): String? =
     if (isNull(index)) null else getString(index)

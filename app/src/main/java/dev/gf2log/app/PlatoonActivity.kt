@@ -98,15 +98,15 @@ class PlatoonActivity : LocalizedActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 filterSpinner = spinner(
                     listOf(
-                        getString(R.string.filter_all),
                         getString(R.string.filter_active),
-                        getString(R.string.filter_departed),
+                        getString(R.string.filter_all),
                     ),
                 )
                 sortSpinner = spinner(
                     listOf(
                         getString(R.string.sort_name),
                         getString(R.string.sort_merit),
+                        getString(R.string.sort_total_merit_management),
                         getString(R.string.sort_last_login),
                     ),
                 )
@@ -150,8 +150,7 @@ class PlatoonActivity : LocalizedActivity() {
         val query = searchInput.text.toString().trim()
         val filtered = statuses.filter { status ->
             val matchesFilter = when (filterSpinner.selectedItemPosition) {
-                1 -> status.isActive
-                2 -> !status.isActive
+                0 -> status.isActive
                 else -> true
             }
             val matchesQuery = query.isBlank() ||
@@ -161,7 +160,8 @@ class PlatoonActivity : LocalizedActivity() {
         }
         val sorted = when (sortSpinner.selectedItemPosition) {
             1 -> filtered.sortedByDescending { latestMembers[it.uid]?.weeklyMerit ?: -1 }
-            2 -> filtered.sortedByDescending { latestMembers[it.uid]?.lastLogin ?: 0 }
+            2 -> filtered.sortedByDescending { latestMembers[it.uid]?.totalMerit ?: -1 }
+            3 -> filtered.sortedByDescending { latestMembers[it.uid]?.lastLogin ?: 0 }
             else -> filtered.sortedWith(
                 compareByDescending<MemberStatus>(MemberStatus::isActive)
                     .thenBy(String.CASE_INSENSITIVE_ORDER, MemberStatus::name),

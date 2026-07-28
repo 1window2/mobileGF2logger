@@ -42,6 +42,14 @@
             android:exported="false" />
 
         <activity
+            android:name=".WeeklySettingsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".MemberOrderActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".SnapshotComparisonActivity"
             android:exported="false" />
 

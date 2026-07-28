@@ -37,7 +37,7 @@ class PlatoonMemberCsvTest {
             zoneId = ZoneId.of("Asia/Seoul"),
         )
 
-        assertTrue(csv.contains("\"Leader, One\",DEPARTED"))
+        assertTrue(csv.contains("\"Leader, One\",WITHDRAWN"))
         assertTrue(csv.contains("2026-01-01 09:00:00,2026-07-21 09:00:00"))
     }
 }

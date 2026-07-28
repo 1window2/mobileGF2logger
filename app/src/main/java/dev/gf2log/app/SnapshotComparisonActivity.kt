@@ -1,12 +1,17 @@
 package dev.gf2log.app
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.graphics.Typeface
 import android.os.Bundle
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import dev.gf2log.app.management.SnapshotComparison
+import dev.gf2log.app.management.SnapshotComparisonCsv
 import dev.gf2log.app.management.PlatoonRepository
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -34,6 +39,25 @@ class SnapshotComparisonActivity : LocalizedActivity() {
                             ),
                         ),
                     )
+                    addView(Button(context).apply {
+                        text = getString(R.string.copy_csv)
+                        textSize = 12f
+                        minHeight = 0
+                        setPadding(dp(12), dp(4), dp(12), dp(4))
+                        setOnClickListener {
+                            getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                                ClipData.newPlainText(
+                                    getString(R.string.snapshot_csv_clipboard_label),
+                                    SnapshotComparisonCsv.format(result),
+                                ),
+                            )
+                            Toast.makeText(
+                                this@SnapshotComparisonActivity,
+                                R.string.snapshot_csv_copied,
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    })
                     addSection(
                         getString(R.string.joined_members),
                         result.joined.map { "${it.name} (#${it.uid})" },

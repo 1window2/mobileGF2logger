@@ -18,9 +18,32 @@ mobileGF2logger is a lightweight, non-root app for Platoon masters who want to r
 - Keeps up to 50 selected packets in a separate saved collection until manually deleted.
 - Opens parsed results as a clean table, with access to the complete raw CSV text and clipboard copy.
 - Supports selecting and deleting recent or saved history entries.
-- Tracks active and departed members, repeat tenures, roster changes, and editable member notes in private on-device storage.
-- Builds weekly Platoon tables using the 05:00 game reset, Monday merit weeks, and the three-week Gunsmoke Frontline cycle.
-- Shows inferred Login, Daily Patrol, Gunsmoke attempts, scores, merit, and rankings, and exports weekly CSV files.
+- Tracks active and withdrawn members, repeat tenures, roster changes, and editable member notes in private on-device storage.
+- Builds Sunday-to-Saturday weekly tables around the 05:00 game reset and the
+  three-week Gunsmoke Frontline cycle.
+- Keeps Standard Week tables compact by showing only Merit, Login, and Daily
+  Patrol; Gunsmoke weeks add score and attempt cells.
+- Supports separate daily and weekly cut-off points for merit, Gunsmoke score
+  and attempts, weekly login days, and weekly Daily Patrol days.
+- Sorts members by join date, Weekly Merit, or Total Merit in either direction,
+  and preserves custom long-press drag ordering across later weeks.
+- Copies snapshot comparisons and weekly CSV data directly to the clipboard,
+  exports weekly CSV files, and opens any week through a calendar picker.
+- Distinguishes unobserved pre-join activity (`-`) from missed activity (`x`)
+  when roster membership changes.
+- Recalculates the weekly table from each newly captured roster, including a
+  confirmed newcomer's first observed merit.
+- Separates immutable packet-derived Join/Withdraw events from deletable manual
+  Notes.
+- Marks live same-day values as partial lower bounds. When captures are sparse,
+  it uses Total Merit to preserve a supported interval total and visibly marks
+  plausible `90`/`50`/`0` daily allocations as approximate rather than
+  presenting them as measured facts.
+- Keeps missing Gunsmoke days unknown instead of inventing daily score or
+  attempts, while using captured counters to preserve the strongest supported
+  Total-column value.
+- Provides a caution-gated manual editor for daily merit, Gunsmoke score and
+  attempts, Login, and Daily Patrol when captured data needs correction.
 - Supports English and Korean, using the Android device timezone by default.
 - Exports and imports explicit Platoon-management backups without storing raw traffic.
 - Uses a GF2-inspired orange, off-white, and black Platoon emblem as its launcher icon.

@@ -9,6 +9,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -59,10 +60,11 @@ class GuildMembersCsvWriterTest {
     }
 
     @Test
-    fun messageZeroBatchClosesWhenItsFlowEnds() {
+    fun flowCloseDiscardsMessageZeroContinuationWithoutProtocolCompletion() {
         val output = temporaryFolder.newFolder("flow-ended-batches")
         val clock = Clock.fixed(Instant.parse("2026-07-21T19:11:09Z"), ZoneOffset.UTC)
-        val writer = GuildMembersCsvWriter(output, clock)
+        val completed = mutableListOf<GuildMembersCsvWriter.CompletedBatch>()
+        val writer = GuildMembersCsvWriter(output, clock, completed::add)
 
         writer.accept(
             payload(messageId = 0, uid = 1u, name = "First", end = true),
@@ -72,21 +74,65 @@ class GuildMembersCsvWriterTest {
         writer.close()
 
         val files = output.listFiles().orEmpty().sortedBy { it.name }
-        assertEquals(2, files.size)
-        assertEquals(
-            listOf(
-                GuildMembersCsv.HEADER,
-                "1,First,60,3750,313832,10398,51661,1784639347,2026-07-21T19:11:09Z",
-            ),
-            files[0].readLines(Charsets.UTF_8),
-        )
+        assertEquals(1, files.size)
+        assertEquals(1, completed.size)
         assertEquals(
             listOf(
                 GuildMembersCsv.HEADER,
                 "2,Second,60,3750,313832,10398,51661,1784639347,2026-07-21T19:11:09Z",
             ),
-            files[1].readLines(Charsets.UTF_8),
+            files.single().readLines(Charsets.UTF_8),
         )
+    }
+
+    @Test
+    fun completionCallbackReceivesTheWholeDeduplicatedBatch() {
+        val output = temporaryFolder.newFolder("completed-batch")
+        val clock = Clock.fixed(Instant.parse("2026-07-21T19:11:09Z"), ZoneOffset.UTC)
+        val completed = mutableListOf<GuildMembersCsvWriter.CompletedBatch>()
+        val writer = GuildMembersCsvWriter(output, clock, completed::add)
+
+        writer.accept(payload(messageId = 0, uid = 1u, name = "Old", end = true))
+        writer.accept(payload(messageId = 44, uid = 1u, name = "Current", end = true))
+
+        assertEquals(1, completed.size)
+        assertEquals("2026-07-21T19:11:09Z", completed.single().logTime)
+        assertEquals("Current", completed.single().members.single().name)
+        assertTrue(completed.single().file.exists())
+    }
+
+    @Test
+    fun shutdownDiscardsAnUnterminatedContinuation() {
+        val output = temporaryFolder.newFolder("incomplete-batch")
+        val clock = Clock.fixed(Instant.parse("2026-07-21T19:11:09Z"), ZoneOffset.UTC)
+        val completed = mutableListOf<GuildMembersCsvWriter.CompletedBatch>()
+        val writer = GuildMembersCsvWriter(output, clock, completed::add)
+
+        writer.accept(payload(messageId = 0, uid = 1u, name = "Partial", end = false))
+        writer.close()
+
+        assertTrue(completed.isEmpty())
+        assertTrue(output.listFiles().orEmpty().isEmpty())
+    }
+
+    @Test
+    fun completedEmptyPayloadDeletesHeaderOnlyCsv() {
+        val output = temporaryFolder.newFolder("empty-completed-batch")
+        val clock = Clock.fixed(Instant.parse("2026-07-21T19:11:09Z"), ZoneOffset.UTC)
+        val completed = mutableListOf<GuildMembersCsvWriter.CompletedBatch>()
+        val writer = GuildMembersCsvWriter(output, clock, completed::add)
+
+        writer.accept(
+            ParsedPayload(
+                messageId = 42,
+                payloadType = Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
+                isEndOfMessage = true,
+                data = GuildMembersData(emptyList()),
+            ),
+        )
+
+        assertTrue(completed.isEmpty())
+        assertTrue(output.listFiles().orEmpty().isEmpty())
     }
 
     private fun payload(messageId: Int, uid: UInt, name: String, end: Boolean): ParsedPayload =

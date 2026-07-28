@@ -14,12 +14,16 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import dev.gf2log.app.R
 import dev.gf2log.app.history.CaptureHistoryStore
+import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.settings.PayloadHistoryPreferences
+import dev.gf2log.app.settings.CapturePreferences
 import dev.gf2log.protocol.Gfl2StreamParser
 import dev.gf2log.protocol.model.ParseEvent
 import java.io.File
+import java.time.Instant
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -30,13 +34,25 @@ class CaptureVpnService : VpnService() {
     private val parsers = ConcurrentHashMap<Long, Gfl2StreamParser>()
     private val decodedPayloadCount = AtomicLong()
     private val observedPayloadBytes = AtomicLong()
+    private val inspectedPayloadBytes = AtomicLong()
     private val reportedTrafficBucket = AtomicLong()
     private val parseWarningCount = AtomicLong()
     private val droppedParserTaskCount = AtomicLong()
+    private val unknownPayloadCounts = ConcurrentHashMap<Int, AtomicLong>()
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var guildMembersWriter: GuildMembersCsvWriter
     private lateinit var historyStore: CaptureHistoryStore
+    private lateinit var platoonRepository: PlatoonRepository
     private lateinit var payloadHistoryPreferences: PayloadHistoryPreferences
+    private lateinit var capturePreferences: CapturePreferences
+    private lateinit var diagnosticsStore: CaptureDiagnosticsStore
+    private var sessionStartedAt: Instant? = null
+    private var captureOnce = false
+    private val migrationExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "GF2LegacyImport")
+    }
+    @Volatile
+    private var captureStartPending = false
     private val parserExecutor = ThreadPoolExecutor(
         1,
         1,
@@ -49,20 +65,45 @@ class CaptureVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        platoonRepository = PlatoonRepository(this)
         guildMembersWriter = GuildMembersCsvWriter(
             File(filesDir, GuildMembersCsvWriter.OUTPUT_DIRECTORY),
-        )
+        ) { batch ->
+            val ingested = runCatching { platoonRepository.ingest(batch) }
+                .onSuccess { result ->
+                    if (!result.duplicate) {
+                        CaptureStatus.update(
+                            "Updated Platoon roster: +${result.joined + result.rejoined}, " +
+                                "-${result.left}",
+                        )
+                    }
+                }
+                .onFailure { CaptureStatus.update("Unable to update Platoon database") }
+                .isSuccess
+            if (ingested && captureOnce && CaptureStatus.isRunning) {
+                mainHandler.post {
+                    if (captureOnce && CaptureStatus.isRunning) {
+                        stopCapture("Captured one complete Platoon roster")
+                    }
+                }
+            }
+        }
         historyStore = CaptureHistoryStore(
             File(filesDir, CaptureHistoryStore.HISTORY_DIRECTORY),
         )
         payloadHistoryPreferences = PayloadHistoryPreferences(this)
+        capturePreferences = CapturePreferences(this)
+        diagnosticsStore = CaptureDiagnosticsStore(this)
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> stopCapture()
-            ACTION_START -> startCapture(intent.getStringExtra(EXTRA_TARGET_PACKAGE).orEmpty())
+            ACTION_START -> {
+                captureOnce = intent.getBooleanExtra(EXTRA_CAPTURE_ONCE, false)
+                startCapture(intent.getStringExtra(EXTRA_TARGET_PACKAGE).orEmpty())
+            }
         }
         return Service.START_NOT_STICKY
     }
@@ -73,9 +114,11 @@ class CaptureVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        captureStartPending = false
         releaseCaptureResources()
         if (CaptureStatus.isRunning) CaptureStatus.markStopped()
         mainHandler.removeCallbacksAndMessages(null)
+        migrationExecutor.shutdownNow()
         guildMembersWriter.close()
         super.onDestroy()
     }
@@ -84,6 +127,10 @@ class CaptureVpnService : VpnService() {
         if (tunnel != null) {
             CaptureStatus.markRunning("Capture is already running")
             updateNotification("Capturing selected game traffic")
+            return
+        }
+        if (captureStartPending) {
+            CaptureStatus.update("Preparing capture")
             return
         }
 
@@ -98,6 +145,25 @@ class CaptureVpnService : VpnService() {
             return
         }
 
+        captureStartPending = true
+        migrationExecutor.execute {
+            val migration = runCatching {
+                platoonRepository.importLegacyCsvFiles(
+                    File(filesDir, GuildMembersCsvWriter.OUTPUT_DIRECTORY),
+                )
+            }
+            mainHandler.post {
+                if (!captureStartPending) return@post
+                captureStartPending = false
+                migration.fold(
+                    onSuccess = { startTunnel(targetPackage) },
+                    onFailure = { failStart("Unable to import previous Platoon history") },
+                )
+            }
+        }
+    }
+
+    private fun startTunnel(targetPackage: String) {
         val descriptor = try {
             Builder()
                 .setSession("GF2logger")
@@ -123,9 +189,12 @@ class CaptureVpnService : VpnService() {
         tunnel = descriptor
         decodedPayloadCount.set(0)
         observedPayloadBytes.set(0)
+        inspectedPayloadBytes.set(0)
         reportedTrafficBucket.set(0)
         parseWarningCount.set(0)
         droppedParserTaskCount.set(0)
+        unknownPayloadCounts.clear()
+        sessionStartedAt = Instant.now()
 
         CaptureStatus.markRunning("Starting native capture")
         val started = try {
@@ -203,6 +272,9 @@ class CaptureVpnService : VpnService() {
         if (warnings.isNotEmpty()) parseWarningCount.addAndGet(warnings.size.toLong())
 
         val decoded = events.filterIsInstance<ParseEvent.Payload>()
+        events.filterIsInstance<ParseEvent.UnknownPayload>().forEach { event ->
+            unknownPayloadCounts.computeIfAbsent(event.payloadType) { AtomicLong() }.incrementAndGet()
+        }
         decoded.forEach { event ->
             if (payloadHistoryPreferences.isEnabled(event.value.payloadType)) {
                 runCatching { historyStore.save(event.value) }
@@ -223,6 +295,7 @@ class CaptureVpnService : VpnService() {
 
     private fun recordTraffic(observed: Long, inspected: Long) {
         observedPayloadBytes.set(observed)
+        inspectedPayloadBytes.set(inspected)
         val bucket = observed / TRAFFIC_REPORT_BYTES
         val previousBucket = reportedTrafficBucket.get()
         if (bucket > previousBucket && reportedTrafficBucket.compareAndSet(previousBucket, bucket)) {
@@ -248,15 +321,17 @@ class CaptureVpnService : VpnService() {
     }
 
     private fun failStart(message: String) {
+        captureStartPending = false
         releaseCaptureResources()
         CaptureStatus.markStopped(message)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
-    private fun stopCapture() {
+    private fun stopCapture(message: String = "") {
+        captureStartPending = false
         releaseCaptureResources()
-        CaptureStatus.markStopped()
+        if (message.isBlank()) CaptureStatus.markStopped() else CaptureStatus.markStopped(message)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -267,6 +342,27 @@ class CaptureVpnService : VpnService() {
         tunnel = null
         drainParserTasks()
         parsers.clear()
+        saveDiagnostics()
+    }
+
+    private fun saveDiagnostics() {
+        if (sessionStartedAt == null) return
+        diagnosticsStore.save(
+            CaptureDiagnosticsStore.Diagnostics(
+                startedAt = sessionStartedAt,
+                stoppedAt = Instant.now(),
+                forwardedBytes = observedPayloadBytes.get(),
+                inspectedBytes = inspectedPayloadBytes.get(),
+                decodedPayloads = decodedPayloadCount.get(),
+                warnings = parseWarningCount.get(),
+                droppedChunks = droppedParserTaskCount.get(),
+                unknownPayloads = unknownPayloadCounts.entries
+                    .sortedBy { it.key }
+                    .joinToString { "${it.key}:${it.value.get()}" },
+                finalStatus = CaptureStatus.read(),
+            ),
+        )
+        sessionStartedAt = null
     }
 
     private fun drainParserTasks() {
@@ -284,7 +380,7 @@ class CaptureVpnService : VpnService() {
     }
 
     private fun startInForeground(content: String) {
-        val notification = buildNotification(content)
+        val notification = buildNotification(notificationContent(content))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 NOTIFICATION_ID,
@@ -298,12 +394,22 @@ class CaptureVpnService : VpnService() {
 
     private fun updateNotification(content: String) {
         getSystemService(NotificationManager::class.java)
-            .notify(NOTIFICATION_ID, buildNotification(content))
+            .notify(
+                NOTIFICATION_ID,
+                buildNotification(notificationContent(content)),
+            )
     }
+
+    private fun notificationContent(content: String): String =
+        if (capturePreferences.detailedNotifications) {
+            content
+        } else {
+            getString(R.string.notification_capture_active)
+        }
 
     private fun buildNotification(content: String): Notification =
         Notification.Builder(this, NOTIFICATION_CHANNEL)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_launcher_monochrome)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(content)
             .setOngoing(true)
@@ -322,6 +428,7 @@ class CaptureVpnService : VpnService() {
         const val ACTION_START = "dev.gf2log.action.START"
         const val ACTION_STOP = "dev.gf2log.action.STOP"
         const val EXTRA_TARGET_PACKAGE = "target_package"
+        const val EXTRA_CAPTURE_ONCE = "capture_once"
         private const val NOTIFICATION_CHANNEL = "capture"
         private const val NOTIFICATION_ID = 1
         private const val VPN_ADDRESS = "10.77.0.1"

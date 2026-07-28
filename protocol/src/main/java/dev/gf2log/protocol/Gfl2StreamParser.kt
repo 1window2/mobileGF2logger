@@ -96,6 +96,12 @@ class Gfl2StreamParser(
                 }
             } else {
                 emitPending(events)
+                events += ParseEvent.UnknownPayload(
+                    messageId = messageId,
+                    payloadType = type,
+                    payloadBytes = payloadSize - PAYLOAD_HEADER_SIZE,
+                    isEndOfMessage = isEndOfMessage,
+                )
             }
 
             offset += payloadSize

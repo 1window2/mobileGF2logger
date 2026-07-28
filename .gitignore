@@ -1,14 +1,26 @@
 .gradle/
 .idea/
 **/build/
+**/.cxx/
 local.properties
 *.iml
 *.apk
 *.aab
+*.idsig
 *.pcap
 *.pcapng
 *.csv
 *.json
 *.log
+*.jks
+*.keystore
+keystore.properties
 .tmp-*/
 .tmp-*
+
+# Local device and UI verification artifacts (repository root only)
+/*.png
+/*.xml
+/*.db
+/*.db-*
+/*.err

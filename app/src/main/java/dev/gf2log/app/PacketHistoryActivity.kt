@@ -1,6 +1,5 @@
 package dev.gf2log.app
 
-import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.graphics.Color
@@ -22,7 +21,7 @@ import dev.gf2log.app.history.SavedHistoryStore
 import dev.gf2log.protocol.ParsedPacketTableParser
 import java.io.File
 
-class PacketHistoryActivity : Activity() {
+class PacketHistoryActivity : LocalizedActivity() {
     private lateinit var actionButton: Button
     private lateinit var contentContainer: LinearLayout
     private lateinit var rawContent: String
@@ -107,6 +106,7 @@ class PacketHistoryActivity : Activity() {
                 text = value
                 textSize = if (header) 14f else 13f
                 gravity = Gravity.CENTER_VERTICAL
+                setTextColor(Color.rgb(28, 32, 38))
                 if (header) setTypeface(typeface, Typeface.BOLD)
                 val horizontal = (10 * resources.displayMetrics.density).toInt()
                 val vertical = (8 * resources.displayMetrics.density).toInt()

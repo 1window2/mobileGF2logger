@@ -2,6 +2,7 @@ package dev.gf2log.app
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -26,10 +27,14 @@ import dev.gf2log.app.capture.CaptureVpnService
 import dev.gf2log.app.capture.GuildMembersCsvWriter
 import dev.gf2log.app.history.CaptureHistoryStore
 import dev.gf2log.app.history.SavedHistoryStore
+import dev.gf2log.app.management.PlatoonBackupManager
+import dev.gf2log.protocol.Gfl2PayloadDecoder
 import dev.gf2log.protocol.PayloadCatalog
 import java.io.File
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
-class MainActivity : Activity() {
+class MainActivity : LocalizedActivity() {
     private lateinit var packageNameInput: EditText
     private lateinit var statusText: TextView
     private lateinit var historyContainer: LinearLayout
@@ -46,6 +51,7 @@ class MainActivity : Activity() {
         }
     }
     private var pendingExport: File? = null
+    private var captureOnceRequested = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -97,6 +103,32 @@ class MainActivity : Activity() {
                     getString(R.string.status_export_failed)
                 }
             }
+            requestCode == REQUEST_BACKUP_EXPORT -> {
+                val destination = data?.data
+                if (resultCode != RESULT_OK || destination == null) return
+                val exported = runCatching {
+                    val output = TrustedExportDestination.openOutputStream(
+                        contentResolver,
+                        destination,
+                    ) ?: error("Document provider did not open an output stream")
+                    output.use { PlatoonBackupManager(this).export(it) }
+                }.isSuccess
+                statusText.text = getString(
+                    if (exported) R.string.status_backup_exported else R.string.status_backup_failed,
+                )
+            }
+            requestCode == REQUEST_BACKUP_IMPORT -> {
+                val source = data?.data
+                if (resultCode != RESULT_OK || source == null) return
+                val imported = runCatching {
+                    val input = TrustedImportSource.openInputStream(contentResolver, source)
+                        ?: error("Document provider did not open an input stream")
+                    input.use { PlatoonBackupManager(this).restore(it) }
+                }.isSuccess
+                statusText.text = getString(
+                    if (imported) R.string.status_backup_restored else R.string.status_backup_failed,
+                )
+            }
         }
     }
 
@@ -142,7 +174,11 @@ class MainActivity : Activity() {
 
             addView(Button(context).apply {
                 text = getString(R.string.prepare_capture)
-                setOnClickListener { requestVpnAndStart() }
+                setOnClickListener { requestVpnAndStart(captureOnce = false) }
+            }, matchWidth())
+            addView(Button(context).apply {
+                text = getString(R.string.capture_one_roster)
+                setOnClickListener { requestVpnAndStart(captureOnce = true) }
             }, matchWidth())
             addView(Button(context).apply {
                 text = getString(R.string.stop_capture)
@@ -155,6 +191,20 @@ class MainActivity : Activity() {
                 setPadding(0, spacing, 0, 0)
             }
             addView(statusText, matchWidth())
+            addView(Button(context).apply {
+                text = getString(R.string.open_platoon_management)
+                setOnClickListener {
+                    startActivity(Intent(this@MainActivity, PlatoonActivity::class.java))
+                }
+            }, matchWidth())
+            addView(Button(context).apply {
+                text = getString(R.string.export_platoon_backup)
+                setOnClickListener { exportPlatoonBackup() }
+            }, matchWidth())
+            addView(Button(context).apply {
+                text = getString(R.string.import_platoon_backup)
+                setOnClickListener { confirmImportPlatoonBackup() }
+            }, matchWidth())
 
             addView(TextView(context).apply {
                 text = getString(R.string.recent_packets, CaptureHistoryStore.MAX_ENTRIES)
@@ -198,8 +248,9 @@ class MainActivity : Activity() {
     }
 
     @Suppress("DEPRECATION")
-    private fun requestVpnAndStart() {
+    private fun requestVpnAndStart(captureOnce: Boolean) {
         val targetPackage = packageNameInput.text.toString().trim()
+        captureOnceRequested = captureOnce
         getPreferences(MODE_PRIVATE).edit().putString(KEY_TARGET_PACKAGE, targetPackage).apply()
         val permissionIntent = VpnService.prepare(this)
         if (permissionIntent == null) {
@@ -213,7 +264,9 @@ class MainActivity : Activity() {
         val intent = Intent(this, CaptureVpnService::class.java)
             .setAction(CaptureVpnService.ACTION_START)
             .putExtra(CaptureVpnService.EXTRA_TARGET_PACKAGE, packageNameInput.text.toString().trim())
+            .putExtra(CaptureVpnService.EXTRA_CAPTURE_ONCE, captureOnceRequested)
         startForegroundService(intent)
+        captureOnceRequested = false
         statusText.text = getString(R.string.status_preparing)
     }
 
@@ -231,6 +284,42 @@ class MainActivity : Activity() {
         ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun exportPlatoonBackup() {
+        if (CaptureStatus.isRunning) {
+            statusText.text = getString(R.string.stop_capture_before_backup)
+            return
+        }
+        val title = "GF2logger-platoon-${BACKUP_TIME.format(LocalDateTime.now())}." +
+            PlatoonBackupManager.FILE_EXTENSION
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("application/zip")
+            .putExtra(Intent.EXTRA_TITLE, title)
+        startActivityForResult(intent, REQUEST_BACKUP_EXPORT)
+    }
+
+    private fun confirmImportPlatoonBackup() {
+        if (CaptureStatus.isRunning) {
+            statusText.text = getString(R.string.stop_capture_before_backup)
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.import_platoon_backup)
+            .setMessage(R.string.import_backup_warning)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.import_platoon_backup) { _, _ -> importPlatoonBackup() }
+            .show()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun importPlatoonBackup() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("application/zip")
+        startActivityForResult(intent, REQUEST_BACKUP_IMPORT)
     }
 
     @Suppress("DEPRECATION")
@@ -314,7 +403,8 @@ class MainActivity : Activity() {
                     }
                 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
                 addView(TextView(context).apply {
-                    text = PayloadCatalog.tag(entry.payloadType)
+                    val localizedTag = localizedPayloadTag(entry.payloadType)
+                    text = localizedTag
                     textSize = 12f
                     setTextColor(Color.WHITE)
                     gravity = Gravity.CENTER
@@ -326,7 +416,7 @@ class MainActivity : Activity() {
                     }
                     contentDescription = getString(
                         R.string.payload_tag_description,
-                        PayloadCatalog.tag(entry.payloadType),
+                        localizedTag,
                         entry.payloadType?.toString() ?: getString(R.string.unknown_payload_type),
                     )
                 }, LinearLayout.LayoutParams(
@@ -335,6 +425,15 @@ class MainActivity : Activity() {
                 ).apply { marginStart = dp(8) })
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rowHeight))
         }
+    }
+
+    private fun localizedPayloadTag(payloadType: Int?): String = when (payloadType) {
+        Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS -> getString(R.string.payload_tag_platoon)
+        Gfl2PayloadDecoder.TYPE_WEAPONS -> getString(R.string.payload_tag_weapons)
+        Gfl2PayloadDecoder.TYPE_ATTACHMENTS -> getString(R.string.payload_tag_attachments)
+        Gfl2PayloadDecoder.TYPE_COMMON_KEYS -> getString(R.string.payload_tag_common_keys)
+        Gfl2PayloadDecoder.TYPE_FORMATIONS -> getString(R.string.payload_tag_formations)
+        else -> PayloadCatalog.tag(payloadType)
     }
 
     private fun deleteSelectedHistory() {
@@ -411,8 +510,11 @@ class MainActivity : Activity() {
         const val REQUEST_VPN = 100
         const val REQUEST_NOTIFICATIONS = 101
         const val REQUEST_EXPORT = 102
+        const val REQUEST_BACKUP_EXPORT = 103
+        const val REQUEST_BACKUP_IMPORT = 104
         const val KEY_TARGET_PACKAGE = "target_package"
         const val DEFAULT_TARGET_PACKAGE = "com.haoplay.game.and.exilium"
         const val STATUS_REFRESH_MILLIS = 1_000L
+        val BACKUP_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
     }
 }

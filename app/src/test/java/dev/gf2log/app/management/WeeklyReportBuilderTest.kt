@@ -357,7 +357,7 @@ class WeeklyReportBuilderTest {
     }
 
     @Test
-    fun exactPatrolActivityCompletesStandardDayWithoutAClosingSnapshot() {
+    fun patrolRewardEvidenceCompletesStandardDayWithoutAClosingSnapshot() {
         val report = WeeklyReportBuilder.build(
             referenceDay = LocalDate.of(2026, 7, 28),
             zoneId = zone,

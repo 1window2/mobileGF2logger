@@ -440,8 +440,12 @@ class PlatoonDatabase(context: Context) :
                     observation.members.forEach {
                         ensureUpdateMember(db, it, observation.occurredAt)
                     }
-                    when (observation.kind) {
-                        UPDATE_KIND_JOIN -> observation.members.forEach { member ->
+                    val affectedMembers = PlatoonUpdateSemantics.affectedMembers(
+                        kind = observation.kind,
+                        members = observation.members,
+                    )
+                    when (PlatoonUpdateSemantics.effect(observation.kind)) {
+                        PlatoonUpdateEffect.JOIN -> affectedMembers.forEach { member ->
                             if (applyExactUpdateBoundary(
                                     db = db,
                                     member = member,
@@ -454,7 +458,7 @@ class PlatoonDatabase(context: Context) :
                                 membershipEvents += 1
                             }
                         }
-                        UPDATE_KIND_WITHDRAW -> observation.members.lastOrNull()?.let { member ->
+                        PlatoonUpdateEffect.WITHDRAW -> affectedMembers.forEach { member ->
                             if (applyExactUpdateBoundary(
                                     db = db,
                                     member = member,
@@ -467,7 +471,7 @@ class PlatoonDatabase(context: Context) :
                                 membershipEvents += 1
                             }
                         }
-                        UPDATE_KIND_REMOVED -> observation.members.lastOrNull()?.let { member ->
+                        PlatoonUpdateEffect.REMOVED -> affectedMembers.forEach { member ->
                             if (applyExactUpdateBoundary(
                                     db = db,
                                     member = member,
@@ -480,13 +484,13 @@ class PlatoonDatabase(context: Context) :
                                 membershipEvents += 1
                             }
                         }
-                        UPDATE_KIND_DAILY_PATROL -> observation.members.forEach { member ->
+                        PlatoonUpdateEffect.DAILY_PATROL -> affectedMembers.forEach { member ->
                             val inserted = db.insertWithOnConflict(
                                 "platoon_activity",
                                 null,
                                 ContentValues().apply {
                                     put("occurred_at", observation.occurredAt.toEpochMilli())
-                                    put("action_id", DAILY_PATROL_ACTION_ID)
+                                    put("action_id", DAILY_PATROL_REWARD_ACTION_ID)
                                     put("kind", observation.kind)
                                     put("member_name", member.name)
                                     put("captured_at", capturedAt.toEpochMilli())
@@ -497,6 +501,7 @@ class PlatoonDatabase(context: Context) :
                             )
                             if (inserted != -1L) patrolFacts += 1
                         }
+                        PlatoonUpdateEffect.IGNORE -> Unit
                     }
                 }
             db.setTransactionSuccessful()
@@ -1056,7 +1061,7 @@ class PlatoonDatabase(context: Context) :
             arrayOf("resolved_uid", "occurred_at"),
             "action_id = ? AND resolved_uid IS NOT NULL AND occurred_at >= ? AND occurred_at < ?",
             arrayOf(
-                DAILY_PATROL_ACTION_ID.toString(),
+                DAILY_PATROL_REWARD_ACTION_ID.toString(),
                 from.toEpochMilli().toString(),
                 until.toEpochMilli().toString(),
             ),
@@ -1744,8 +1749,8 @@ class PlatoonDatabase(context: Context) :
             memberName,
             from.toEpochMilli().toString(),
             until.toEpochMilli().toString(),
-            DAILY_PATROL_ACTION_ID.toString(),
-            DAILY_PATROL_COMPANION_ACTION_ID.toString(),
+            DAILY_PATROL_REWARD_ACTION_ID.toString(),
+            DAILY_PATROL_RELATED_ACTION_ID.toString(),
         ),
     ).use { cursor ->
         buildList {
@@ -1766,8 +1771,8 @@ class PlatoonDatabase(context: Context) :
             ORDER BY occurred_at, id
             """.trimIndent(),
             arrayOf(
-                DAILY_PATROL_ACTION_ID.toString(),
-                DAILY_PATROL_COMPANION_ACTION_ID.toString(),
+                DAILY_PATROL_REWARD_ACTION_ID.toString(),
+                DAILY_PATROL_RELATED_ACTION_ID.toString(),
             ),
         ).use { cursor ->
             buildList {
@@ -2633,16 +2638,17 @@ class PlatoonDatabase(context: Context) :
     )
 
     companion object {
-        const val DAILY_PATROL_ACTION_ID = 802001L
-        private const val DAILY_PATROL_COMPANION_ACTION_ID = 801005L
+        /**
+         * A sparse positive signal: the member triggered a Daily Patrol supply
+         * reward, which proves completion for that member and day. Its absence
+         * must never be interpreted as a missed Daily Patrol.
+         */
+        const val DAILY_PATROL_REWARD_ACTION_ID = 802001L
+        private const val DAILY_PATROL_RELATED_ACTION_ID = 801005L
         private const val NAME_RESOLUTION_WINDOW_MILLIS = 30L * 24L * 60L * 60L * 1000L
         private const val MEMBERSHIP_CORRELATION_WINDOW_MILLIS = 12L * 60L * 60L * 1000L
         private const val EXACT_UPDATE_CORRELATION_WINDOW_MILLIS =
             48L * 60L * 60L * 1000L
-        private const val UPDATE_KIND_JOIN = 3L
-        private const val UPDATE_KIND_WITHDRAW = 4L
-        private const val UPDATE_KIND_REMOVED = 5L
-        private const val UPDATE_KIND_DAILY_PATROL = 8L
         private val SNAPSHOT_EVENT_SOURCES = setOf(
             EvidenceSource.SNAPSHOT,
             EvidenceSource.LEGACY_IMPORT,

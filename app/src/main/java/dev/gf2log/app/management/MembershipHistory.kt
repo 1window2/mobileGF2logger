@@ -30,6 +30,12 @@ fun isValidMembershipRange(
 fun EvidenceSource.isImmutableMembershipBoundary(): Boolean =
     this == EvidenceSource.GAME_UPDATES
 
+internal fun editableMembershipBoundaryChanged(
+    original: MembershipBoundaryValue?,
+    requested: MembershipBoundaryValue?,
+    source: EvidenceSource?,
+): Boolean = source?.isImmutableMembershipBoundary() != true && original != requested
+
 internal fun migrationCalendarDate(epochMillis: Long, zoneId: ZoneId): LocalDate =
     Instant.ofEpochMilli(epochMillis).atZone(zoneId).toLocalDate()
 
@@ -46,6 +52,11 @@ internal object MembershipChronology {
     ): Boolean = oppositeBoundaryTimes.any { oppositeAt ->
         oppositeAt.isAfter(boundaryAt) && !oppositeAt.isAfter(observedAt)
     }
+
+    fun shouldRestoreRosterActiveTenure(
+        memberIsActive: Boolean,
+        withdrawalPredatesRoster: Boolean,
+    ): Boolean = memberIsActive && withdrawalPredatesRoster
 }
 
 /**

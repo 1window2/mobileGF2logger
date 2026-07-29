@@ -758,6 +758,20 @@ class PlatoonDatabase(context: Context) :
             observedAt = observedAt,
             activityIds = emptyList(),
         )
+        if (boundary == MembershipBoundary.WITHDRAW &&
+            MembershipChronology.shouldRestoreRosterActiveTenure(
+                memberIsActive = isActiveMember(db, member.uid),
+                withdrawalPredatesRoster = hasRosterPresenceAfter(db, member.uid, occurredAt),
+            )
+        ) {
+            /*
+             * The historical boundary and a later authoritative roster are
+             * both true. Close the compatible historical tenure above, then
+             * preserve exactly one unknown current tenure for the later roster.
+             * A subsequent exact rejoin in the replay will refine this tenure.
+             */
+            ensureRosterActiveTenure(db, member.uid, EvidenceSource.SNAPSHOT)
+        }
         return true
     }
 
@@ -846,9 +860,6 @@ class PlatoonDatabase(context: Context) :
         occurredAt: Instant,
     ): Long {
         val occurredAtMillis = occurredAt.toEpochMilli()
-        val preserveLaterRosterTenure =
-            boundary == MembershipBoundary.WITHDRAW &&
-                hasRosterPresenceAfter(db, uid, occurredAt)
         val nearby = when (boundary) {
             MembershipBoundary.JOIN -> db.rawQuery(
                 """
@@ -886,7 +897,6 @@ class PlatoonDatabase(context: Context) :
                 FROM tenures
                 WHERE uid = ?
                   AND (joined_at IS NULL OR joined_at <= ?)
-                  AND (? = 0 OR left_at IS NOT NULL)
                   AND (
                     left_at IS NULL
                     OR (
@@ -896,6 +906,8 @@ class PlatoonDatabase(context: Context) :
                   )
                 ORDER BY
                   CASE WHEN left_at IS NULL THEN 0 ELSE 1 END,
+                  CASE WHEN joined_at IS NULL THEN 1 ELSE 0 END,
+                  joined_at DESC,
                   ABS(COALESCE(left_at, ?) - ?),
                   id DESC
                 LIMIT 1
@@ -903,7 +915,6 @@ class PlatoonDatabase(context: Context) :
                 arrayOf(
                     uid.toString(),
                     occurredAtMillis.toString(),
-                    if (preserveLaterRosterTenure) "1" else "0",
                     EvidencePrecision.EXACT.name,
                     occurredAtMillis.toString(),
                     EXACT_UPDATE_CORRELATION_WINDOW_MILLIS.toString(),
@@ -925,6 +936,12 @@ class PlatoonDatabase(context: Context) :
             source = EvidenceSource.GAME_UPDATES,
         )
     }
+
+    private fun isActiveMember(db: SQLiteDatabase, uid: Long): Boolean =
+        db.rawQuery(
+            "SELECT is_active FROM members WHERE uid = ? LIMIT 1",
+            arrayOf(uid.toString()),
+        ).use { cursor -> cursor.moveToFirst() && cursor.getInt(0) != 0 }
 
     private fun hasRosterPresenceAfter(
         db: SQLiteDatabase,
@@ -1294,15 +1311,35 @@ class PlatoonDatabase(context: Context) :
                 left
             }
             require(isValidMembershipRange(effectiveJoined, effectiveLeft))
+            val joinedChanged = editableMembershipBoundaryChanged(
+                original = tenure.joined,
+                requested = joined,
+                source = tenure.joinedSource,
+            )
+            val leftChanged = editableMembershipBoundaryChanged(
+                original = tenure.left,
+                requested = left,
+                source = tenure.leftSource,
+            )
+            val resultingJoinedSource = if (joinedChanged) {
+                EvidenceSource.MANUAL
+            } else {
+                tenure.joinedSource
+            }
+            val resultingLeftSource = if (leftChanged) {
+                left?.let { EvidenceSource.MANUAL }
+            } else {
+                tenure.leftSource
+            }
             val updated = db.update(
                 "tenures",
                 ContentValues().apply {
-                    if (!tenure.joinedSource.isImmutableMembershipBoundary()) {
+                    if (joinedChanged) {
                         putMembershipBoundary("joined", joined)
                         put("joined_precision", EvidencePrecision.MANUAL.name)
                         put("joined_source", EvidenceSource.MANUAL.name)
                     }
-                    if (tenure.leftSource?.isImmutableMembershipBoundary() != true) {
+                    if (leftChanged) {
                         if (left == null) {
                             clearMembershipBoundary("left")
                             putNull("left_precision")
@@ -1318,18 +1355,18 @@ class PlatoonDatabase(context: Context) :
                 "id = ?",
                 arrayOf(tenureId.toString()),
             ) == 1
-            if (updated) {
+            if (updated && (joinedChanged || leftChanged)) {
                 replaceManualTenureEvents(
                     db,
                     tenureId,
                     tenure.uid,
                     memberName(db, tenure.uid).orEmpty(),
-                    if (tenure.joinedSource.isImmutableMembershipBoundary()) {
-                        null
-                    } else {
-                        joined
+                    effectiveJoined.takeIf {
+                        resultingJoinedSource == EvidenceSource.MANUAL
                     },
-                    if (tenure.leftSource?.isImmutableMembershipBoundary() == true) null else left,
+                    effectiveLeft.takeIf {
+                        resultingLeftSource == EvidenceSource.MANUAL
+                    },
                 )
             }
             db.setTransactionSuccessful()

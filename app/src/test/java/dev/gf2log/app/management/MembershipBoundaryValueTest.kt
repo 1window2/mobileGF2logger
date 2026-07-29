@@ -10,6 +10,48 @@ import org.junit.Test
 
 class MembershipBoundaryValueTest {
     @Test
+    fun `note-only save does not change editable boundary evidence`() {
+        val original = MembershipBoundaryValue(
+            date = LocalDate.of(2026, 7, 29),
+            instant = Instant.parse("2026-07-29T10:14:45.123Z"),
+            timeKnown = true,
+        )
+
+        assertFalse(
+            editableMembershipBoundaryChanged(
+                original = original,
+                requested = original,
+                source = EvidenceSource.SNAPSHOT,
+            ),
+        )
+    }
+
+    @Test
+    fun `changed editable boundary is promoted to manual evidence`() {
+        val original = MembershipBoundaryValue(
+            date = LocalDate.of(2026, 7, 29),
+            instant = Instant.parse("2026-07-29T10:14:45Z"),
+            timeKnown = true,
+        )
+        val changed = original.copy(instant = Instant.parse("2026-07-29T10:15:00Z"))
+
+        assertTrue(
+            editableMembershipBoundaryChanged(
+                original = original,
+                requested = changed,
+                source = EvidenceSource.SNAPSHOT,
+            ),
+        )
+        assertFalse(
+            editableMembershipBoundaryChanged(
+                original = original,
+                requested = changed,
+                source = EvidenceSource.GAME_UPDATES,
+            ),
+        )
+    }
+
+    @Test
     fun allowsSameDateWhenEitherManualTimeIsUnknown() {
         val joined = boundary("2026-07-29", "2026-07-29T12:00:00Z", timeKnown = true)
         val withdrew = boundary("2026-07-29", "2026-07-29T00:00:00Z", timeKnown = false)
@@ -79,6 +121,28 @@ class MembershipBoundaryValueTest {
                 boundaryAt = withdrawal,
                 observedAt = roster,
                 oppositeBoundaryTimes = listOf(Instant.parse("2026-07-29T03:00:00Z")),
+            ),
+        )
+    }
+
+    @Test
+    fun historicalWithdrawalRestoresOnlyAnAuthoritativeActiveRosterTenure() {
+        assertTrue(
+            MembershipChronology.shouldRestoreRosterActiveTenure(
+                memberIsActive = true,
+                withdrawalPredatesRoster = true,
+            ),
+        )
+        assertFalse(
+            MembershipChronology.shouldRestoreRosterActiveTenure(
+                memberIsActive = false,
+                withdrawalPredatesRoster = true,
+            ),
+        )
+        assertFalse(
+            MembershipChronology.shouldRestoreRosterActiveTenure(
+                memberIsActive = true,
+                withdrawalPredatesRoster = false,
             ),
         )
     }

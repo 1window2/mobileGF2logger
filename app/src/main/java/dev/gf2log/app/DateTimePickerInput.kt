@@ -35,35 +35,24 @@ internal class DateTimePickerInput(
     editable: Boolean = true,
 ) : LinearLayout(context) {
     private val zone: ZoneId = ZoneId.systemDefault()
-    private var selectedDate: LocalDate? =
-        initialDate ?: initialValue?.atZone(zone)?.toLocalDate()
-    private var selectedTime: LocalTime? =
-        initialValue
-            ?.takeIf { initialTimeKnown }
-            ?.atZone(zone)
-            ?.toLocalTime()
-            ?.withSecond(0)
-            ?.withNano(0)
+    private val selection = MembershipBoundaryDraft(
+        initialValue = initialValue,
+        initialDate = initialDate,
+        initialTimeKnown = initialTimeKnown,
+        zone = zone,
+    )
 
     val date: LocalDate?
-        get() = selectedDate
+        get() = selection.date
 
     val boundary: MembershipBoundaryValue?
-        get() = selectedDate?.let { date ->
-            MembershipBoundaryValue(
-                date = date,
-                instant = date.atTime(selectedTime ?: LocalTime.MIDNIGHT)
-                    .atZone(zone)
-                    .toInstant(),
-                timeKnown = selectedTime != null,
-            )
-        }
+        get() = selection.boundary
 
     private val dateInput = pickerField(context.getString(R.string.date_unset)) {
         showDatePicker()
     }
     private val timeInput = pickerField(context.getString(R.string.time_optional)) {
-        if (selectedDate == null) {
+        if (selection.date == null) {
             Toast.makeText(context, R.string.select_date_first, Toast.LENGTH_SHORT).show()
         } else {
             showTimePicker()
@@ -72,15 +61,14 @@ internal class DateTimePickerInput(
     private val clearDateButton = Button(context).apply {
         text = context.getString(R.string.clear_date)
         setOnClickListener {
-            selectedDate = null
-            selectedTime = null
+            selection.clearDate()
             renderValue()
         }
     }
     private val clearTimeButton = Button(context).apply {
         text = context.getString(R.string.clear_time)
         setOnClickListener {
-            selectedTime = null
+            selection.clearTime()
             renderValue()
         }
     }
@@ -129,11 +117,11 @@ internal class DateTimePickerInput(
         }
 
     private fun showDatePicker() {
-        val seed = selectedDate ?: LocalDate.now(zone)
+        val seed = selection.date ?: LocalDate.now(zone)
         DatePickerDialog(
             context,
             { _, year, month, day ->
-                selectedDate = LocalDate.of(year, month + 1, day)
+                selection.selectDate(LocalDate.of(year, month + 1, day))
                 renderValue()
             },
             seed.year,
@@ -143,11 +131,11 @@ internal class DateTimePickerInput(
     }
 
     private fun showTimePicker() {
-        val seed = selectedTime ?: LocalTime.now(zone).withSecond(0).withNano(0)
+        val seed = selection.time ?: LocalTime.now(zone).withSecond(0).withNano(0)
         TimePickerDialog(
             context,
             { _, hour, minute ->
-                selectedTime = LocalTime.of(hour, minute)
+                selection.selectTime(LocalTime.of(hour, minute))
                 renderValue()
             },
             seed.hour,
@@ -165,10 +153,10 @@ internal class DateTimePickerInput(
     }
 
     private fun renderValue() {
-        dateInput.setText(selectedDate?.format(DATE).orEmpty())
-        timeInput.setText(selectedTime?.format(TIME).orEmpty())
-        timeInput.isEnabled = dateInput.isEnabled && selectedDate != null
-        clearTimeButton.isEnabled = selectedDate != null && selectedTime != null
+        dateInput.setText(selection.date?.format(DATE).orEmpty())
+        timeInput.setText(selection.time?.format(TIME).orEmpty())
+        timeInput.isEnabled = dateInput.isEnabled && selection.date != null
+        clearTimeButton.isEnabled = selection.date != null && selection.time != null
     }
 
     private fun dp(value: Int): Int =

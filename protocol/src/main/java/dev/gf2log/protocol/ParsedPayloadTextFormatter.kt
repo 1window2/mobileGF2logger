@@ -6,6 +6,7 @@ import dev.gf2log.protocol.model.FormationsData
 import dev.gf2log.protocol.model.GuildMembersData
 import dev.gf2log.protocol.model.ParsedPayload
 import dev.gf2log.protocol.model.PlatoonActivityData
+import dev.gf2log.protocol.model.PlatoonUpdatesData
 import dev.gf2log.protocol.model.WeaponsData
 
 object ParsedPayloadTextFormatter {
@@ -30,6 +31,17 @@ object ParsedPayloadTextFormatter {
                         "entry,,${it.kind},${it.occurredAt},${it.actionId},," +
                             csvEscape(it.memberName),
                     )
+                }
+            }
+            is PlatoonUpdatesData -> {
+                appendLine("kind,occurredAt,memberIndex,role,uid,memberName")
+                data.entries.forEach { entry ->
+                    entry.members.forEachIndexed { index, member ->
+                        appendLine(
+                            "${entry.kind},${entry.occurredAt},$index,${member.role}," +
+                                "${member.uid},${csvEscape(member.name)}",
+                        )
+                    }
                 }
             }
             is WeaponsData -> {

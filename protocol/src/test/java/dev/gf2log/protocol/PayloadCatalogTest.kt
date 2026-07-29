@@ -14,16 +14,18 @@ class PayloadCatalogTest {
         assertEquals("KEYS", PayloadCatalog.tag(11138))
         assertEquals("PLATOON", PayloadCatalog.tag(21917))
         assertEquals("ACTIVITY", PayloadCatalog.tag(21935))
+        assertEquals("UPDATES", PayloadCatalog.tag(21960))
         assertEquals("FORMATIONS", PayloadCatalog.tag(23201))
     }
 
     @Test
-    fun `Platoon members and activity are required`() {
+    fun `Platoon members activity and updates are required`() {
         val required = PayloadCatalog.categories.filter(PayloadCategory::isRequired)
         assertEquals(
             setOf(
                 Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
                 Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY,
+                Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES,
             ),
             required.map(PayloadCategory::payloadType).toSet(),
         )

@@ -3,6 +3,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdatomic.h>
@@ -26,6 +27,8 @@
 #define VPN_MTU 1500
 #define SELECT_TIMEOUT_USEC 250000
 #define PURGE_INTERVAL_SECONDS 1
+#define TUN_WRITE_TIMEOUT_MILLIS 100
+#define TUN_WRITE_POLL_SLICE_MILLIS 25
 
 typedef struct flow_state {
     int64_t id;
@@ -142,6 +145,79 @@ static void notify_payload(
     (*context->env)->DeleteLocalRef(context->env, bytes);
 }
 
+static int64_t monotonic_millis(void) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+        return -1;
+    }
+    return ((int64_t) now.tv_sec * 1000) + (now.tv_nsec / 1000000);
+}
+
+static int write_tun_packet(capture_context_t *context, const void *buffer, size_t length) {
+    const int64_t started_at = monotonic_millis();
+    if (started_at < 0) {
+        LOGE("Cannot read monotonic clock before TUN write: errno=%d", errno);
+        return -1;
+    }
+    const int64_t deadline = started_at + TUN_WRITE_TIMEOUT_MILLIS;
+
+    while (atomic_load(&context->running)) {
+        ssize_t written = write(context->tun_fd, buffer, length);
+        if (written == (ssize_t) length) {
+            return 0;
+        }
+        if (written >= 0) {
+            LOGE("Partial TUN packet write: expected=%zu actual=%zd", length, written);
+            return -1;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        if (errno == EIO || errno == EBADF) {
+            atomic_store(&context->running, false);
+            return -1;
+        }
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            LOGE("TUN write failed: expected=%zu errno=%d", length, errno);
+            return -1;
+        }
+
+        const int64_t now = monotonic_millis();
+        if (now < 0 || now >= deadline) {
+            LOGW("TUN output remained blocked for %d ms", TUN_WRITE_TIMEOUT_MILLIS);
+            return -1;
+        }
+        const int64_t remaining = deadline - now;
+        const int timeout = (int) (
+                remaining < TUN_WRITE_POLL_SLICE_MILLIS
+                        ? remaining
+                        : TUN_WRITE_POLL_SLICE_MILLIS);
+        struct pollfd descriptor = {
+                .fd = context->tun_fd,
+                .events = POLLOUT,
+                .revents = 0,
+        };
+        int poll_result;
+        do {
+            poll_result = poll(&descriptor, 1, timeout);
+        } while (poll_result < 0 && errno == EINTR && atomic_load(&context->running));
+
+        if (!atomic_load(&context->running)) {
+            return 0;
+        }
+        if (poll_result < 0) {
+            LOGE("TUN writable poll failed: errno=%d", errno);
+            return -1;
+        }
+        if (poll_result > 0 && (descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+            LOGE("TUN writable poll reported terminal events: revents=%d", descriptor.revents);
+            return -1;
+        }
+        // A timeout or POLLOUT readiness both retry the nonblocking write. Readiness can race.
+    }
+    return 0;
+}
+
 static int send_client_callback(
         zdtun_t *tunnel,
         zdtun_pkt_t *packet,
@@ -154,21 +230,7 @@ static int send_client_callback(
     context->received_bytes += packet->l7_len;
     notify_payload(context, connection, false, packet->l7, packet->l7_len);
 
-    ssize_t written;
-    do {
-        written = write(context->tun_fd, packet->buf, packet->len);
-    } while (written < 0 && errno == EINTR);
-
-    if (written != (ssize_t) packet->len) {
-        if (written < 0 && (errno == EIO || errno == EBADF)) {
-            atomic_store(&context->running, false);
-        } else {
-            LOGE("TUN write failed: expected=%u actual=%zd errno=%d", packet->len, written, errno);
-        }
-        return -1;
-    }
-
-    return 0;
+    return write_tun_packet(context, packet->buf, packet->len);
 }
 
 static void protect_socket_callback(zdtun_t *tunnel, socket_t socket_fd) {
@@ -301,7 +363,7 @@ static void *capture_thread_main(void *argument) {
 
     int descriptor_flags = fcntl(context->tun_fd, F_GETFL, 0);
     if (descriptor_flags >= 0) {
-        fcntl(context->tun_fd, F_SETFL, descriptor_flags & ~O_NONBLOCK);
+        fcntl(context->tun_fd, F_SETFL, descriptor_flags | O_NONBLOCK);
     }
 
     char *packet_buffer = malloc(PACKET_BUFFER_SIZE);

@@ -62,6 +62,22 @@ data class PlatoonActivityEntry(
     val memberName: String,
 )
 
+data class PlatoonUpdatesData(
+    val entries: List<PlatoonUpdateEntry>,
+) : GameData
+
+data class PlatoonUpdateEntry(
+    val kind: UInt,
+    val members: List<PlatoonUpdateMember>,
+    val occurredAt: UInt,
+)
+
+data class PlatoonUpdateMember(
+    val role: UInt,
+    val uid: UInt,
+    val name: String,
+)
+
 data class FormationsData(val formations: List<Formation>) : GameData
 
 data class Formation(

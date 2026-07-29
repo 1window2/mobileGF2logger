@@ -33,6 +33,7 @@ import dev.gf2log.protocol.PayloadCatalog
 import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.Executors
 
 class MainActivity : LocalizedActivity() {
     private lateinit var packageNameInput: EditText
@@ -44,6 +45,9 @@ class MainActivity : LocalizedActivity() {
     private val selectedHistoryIds = linkedSetOf<String>()
     private val selectedSavedHistoryIds = linkedSetOf<String>()
     private val statusHandler = Handler(Looper.getMainLooper())
+    private val fileIoExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "GF2FileIo")
+    }
     private val refreshStatus = object : Runnable {
         override fun run() {
             statusText.text = CaptureStatus.read()
@@ -77,6 +81,11 @@ class MainActivity : LocalizedActivity() {
         super.onPause()
     }
 
+    override fun onDestroy() {
+        fileIoExecutor.shutdownNow()
+        super.onDestroy()
+    }
+
     @Deprecated("Uses the platform VPN consent activity without an AndroidX dependency")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -87,7 +96,10 @@ class MainActivity : LocalizedActivity() {
                 pendingExport = null
                 val destination = data?.data
                 if (resultCode != RESULT_OK || destination == null || source == null) return
-                val exported = runCatching {
+                runFileOperation(
+                    successMessage = { getString(R.string.status_exported, source.name) },
+                    failureMessage = { getString(R.string.status_export_failed) },
+                ) {
                     val output = TrustedExportDestination.openOutputStream(
                         contentResolver,
                         destination,
@@ -96,38 +108,48 @@ class MainActivity : LocalizedActivity() {
                     output.use { stream ->
                         source.inputStream().use { input -> input.copyTo(stream) }
                     }
-                }.isSuccess
-                statusText.text = if (exported) {
-                    getString(R.string.status_exported, source.name)
-                } else {
-                    getString(R.string.status_export_failed)
                 }
             }
             requestCode == REQUEST_BACKUP_EXPORT -> {
                 val destination = data?.data
                 if (resultCode != RESULT_OK || destination == null) return
-                val exported = runCatching {
+                runFileOperation(
+                    successMessage = { getString(R.string.status_backup_exported) },
+                    failureMessage = { getString(R.string.status_backup_failed) },
+                ) {
                     val output = TrustedExportDestination.openOutputStream(
                         contentResolver,
                         destination,
                     ) ?: error("Document provider did not open an output stream")
                     output.use { PlatoonBackupManager(this).export(it) }
-                }.isSuccess
-                statusText.text = getString(
-                    if (exported) R.string.status_backup_exported else R.string.status_backup_failed,
-                )
+                }
             }
             requestCode == REQUEST_BACKUP_IMPORT -> {
                 val source = data?.data
                 if (resultCode != RESULT_OK || source == null) return
-                val imported = runCatching {
+                runFileOperation(
+                    successMessage = { getString(R.string.status_backup_restored) },
+                    failureMessage = { getString(R.string.status_backup_failed) },
+                ) {
                     val input = TrustedImportSource.openInputStream(contentResolver, source)
                         ?: error("Document provider did not open an input stream")
                     input.use { PlatoonBackupManager(this).restore(it) }
-                }.isSuccess
-                statusText.text = getString(
-                    if (imported) R.string.status_backup_restored else R.string.status_backup_failed,
-                )
+                }
+            }
+        }
+    }
+
+    private fun runFileOperation(
+        successMessage: () -> String,
+        failureMessage: () -> String,
+        operation: () -> Unit,
+    ) {
+        fileIoExecutor.execute {
+            val succeeded = runCatching(operation).isSuccess
+            statusHandler.post {
+                if (!isFinishing && !isDestroyed) {
+                    statusText.text = if (succeeded) successMessage() else failureMessage()
+                }
             }
         }
     }
@@ -429,6 +451,8 @@ class MainActivity : LocalizedActivity() {
 
     private fun localizedPayloadTag(payloadType: Int?): String = when (payloadType) {
         Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS -> getString(R.string.payload_tag_platoon)
+        Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY -> getString(R.string.payload_tag_activity)
+        Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES -> getString(R.string.payload_tag_updates)
         Gfl2PayloadDecoder.TYPE_WEAPONS -> getString(R.string.payload_tag_weapons)
         Gfl2PayloadDecoder.TYPE_ATTACHMENTS -> getString(R.string.payload_tag_attachments)
         Gfl2PayloadDecoder.TYPE_COMMON_KEYS -> getString(R.string.payload_tag_common_keys)

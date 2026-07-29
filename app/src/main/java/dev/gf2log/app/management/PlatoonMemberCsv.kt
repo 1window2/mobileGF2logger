@@ -28,8 +28,22 @@ object PlatoonMemberCsv {
                     latest?.highScore,
                     latest?.totalScore,
                     latest?.lastLogin,
-                    tenure?.joinedAt?.atZone(zoneId)?.format(TIME),
-                    tenure?.leftAt?.atZone(zoneId)?.format(TIME),
+                    tenure?.let {
+                        formatBoundary(
+                            date = it.joinedDate,
+                            instant = it.joinedAt,
+                            timeKnown = it.joinedTimeKnown,
+                            zoneId = zoneId,
+                        )
+                    },
+                    tenure?.let {
+                        formatBoundary(
+                            date = it.leftDate,
+                            instant = it.leftAt,
+                            timeKnown = it.leftTimeKnown ?: (it.leftAt != null),
+                            zoneId = zoneId,
+                        )
+                    },
                     status.note,
                 ).joinToString(",", transform = ::escape),
             )
@@ -42,5 +56,20 @@ object PlatoonMemberCsv {
         return "\"${text.replace("\"", "\"\"")}\""
     }
 
+    private fun formatBoundary(
+        date: java.time.LocalDate?,
+        instant: java.time.Instant?,
+        timeKnown: Boolean,
+        zoneId: ZoneId,
+    ): String {
+        val displayDate = date ?: instant?.atZone(zoneId)?.toLocalDate() ?: return ""
+        return if (timeKnown && instant != null) {
+            instant.atZone(zoneId).format(TIME)
+        } else {
+            displayDate.format(DATE)
+        }
+    }
+
     private val TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+    private val DATE = DateTimeFormatter.ISO_LOCAL_DATE
 }

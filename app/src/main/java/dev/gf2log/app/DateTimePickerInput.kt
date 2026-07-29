@@ -3,73 +3,126 @@ package dev.gf2log.app
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
+import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
+import dev.gf2log.app.management.MembershipBoundaryValue
 import java.time.Instant
-import java.time.LocalDateTime
+import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * Read-only text input that opens Android's calendar and clock pickers.
+ * Calendar input with an optional clock value.
  *
- * The selected value is stored as an [Instant] in the device time zone. The
- * clear action deliberately allows unknown historical boundaries.
+ * Dates are stored explicitly so a date-only manual boundary remains stable if
+ * the device timezone later changes. A date-only value uses local midnight as
+ * its representative Instant, while [MembershipBoundaryValue.timeKnown]
+ * preserves that the time itself is unknown.
  */
 internal class DateTimePickerInput(
     context: Context,
     label: String,
     initialValue: Instant? = null,
+    initialDate: LocalDate? = null,
+    initialTimeKnown: Boolean = initialValue != null,
+    private val dateRequired: Boolean = false,
+    editable: Boolean = true,
 ) : LinearLayout(context) {
-    var instant: Instant? = initialValue
-        private set
+    private val zone: ZoneId = ZoneId.systemDefault()
+    private val selection = MembershipBoundaryDraft(
+        initialValue = initialValue,
+        initialDate = initialDate,
+        initialTimeKnown = initialTimeKnown,
+        zone = zone,
+    )
 
-    private val valueInput = EditText(context).apply {
-        isFocusable = false
-        isClickable = true
-        hint = context.getString(R.string.date_time_unset)
-        setSingleLine(true)
-        setOnClickListener { showDatePicker() }
+    val date: LocalDate?
+        get() = selection.date
+
+    val boundary: MembershipBoundaryValue?
+        get() = selection.boundary
+
+    private val dateInput = pickerField(context.getString(R.string.date_unset)) {
+        showDatePicker()
+    }
+    private val timeInput = pickerField(context.getString(R.string.time_optional)) {
+        if (selection.date == null) {
+            Toast.makeText(context, R.string.select_date_first, Toast.LENGTH_SHORT).show()
+        } else {
+            showTimePicker()
+        }
+    }
+    private val clearDateButton = Button(context).apply {
+        text = context.getString(R.string.clear_date)
+        setOnClickListener {
+            selection.clearDate()
+            renderValue()
+        }
+    }
+    private val clearTimeButton = Button(context).apply {
+        text = context.getString(R.string.clear_time)
+        setOnClickListener {
+            selection.clearTime()
+            renderValue()
+        }
     }
 
     init {
-        orientation = HORIZONTAL
+        orientation = VERTICAL
         addView(TextView(context).apply {
             text = label
-            setPadding(0, 0, dp(8), 0)
-        }, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        addView(valueInput, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        addView(Button(context).apply {
-            text = context.getString(R.string.clear)
-            setOnClickListener {
-                instant = null
-                renderValue()
+            setPadding(0, dp(6), 0, dp(2))
+        }, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        addView(LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            addView(dateInput, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            if (!dateRequired) {
+                addView(
+                    clearDateButton,
+                    LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ),
+                )
             }
-        }, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        addView(LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            addView(timeInput, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(
+                clearTimeButton,
+                LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        setBoundaryEditable(editable)
         renderValue()
     }
 
+    private fun pickerField(hintText: String, onClick: () -> Unit) =
+        EditText(context).apply {
+            isFocusable = false
+            isClickable = true
+            hint = hintText
+            setSingleLine(true)
+            setOnClickListener { onClick() }
+        }
+
     private fun showDatePicker() {
-        val zone = ZoneId.systemDefault()
-        val seed = instant?.atZone(zone)?.toLocalDateTime() ?: LocalDateTime.now(zone)
+        val seed = selection.date ?: LocalDate.now(zone)
         DatePickerDialog(
             context,
             { _, year, month, day ->
-                TimePickerDialog(
-                    context,
-                    { _, hour, minute ->
-                        instant = LocalDateTime.of(year, month + 1, day, hour, minute)
-                            .atZone(zone)
-                            .toInstant()
-                        renderValue()
-                    },
-                    seed.hour,
-                    seed.minute,
-                    true,
-                ).show()
+                selection.selectDate(LocalDate.of(year, month + 1, day))
+                renderValue()
             },
             seed.year,
             seed.monthValue - 1,
@@ -77,19 +130,40 @@ internal class DateTimePickerInput(
         ).show()
     }
 
+    private fun showTimePicker() {
+        val seed = selection.time ?: LocalTime.now(zone).withSecond(0).withNano(0)
+        TimePickerDialog(
+            context,
+            { _, hour, minute ->
+                selection.selectTime(LocalTime.of(hour, minute))
+                renderValue()
+            },
+            seed.hour,
+            seed.minute,
+            true,
+        ).show()
+    }
+
+    private fun setBoundaryEditable(editable: Boolean) {
+        dateInput.isEnabled = editable
+        timeInput.isEnabled = editable
+        clearDateButton.visibility = if (editable && !dateRequired) View.VISIBLE else View.GONE
+        clearTimeButton.visibility = if (editable) View.VISIBLE else View.GONE
+        alpha = if (editable) 1f else 0.72f
+    }
+
     private fun renderValue() {
-        valueInput.setText(
-            instant
-                ?.atZone(ZoneId.systemDefault())
-                ?.format(DISPLAY_TIME)
-                .orEmpty(),
-        )
+        dateInput.setText(selection.date?.format(DATE).orEmpty())
+        timeInput.setText(selection.time?.format(TIME).orEmpty())
+        timeInput.isEnabled = dateInput.isEnabled && selection.date != null
+        clearTimeButton.isEnabled = selection.date != null && selection.time != null
     }
 
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).toInt()
 
     private companion object {
-        val DISPLAY_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+        val DATE: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
+        val TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     }
 }

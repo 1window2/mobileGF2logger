@@ -9,6 +9,7 @@ import dev.gf2log.protocol.model.GuildMembersData
 import dev.gf2log.protocol.model.ParseEvent
 import dev.gf2log.protocol.model.ParsedPayload
 import dev.gf2log.protocol.model.PlatoonActivityData
+import dev.gf2log.protocol.model.PlatoonUpdatesData
 import dev.gf2log.protocol.model.WeaponsData
 
 class Gfl2StreamParser(
@@ -162,6 +163,8 @@ class Gfl2StreamParser(
                 summaries = first.summaries + second.summaries,
                 entries = first.entries + second.entries,
             )
+        first is PlatoonUpdatesData && second is PlatoonUpdatesData ->
+            PlatoonUpdatesData(first.entries + second.entries)
         first is FormationsData && second is FormationsData ->
             FormationsData(first.formations + second.formations)
         else -> second

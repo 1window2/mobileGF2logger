@@ -52,18 +52,45 @@ history but is not counted independently.
 member UID. `Entry.kind` is an event variant/state discriminator: values 1, 2,
 and 3 can occur for the same member, action, and timestamp, so it is neither an
 attempt count nor an identity field. Activity entries contain a member name
-but no UID. GF2logger therefore resolves an activity or membership event only
-when the name maps to exactly one UID in nearby 21917 snapshots. Duplicate
-names remain unresolved rather than risking an update to the wrong member.
+but no UID. GF2logger therefore resolves an activity only when the name maps
+to exactly one UID in nearby 21917 snapshots. Duplicate names remain
+unresolved rather than risking an update to the wrong member.
+
+Inner type `21960` is the exact Platoon Updates feed shown by the in-game
+Updates tab:
+
+```text
+PlatoonUpdates.entries = repeated field 1
+Update.kind = field 1
+Update.members = repeated field 2
+Update.occurred_at = field 3
+Member.role = field 1
+Member.uid = field 2
+Member.name = field 3
+```
+
+Observed update kinds are:
+
+```text
+3 = joined the Platoon
+4 = withdrew from the Platoon
+5 = removed from the Platoon (the final member is the removed member)
+8 = triggered the Daily Patrol supply reward
+```
+
+Unlike type `21935`, type `21960` contains exact UIDs and timestamps. It is the
+preferred source for Join/Withdraw history and Daily Patrol facts. Type `21917`
+remains the authoritative current roster, and type `21935` remains incremental
+supporting activity evidence.
 
 The reference may receive one logical dataset across multiple inner payloads. It continues when the payload type matches and the previous outer message id is `0`, or when both outer message ids match. mobileGF2logger preserves that batching rule when writing CSV files.
 
 The reference reports Platoon data during login, sometimes twice during login,
-after reconnection, and on Platoon pages. The 21935 response is incremental:
-the app stores every supplied fact, but cannot reconstruct entries the server
-does not send. Durable membership history therefore comes from UID-based 21917
-roster differences, optionally upgraded by exact 21935 timestamps, plus manual
-membership history for older missing tenures.
+after reconnection, and on Platoon pages. The 21935 and 21960 responses are
+incremental: the app stores every supplied fact, but cannot reconstruct entries
+the server does not send. Durable membership history therefore combines
+UID-based 21917 roster differences, exact 21960 Updates, and manual history for
+older missing tenures.
 
 ## Output
 
@@ -79,4 +106,10 @@ Platoon Activity history uses this column order:
 
 ```text
 recordType,id,kind,occurredAt,actionId,count,memberName
+```
+
+Platoon Updates history uses this column order:
+
+```text
+kind,occurredAt,memberIndex,role,uid,memberName
 ```

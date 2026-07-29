@@ -25,6 +25,13 @@ object PayloadCatalog {
             isRequired = true,
         ),
         PayloadCategory(
+            payloadType = Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES,
+            name = "PLATOON UPDATES",
+            tag = "UPDATES",
+            description = "Exact Platoon join, withdrawal, removal, and Daily Patrol updates.",
+            isRequired = true,
+        ),
+        PayloadCategory(
             payloadType = Gfl2PayloadDecoder.TYPE_WEAPONS,
             name = "WEAPONS",
             tag = "WEAPONS",

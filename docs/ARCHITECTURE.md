@@ -20,7 +20,7 @@ Native zdtun forwarding/reassembly core
 Gfl2StreamParser (one bounded instance per live TCP flow)
         |
         v
-Gfl2PayloadDecoder (six recognized protobuf message types)
+Gfl2PayloadDecoder (seven recognized protobuf message types)
         |
         v
 Typed GameData events
@@ -59,6 +59,7 @@ Recognized inner types:
 | 11138 | Common keys |
 | 21917 | Platoon members |
 | 21935 | Platoon activity |
+| 21960 | Platoon updates |
 | 23201 | Formations |
 
 Unknown payload types are skipped without allocation. A recognized but malformed protobuf payload produces a warning event and does not terminate parsing of later messages.
@@ -73,7 +74,7 @@ Unknown payload types are skipped without allocation. A recognized but malformed
 - Queue saturation is counted and surfaced in the capture status instead of being silently discarded.
 - Raw IP packets and application payloads are not persisted.
 
-The single worker is deliberate: these six responses are sparse, and avoiding
+The single worker is deliberate: these seven responses are sparse, and avoiding
 a worker pool reduces scheduling, memory, and ordering complexity. If
 benchmarking later proves this insufficient, partition work by flow while
 preserving in-flow ordering.
@@ -93,21 +94,50 @@ collectors, and the full PCAPdroid UI are not included.
 
 ## Structured Platoon evidence
 
-The private management database stores 21917 roster snapshots and 21935
-activity facts separately. The roster is authoritative for stable UID
-identity. Activity entries supply an action, name, and Unix timestamp but no
-UID, so a fact is linked only when nearby roster snapshots map the name to
-exactly one member. Ambiguous duplicate names remain stored but unresolved.
+The private management database stores 21917 roster snapshots, 21935 activity
+facts, and 21960 Updates facts separately. The roster is authoritative for
+stable UID identity. Activity entries supply an action, name, and Unix
+timestamp but no UID, so a fact is linked only when nearby roster snapshots
+map the name to exactly one member. Ambiguous duplicate names remain stored
+but unresolved.
 
 Observed action `802001` is deduplicated to one Daily Patrol fact per UID and
 matching 05:00-based game day. Membership boundaries remain available as
-UID-safe 21917 observation facts and are upgraded to exact, non-deletable
-21935 timestamps only after the same strict identity check. Manual tenures
-remain available for history absent from incremental responses.
+UID-safe 21917 observation facts. Payload 21960 supplies exact UID and event
+timestamps for Join, Withdraw, and Remove boundaries; those individual
+boundaries are immutable. Manual boundaries remain editable and can coexist
+with an exact boundary in the same tenure.
 
 ## HTTPS and application-layer encryption
 
-An Android VPN can observe packet metadata, but it cannot automatically read TLS-protected application data. Like the desktop reference, mobileGF2logger identifies TLS/HTTP flows and forwards them unchanged without parsing. The five game frame signatures are evaluated only on candidate plaintext TCP streams. Do not add pinning or anti-cheat bypasses.
+An Android VPN can observe packet metadata, but it cannot automatically read
+TLS-protected application data. Like the desktop reference, mobileGF2logger
+identifies TLS/HTTP flows and forwards them unchanged without parsing. The
+seven recognized game frame signatures are evaluated only on candidate
+plaintext TCP streams. Do not add pinning or anti-cheat bypasses.
+
+## Module and object boundaries
+
+- `protocol` is an Android-independent decoding library. It owns framing,
+  protobuf wire decoding, typed payload models, and text/CSV formatting.
+- `capture` owns the VPN/native lifecycle, bounded per-flow parsing, and
+  translation of completed capture batches into management-domain input.
+- `management` owns evidence policy, reporting rules, the repository facade,
+  and private SQLite persistence. It does not depend on the capture package.
+- Activities own Android presentation and delegate evidence precedence,
+  inference, ordering, and CSV construction to pure policy objects.
+
+The design deliberately favors composition over deep inheritance. Abstraction
+and polymorphism appear at real variation points (`GameData`, `ParseEvent`, and
+the native listener contract); encapsulation is provided by stores and the
+repository facade. Android lifecycle inheritance remains shallow through
+`LocalizedActivity`, `VpnService`, and `SQLiteOpenHelper`.
+
+The large SQLite helper remains a known maintenance boundary. Schema,
+migrations, and transactional evidence correlation stay together for v2.0.1
+to avoid a risky pre-release rewrite; future schema work should extract those
+concerns behind the existing repository while retaining single-transaction
+ingestion.
 
 ## Parsed-packet history
 

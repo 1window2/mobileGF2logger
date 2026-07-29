@@ -1,7 +1,7 @@
 # Platoon management model
 
 This document defines the management rules implemented by GF2logger. The
-reference workbook is the leader-maintained `부엉이 관리현황` spreadsheet.
+reference workbook is a leader-maintained Platoon management spreadsheet.
 Spreadsheet labels and formulas are evidence, but capture timestamps and the
 rules below take precedence over stale copied dates in archived templates.
 
@@ -64,13 +64,21 @@ resets on Monday while a Gunsmoke week begins on Sunday.
 - Every Platoon Members payload is stored as a structured snapshot keyed by its
   capture instant.
 - Every supplied Platoon Activity entry is stored as an immutable timestamped
-  fact. Action `802001` supplies exact Daily Patrol evidence.
-- Non-Gunsmoke weeks show daily Total Merit changes, inferred attendance,
-  activity-backed Daily Patrol completion, and notes.
+  fact. Only UID-safe Updates kind `8` / action `802001` supplies exact Daily
+  Patrol evidence; a missing event never proves that Daily Patrol was skipped.
+- Platoon Updates payload 21960 supplies UID-safe exact Join, Withdraw, and
+  Remove timestamps.
+- Non-Gunsmoke weeks constrain every `0/50/90` daily allocation against all
+  captured Weekly Merit checkpoints. A 21917 recent-login time proves the
+  member logged in on its 05:00-based game day and narrows that day to 50 or
+  90; an exact Daily Patrol event fixes it at 90.
+- Values shared by every compatible allocation are exact. Ambiguous completed
+  days use a marked Monday-first estimate, while an unfinished day displays
+  only its confirmed lower bound until it reaches the 90-point cap.
 - Gunsmoke weeks additionally show daily score changes, inferred participation
   counts, cumulative Gunsmoke score, participation totals, and rankings.
 - The separate Join/Withdraw section combines UID-safe 21917 roster changes,
-  exact 21935-linked timestamps, and manually entered membership history.
+  exact 21960 Updates timestamps, and manually entered membership history.
   Snapshot-only boundaries are labelled with their observation time instead of
   being presented as exact event times.
 - Calculated values retain an evidence state: exact, inferred, ambiguous, or

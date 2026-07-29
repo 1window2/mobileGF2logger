@@ -27,6 +27,10 @@ data class MembershipTenure(
     val uid: Long,
     val joinedAt: Instant?,
     val leftAt: Instant?,
+    val joinedDate: LocalDate?,
+    val leftDate: LocalDate?,
+    val joinedTimeKnown: Boolean,
+    val leftTimeKnown: Boolean?,
     val joinedPrecision: EvidencePrecision,
     val leftPrecision: EvidencePrecision?,
     val joinedSource: EvidenceSource,
@@ -50,6 +54,8 @@ data class MemberEvent(
     val uid: Long,
     val type: MemberEventType,
     val occurredAt: Instant?,
+    val eventDate: LocalDate?,
+    val timeKnown: Boolean,
     val observedAt: Instant,
     val precision: EvidencePrecision,
     val source: EvidenceSource,
@@ -74,6 +80,18 @@ data class PlatoonActivityObservation(
     val memberName: String,
 )
 
+data class PlatoonUpdateObservation(
+    val kind: Long,
+    val occurredAt: Instant,
+    val members: List<PlatoonUpdateMemberObservation>,
+)
+
+data class PlatoonUpdateMemberObservation(
+    val role: Long,
+    val uid: Long,
+    val name: String,
+)
+
 data class DailyPatrolFact(
     val uid: Long,
     val occurredAt: Instant,
@@ -83,6 +101,7 @@ enum class ActivityResolution {
     UNRESOLVED,
     UNIQUE_ROSTER_NAME,
     MEMBERSHIP_CORRELATION,
+    EXACT_UPDATE,
 }
 
 enum class MemberEventType {

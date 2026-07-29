@@ -4,8 +4,57 @@ All notable changes to mobileGF2logger are documented here.
 
 ## Unreleased
 
+### Added
+
+- Parse mandatory Platoon Updates payload `21960` with exact member UIDs,
+  event kinds, and Unix timestamps.
+- Apply exact Updates evidence to Join/Withdraw history and UID-resolved Daily
+  Patrol facts.
+
 ### Fixed
 
+- Reconcile exact Updates events with nearby manual and snapshot boundaries so
+  the same Join or Withdraw event is shown only once.
+- Reuse an exact Updates tenure when the following roster snapshot confirms it,
+  avoiding duplicate open tenures and withdrawal-ingestion rollback.
+- Preserve the current open tenure when a captured Updates feed contains an
+  older withdrawal, and reject roster confirmation from a withdrawal
+  superseded by a later rejoin.
+- Backfill device-local calendar dates for pre-2.0.1 manual membership
+  boundaries so they remain stable after timezone changes.
+- Retry transient non-blocking TUN backpressure before treating the affected
+  connection as failed.
+- Preserve rapid rejoin/withdraw histories when an opposite boundary separates
+  otherwise nearby same-side events, and merge safe inferred shadow tenures
+  without discarding their independent boundary.
+- Present Join/Withdraw history as a compact borderless two-column table,
+  including exact device-local times and an unknown-date group for inferred
+  events.
+- Use locale-independent identity keys when correlating roster names.
+- Localize Activity and Updates packet-history badges in Korean.
+- Require dates but allow unknown times for manually entered membership
+  boundaries, displaying date-only tenure summaries and `??:??` in weekly
+  Join/Withdraw rows.
+- Reconcile standard-week merit against every captured counter and recent-login
+  timestamp instead of finalizing unsupported daily estimates.
+- Treat only UID-safe Updates kind `8` records as exact Daily Patrol evidence.
+- Keep packet-derived membership boundaries immutable without locking the
+  editable manual boundary or private note on the same tenure.
+- Hide internal evidence-precision labels from membership-history buttons.
+- Place Join/Withdraw events by their device-local calendar date while merit
+  calculations continue to use the 05:00 game-day boundary.
+- Allow enough one-shot navigation time to open both Members and Updates.
+- Recreate the bounded parser worker for each capture session and quarantine a
+  TCP flow after queue overflow instead of parsing later chunks out of sequence.
+- Keep native TUN I/O non-blocking so stopping capture cannot wait on a blocked
+  device write.
+- Load weekly snapshots with one period-bounded query instead of an N+1 query
+  loop and an arbitrary 1,000-snapshot history cap.
+- Serialize database maintenance against repository access, validate backup
+  integrity and required schema, and retain rollback data until a restored
+  database opens successfully.
+- Run exports and management backup operations away from the Android main
+  thread.
 - Project weekly rows from the latest complete active roster so withdrawn
   members disappear immediately while their immutable Join/Withdraw records
   remain in the weekly event section.

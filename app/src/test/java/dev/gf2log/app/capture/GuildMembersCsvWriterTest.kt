@@ -24,8 +24,8 @@ class GuildMembersCsvWriterTest {
         val clock = Clock.fixed(Instant.parse("2026-07-21T19:11:09.987Z"), ZoneOffset.UTC)
         val writer = GuildMembersCsvWriter(output, clock)
 
-        writer.accept(payload(messageId = 0, uid = 258857u, name = "카논", end = true))
-        writer.accept(payload(messageId = 42, uid = 1025106u, name = "Crios", end = true))
+        writer.accept(payload(messageId = 0, uid = 123456u, name = "First Member", end = true))
+        writer.accept(payload(messageId = 42, uid = 654321u, name = "Second Member", end = true))
         writer.close()
 
         val file = output.listFiles().orEmpty().single()
@@ -33,8 +33,8 @@ class GuildMembersCsvWriterTest {
         assertEquals(
             listOf(
                 GuildMembersCsv.HEADER,
-                "258857,카논,60,3750,313832,10398,51661,1784639347,2026-07-21T19:11:09Z",
-                "1025106,Crios,60,3750,313832,10398,51661,1784639347,2026-07-21T19:11:09Z",
+                "123456,First Member,60,120,4560,789,1234,1700000000,2026-07-21T19:11:09Z",
+                "654321,Second Member,60,120,4560,789,1234,1700000000,2026-07-21T19:11:09Z",
             ),
             file.readLines(Charsets.UTF_8),
         )
@@ -79,7 +79,7 @@ class GuildMembersCsvWriterTest {
         assertEquals(
             listOf(
                 GuildMembersCsv.HEADER,
-                "2,Second,60,3750,313832,10398,51661,1784639347,2026-07-21T19:11:09Z",
+                "2,Second,60,120,4560,789,1234,1700000000,2026-07-21T19:11:09Z",
             ),
             files.single().readLines(Charsets.UTF_8),
         )
@@ -146,11 +146,11 @@ class GuildMembersCsvWriterTest {
                         uid = uid,
                         name = name,
                         level = 60u,
-                        weeklyMerit = 3750u,
-                        totalMerit = 313832u,
-                        highScore = 10398u,
-                        totalScore = 51661u,
-                        lastLogin = 1784639347u,
+                        weeklyMerit = 120u,
+                        totalMerit = 4560u,
+                        highScore = 789u,
+                        totalScore = 1234u,
+                        lastLogin = 1700000000u,
                     ),
                 ),
             ),

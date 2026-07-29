@@ -6,6 +6,7 @@ import dev.gf2log.protocol.model.FormationsData
 import dev.gf2log.protocol.model.GuildMembersData
 import dev.gf2log.protocol.model.ParseEvent
 import dev.gf2log.protocol.model.PlatoonActivityData
+import dev.gf2log.protocol.model.PlatoonUpdatesData
 import dev.gf2log.protocol.model.WeaponsData
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -106,10 +107,29 @@ class Gfl2StreamParserTest {
         assertEquals(1, data.summaries.size)
         assertEquals(9_007_199_254_740_993uL, data.summaries.single().id)
         assertEquals(802001u, data.summaries.single().actionId)
-        assertEquals(1_785_252_994u, data.summaries.single().occurredAt)
+        assertEquals(1_700_100_000u, data.summaries.single().occurredAt)
         assertEquals(1u, data.summaries.single().count)
         assertEquals(2u, data.entries.single().kind)
-        assertEquals("지휘관", data.entries.single().memberName)
+        assertEquals("Test Member", data.entries.single().memberName)
+    }
+
+    @Test
+    fun platoonUpdatesPreserveKindsExactUidsAndTimestamps() {
+        val parser = Gfl2StreamParser()
+        val message = outerMessage(
+            102,
+            payload(Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES, platoonUpdatesPayload()),
+        )
+
+        val entry = (parser.accept(message).singlePayload().value.data as PlatoonUpdatesData)
+            .entries
+            .single()
+
+        assertEquals(5u, entry.kind)
+        assertEquals(1_700_200_000u, entry.occurredAt)
+        assertEquals(listOf(1_111_111u, 2_222_222u), entry.members.map { it.uid })
+        assertEquals(listOf("Leader", "Removed Member"), entry.members.map { it.name })
+        assertEquals(listOf(1u, 1u), entry.members.map { it.role })
     }
 
     @Test
@@ -244,13 +264,24 @@ class Gfl2StreamParserTest {
     private fun platoonActivityPayload(): ByteArray {
         val summary = uintField(1, 9_007_199_254_740_993uL) +
             uintField(2, 802001uL) +
-            uintField(3, 1_785_252_994uL) +
+            uintField(3, 1_700_100_000uL) +
             uintField(4, 1uL)
         val entry = uintField(2, 2uL) +
-            uintField(3, 1_785_252_994uL) +
+            uintField(3, 1_700_100_000uL) +
             uintField(4, 802001uL) +
-            stringField(5, "지휘관")
+            stringField(5, "Test Member")
         return messageField(1, summary) + messageField(2, entry)
+    }
+
+    private fun platoonUpdatesPayload(): ByteArray {
+        fun member(uid: ULong, name: String): ByteArray =
+            uintField(1, 1uL) + uintField(2, uid) + stringField(3, name)
+
+        val entry = uintField(1, 5uL) +
+            messageField(2, member(1_111_111uL, "Leader")) +
+            messageField(2, member(2_222_222uL, "Removed Member")) +
+            uintField(3, 1_700_200_000uL)
+        return messageField(1, entry)
     }
 
     private fun List<ParseEvent>.singlePayload(): ParseEvent.Payload =

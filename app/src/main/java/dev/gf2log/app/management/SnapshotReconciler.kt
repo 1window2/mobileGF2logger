@@ -39,6 +39,7 @@ object SnapshotReconciler {
                 when {
                     previous == null -> joined += member
                     !previous.isActive && previous.hasPriorTenure -> rejoined += member
+                    !previous.isActive -> joined += member
                 }
                 if (previous != null && previous.name != member.name) {
                     renamed += Rename(member.uid, previous.name, member.name)

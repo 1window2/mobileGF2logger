@@ -174,6 +174,9 @@ class PlatoonDatabase(context: Context) :
         if (oldVersion < 7) {
             backfillSnapshotTenureEvents(db)
         }
+        if (oldVersion in 6 until 8) {
+            migratePlatoonActivityIdentity(db)
+        }
     }
 
     @Synchronized
@@ -218,13 +221,7 @@ class PlatoonDatabase(context: Context) :
 
             if (!hasPriorSnapshot) {
                 snapshot.members.forEach { member ->
-                    insertTenure(
-                        db = db,
-                        uid = member.uid,
-                        joinedAt = null,
-                        precision = EvidencePrecision.UNKNOWN,
-                        source = source,
-                    )
+                    ensureInitialRosterTenure(db, member.uid, source)
                 }
             } else {
                 val changedNameCounts = (
@@ -561,6 +558,7 @@ class PlatoonDatabase(context: Context) :
             FROM member_events
             WHERE uid = ?
               AND event_type IN (?, ?)
+              AND source != ?
               AND ABS(COALESCE(occurred_at, observed_at) - ?) <= ?
             ORDER BY distance,
                      CASE source
@@ -575,6 +573,7 @@ class PlatoonDatabase(context: Context) :
                 member.uid.toString(),
                 boundaryTypes[0].name,
                 boundaryTypes[1].name,
+                EvidenceSource.GAME_UPDATES.name,
                 occurredAt.toEpochMilli().toString(),
                 EXACT_UPDATE_CORRELATION_WINDOW_MILLIS.toString(),
             ),
@@ -677,30 +676,68 @@ class PlatoonDatabase(context: Context) :
         boundary: MembershipBoundary,
         occurredAt: Instant,
     ): Long {
-        val boundaryColumn = if (boundary == MembershipBoundary.JOIN) "joined_at" else "left_at"
-        val nearby = db.rawQuery(
-            """
-            SELECT id
-            FROM tenures
-            WHERE uid = ?
-              AND (
-                $boundaryColumn IS NULL
-                OR ABS($boundaryColumn - ?) <= ?
-              )
-            ORDER BY
-              CASE WHEN $boundaryColumn IS NULL THEN 1 ELSE 0 END,
-              ABS(COALESCE($boundaryColumn, ?) - ?),
-              id DESC
-            LIMIT 1
-            """.trimIndent(),
-            arrayOf(
-                uid.toString(),
-                occurredAt.toEpochMilli().toString(),
-                EXACT_UPDATE_CORRELATION_WINDOW_MILLIS.toString(),
-                occurredAt.toEpochMilli().toString(),
-                occurredAt.toEpochMilli().toString(),
-            ),
-        ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
+        val occurredAtMillis = occurredAt.toEpochMilli()
+        val nearby = when (boundary) {
+            MembershipBoundary.JOIN -> db.rawQuery(
+                """
+                SELECT id
+                FROM tenures
+                WHERE uid = ?
+                  AND (left_at IS NULL OR left_at >= ?)
+                  AND (
+                    joined_at IS NULL
+                    OR (
+                      joined_precision != ?
+                      AND ABS(joined_at - ?) <= ?
+                    )
+                  )
+                ORDER BY
+                  CASE WHEN left_at IS NULL THEN 0 ELSE 1 END,
+                  CASE WHEN joined_at IS NULL THEN 0 ELSE 1 END,
+                  ABS(COALESCE(joined_at, ?) - ?),
+                  id DESC
+                LIMIT 1
+                """.trimIndent(),
+                arrayOf(
+                    uid.toString(),
+                    occurredAtMillis.toString(),
+                    EvidencePrecision.EXACT.name,
+                    occurredAtMillis.toString(),
+                    EXACT_UPDATE_CORRELATION_WINDOW_MILLIS.toString(),
+                    occurredAtMillis.toString(),
+                    occurredAtMillis.toString(),
+                ),
+            )
+            MembershipBoundary.WITHDRAW -> db.rawQuery(
+                """
+                SELECT id
+                FROM tenures
+                WHERE uid = ?
+                  AND (joined_at IS NULL OR joined_at <= ?)
+                  AND (
+                    left_at IS NULL
+                    OR (
+                      left_precision != ?
+                      AND ABS(left_at - ?) <= ?
+                    )
+                  )
+                ORDER BY
+                  CASE WHEN left_at IS NULL THEN 0 ELSE 1 END,
+                  ABS(COALESCE(left_at, ?) - ?),
+                  id DESC
+                LIMIT 1
+                """.trimIndent(),
+                arrayOf(
+                    uid.toString(),
+                    occurredAtMillis.toString(),
+                    EvidencePrecision.EXACT.name,
+                    occurredAtMillis.toString(),
+                    EXACT_UPDATE_CORRELATION_WINDOW_MILLIS.toString(),
+                    occurredAtMillis.toString(),
+                    occurredAtMillis.toString(),
+                ),
+            )
+        }.use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
         if (nearby != null) return nearby
         return insertTenure(
             db = db,
@@ -1141,11 +1178,14 @@ class PlatoonDatabase(context: Context) :
                 captured_at INTEGER NOT NULL,
                 resolved_uid INTEGER REFERENCES members(uid),
                 resolution TEXT NOT NULL DEFAULT 'UNRESOLVED',
-                member_event_id INTEGER REFERENCES member_events(id),
-                UNIQUE(occurred_at, action_id, kind, member_name)
+                member_event_id INTEGER REFERENCES member_events(id)
             )
             """.trimIndent(),
         )
+        createPlatoonActivityIndexes(db)
+    }
+
+    private fun createPlatoonActivityIndexes(db: SQLiteDatabase) {
         db.execSQL(
             "CREATE INDEX IF NOT EXISTS platoon_activity_member_time " +
                 "ON platoon_activity(member_name, occurred_at)",
@@ -1154,6 +1194,67 @@ class PlatoonDatabase(context: Context) :
             "CREATE INDEX IF NOT EXISTS platoon_activity_action_time " +
                 "ON platoon_activity(action_id, occurred_at)",
         )
+        db.execSQL(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS platoon_activity_exact_identity
+            ON platoon_activity(occurred_at, action_id, kind, resolved_uid)
+            WHERE resolved_uid IS NOT NULL
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS platoon_activity_unresolved_identity
+            ON platoon_activity(occurred_at, action_id, kind, member_name)
+            WHERE resolved_uid IS NULL
+            """.trimIndent(),
+        )
+    }
+
+    private fun migratePlatoonActivityIdentity(db: SQLiteDatabase) {
+        db.execSQL("ALTER TABLE platoon_activity RENAME TO platoon_activity_legacy")
+        db.execSQL(
+            """
+            CREATE TABLE platoon_activity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                occurred_at INTEGER NOT NULL,
+                action_id INTEGER NOT NULL,
+                kind INTEGER NOT NULL,
+                member_name TEXT NOT NULL,
+                captured_at INTEGER NOT NULL,
+                resolved_uid INTEGER REFERENCES members(uid),
+                resolution TEXT NOT NULL DEFAULT 'UNRESOLVED',
+                member_event_id INTEGER REFERENCES member_events(id)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE UNIQUE INDEX platoon_activity_exact_identity
+            ON platoon_activity(occurred_at, action_id, kind, resolved_uid)
+            WHERE resolved_uid IS NOT NULL
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            CREATE UNIQUE INDEX platoon_activity_unresolved_identity
+            ON platoon_activity(occurred_at, action_id, kind, member_name)
+            WHERE resolved_uid IS NULL
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            INSERT OR IGNORE INTO platoon_activity(
+                id, occurred_at, action_id, kind, member_name, captured_at,
+                resolved_uid, resolution, member_event_id
+            )
+            SELECT id, occurred_at, action_id, kind, member_name, captured_at,
+                   resolved_uid, resolution, member_event_id
+            FROM platoon_activity_legacy
+            ORDER BY CASE WHEN member_event_id IS NULL THEN 1 ELSE 0 END, id
+            """.trimIndent(),
+        )
+        db.execSQL("DROP TABLE platoon_activity_legacy")
+        createPlatoonActivityIndexes(db)
     }
 
     private fun latestSnapshotCapturedAt(db: SQLiteDatabase): Instant? =
@@ -1205,7 +1306,7 @@ class PlatoonDatabase(context: Context) :
     private fun resolveUnresolvedActivityUids(db: SQLiteDatabase) {
         val unresolved = db.query(
             "platoon_activity",
-            arrayOf("id", "occurred_at", "member_name"),
+            arrayOf("id", "occurred_at", "member_name", "action_id", "kind"),
             "resolved_uid IS NULL",
             null,
             null,
@@ -1219,6 +1320,8 @@ class PlatoonDatabase(context: Context) :
                             id = cursor.getLong(0),
                             occurredAt = Instant.ofEpochMilli(cursor.getLong(1)),
                             memberName = cursor.getString(2),
+                            actionId = cursor.getLong(3),
+                            kind = cursor.getLong(4),
                         ),
                     )
                 }
@@ -1227,7 +1330,7 @@ class PlatoonDatabase(context: Context) :
         unresolved.forEach { activity ->
             val uid = resolveUidForName(db, activity.memberName, activity.occurredAt)
                 ?: return@forEach
-            db.update(
+            val updated = db.updateWithOnConflict(
                 "platoon_activity",
                 ContentValues().apply {
                     put("resolved_uid", uid)
@@ -1235,8 +1338,52 @@ class PlatoonDatabase(context: Context) :
                 },
                 "id = ? AND resolved_uid IS NULL",
                 arrayOf(activity.id.toString()),
+                SQLiteDatabase.CONFLICT_IGNORE,
             )
+            if (updated == 0) {
+                db.delete(
+                    "platoon_activity",
+                    """
+                    id = ? AND EXISTS (
+                        SELECT 1
+                        FROM platoon_activity existing
+                        WHERE existing.id != ?
+                          AND existing.occurred_at = ?
+                          AND existing.action_id = ?
+                          AND existing.kind = ?
+                          AND existing.resolved_uid = ?
+                    )
+                    """.trimIndent(),
+                    arrayOf(
+                        activity.id.toString(),
+                        activity.id.toString(),
+                        activity.occurredAt.toEpochMilli().toString(),
+                        activity.actionId.toString(),
+                        activity.kind.toString(),
+                        uid.toString(),
+                    ),
+                )
+            }
         }
+    }
+
+    private fun ensureInitialRosterTenure(
+        db: SQLiteDatabase,
+        uid: Long,
+        source: EvidenceSource,
+    ) {
+        val hasOpenTenure = db.rawQuery(
+            "SELECT 1 FROM tenures WHERE uid = ? AND left_at IS NULL LIMIT 1",
+            arrayOf(uid.toString()),
+        ).use(Cursor::moveToFirst)
+        if (hasOpenTenure) return
+        insertTenure(
+            db = db,
+            uid = uid,
+            joinedAt = null,
+            precision = EvidencePrecision.UNKNOWN,
+            source = source,
+        )
     }
 
     private fun correlateMembershipBoundary(
@@ -1998,6 +2145,8 @@ class PlatoonDatabase(context: Context) :
         val id: Long,
         val occurredAt: Instant,
         val memberName: String,
+        val actionId: Long,
+        val kind: Long,
     )
 
     private data class InferredBoundary(
@@ -2028,7 +2177,7 @@ class PlatoonDatabase(context: Context) :
 
     companion object {
         private const val DATABASE_NAME = "platoon.db"
-        private const val DATABASE_VERSION = 7
+        private const val DATABASE_VERSION = 8
         const val DAILY_PATROL_ACTION_ID = 802001L
         private const val DAILY_PATROL_COMPANION_ACTION_ID = 801005L
         private const val NAME_RESOLUTION_WINDOW_MILLIS = 30L * 24L * 60L * 60L * 1000L

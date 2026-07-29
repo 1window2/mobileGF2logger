@@ -156,7 +156,7 @@ class PlatoonBackupManager(context: Context) {
         private const val MANIFEST_ENTRY = "manifest.properties"
         private const val FORMAT_VERSION = 1
         private const val MIN_DATABASE_VERSION = 1
-        private const val CURRENT_DATABASE_VERSION = 7
+        private const val CURRENT_DATABASE_VERSION = 8
         private const val MAX_DATABASE_BYTES = 50L * 1024 * 1024
         private val SQLITE_HEADER = "SQLite format 3\u0000".toByteArray(Charsets.US_ASCII)
     }

@@ -43,6 +43,25 @@ class SnapshotReconcilerTest {
         )
     }
 
+    @Test
+    fun treatsAnUpdateOnlyPlaceholderAsJoinedWhenItFirstAppearsInRoster() {
+        val result = SnapshotReconciler.reconcile(
+            known = listOf(
+                SnapshotReconciler.KnownMember(
+                    uid = 4,
+                    name = "Joining",
+                    isActive = false,
+                    hasPriorTenure = false,
+                ),
+            ),
+            incoming = listOf(member(4, "Joining")),
+            hasPriorSnapshot = true,
+        )
+
+        assertEquals(listOf(4L), result.joined.map { it.uid })
+        assertTrue(result.rejoined.isEmpty())
+    }
+
     private fun member(uid: Long, name: String) =
         SnapshotMember(uid, name, 60, 0, 0, 0, 0, 0)
 

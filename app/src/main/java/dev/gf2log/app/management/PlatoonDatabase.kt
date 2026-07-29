@@ -556,7 +556,7 @@ class PlatoonDatabase(context: Context) :
 
         val candidates = db.rawQuery(
             """
-            SELECT id, tenure_id,
+            SELECT id, tenure_id, COALESCE(occurred_at, observed_at),
                    ABS(COALESCE(occurred_at, observed_at) - ?) AS distance
             FROM member_events
             WHERE uid = ?
@@ -585,18 +585,29 @@ class PlatoonDatabase(context: Context) :
                         BoundaryEventCandidate(
                             id = cursor.getLong(0),
                             tenureId = cursor.getNullableLong(1),
+                            boundaryAt = Instant.ofEpochMilli(cursor.getLong(2)),
                         ),
                     )
                 }
             }
         }
-        val tenureId = candidates.firstNotNullOfOrNull(BoundaryEventCandidate::tenureId)
+        val correlatableCandidates = candidates.filter { candidate ->
+            !hasOppositeBoundaryBetween(
+                db = db,
+                uid = member.uid,
+                boundary = boundary,
+                first = candidate.boundaryAt,
+                second = occurredAt,
+            )
+        }
+        val tenureId = correlatableCandidates
+            .firstNotNullOfOrNull(BoundaryEventCandidate::tenureId)
             ?: findOrCreateUpdateTenure(db, member.uid, boundary, occurredAt)
 
-        candidates.forEach { candidate ->
+        correlatableCandidates.forEach { candidate ->
             db.delete("member_events", "id = ?", arrayOf(candidate.id.toString()))
         }
-        candidates.mapNotNull(BoundaryEventCandidate::tenureId)
+        correlatableCandidates.mapNotNull(BoundaryEventCandidate::tenureId)
             .filter { it != tenureId }
             .distinct()
             .forEach { candidateTenureId ->
@@ -621,6 +632,43 @@ class PlatoonDatabase(context: Context) :
             activityIds = emptyList(),
         )
         return true
+    }
+
+    private fun hasOppositeBoundaryBetween(
+        db: SQLiteDatabase,
+        uid: Long,
+        boundary: MembershipBoundary,
+        first: Instant,
+        second: Instant,
+    ): Boolean {
+        if (first == second) return false
+        val oppositeTypes = when (boundary) {
+            MembershipBoundary.JOIN -> listOf(MemberEventType.LEFT, MemberEventType.REMOVED)
+            MembershipBoundary.WITHDRAW -> listOf(
+                MemberEventType.JOINED,
+                MemberEventType.REJOINED,
+            )
+        }
+        val start = minOf(first, second).toEpochMilli()
+        val end = maxOf(first, second).toEpochMilli()
+        return db.rawQuery(
+            """
+            SELECT 1
+            FROM member_events
+            WHERE uid = ?
+              AND event_type IN (?, ?)
+              AND COALESCE(occurred_at, observed_at) > ?
+              AND COALESCE(occurred_at, observed_at) < ?
+            LIMIT 1
+            """.trimIndent(),
+            arrayOf(
+                uid.toString(),
+                oppositeTypes[0].name,
+                oppositeTypes[1].name,
+                start.toString(),
+                end.toString(),
+            ),
+        ).use(Cursor::moveToFirst)
     }
 
     private fun findOrCreateUpdateTenure(
@@ -1962,6 +2010,7 @@ class PlatoonDatabase(context: Context) :
     private data class BoundaryEventCandidate(
         val id: Long,
         val tenureId: Long?,
+        val boundaryAt: Instant,
     )
 
     private data class TenureForUpdate(

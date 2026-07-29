@@ -107,10 +107,10 @@ class Gfl2StreamParserTest {
         assertEquals(1, data.summaries.size)
         assertEquals(9_007_199_254_740_993uL, data.summaries.single().id)
         assertEquals(802001u, data.summaries.single().actionId)
-        assertEquals(1_785_252_994u, data.summaries.single().occurredAt)
+        assertEquals(1_700_100_000u, data.summaries.single().occurredAt)
         assertEquals(1u, data.summaries.single().count)
         assertEquals(2u, data.entries.single().kind)
-        assertEquals("지휘관", data.entries.single().memberName)
+        assertEquals("Test Member", data.entries.single().memberName)
     }
 
     @Test
@@ -126,9 +126,9 @@ class Gfl2StreamParserTest {
             .single()
 
         assertEquals(5u, entry.kind)
-        assertEquals(1_785_037_130u, entry.occurredAt)
-        assertEquals(listOf(2_370_910u, 4_420_633u), entry.members.map { it.uid })
-        assertEquals(listOf("아이묭", "봇치"), entry.members.map { it.name })
+        assertEquals(1_700_200_000u, entry.occurredAt)
+        assertEquals(listOf(1_111_111u, 2_222_222u), entry.members.map { it.uid })
+        assertEquals(listOf("Leader", "Removed Member"), entry.members.map { it.name })
         assertEquals(listOf(1u, 1u), entry.members.map { it.role })
     }
 
@@ -264,12 +264,12 @@ class Gfl2StreamParserTest {
     private fun platoonActivityPayload(): ByteArray {
         val summary = uintField(1, 9_007_199_254_740_993uL) +
             uintField(2, 802001uL) +
-            uintField(3, 1_785_252_994uL) +
+            uintField(3, 1_700_100_000uL) +
             uintField(4, 1uL)
         val entry = uintField(2, 2uL) +
-            uintField(3, 1_785_252_994uL) +
+            uintField(3, 1_700_100_000uL) +
             uintField(4, 802001uL) +
-            stringField(5, "지휘관")
+            stringField(5, "Test Member")
         return messageField(1, summary) + messageField(2, entry)
     }
 
@@ -278,9 +278,9 @@ class Gfl2StreamParserTest {
             uintField(1, 1uL) + uintField(2, uid) + stringField(3, name)
 
         val entry = uintField(1, 5uL) +
-            messageField(2, member(2_370_910uL, "아이묭")) +
-            messageField(2, member(4_420_633uL, "봇치")) +
-            uintField(3, 1_785_037_130uL)
+            messageField(2, member(1_111_111uL, "Leader")) +
+            messageField(2, member(2_222_222uL, "Removed Member")) +
+            uintField(3, 1_700_200_000uL)
         return messageField(1, entry)
     }
 

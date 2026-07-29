@@ -61,8 +61,8 @@ class ParsedPayloadTextFormatterTest {
                 listOf(
                     PlatoonUpdateEntry(
                         kind = 3u,
-                        members = listOf(PlatoonUpdateMember(1u, 4_161_407u, "Name,WithComma")),
-                        occurredAt = 1_785_121_625u,
+                        members = listOf(PlatoonUpdateMember(1u, 3_333_333u, "Name,WithComma")),
+                        occurredAt = 1_700_300_000u,
                     ),
                 ),
             ),
@@ -71,7 +71,7 @@ class ParsedPayloadTextFormatterTest {
         val text = ParsedPayloadTextFormatter.format(payload, "2026-07-29T00:00:00Z")
 
         assertTrue(text.contains("kind,occurredAt,memberIndex,role,uid,memberName"))
-        assertTrue(text.contains("3,1785121625,0,1,4161407,\"Name,WithComma\""))
+        assertTrue(text.contains("3,1700300000,0,1,3333333,\"Name,WithComma\""))
     }
 
     private fun member(uid: UInt, name: String) = GuildMember(

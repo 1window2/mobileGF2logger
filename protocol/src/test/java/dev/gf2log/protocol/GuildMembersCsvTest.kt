@@ -9,19 +9,19 @@ class GuildMembersCsvTest {
     @Test
     fun guildMemberMatchesReferenceColumnOrder() {
         val member = GuildMember(
-            uid = 258857u,
-            name = "카논",
+            uid = 123456u,
+            name = "Test Leader",
             level = 60u,
-            weeklyMerit = 3750u,
-            totalMerit = 313832u,
-            highScore = 10398u,
-            totalScore = 51661u,
-            lastLogin = 1784639347u,
+            weeklyMerit = 120u,
+            totalMerit = 4560u,
+            highScore = 789u,
+            totalScore = 1234u,
+            lastLogin = 1700000000u,
         )
 
         assertEquals(
-            "258857,카논,60,3750,313832,10398,51661,1784639347,2026-07-21T19:11:09Z",
-            GuildMembersCsv.row(member, "2026-07-21T19:11:09Z"),
+            "123456,Test Leader,60,120,4560,789,1234,1700000000,2026-01-01T00:00:00Z",
+            GuildMembersCsv.row(member, "2026-01-01T00:00:00Z"),
         )
     }
 
@@ -39,16 +39,16 @@ class GuildMembersCsvTest {
     fun parsesACompleteSnapshot() {
         val content = listOf(
             GuildMembersCsv.HEADER,
-            "258857,\"Kanon, \"\"Leader\"\"\",60,3750,313832,10398,51661,1784639347,2026-07-21T19:11:09Z",
-            "1025106,Crios,60,3761,21564,10545,52165,1784644895,2026-07-21T19:11:09Z",
+            "123456,\"Test, \"\"Leader\"\"\",60,120,4560,789,1234,1700000000,2026-01-01T00:00:00Z",
+            "654321,Test Member,59,90,9000,500,2500,1700003600,2026-01-01T00:00:00Z",
         ).joinToString("\n")
 
         val parsed = GuildMembersCsv.parse(content)
 
-        assertEquals("2026-07-21T19:11:09Z", parsed!!.logTime)
+        assertEquals("2026-01-01T00:00:00Z", parsed!!.logTime)
         assertEquals(2, parsed.members.size)
-        assertEquals("Kanon, \"Leader\"", parsed.members.first().name)
-        assertEquals(1025106u, parsed.members.last().uid)
+        assertEquals("Test, \"Leader\"", parsed.members.first().name)
+        assertEquals(654321u, parsed.members.last().uid)
     }
 
     @Test

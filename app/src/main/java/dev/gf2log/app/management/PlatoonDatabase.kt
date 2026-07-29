@@ -6,6 +6,7 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import java.time.Instant
+import java.util.Locale
 
 class PlatoonDatabase(context: Context) :
     SQLiteOpenHelper(context.applicationContext, DATABASE_NAME, null, DATABASE_VERSION) {
@@ -230,11 +231,11 @@ class PlatoonDatabase(context: Context) :
                     changes.joined.map(SnapshotMember::name) +
                         changes.rejoined.map(SnapshotMember::name) +
                         changes.left.map(SnapshotReconciler.KnownMember::name)
-                    ).groupingBy { it.lowercase() }.eachCount()
+                    ).groupingBy { it.lowercase(Locale.ROOT) }.eachCount()
                 val rosterNameUidCounts = (
                     known.map { it.uid to it.name } +
                         snapshot.members.map { it.uid to it.name }
-                    ).groupBy { it.second.lowercase() }
+                    ).groupBy { it.second.lowercase(Locale.ROOT) }
                     .mapValues { (_, identities) -> identities.map { it.first }.distinct().size }
                 changes.joined.forEach { member ->
                     val tenureId = insertTenure(
@@ -261,8 +262,8 @@ class PlatoonDatabase(context: Context) :
                         boundary = MembershipBoundary.JOIN,
                         observedAt = snapshot.capturedAt,
                         from = priorCapturedAt,
-                        nameIsUnique = changedNameCounts[member.name.lowercase()] == 1 &&
-                            rosterNameUidCounts[member.name.lowercase()] == 1,
+                        nameIsUnique = changedNameCounts[member.name.lowercase(Locale.ROOT)] == 1 &&
+                            rosterNameUidCounts[member.name.lowercase(Locale.ROOT)] == 1,
                     )
                 }
                 changes.rejoined.forEach { member ->
@@ -290,8 +291,8 @@ class PlatoonDatabase(context: Context) :
                         boundary = MembershipBoundary.JOIN,
                         observedAt = snapshot.capturedAt,
                         from = priorCapturedAt,
-                        nameIsUnique = changedNameCounts[member.name.lowercase()] == 1 &&
-                            rosterNameUidCounts[member.name.lowercase()] == 1,
+                        nameIsUnique = changedNameCounts[member.name.lowercase(Locale.ROOT)] == 1 &&
+                            rosterNameUidCounts[member.name.lowercase(Locale.ROOT)] == 1,
                     )
                 }
                 changes.left.forEach { member ->
@@ -320,8 +321,8 @@ class PlatoonDatabase(context: Context) :
                         boundary = MembershipBoundary.WITHDRAW,
                         observedAt = snapshot.capturedAt,
                         from = priorCapturedAt,
-                        nameIsUnique = changedNameCounts[member.name.lowercase()] == 1 &&
-                            rosterNameUidCounts[member.name.lowercase()] == 1,
+                        nameIsUnique = changedNameCounts[member.name.lowercase(Locale.ROOT)] == 1 &&
+                            rosterNameUidCounts[member.name.lowercase(Locale.ROOT)] == 1,
                     )
                 }
                 changes.renamed.forEach { rename ->

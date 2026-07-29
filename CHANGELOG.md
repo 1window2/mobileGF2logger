@@ -17,6 +17,13 @@ All notable changes to mobileGF2logger are documented here.
   the same Join or Withdraw event is shown only once.
 - Reuse an exact Updates tenure when the following roster snapshot confirms it,
   avoiding duplicate open tenures and withdrawal-ingestion rollback.
+- Preserve the current open tenure when a captured Updates feed contains an
+  older withdrawal, and reject roster confirmation from a withdrawal
+  superseded by a later rejoin.
+- Backfill device-local calendar dates for pre-2.0.1 manual membership
+  boundaries so they remain stable after timezone changes.
+- Retry transient non-blocking TUN backpressure before treating the affected
+  connection as failed.
 - Preserve rapid rejoin/withdraw histories when an opposite boundary separates
   otherwise nearby same-side events, and merge safe inferred shadow tenures
   without discarding their independent boundary.

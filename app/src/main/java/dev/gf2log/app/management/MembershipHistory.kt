@@ -30,6 +30,24 @@ fun isValidMembershipRange(
 fun EvidenceSource.isImmutableMembershipBoundary(): Boolean =
     this == EvidenceSource.GAME_UPDATES
 
+internal fun migrationCalendarDate(epochMillis: Long, zoneId: ZoneId): LocalDate =
+    Instant.ofEpochMilli(epochMillis).atZone(zoneId).toLocalDate()
+
+internal object MembershipChronology {
+    fun withdrawalPredatesRosterPresence(
+        withdrewAt: Instant,
+        latestRosterPresenceAt: Instant?,
+    ): Boolean = latestRosterPresenceAt?.isAfter(withdrewAt) == true
+
+    fun hasSupersedingOppositeBoundary(
+        boundaryAt: Instant,
+        observedAt: Instant,
+        oppositeBoundaryTimes: Iterable<Instant>,
+    ): Boolean = oppositeBoundaryTimes.any { oppositeAt ->
+        oppositeAt.isAfter(boundaryAt) && !oppositeAt.isAfter(observedAt)
+    }
+}
+
 /**
  * Pure presentation policy for the Join/Withdraw section.
  *

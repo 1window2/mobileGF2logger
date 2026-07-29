@@ -7,6 +7,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import java.util.Locale
 
 class PlatoonDatabase(context: Context) :
@@ -119,6 +120,7 @@ class PlatoonDatabase(context: Context) :
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        val needsManualCalendarDateBackfill = oldVersion < 9
         if (oldVersion < 9) {
             db.execSQL("ALTER TABLE tenures ADD COLUMN joined_date INTEGER")
             db.execSQL("ALTER TABLE tenures ADD COLUMN left_date INTEGER")
@@ -201,6 +203,9 @@ class PlatoonDatabase(context: Context) :
         if (oldVersion in 6 until 8) {
             migratePlatoonActivityIdentity(db)
         }
+        if (needsManualCalendarDateBackfill) {
+            backfillManualCalendarDates(db, ZoneId.systemDefault())
+        }
     }
 
     @Synchronized
@@ -243,11 +248,7 @@ class PlatoonDatabase(context: Context) :
                 upsertMember(db, member, snapshot.capturedAt)
             }
 
-            if (!hasPriorSnapshot) {
-                snapshot.members.forEach { member ->
-                    ensureInitialRosterTenure(db, member.uid, source)
-                }
-            } else {
+            if (hasPriorSnapshot) {
                 val changedNameCounts = (
                     changes.joined.map(SnapshotMember::name) +
                         changes.rejoined.map(SnapshotMember::name) +
@@ -336,6 +337,11 @@ class PlatoonDatabase(context: Context) :
                         note = "${rename.oldName} -> ${rename.newName}",
                     )
                 }
+            }
+            // A roster is authoritative for current presence. Repair any missing open
+            // tenure left by an incomplete historical Updates feed.
+            snapshot.members.forEach { member ->
+                ensureRosterActiveTenure(db, member.uid, source)
             }
 
             resolveUnresolvedActivityUids(db)
@@ -599,9 +605,9 @@ class PlatoonDatabase(context: Context) :
             if (from != null) add(from.toEpochMilli().toString())
             add(observedAt.toEpochMilli().toString())
         }.toTypedArray()
-        return db.rawQuery(
+        val candidates = db.rawQuery(
             """
-            SELECT id
+            SELECT id, $boundaryColumn
             FROM tenures
             WHERE uid = ?
               AND $sourceColumn = ?
@@ -610,10 +616,24 @@ class PlatoonDatabase(context: Context) :
               $fromClause
               AND $compatibility
             ORDER BY $boundaryColumn DESC, id DESC
-            LIMIT 1
             """.trimIndent(),
             arguments,
-        ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(cursor.getLong(0) to Instant.ofEpochMilli(cursor.getLong(1)))
+                }
+            }
+        }
+        return candidates.firstOrNull { (_, boundaryAt) ->
+            !hasLaterOppositeBoundaryThrough(
+                db = db,
+                uid = uid,
+                boundary = boundary,
+                boundaryAt = boundaryAt,
+                observedAt = observedAt,
+            )
+        }?.first
     }
 
     private fun applyExactUpdateBoundary(
@@ -773,6 +793,47 @@ class PlatoonDatabase(context: Context) :
         ).use(Cursor::moveToFirst)
     }
 
+    private fun hasLaterOppositeBoundaryThrough(
+        db: SQLiteDatabase,
+        uid: Long,
+        boundary: MembershipBoundary,
+        boundaryAt: Instant,
+        observedAt: Instant,
+    ): Boolean {
+        if (!observedAt.isAfter(boundaryAt)) return false
+        val oppositeTypes = when (boundary) {
+            MembershipBoundary.JOIN -> listOf(MemberEventType.LEFT, MemberEventType.REMOVED)
+            MembershipBoundary.WITHDRAW -> listOf(
+                MemberEventType.JOINED,
+                MemberEventType.REJOINED,
+            )
+        }
+        val oppositeBoundaryAt = db.rawQuery(
+            """
+            SELECT MIN(COALESCE(occurred_at, observed_at))
+            FROM member_events
+            WHERE uid = ?
+              AND event_type IN (?, ?)
+              AND COALESCE(occurred_at, observed_at) > ?
+              AND COALESCE(occurred_at, observed_at) <= ?
+            """.trimIndent(),
+            arrayOf(
+                uid.toString(),
+                oppositeTypes[0].name,
+                oppositeTypes[1].name,
+                boundaryAt.toEpochMilli().toString(),
+                observedAt.toEpochMilli().toString(),
+            ),
+        ).use { cursor ->
+            if (cursor.moveToFirst()) cursor.getNullableLong(0)?.let(Instant::ofEpochMilli) else null
+        }
+        return MembershipChronology.hasSupersedingOppositeBoundary(
+            boundaryAt = boundaryAt,
+            observedAt = observedAt,
+            oppositeBoundaryTimes = listOfNotNull(oppositeBoundaryAt),
+        )
+    }
+
     private fun findOrCreateUpdateTenure(
         db: SQLiteDatabase,
         uid: Long,
@@ -780,6 +841,9 @@ class PlatoonDatabase(context: Context) :
         occurredAt: Instant,
     ): Long {
         val occurredAtMillis = occurredAt.toEpochMilli()
+        val preserveLaterRosterTenure =
+            boundary == MembershipBoundary.WITHDRAW &&
+                hasRosterPresenceAfter(db, uid, occurredAt)
         val nearby = when (boundary) {
             MembershipBoundary.JOIN -> db.rawQuery(
                 """
@@ -817,6 +881,7 @@ class PlatoonDatabase(context: Context) :
                 FROM tenures
                 WHERE uid = ?
                   AND (joined_at IS NULL OR joined_at <= ?)
+                  AND (? = 0 OR left_at IS NOT NULL)
                   AND (
                     left_at IS NULL
                     OR (
@@ -833,6 +898,7 @@ class PlatoonDatabase(context: Context) :
                 arrayOf(
                     uid.toString(),
                     occurredAtMillis.toString(),
+                    if (preserveLaterRosterTenure) "1" else "0",
                     EvidencePrecision.EXACT.name,
                     occurredAtMillis.toString(),
                     EXACT_UPDATE_CORRELATION_WINDOW_MILLIS.toString(),
@@ -852,6 +918,28 @@ class PlatoonDatabase(context: Context) :
                 EvidencePrecision.UNKNOWN
             },
             source = EvidenceSource.GAME_UPDATES,
+        )
+    }
+
+    private fun hasRosterPresenceAfter(
+        db: SQLiteDatabase,
+        uid: Long,
+        occurredAt: Instant,
+    ): Boolean {
+        val latestRosterPresenceAt = db.rawQuery(
+            """
+            SELECT MAX(snapshot.captured_at)
+            FROM snapshots snapshot
+            JOIN snapshot_members member ON member.snapshot_id = snapshot.id
+            WHERE member.uid = ?
+            """.trimIndent(),
+            arrayOf(uid.toString()),
+        ).use { cursor ->
+            if (cursor.moveToFirst()) cursor.getNullableLong(0)?.let(Instant::ofEpochMilli) else null
+        }
+        return MembershipChronology.withdrawalPredatesRosterPresence(
+            withdrewAt = occurredAt,
+            latestRosterPresenceAt = latestRosterPresenceAt,
         )
     }
 
@@ -1585,7 +1673,7 @@ class PlatoonDatabase(context: Context) :
         }
     }
 
-    private fun ensureInitialRosterTenure(
+    private fun ensureRosterActiveTenure(
         db: SQLiteDatabase,
         uid: Long,
         source: EvidenceSource,
@@ -1980,6 +2068,84 @@ class PlatoonDatabase(context: Context) :
                         timeKnown = true,
                     )
                 },
+            )
+        }
+    }
+
+    private fun backfillManualCalendarDates(db: SQLiteDatabase, zoneId: ZoneId) {
+        val tenures = db.rawQuery(
+            """
+            SELECT id, joined_at, left_at, joined_source, left_source
+            FROM tenures
+            WHERE (joined_source = ? AND joined_at IS NOT NULL)
+               OR (left_source = ? AND left_at IS NOT NULL)
+            """.trimIndent(),
+            arrayOf(EvidenceSource.MANUAL.name, EvidenceSource.MANUAL.name),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        ManualBoundaryDateBackfill(
+                            id = cursor.getLong(0),
+                            joinedAtMillis = cursor.getNullableLong(1),
+                            leftAtMillis = cursor.getNullableLong(2),
+                            joinedIsManual = cursor.getString(3) == EvidenceSource.MANUAL.name,
+                            leftIsManual =
+                                cursor.getNullableString(4) == EvidenceSource.MANUAL.name,
+                        ),
+                    )
+                }
+            }
+        }
+        tenures.forEach { tenure ->
+            db.update(
+                "tenures",
+                ContentValues().apply {
+                    if (tenure.joinedIsManual && tenure.joinedAtMillis != null) {
+                        put(
+                            "joined_date",
+                            migrationCalendarDate(tenure.joinedAtMillis, zoneId).toEpochDay(),
+                        )
+                        put("joined_time_known", 1)
+                    }
+                    if (tenure.leftIsManual && tenure.leftAtMillis != null) {
+                        put(
+                            "left_date",
+                            migrationCalendarDate(tenure.leftAtMillis, zoneId).toEpochDay(),
+                        )
+                        put("left_time_known", 1)
+                    }
+                },
+                "id = ?",
+                arrayOf(tenure.id.toString()),
+            )
+        }
+
+        val events = db.rawQuery(
+            """
+            SELECT id, occurred_at
+            FROM member_events
+            WHERE source = ?
+              AND occurred_at IS NOT NULL
+            """.trimIndent(),
+            arrayOf(EvidenceSource.MANUAL.name),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) add(cursor.getLong(0) to cursor.getLong(1))
+            }
+        }
+        events.forEach { (id, occurredAtMillis) ->
+            db.update(
+                "member_events",
+                ContentValues().apply {
+                    put(
+                        "event_date",
+                        migrationCalendarDate(occurredAtMillis, zoneId).toEpochDay(),
+                    )
+                    put("time_known", 1)
+                },
+                "id = ?",
+                arrayOf(id.toString()),
             )
         }
     }
@@ -2456,6 +2622,14 @@ class PlatoonDatabase(context: Context) :
         val uid: Long,
         val joinedAt: Instant?,
         val withdrewAt: Instant?,
+    )
+
+    private data class ManualBoundaryDateBackfill(
+        val id: Long,
+        val joinedAtMillis: Long?,
+        val leftAtMillis: Long?,
+        val joinedIsManual: Boolean,
+        val leftIsManual: Boolean,
     )
 
     companion object {

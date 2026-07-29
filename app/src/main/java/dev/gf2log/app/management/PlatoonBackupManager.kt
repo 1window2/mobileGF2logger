@@ -87,8 +87,8 @@ class PlatoonBackupManager(context: Context) {
             validateDatabase(stagedDatabase)
             PlatoonRepository.withExclusiveDatabase {
                 replaceDatabase(stagedDatabase)
+                PlatoonRepository.markLegacyImportComplete(appContext)
             }
-            PlatoonRepository.markLegacyImportComplete(appContext)
         } finally {
             stagedDatabase.delete()
         }

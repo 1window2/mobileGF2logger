@@ -84,9 +84,14 @@ class PlatoonRepository(context: Context) {
         )
     }
 
-    fun importLegacyCsvFiles(directory: File): ImportResult {
+    fun importLegacyCsvFiles(directory: File): ImportResult = access { database ->
         if (migrationPreferences.getBoolean(LEGACY_IMPORT_COMPLETE, false)) {
-            return ImportResult(alreadyComplete = true, imported = 0, skipped = 0, invalid = 0)
+            return@access ImportResult(
+                alreadyComplete = true,
+                imported = 0,
+                skipped = 0,
+                invalid = 0,
+            )
         }
 
         var imported = 0
@@ -106,22 +111,24 @@ class PlatoonRepository(context: Context) {
                     return@forEach
                 }
 
-                val result = access { database ->
-                    database.ingestSnapshot(
-                        PlatoonSnapshot(
-                            id = 0,
-                            capturedAt = capturedAt,
-                            members = parsed.members.map(GuildMember::toSnapshotMember),
-                            sourceFile = file.name,
-                        ),
-                        EvidenceSource.LEGACY_IMPORT,
-                    )
-                }
+                val result = database.ingestSnapshot(
+                    PlatoonSnapshot(
+                        id = 0,
+                        capturedAt = capturedAt,
+                        members = parsed.members.map(GuildMember::toSnapshotMember),
+                        sourceFile = file.name,
+                    ),
+                    EvidenceSource.LEGACY_IMPORT,
+                )
                 if (result.duplicate) skipped += 1 else imported += 1
             }
 
-        migrationPreferences.edit().putBoolean(LEGACY_IMPORT_COMPLETE, true).apply()
-        return ImportResult(
+        check(
+            migrationPreferences.edit()
+                .putBoolean(LEGACY_IMPORT_COMPLETE, true)
+                .commit(),
+        ) { "Failed to persist legacy import completion" }
+        ImportResult(
             alreadyComplete = false,
             imported = imported,
             skipped = skipped,
@@ -230,10 +237,12 @@ class PlatoonRepository(context: Context) {
             }
 
         internal fun markLegacyImportComplete(context: Context) {
-            context.applicationContext.getSharedPreferences(
-                MIGRATION_PREFERENCES,
-                Context.MODE_PRIVATE,
-            ).edit().putBoolean(LEGACY_IMPORT_COMPLETE, true).apply()
+            check(
+                context.applicationContext.getSharedPreferences(
+                    MIGRATION_PREFERENCES,
+                    Context.MODE_PRIVATE,
+                ).edit().putBoolean(LEGACY_IMPORT_COMPLETE, true).commit(),
+            ) { "Failed to persist legacy import completion" }
         }
     }
 }

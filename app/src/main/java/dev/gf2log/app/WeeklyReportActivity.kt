@@ -31,6 +31,7 @@ import dev.gf2log.app.management.PlatoonPeriods
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.MemberEvent
 import dev.gf2log.app.management.MemberEventType
+import dev.gf2log.app.management.EvidenceSource
 import dev.gf2log.app.management.DailyEvidence
 import dev.gf2log.app.management.WeeklyCellOverride
 import dev.gf2log.app.management.WeeklyNote
@@ -72,18 +73,27 @@ class WeeklyReportActivity : LocalizedActivity() {
         body.removeAllViews()
         val zone = ZoneId.systemDefault()
         val periodStart = PlatoonPeriods.weekStart(referenceDay)
+        val periodStartInstant = PlatoonPeriods.periodStartInstant(periodStart, zone)
+        val periodEndInstant = PlatoonPeriods.periodStartInstant(periodStart.plusDays(7), zone)
         val report = WeeklyReportBuilder.build(
             referenceDay = referenceDay,
             zoneId = zone,
             snapshots = repository.listSnapshots(1000),
             overrides = repository.listWeeklyOverrides(periodStart.toEpochDay()),
+            dailyPatrolFacts = repository.listDailyPatrolFacts(
+                periodStartInstant,
+                periodEndInstant,
+            ),
         )
         val notes = repository.listWeeklyNotes(report.periodStart.toEpochDay())
             .filterNot(WeeklyNote::isAutomatic)
         val events = repository.listEvents(
-            PlatoonPeriods.periodStartInstant(report.periodStart, zone),
-            PlatoonPeriods.periodStartInstant(report.periodEnd.plusDays(1), zone),
-        ).filter { it.type in MEMBERSHIP_EVENT_TYPES }
+            periodStartInstant,
+            periodEndInstant,
+        ).filter {
+            it.type in MEMBERSHIP_EVENT_TYPES &&
+                it.source in DISPLAYED_MEMBERSHIP_EVENT_SOURCES
+        }
         val cutlines = WeeklyCutlinePreferences(this).read()
         val isEditing = editingPeriodStart == report.periodStart
 
@@ -547,13 +557,13 @@ class WeeklyReportActivity : LocalizedActivity() {
         ),
         login = metricText(
             getString(R.string.login_short),
-            lowerBound(member.loginDays),
-            !incomplete && cutlines.belowWeeklyLoginDays(member.loginDays),
+            member.loginDays?.let(::lowerBound) ?: "?",
+            !incomplete && member.loginDays?.let(cutlines::belowWeeklyLoginDays) == true,
         ),
         patrol = metricText(
             getString(R.string.patrol_short),
-            lowerBound(member.patrolDays),
-            !incomplete && cutlines.belowWeeklyPatrolDays(member.patrolDays),
+            member.patrolDays?.let(::lowerBound) ?: "?",
+            !incomplete && member.patrolDays?.let(cutlines::belowWeeklyPatrolDays) == true,
         ),
     )
     }
@@ -806,6 +816,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                         getString(R.string.join_label),
                         joins,
                         namesByUid,
+                        zoneId,
                     ),
                     LinearLayout.LayoutParams(0, wrap(), 1f).apply {
                         marginEnd = dp(4)
@@ -816,6 +827,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                         getString(R.string.withdraw_label),
                         withdrawals,
                         namesByUid,
+                        zoneId,
                     ),
                     LinearLayout.LayoutParams(0, wrap(), 1f).apply {
                         marginStart = dp(4)
@@ -829,6 +841,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         label: String,
         events: List<MemberEvent>,
         namesByUid: Map<Long, String>,
+        zoneId: ZoneId,
     ) = TextView(this).apply {
         text = buildString {
             append(label)
@@ -839,9 +852,17 @@ class WeeklyReportActivity : LocalizedActivity() {
                 append(
                     events.joinToString(", ") { event ->
                         val eventName = event.note.ifBlank { namesByUid[event.uid].orEmpty() }
-                        eventName.takeIf { it.isNotBlank() }
+                        val identity = eventName.takeIf { it.isNotBlank() }
                             ?.let { "$it (#${event.uid})" }
                             ?: "#${event.uid}"
+                        val time = EVENT_TIME.format(
+                            (event.occurredAt ?: event.observedAt).atZone(zoneId),
+                        )
+                        if (event.occurredAt == null) {
+                            "$identity ${getString(R.string.observed_at_time, time)}"
+                        } else {
+                            "$identity $time"
+                        }
                     },
                 )
             }
@@ -987,6 +1008,7 @@ class WeeklyReportActivity : LocalizedActivity() {
     companion object {
         private val DATE = DateTimeFormatter.ofPattern("yy/MM/dd")
         private val DAY = DateTimeFormatter.ofPattern("MM/dd")
+        private val EVENT_TIME = DateTimeFormatter.ofPattern("HH:mm")
         private val FILE_DATE = DateTimeFormatter.BASIC_ISO_DATE
         private const val REQUEST_EXPORT_WEEKLY = 201
         private const val HEADER_HEIGHT = 40
@@ -1004,6 +1026,12 @@ class WeeklyReportActivity : LocalizedActivity() {
             MemberEventType.REJOINED,
             MemberEventType.LEFT,
             MemberEventType.REMOVED,
+        )
+        private val DISPLAYED_MEMBERSHIP_EVENT_SOURCES = setOf(
+            EvidenceSource.SNAPSHOT,
+            EvidenceSource.LEGACY_IMPORT,
+            EvidenceSource.GAME_UPDATES,
+            EvidenceSource.MANUAL,
         )
         private val SUCCESS_GREEN = Color.rgb(45, 170, 75)
         private val FAILURE_RED = Color.rgb(215, 60, 55)

@@ -356,6 +356,70 @@ class WeeklyReportBuilderTest {
         assertEquals(42L, report.members.single().totalMerit)
     }
 
+    @Test
+    fun exactPatrolActivityCompletesStandardDayWithoutAClosingSnapshot() {
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 28),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers(
+                    "2026-07-28T03:00:00Z",
+                    member(uid = 1, name = "Patrol", weekly = 90, score = 0),
+                ),
+            ),
+            dailyPatrolFacts = listOf(
+                DailyPatrolFact(1, Instant.parse("2026-07-28T00:00:00Z")),
+            ),
+        )
+
+        val tuesday = report.members.single().days[2]
+        assertEquals(90L, tuesday.meritDelta)
+        assertEquals(true, tuesday.attended)
+        assertEquals(true, tuesday.dailyPatrol)
+        assertEquals(DailyEvidence.ATTRIBUTED, tuesday.evidence)
+    }
+
+    @Test
+    fun patrolActivityDoesNotFabricateGunsmokeScoreOrAttempts() {
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 22),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers(
+                    "2026-07-22T03:00:00Z",
+                    member(uid = 1, name = "Patrol", weekly = 90, score = 0),
+                ),
+            ),
+            dailyPatrolFacts = listOf(
+                DailyPatrolFact(1, Instant.parse("2026-07-22T00:00:00Z")),
+            ),
+        )
+
+        val wednesday = report.members.single().days[3]
+        assertEquals(90L, wednesday.meritDelta)
+        assertNull(wednesday.scoreDelta)
+        assertNull(wednesday.attempts)
+        assertEquals(true, wednesday.dailyPatrol)
+        assertEquals(DailyEvidence.PARTIAL_DAY, wednesday.evidence)
+    }
+
+    @Test
+    fun skippedGunsmokeDayKeepsWeeklyLoginAndPatrolTotalsUnknown() {
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 22),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshot("2026-07-19T20:00:00Z", weekly = 90, score = 100),
+                snapshot("2026-07-21T19:59:00Z", weekly = 270, score = 300),
+            ),
+        )
+
+        val member = report.members.single()
+        assertNull(member.loginDays)
+        assertNull(member.patrolDays)
+        assertTrue(member.hasUnknownGunsmokeActivityTotals)
+    }
+
     private fun snapshot(time: String, weekly: Long, score: Long) =
         PlatoonSnapshot(
             id = 0,

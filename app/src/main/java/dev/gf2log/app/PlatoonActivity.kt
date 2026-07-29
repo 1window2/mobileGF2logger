@@ -1,9 +1,11 @@
 package dev.gf2log.app
 
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Typeface
 import android.os.Bundle
 import android.text.Editable
+import android.text.InputType
 import android.text.TextWatcher
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
@@ -81,6 +83,10 @@ class PlatoonActivity : LocalizedActivity() {
             addView(Button(context).apply {
                 text = getString(R.string.export_selected_members)
                 setOnClickListener { exportSelectedMembers() }
+            }, matchWidth())
+            addView(Button(context).apply {
+                text = getString(R.string.add_withdrawn_member)
+                setOnClickListener { showAddWithdrawnMemberDialog() }
             }, matchWidth())
             searchInput = EditText(context).apply {
                 hint = getString(R.string.search_members)
@@ -253,6 +259,72 @@ class PlatoonActivity : LocalizedActivity() {
             .setType("text/csv")
             .putExtra(Intent.EXTRA_TITLE, "GF2logger-members.csv")
         startActivityForResult(intent, REQUEST_EXPORT_MEMBERS)
+    }
+
+    private fun showAddWithdrawnMemberDialog() {
+        val uidInput = EditText(this).apply {
+            hint = getString(R.string.uid)
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setSingleLine(true)
+        }
+        val nicknameInput = EditText(this).apply {
+            hint = getString(R.string.member_nickname)
+            setSingleLine(true)
+        }
+        val joined = DateTimePickerInput(this, getString(R.string.join_field))
+        val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_field))
+        val noteInput = EditText(this).apply {
+            hint = getString(R.string.membership_note_hint)
+            minLines = 2
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), 0, dp(16), 0)
+            addView(uidInput, matchWidth())
+            addView(nicknameInput, matchWidth())
+            addView(joined, matchWidth())
+            addView(withdrew, matchWidth())
+            addView(noteInput, matchWidth())
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.add_withdrawn_member)
+            .setView(content)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.add, null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val uid = uidInput.text.toString().trim().toLongOrNull()
+                val nickname = nicknameInput.text.toString().trim()
+                val joinedAt = joined.instant
+                val withdrewAt = withdrew.instant
+                val validRange = joinedAt == null ||
+                    withdrewAt == null ||
+                    !withdrewAt.isBefore(joinedAt)
+                val saved = uid != null && uid > 0 && nickname.isNotBlank() && validRange &&
+                    runCatching {
+                        repository.addWithdrawnMember(
+                            uid,
+                            nickname,
+                            joinedAt,
+                            withdrewAt,
+                            noteInput.text.toString(),
+                        )
+                    }.getOrDefault(false)
+                if (saved) {
+                    dialog.dismiss()
+                    refresh()
+                    Toast.makeText(this, R.string.saved, Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(
+                        this,
+                        R.string.invalid_withdrawn_member,
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun spinner(items: List<String>) = Spinner(this).apply {

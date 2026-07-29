@@ -56,6 +56,35 @@ data class MemberEvent(
     val note: String,
 )
 
+data class PlatoonActivityFact(
+    val id: Long,
+    val occurredAt: Instant,
+    val actionId: Long,
+    val kind: Long,
+    val memberName: String,
+    val capturedAt: Instant,
+    val resolvedUid: Long?,
+    val resolution: ActivityResolution,
+)
+
+data class PlatoonActivityObservation(
+    val occurredAt: Instant,
+    val actionId: Long,
+    val kind: Long,
+    val memberName: String,
+)
+
+data class DailyPatrolFact(
+    val uid: Long,
+    val occurredAt: Instant,
+)
+
+enum class ActivityResolution {
+    UNRESOLVED,
+    UNIQUE_ROSTER_NAME,
+    MEMBERSHIP_CORRELATION,
+}
+
 enum class MemberEventType {
     JOINED,
     REJOINED,

@@ -16,6 +16,7 @@ local.properties
 *.log
 *.jks
 *.keystore
+*.gf2backup
 keystore.properties
 .tmp-*/
 .tmp-*

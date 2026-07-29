@@ -20,7 +20,26 @@ All notable changes to mobileGF2logger are documented here.
   events.
 - Use locale-independent identity keys when correlating roster names.
 - Localize Activity and Updates packet-history badges in Korean.
+- Require dates but allow unknown times for manually entered membership
+  boundaries, displaying date-only tenure summaries and `??:??` in weekly
+  Join/Withdraw rows.
+- Keep packet-derived membership boundaries immutable without locking the
+  editable manual boundary or private note on the same tenure.
+- Hide internal evidence-precision labels from membership-history buttons.
+- Place Join/Withdraw events by their device-local calendar date while merit
+  calculations continue to use the 05:00 game-day boundary.
 - Allow enough one-shot navigation time to open both Members and Updates.
+- Recreate the bounded parser worker for each capture session and quarantine a
+  TCP flow after queue overflow instead of parsing later chunks out of sequence.
+- Keep native TUN I/O non-blocking so stopping capture cannot wait on a blocked
+  device write.
+- Load weekly snapshots with one period-bounded query instead of an N+1 query
+  loop and an arbitrary 1,000-snapshot history cap.
+- Serialize database maintenance against repository access, validate backup
+  integrity and required schema, and retain rollback data until a restored
+  database opens successfully.
+- Run exports and management backup operations away from the Android main
+  thread.
 - Project weekly rows from the latest complete active roster so withdrawn
   members disappear immediately while their immutable Join/Withdraw records
   remain in the weekly event section.

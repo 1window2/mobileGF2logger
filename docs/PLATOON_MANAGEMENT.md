@@ -65,12 +65,14 @@ resets on Monday while a Gunsmoke week begins on Sunday.
   capture instant.
 - Every supplied Platoon Activity entry is stored as an immutable timestamped
   fact. Action `802001` supplies exact Daily Patrol evidence.
+- Platoon Updates payload 21960 supplies UID-safe exact Join, Withdraw, and
+  Remove timestamps.
 - Non-Gunsmoke weeks show daily Total Merit changes, inferred attendance,
   activity-backed Daily Patrol completion, and notes.
 - Gunsmoke weeks additionally show daily score changes, inferred participation
   counts, cumulative Gunsmoke score, participation totals, and rankings.
 - The separate Join/Withdraw section combines UID-safe 21917 roster changes,
-  exact 21935-linked timestamps, and manually entered membership history.
+  exact 21960 Updates timestamps, and manually entered membership history.
   Snapshot-only boundaries are labelled with their observation time instead of
   being presented as exact event times.
 - Calculated values retain an evidence state: exact, inferred, ambiguous, or

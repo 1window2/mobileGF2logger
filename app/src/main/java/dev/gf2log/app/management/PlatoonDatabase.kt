@@ -1076,9 +1076,13 @@ class PlatoonDatabase(context: Context) :
             true,
             "platoon_activity",
             arrayOf("resolved_uid", "occurred_at"),
-            "action_id = ? AND resolved_uid IS NOT NULL AND occurred_at >= ? AND occurred_at < ?",
+            """
+                action_id = ? AND resolved_uid IS NOT NULL
+                AND resolution = ? AND occurred_at >= ? AND occurred_at < ?
+            """.trimIndent(),
             arrayOf(
                 DAILY_PATROL_REWARD_ACTION_ID.toString(),
+                ActivityResolution.EXACT_UPDATE.name,
                 from.toEpochMilli().toString(),
                 until.toEpochMilli().toString(),
             ),

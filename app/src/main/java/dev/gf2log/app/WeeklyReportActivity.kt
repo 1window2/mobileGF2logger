@@ -797,9 +797,23 @@ class WeeklyReportActivity : LocalizedActivity() {
         }, matchWidth())
         val namesByUid = repository.listMemberStatuses().associate { it.uid to it.name }
         report.days.forEach { day ->
-            val dayEvents = events.filter { event ->
-                PlatoonPeriods.gameDay(event.occurredAt ?: event.observedAt, zoneId) == day
-            }
+            val dayEvents = events
+                .filter { event ->
+                    PlatoonPeriods.gameDay(event.occurredAt ?: event.observedAt, zoneId) == day
+                }
+                .groupBy { event ->
+                    event.uid to when (event.type) {
+                        MemberEventType.JOINED, MemberEventType.REJOINED -> MemberEventType.JOINED
+                        MemberEventType.LEFT, MemberEventType.REMOVED -> MemberEventType.LEFT
+                        else -> event.type
+                    }
+                }
+                .values
+                .map { candidates ->
+                    candidates.maxWith(
+                        compareBy<MemberEvent>({ membershipEvidencePriority(it.source) }, { it.id }),
+                    )
+                }
             if (dayEvents.isEmpty()) return@forEach
             body.addView(TextView(this).apply {
                 text = day.format(DATE)
@@ -851,7 +865,8 @@ class WeeklyReportActivity : LocalizedActivity() {
             } else {
                 append(
                     events.joinToString(", ") { event ->
-                        val eventName = event.note.ifBlank { namesByUid[event.uid].orEmpty() }
+                        val eventName = namesByUid[event.uid].orEmpty()
+                            .ifBlank { event.note }
                         val identity = eventName.takeIf { it.isNotBlank() }
                             ?.let { "$it (#${event.uid})" }
                             ?: "#${event.uid}"
@@ -1003,6 +1018,12 @@ class WeeklyReportActivity : LocalizedActivity() {
     private fun membershipEventBackground() = GradientDrawable().apply {
         setColor(MEMBERSHIP_EVENT_COLOR)
         cornerRadius = dp(8).toFloat()
+    }
+
+    private fun membershipEvidencePriority(source: EvidenceSource): Int = when (source) {
+        EvidenceSource.GAME_UPDATES -> 3
+        EvidenceSource.MANUAL -> 2
+        EvidenceSource.SNAPSHOT, EvidenceSource.LEGACY_IMPORT -> 1
     }
 
     companion object {

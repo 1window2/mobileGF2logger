@@ -6,10 +6,16 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import java.time.Instant
+import java.time.LocalDate
 import java.util.Locale
 
 class PlatoonDatabase(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, DATABASE_NAME, null, DATABASE_VERSION) {
+    SQLiteOpenHelper(
+        context.applicationContext,
+        PlatoonSchema.DATABASE_NAME,
+        null,
+        PlatoonSchema.CURRENT_VERSION,
+    ) {
 
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
@@ -65,6 +71,10 @@ class PlatoonDatabase(context: Context) :
                 uid INTEGER NOT NULL REFERENCES members(uid),
                 joined_at INTEGER,
                 left_at INTEGER,
+                joined_date INTEGER,
+                left_date INTEGER,
+                joined_time_known INTEGER NOT NULL DEFAULT 1,
+                left_time_known INTEGER,
                 joined_precision TEXT NOT NULL,
                 left_precision TEXT,
                 joined_source TEXT NOT NULL,
@@ -82,6 +92,8 @@ class PlatoonDatabase(context: Context) :
                 tenure_id INTEGER REFERENCES tenures(id),
                 event_type TEXT NOT NULL,
                 occurred_at INTEGER,
+                event_date INTEGER,
+                time_known INTEGER NOT NULL DEFAULT 1,
                 observed_at INTEGER NOT NULL,
                 precision TEXT NOT NULL,
                 source TEXT NOT NULL,
@@ -107,6 +119,18 @@ class PlatoonDatabase(context: Context) :
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 9) {
+            db.execSQL("ALTER TABLE tenures ADD COLUMN joined_date INTEGER")
+            db.execSQL("ALTER TABLE tenures ADD COLUMN left_date INTEGER")
+            db.execSQL(
+                "ALTER TABLE tenures ADD COLUMN joined_time_known INTEGER NOT NULL DEFAULT 1",
+            )
+            db.execSQL("ALTER TABLE tenures ADD COLUMN left_time_known INTEGER")
+            db.execSQL("ALTER TABLE member_events ADD COLUMN event_date INTEGER")
+            db.execSQL(
+                "ALTER TABLE member_events ADD COLUMN time_known INTEGER NOT NULL DEFAULT 1",
+            )
+        }
         if (oldVersion < 2) {
             val correctedPeriods = mutableListOf<Pair<Long, Long>>()
             db.query(
@@ -183,7 +207,7 @@ class PlatoonDatabase(context: Context) :
     fun ingestSnapshot(
         snapshot: PlatoonSnapshot,
         source: EvidenceSource,
-    ): IngestResult {
+    ): SnapshotIngestResult {
         require(snapshot.members.isNotEmpty()) { "A Platoon snapshot cannot be empty" }
         require(snapshot.members.map(SnapshotMember::uid).distinct().size == snapshot.members.size) {
             "A Platoon snapshot cannot contain duplicate UIDs"
@@ -193,7 +217,7 @@ class PlatoonDatabase(context: Context) :
         db.beginTransaction()
         try {
             if (snapshot.sourceFile != null && sourceFileExists(db, snapshot.sourceFile)) {
-                return IngestResult.duplicate()
+                return SnapshotIngestResult.duplicate()
             }
 
             val hasPriorSnapshot = count(db, "snapshots") > 0
@@ -338,7 +362,7 @@ class PlatoonDatabase(context: Context) :
 
             resolveUnresolvedActivityUids(db)
             db.setTransactionSuccessful()
-            return IngestResult(
+            return SnapshotIngestResult(
                 snapshotId = snapshotId,
                 duplicate = false,
                 initialRoster = changes.initialRoster,
@@ -825,19 +849,17 @@ class PlatoonDatabase(context: Context) :
     fun addWithdrawnMember(
         uid: Long,
         name: String,
-        joinedAt: Instant?,
-        withdrewAt: Instant?,
+        joined: MembershipBoundaryValue,
+        withdrew: MembershipBoundaryValue,
         note: String,
     ): Boolean {
         require(uid > 0)
         require(name.isNotBlank())
-        require(joinedAt == null || withdrewAt == null || !withdrewAt.isBefore(joinedAt))
+        require(isValidMembershipRange(joined, withdrew))
         val db = writableDatabase
         db.beginTransaction()
         try {
             if (memberExists(db, uid)) return false
-            val firstSeen = joinedAt ?: withdrewAt ?: Instant.now()
-            val lastSeen = withdrewAt ?: firstSeen
             db.insertOrThrow(
                 "members",
                 null,
@@ -847,13 +869,13 @@ class PlatoonDatabase(context: Context) :
                     put("custom_name", name.trim())
                     put("current_level", 0)
                     put("is_active", 0)
-                    put("first_seen_at", firstSeen.toEpochMilli())
-                    put("last_seen_at", lastSeen.toEpochMilli())
+                    put("first_seen_at", joined.instant.toEpochMilli())
+                    put("last_seen_at", withdrew.instant.toEpochMilli())
                     put("note", "")
                 },
             )
-            val tenureId = insertManualTenure(db, uid, joinedAt, withdrewAt, note)
-            replaceManualTenureEvents(db, tenureId, uid, name.trim(), joinedAt, withdrewAt)
+            val tenureId = insertManualTenure(db, uid, joined, withdrew, note)
+            replaceManualTenureEvents(db, tenureId, uid, name.trim(), joined, withdrew)
             db.setTransactionSuccessful()
             return true
         } finally {
@@ -864,17 +886,17 @@ class PlatoonDatabase(context: Context) :
     @Synchronized
     fun addTenure(
         uid: Long,
-        joinedAt: Instant?,
-        withdrewAt: Instant?,
+        joined: MembershipBoundaryValue,
+        withdrew: MembershipBoundaryValue?,
         note: String,
     ): Boolean {
-        require(joinedAt == null || withdrewAt == null || !withdrewAt.isBefore(joinedAt))
+        require(isValidMembershipRange(joined, withdrew))
         val db = writableDatabase
         db.beginTransaction()
         try {
             val memberName = memberName(db, uid) ?: return false
-            val tenureId = insertManualTenure(db, uid, joinedAt, withdrewAt, note)
-            replaceManualTenureEvents(db, tenureId, uid, memberName, joinedAt, withdrewAt)
+            val tenureId = insertManualTenure(db, uid, joined, withdrew, note)
+            replaceManualTenureEvents(db, tenureId, uid, memberName, joined, withdrew)
             db.setTransactionSuccessful()
             return true
         } finally {
@@ -885,32 +907,47 @@ class PlatoonDatabase(context: Context) :
     @Synchronized
     fun listSnapshots(limit: Int = 100): List<PlatoonSnapshot> {
         require(limit in 1..1000)
-        val db = readableDatabase
-        return db.query(
-            "snapshots",
-            SNAPSHOT_COLUMNS,
-            null,
-            null,
-            null,
-            null,
-            "captured_at DESC, id DESC",
-            limit.toString(),
-        ).use { cursor ->
-            buildList {
-                while (cursor.moveToNext()) {
-                    val id = cursor.getLong(0)
-                    add(
-                        PlatoonSnapshot(
-                            id = id,
-                            capturedAt = Instant.ofEpochMilli(cursor.getLong(1)),
-                            sourceFile = cursor.getNullableString(2),
-                            gameVersion = cursor.getNullableString(3),
-                            members = readSnapshotMembers(db, id),
-                        ),
-                    )
-                }
-            }
-        }
+        return querySnapshots(
+            selectedSnapshotsSql =
+                """
+                SELECT id, captured_at, source_file, game_version
+                FROM snapshots
+                ORDER BY captured_at DESC, id DESC
+                LIMIT ?
+                """.trimIndent(),
+            selectionArgs = arrayOf(limit.toString()),
+        )
+    }
+
+    /**
+     * Loads only the snapshots capable of affecting a reporting period plus
+     * the nearest prior roster/baseline. This avoids an arbitrary historical
+     * cap and keeps weekly rendering independent of database growth.
+     */
+    @Synchronized
+    fun listSnapshotsForPeriod(from: Instant, until: Instant): List<PlatoonSnapshot> {
+        require(until.isAfter(from))
+        return querySnapshots(
+            selectedSnapshotsSql =
+                """
+                SELECT id, captured_at, source_file, game_version
+                FROM snapshots
+                WHERE (captured_at >= ? AND captured_at < ?)
+                   OR id = (
+                       SELECT id
+                       FROM snapshots
+                       WHERE captured_at < ?
+                       ORDER BY captured_at DESC, id DESC
+                       LIMIT 1
+                   )
+                ORDER BY captured_at DESC, id DESC
+                """.trimIndent(),
+            selectionArgs = arrayOf(
+                from.toEpochMilli().toString(),
+                until.toEpochMilli().toString(),
+                from.toEpochMilli().toString(),
+            ),
+        )
     }
 
     @Synchronized
@@ -947,14 +984,36 @@ class PlatoonDatabase(context: Context) :
     }
 
     @Synchronized
-    fun listEvents(from: Instant, until: Instant): List<MemberEvent> {
+    fun listEvents(
+        from: Instant,
+        until: Instant,
+        fromDate: LocalDate,
+        untilDate: LocalDate,
+    ): List<MemberEvent> {
         require(!until.isBefore(from))
+        require(!untilDate.isBefore(fromDate))
         return readableDatabase.query(
             "member_events",
             EVENT_COLUMNS,
-            "COALESCE(occurred_at, observed_at) >= CAST(? AS INTEGER) AND " +
-                "COALESCE(occurred_at, observed_at) < CAST(? AS INTEGER)",
-            arrayOf(from.toEpochMilli().toString(), until.toEpochMilli().toString()),
+            """
+            (
+                event_date IS NOT NULL
+                AND event_date >= CAST(? AS INTEGER)
+                AND event_date < CAST(? AS INTEGER)
+            )
+            OR
+            (
+                event_date IS NULL
+                AND COALESCE(occurred_at, observed_at) >= CAST(? AS INTEGER)
+                AND COALESCE(occurred_at, observed_at) < CAST(? AS INTEGER)
+            )
+            """.trimIndent(),
+            arrayOf(
+                fromDate.toEpochDay().toString(),
+                untilDate.toEpochDay().toString(),
+                from.toEpochMilli().toString(),
+                until.toEpochMilli().toString(),
+            ),
             null,
             null,
             "COALESCE(occurred_at, observed_at), id",
@@ -978,33 +1037,43 @@ class PlatoonDatabase(context: Context) :
     @Synchronized
     fun updateTenure(
         tenureId: Long,
-        joinedAt: Instant?,
-        leftAt: Instant?,
+        joined: MembershipBoundaryValue,
+        left: MembershipBoundaryValue?,
         note: String,
     ): Boolean {
-        require(joinedAt == null || leftAt == null || !leftAt.isBefore(joinedAt))
         val db = writableDatabase
         db.beginTransaction()
         try {
             val tenure = readTenureForUpdate(db, tenureId) ?: return false
-            if (tenure.joinedSource == EvidenceSource.GAME_UPDATES ||
-                tenure.leftSource == EvidenceSource.GAME_UPDATES
-            ) {
-                return false
+            val effectiveJoined = if (tenure.joinedSource.isImmutableMembershipBoundary()) {
+                tenure.joined
+            } else {
+                joined
+            } ?: return false
+            val effectiveLeft = if (tenure.leftSource?.isImmutableMembershipBoundary() == true) {
+                tenure.left
+            } else {
+                left
             }
+            require(isValidMembershipRange(effectiveJoined, effectiveLeft))
             val updated = db.update(
                 "tenures",
                 ContentValues().apply {
-                    putNullableLong("joined_at", joinedAt?.toEpochMilli())
-                    putNullableLong("left_at", leftAt?.toEpochMilli())
-                    put("joined_precision", EvidencePrecision.MANUAL.name)
-                    put("joined_source", EvidenceSource.MANUAL.name)
-                    if (leftAt == null) {
-                        putNull("left_precision")
-                        putNull("left_source")
-                    } else {
-                        put("left_precision", EvidencePrecision.MANUAL.name)
-                        put("left_source", EvidenceSource.MANUAL.name)
+                    if (!tenure.joinedSource.isImmutableMembershipBoundary()) {
+                        putMembershipBoundary("joined", joined)
+                        put("joined_precision", EvidencePrecision.MANUAL.name)
+                        put("joined_source", EvidenceSource.MANUAL.name)
+                    }
+                    if (tenure.leftSource?.isImmutableMembershipBoundary() != true) {
+                        if (left == null) {
+                            clearMembershipBoundary("left")
+                            putNull("left_precision")
+                            putNull("left_source")
+                        } else {
+                            putMembershipBoundary("left", left)
+                            put("left_precision", EvidencePrecision.MANUAL.name)
+                            put("left_source", EvidenceSource.MANUAL.name)
+                        }
                     }
                     put("note", note.trim())
                 },
@@ -1017,8 +1086,12 @@ class PlatoonDatabase(context: Context) :
                     tenureId,
                     tenure.uid,
                     memberName(db, tenure.uid).orEmpty(),
-                    joinedAt,
-                    leftAt,
+                    if (tenure.joinedSource.isImmutableMembershipBoundary()) {
+                        null
+                    } else {
+                        joined
+                    },
+                    if (tenure.leftSource?.isImmutableMembershipBoundary() == true) null else left,
                 )
             }
             db.setTransactionSuccessful()
@@ -1581,11 +1654,15 @@ class PlatoonDatabase(context: Context) :
             when (boundary) {
                 MembershipBoundary.JOIN -> {
                     put("joined_at", occurredAt.toEpochMilli())
+                    putNull("joined_date")
+                    put("joined_time_known", 1)
                     put("joined_precision", EvidencePrecision.EXACT.name)
                     put("joined_source", EvidenceSource.GAME_UPDATES.name)
                 }
                 MembershipBoundary.WITHDRAW -> {
                     put("left_at", occurredAt.toEpochMilli())
+                    putNull("left_date")
+                    put("left_time_known", 1)
                     put("left_precision", EvidencePrecision.EXACT.name)
                     put("left_source", EvidenceSource.GAME_UPDATES.name)
                 }
@@ -1641,22 +1718,23 @@ class PlatoonDatabase(context: Context) :
     private fun insertManualTenure(
         db: SQLiteDatabase,
         uid: Long,
-        joinedAt: Instant?,
-        withdrewAt: Instant?,
+        joined: MembershipBoundaryValue,
+        withdrew: MembershipBoundaryValue?,
         note: String,
     ): Long = db.insertOrThrow(
         "tenures",
         null,
         ContentValues().apply {
             put("uid", uid)
-            putNullableLong("joined_at", joinedAt?.toEpochMilli())
-            putNullableLong("left_at", withdrewAt?.toEpochMilli())
+            putMembershipBoundary("joined", joined)
             put("joined_precision", EvidencePrecision.MANUAL.name)
             put("joined_source", EvidenceSource.MANUAL.name)
-            if (withdrewAt == null) {
+            if (withdrew == null) {
+                clearMembershipBoundary("left")
                 putNull("left_precision")
                 putNull("left_source")
             } else {
+                putMembershipBoundary("left", withdrew)
                 put("left_precision", EvidencePrecision.MANUAL.name)
                 put("left_source", EvidenceSource.MANUAL.name)
             }
@@ -1669,8 +1747,8 @@ class PlatoonDatabase(context: Context) :
         tenureId: Long,
         uid: Long,
         memberName: String,
-        joinedAt: Instant?,
-        withdrewAt: Instant?,
+        joined: MembershipBoundaryValue?,
+        withdrew: MembershipBoundaryValue?,
     ) {
         db.delete(
             "member_events",
@@ -1678,7 +1756,7 @@ class PlatoonDatabase(context: Context) :
             arrayOf(tenureId.toString(), EvidenceSource.MANUAL.name),
         )
         val observedAt = Instant.now()
-        if (joinedAt != null) {
+        if (joined != null) {
             insertEvent(
                 db = db,
                 uid = uid,
@@ -1687,7 +1765,9 @@ class PlatoonDatabase(context: Context) :
                 } else {
                     MemberEventType.JOINED
                 },
-                occurredAt = joinedAt,
+                occurredAt = joined.instant,
+                eventDate = joined.date,
+                timeKnown = joined.timeKnown,
                 observedAt = observedAt,
                 precision = EvidencePrecision.MANUAL,
                 source = EvidenceSource.MANUAL,
@@ -1695,12 +1775,14 @@ class PlatoonDatabase(context: Context) :
                 tenureId = tenureId,
             )
         }
-        if (withdrewAt != null) {
+        if (withdrew != null) {
             insertEvent(
                 db = db,
                 uid = uid,
                 type = MemberEventType.LEFT,
-                occurredAt = withdrewAt,
+                occurredAt = withdrew.instant,
+                eventDate = withdrew.date,
+                timeKnown = withdrew.timeKnown,
                 observedAt = observedAt,
                 precision = EvidencePrecision.MANUAL,
                 source = EvidenceSource.MANUAL,
@@ -1739,8 +1821,20 @@ class PlatoonDatabase(context: Context) :
                 tenure.tenureId,
                 tenure.uid,
                 memberName(db, tenure.uid).orEmpty(),
-                tenure.joinedAt,
-                tenure.withdrewAt,
+                tenure.joinedAt?.let {
+                    MembershipBoundaryValue(
+                        date = it.atZone(java.time.ZoneId.systemDefault()).toLocalDate(),
+                        instant = it,
+                        timeKnown = true,
+                    )
+                },
+                tenure.withdrewAt?.let {
+                    MembershipBoundaryValue(
+                        date = it.atZone(java.time.ZoneId.systemDefault()).toLocalDate(),
+                        instant = it,
+                        timeKnown = true,
+                    )
+                },
             )
         }
     }
@@ -1863,7 +1957,8 @@ class PlatoonDatabase(context: Context) :
     private fun readTenureForUpdate(db: SQLiteDatabase, tenureId: Long): TenureForUpdate? =
         db.rawQuery(
             """
-            SELECT uid, joined_source, left_source
+            SELECT uid, joined_at, left_at, joined_date, left_date,
+                   joined_time_known, left_time_known, joined_source, left_source
             FROM tenures
             WHERE id = ?
             """.trimIndent(),
@@ -1874,8 +1969,18 @@ class PlatoonDatabase(context: Context) :
             } else {
                 TenureForUpdate(
                     uid = cursor.getLong(0),
-                    joinedSource = EvidenceSource.valueOf(cursor.getString(1)),
-                    leftSource = cursor.getNullableString(2)?.let(EvidenceSource::valueOf),
+                    joined = cursor.membershipBoundaryValue(
+                        instantIndex = 1,
+                        dateIndex = 3,
+                        timeKnownIndex = 5,
+                    ),
+                    left = cursor.membershipBoundaryValue(
+                        instantIndex = 2,
+                        dateIndex = 4,
+                        timeKnownIndex = 6,
+                    ),
+                    joinedSource = EvidenceSource.valueOf(cursor.getString(7)),
+                    leftSource = cursor.getNullableString(8)?.let(EvidenceSource::valueOf),
                 )
             }
         }
@@ -1961,6 +2066,8 @@ class PlatoonDatabase(context: Context) :
             "tenures",
             ContentValues().apply {
                 put("left_at", leftAt.toEpochMilli())
+                putNull("left_date")
+                put("left_time_known", 1)
                 put("left_precision", precision.name)
                 put("left_source", source.name)
             },
@@ -1975,6 +2082,8 @@ class PlatoonDatabase(context: Context) :
         uid: Long,
         type: MemberEventType,
         occurredAt: Instant?,
+        eventDate: LocalDate? = null,
+        timeKnown: Boolean = true,
         observedAt: Instant,
         precision: EvidencePrecision,
         source: EvidenceSource,
@@ -1988,6 +2097,8 @@ class PlatoonDatabase(context: Context) :
             putNullableLong("tenure_id", tenureId)
             put("event_type", type.name)
             putNullableLong("occurred_at", occurredAt?.toEpochMilli())
+            putNullableLong("event_date", eventDate?.toEpochDay())
+            put("time_known", if (timeKnown) 1 else 0)
             put("observed_at", observedAt.toEpochMilli())
             put("precision", precision.name)
             put("source", source.name)
@@ -2018,33 +2129,47 @@ class PlatoonDatabase(context: Context) :
             }
         }
 
-    private fun readSnapshotMembers(db: SQLiteDatabase, snapshotId: Long): List<SnapshotMember> =
-        db.query(
-            "snapshot_members",
-            SNAPSHOT_MEMBER_COLUMNS,
-            "snapshot_id = ?",
-            arrayOf(snapshotId.toString()),
-            null,
-            null,
-            "name COLLATE NOCASE, uid",
-        ).use { cursor ->
-            buildList {
-                while (cursor.moveToNext()) {
-                    add(
-                        SnapshotMember(
-                            uid = cursor.getLong(0),
-                            name = cursor.getString(1),
-                            level = cursor.getLong(2),
-                            weeklyMerit = cursor.getLong(3),
-                            totalMerit = cursor.getLong(4),
-                            highScore = cursor.getLong(5),
-                            totalScore = cursor.getLong(6),
-                            lastLogin = cursor.getLong(7),
-                        ),
-                    )
-                }
+    private fun querySnapshots(
+        selectedSnapshotsSql: String,
+        selectionArgs: Array<String>,
+    ): List<PlatoonSnapshot> = readableDatabase.rawQuery(
+        """
+        SELECT selected.id, selected.captured_at, selected.source_file, selected.game_version,
+               member.uid, member.name, member.level, member.weekly_merit,
+               member.total_merit, member.high_score, member.total_score, member.last_login
+        FROM ($selectedSnapshotsSql) AS selected
+        LEFT JOIN snapshot_members AS member ON member.snapshot_id = selected.id
+        ORDER BY selected.captured_at DESC, selected.id DESC,
+                 member.name COLLATE NOCASE, member.uid
+        """.trimIndent(),
+        selectionArgs,
+    ).use { cursor ->
+        val snapshots = linkedMapOf<Long, SnapshotAccumulator>()
+        while (cursor.moveToNext()) {
+            val snapshotId = cursor.getLong(0)
+            val snapshot = snapshots.getOrPut(snapshotId) {
+                SnapshotAccumulator(
+                    id = snapshotId,
+                    capturedAt = Instant.ofEpochMilli(cursor.getLong(1)),
+                    sourceFile = cursor.getNullableString(2),
+                    gameVersion = cursor.getNullableString(3),
+                )
+            }
+            if (!cursor.isNull(4)) {
+                snapshot.members += SnapshotMember(
+                    uid = cursor.getLong(4),
+                    name = cursor.getString(5),
+                    level = cursor.getLong(6),
+                    weeklyMerit = cursor.getLong(7),
+                    totalMerit = cursor.getLong(8),
+                    highScore = cursor.getLong(9),
+                    totalScore = cursor.getLong(10),
+                    lastLogin = cursor.getLong(11),
+                )
             }
         }
+        snapshots.values.map(SnapshotAccumulator::toSnapshot)
+    }
 
     private fun readTenures(db: SQLiteDatabase, uid: Long): List<MembershipTenure> =
         db.query(
@@ -2064,13 +2189,17 @@ class PlatoonDatabase(context: Context) :
                             uid = uid,
                             joinedAt = cursor.getNullableLong(1)?.let(Instant::ofEpochMilli),
                             leftAt = cursor.getNullableLong(2)?.let(Instant::ofEpochMilli),
-                            joinedPrecision = enumValueOf(cursor.getString(3)),
-                            leftPrecision = cursor.getNullableString(4)
+                            joinedDate = cursor.getNullableLong(3)?.let(LocalDate::ofEpochDay),
+                            leftDate = cursor.getNullableLong(4)?.let(LocalDate::ofEpochDay),
+                            joinedTimeKnown = cursor.getInt(5) != 0,
+                            leftTimeKnown = cursor.getNullableInt(6)?.let { it != 0 },
+                            joinedPrecision = enumValueOf(cursor.getString(7)),
+                            leftPrecision = cursor.getNullableString(8)
                                 ?.let(EvidencePrecision::valueOf),
-                            joinedSource = enumValueOf(cursor.getString(5)),
-                            leftSource = cursor.getNullableString(6)
+                            joinedSource = enumValueOf(cursor.getString(9)),
+                            leftSource = cursor.getNullableString(10)
                                 ?.let(EvidenceSource::valueOf),
-                            note = cursor.getString(7),
+                            note = cursor.getString(11),
                         ),
                     )
                 }
@@ -2094,34 +2223,12 @@ class PlatoonDatabase(context: Context) :
         uid = getLong(1),
         type = enumValueOf(getString(2)),
         occurredAt = getNullableLong(3)?.let(Instant::ofEpochMilli),
-        observedAt = Instant.ofEpochMilli(getLong(4)),
-        precision = enumValueOf(getString(5)),
-        source = enumValueOf(getString(6)),
-        note = getString(7),
-    )
-
-    data class IngestResult(
-        val snapshotId: Long?,
-        val duplicate: Boolean,
-        val initialRoster: Boolean,
-        val joined: Int,
-        val rejoined: Int,
-        val left: Int,
-        val renamed: Int,
-    ) {
-        companion object {
-            fun duplicate() = IngestResult(null, true, false, 0, 0, 0, 0)
-        }
-    }
-
-    data class ActivityIngestResult(
-        val inserted: Int,
-        val resolved: Int,
-    )
-
-    data class UpdatesIngestResult(
-        val membershipEvents: Int,
-        val patrolFacts: Int,
+        eventDate = getNullableLong(4)?.let(LocalDate::ofEpochDay),
+        timeKnown = getInt(5) != 0,
+        observedAt = Instant.ofEpochMilli(getLong(6)),
+        precision = enumValueOf(getString(7)),
+        source = enumValueOf(getString(8)),
+        note = getString(9),
     )
 
     private enum class MembershipBoundary {
@@ -2164,9 +2271,27 @@ class PlatoonDatabase(context: Context) :
 
     private data class TenureForUpdate(
         val uid: Long,
+        val joined: MembershipBoundaryValue?,
+        val left: MembershipBoundaryValue?,
         val joinedSource: EvidenceSource,
         val leftSource: EvidenceSource?,
     )
+
+    private data class SnapshotAccumulator(
+        val id: Long,
+        val capturedAt: Instant,
+        val sourceFile: String?,
+        val gameVersion: String?,
+        val members: MutableList<SnapshotMember> = mutableListOf(),
+    ) {
+        fun toSnapshot() = PlatoonSnapshot(
+            id = id,
+            capturedAt = capturedAt,
+            sourceFile = sourceFile,
+            gameVersion = gameVersion,
+            members = members,
+        )
+    }
 
     private data class ManualTenureBoundary(
         val tenureId: Long,
@@ -2176,8 +2301,6 @@ class PlatoonDatabase(context: Context) :
     )
 
     companion object {
-        private const val DATABASE_NAME = "platoon.db"
-        private const val DATABASE_VERSION = 8
         const val DAILY_PATROL_ACTION_ID = 802001L
         private const val DAILY_PATROL_COMPANION_ACTION_ID = 801005L
         private const val NAME_RESOLUTION_WINDOW_MILLIS = 30L * 24L * 60L * 60L * 1000L
@@ -2207,6 +2330,8 @@ class PlatoonDatabase(context: Context) :
             "uid",
             "event_type",
             "occurred_at",
+            "event_date",
+            "time_known",
             "observed_at",
             "precision",
             "source",
@@ -2226,6 +2351,10 @@ class PlatoonDatabase(context: Context) :
             "id",
             "joined_at",
             "left_at",
+            "joined_date",
+            "left_date",
+            "joined_time_known",
+            "left_time_known",
             "joined_precision",
             "left_precision",
             "joined_source",
@@ -2257,6 +2386,21 @@ private fun ContentValues.putNullableLong(key: String, value: Long?) {
     if (value == null) putNull(key) else put(key, value)
 }
 
+private fun ContentValues.putMembershipBoundary(
+    prefix: String,
+    boundary: MembershipBoundaryValue,
+) {
+    put("${prefix}_at", boundary.instant.toEpochMilli())
+    put("${prefix}_date", boundary.date.toEpochDay())
+    put("${prefix}_time_known", if (boundary.timeKnown) 1 else 0)
+}
+
+private fun ContentValues.clearMembershipBoundary(prefix: String) {
+    putNull("${prefix}_at")
+    putNull("${prefix}_date")
+    putNull("${prefix}_time_known")
+}
+
 private fun ContentValues.putNullableInt(key: String, value: Int?) {
     if (value == null) putNull(key) else put(key, value)
 }
@@ -2270,6 +2414,21 @@ private fun Cursor.getNullableLong(index: Int): Long? =
 
 private fun Cursor.getNullableInt(index: Int): Int? =
     if (isNull(index)) null else getInt(index)
+
+private fun Cursor.membershipBoundaryValue(
+    instantIndex: Int,
+    dateIndex: Int,
+    timeKnownIndex: Int,
+): MembershipBoundaryValue? {
+    val instant = getNullableLong(instantIndex)?.let(Instant::ofEpochMilli) ?: return null
+    val date = getNullableLong(dateIndex)?.let(LocalDate::ofEpochDay)
+        ?: instant.atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+    return MembershipBoundaryValue(
+        date = date,
+        instant = instant,
+        timeKnown = getNullableInt(timeKnownIndex)?.let { it != 0 } ?: true,
+    )
+}
 
 private fun Cursor.getNullableBoolean(index: Int): Boolean? =
     if (isNull(index)) null else getInt(index) != 0

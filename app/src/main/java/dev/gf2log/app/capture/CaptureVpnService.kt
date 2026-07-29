@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicLong
 class CaptureVpnService : VpnService() {
     private var tunnel: ParcelFileDescriptor? = null
     private val parsers = ConcurrentHashMap<Long, Gfl2StreamParser>()
+    private val taintedFlows = ConcurrentHashMap.newKeySet<Long>()
     private val decodedPayloadCount = AtomicLong()
     private val observedPayloadBytes = AtomicLong()
     private val inspectedPayloadBytes = AtomicLong()
@@ -70,15 +71,7 @@ class CaptureVpnService : VpnService() {
     }
     @Volatile
     private var captureStartPending = false
-    private val parserExecutor = ThreadPoolExecutor(
-        1,
-        1,
-        0,
-        TimeUnit.MILLISECONDS,
-        ArrayBlockingQueue(PARSER_QUEUE_CAPACITY),
-        { runnable -> Thread(runnable, "GF2ProtocolParser") },
-        ThreadPoolExecutor.AbortPolicy(),
-    )
+    private var parserExecutor = createParserExecutor()
 
     override fun onCreate() {
         super.onCreate()
@@ -86,7 +79,13 @@ class CaptureVpnService : VpnService() {
         guildMembersWriter = GuildMembersCsvWriter(
             File(filesDir, GuildMembersCsvWriter.OUTPUT_DIRECTORY),
         ) { batch ->
-            runCatching { platoonRepository.ingest(batch) }
+            runCatching {
+                platoonRepository.ingest(
+                    capturedAt = Instant.parse(batch.logTime),
+                    members = batch.members,
+                    sourceFile = batch.file.name,
+                )
+            }
                 .onSuccess { result ->
                     if (!result.duplicate) {
                         CaptureStatus.update(
@@ -202,6 +201,11 @@ class CaptureVpnService : VpnService() {
             return
         }
         tunnel = descriptor
+        if (parserExecutor.isShutdown) {
+            parserExecutor = createParserExecutor()
+        }
+        parsers.clear()
+        taintedFlows.clear()
         decodedPayloadCount.set(0)
         observedPayloadBytes.set(0)
         inspectedPayloadBytes.set(0)
@@ -255,19 +259,31 @@ class CaptureVpnService : VpnService() {
     private fun enqueuePayload(flowId: Long, isSent: Boolean, payload: ByteArray) {
         if (payload.isEmpty()) return
         if (isSent) return
-        submitParserTask {
+        if (flowId in taintedFlows) return
+        if (!submitParserTask {
+            if (flowId in taintedFlows) return@submitParserTask
             val parser = parsers.computeIfAbsent(flowId) { Gfl2StreamParser() }
             processEvents(parser.accept(payload))
+        }) {
+            // A missing TCP chunk makes every later byte offset unreliable.
+            // Keep this flow quarantined until native closure instead of
+            // feeding a corrupted stream into the framing parser.
+            taintedFlows += flowId
         }
     }
 
     private fun enqueueFlowClosed(flowId: Long) {
         if (!submitParserTask {
+                if (taintedFlows.remove(flowId)) {
+                    parsers.remove(flowId)
+                    return@submitParserTask
+                }
                 val parser = parsers.remove(flowId) ?: return@submitParserTask
                 processEvents(parser.finish(), flowEnded = true)
             }
         ) {
             parsers.remove(flowId)
+            taintedFlows += flowId
         }
     }
 
@@ -391,6 +407,7 @@ class CaptureVpnService : VpnService() {
         tunnel = null
         drainParserTasks()
         parsers.clear()
+        taintedFlows.clear()
         saveDiagnostics()
     }
 
@@ -427,6 +444,16 @@ class CaptureVpnService : VpnService() {
             droppedParserTaskCount.addAndGet(dropped.toLong())
         }
     }
+
+    private fun createParserExecutor() = ThreadPoolExecutor(
+        1,
+        1,
+        0,
+        TimeUnit.MILLISECONDS,
+        ArrayBlockingQueue(PARSER_QUEUE_CAPACITY),
+        { runnable -> Thread(runnable, "GF2ProtocolParser") },
+        ThreadPoolExecutor.AbortPolicy(),
+    )
 
     private fun startInForeground(content: String) {
         val notification = buildNotification(notificationContent(content))

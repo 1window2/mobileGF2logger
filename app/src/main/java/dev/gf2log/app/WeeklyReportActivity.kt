@@ -32,6 +32,7 @@ import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.MemberEvent
 import dev.gf2log.app.management.MemberEventType
 import dev.gf2log.app.management.EvidenceSource
+import dev.gf2log.app.management.MembershipEventPresentation
 import dev.gf2log.app.management.DailyEvidence
 import dev.gf2log.app.management.WeeklyCellOverride
 import dev.gf2log.app.management.WeeklyNote
@@ -75,10 +76,15 @@ class WeeklyReportActivity : LocalizedActivity() {
         val periodStart = PlatoonPeriods.weekStart(referenceDay)
         val periodStartInstant = PlatoonPeriods.periodStartInstant(periodStart, zone)
         val periodEndInstant = PlatoonPeriods.periodStartInstant(periodStart.plusDays(7), zone)
+        val membershipStartInstant = periodStart.atStartOfDay(zone).toInstant()
+        val membershipEndInstant = periodStart.plusDays(7).atStartOfDay(zone).toInstant()
         val report = WeeklyReportBuilder.build(
             referenceDay = referenceDay,
             zoneId = zone,
-            snapshots = repository.listSnapshots(1000),
+            snapshots = repository.listSnapshotsForPeriod(
+                periodStartInstant,
+                periodEndInstant,
+            ),
             overrides = repository.listWeeklyOverrides(periodStart.toEpochDay()),
             dailyPatrolFacts = repository.listDailyPatrolFacts(
                 periodStartInstant,
@@ -88,11 +94,13 @@ class WeeklyReportActivity : LocalizedActivity() {
         val notes = repository.listWeeklyNotes(report.periodStart.toEpochDay())
             .filterNot(WeeklyNote::isAutomatic)
         val events = repository.listEvents(
-            periodStartInstant,
-            periodEndInstant,
+            membershipStartInstant,
+            membershipEndInstant,
+            periodStart,
+            periodStart.plusDays(7),
         ).filter {
-            it.type in MEMBERSHIP_EVENT_TYPES &&
-                it.source in DISPLAYED_MEMBERSHIP_EVENT_SOURCES
+            it.type in MembershipEventPresentation.displayedTypes &&
+                it.source in MembershipEventPresentation.displayedSources
         }
         val cutlines = WeeklyCutlinePreferences(this).read()
         val isEditing = editingPeriodStart == report.periodStart
@@ -796,7 +804,7 @@ class WeeklyReportActivity : LocalizedActivity() {
             setPadding(0, dp(16), 0, dp(4))
         }, matchWidth())
         val namesByUid = repository.listMemberStatuses().associate { it.uid to it.name }
-        val membershipEvents = deduplicateMembershipEvents(events)
+        val membershipEvents = MembershipEventPresentation.deduplicate(events)
         body.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             addView(membershipHeader(getString(R.string.join_label)), weightedCell())
@@ -804,10 +812,10 @@ class WeeklyReportActivity : LocalizedActivity() {
         }, matchWidth())
 
         val datedEvents = membershipEvents
-            .filter { it.occurredAt != null }
-            .groupBy { event ->
-                PlatoonPeriods.gameDay(requireNotNull(event.occurredAt), zoneId)
+            .mapNotNull { event ->
+                MembershipEventPresentation.calendarDate(event, zoneId)?.let { it to event }
             }
+            .groupBy({ it.first }, { it.second })
         report.days.forEach { day ->
             val dayEvents = datedEvents[day].orEmpty()
             if (dayEvents.isEmpty()) return@forEach
@@ -819,7 +827,9 @@ class WeeklyReportActivity : LocalizedActivity() {
             addMembershipEventRow(dayEvents, namesByUid, zoneId)
         }
 
-        val unknownEvents = membershipEvents.filter { it.occurredAt == null }
+        val unknownEvents = membershipEvents.filter {
+            MembershipEventPresentation.calendarDate(it, zoneId) == null
+        }
         if (unknownEvents.isNotEmpty()) {
             body.addView(TextView(this).apply {
                 text = getString(R.string.unknown_date)
@@ -868,46 +878,11 @@ class WeeklyReportActivity : LocalizedActivity() {
             val identity = eventName.takeIf { it.isNotBlank() }
                 ?.let { "$it (#${event.uid})" }
                 ?: "#${event.uid}"
-            if (event.source == EvidenceSource.GAME_UPDATES && event.occurredAt != null) {
-                val time = EVENT_TIME.format(event.occurredAt.atZone(zoneId))
-                "$time $identity"
-            } else {
-                identity
-            }
+            MembershipEventPresentation.timePrefix(event, zoneId)
+                ?.let { "$it $identity" }
+                ?: identity
         }
         setPadding(0, dp(2), dp(8), dp(4))
-    }
-
-    private fun deduplicateMembershipEvents(events: List<MemberEvent>): List<MemberEvent> {
-        val selected = mutableListOf<MemberEvent>()
-        events
-            .filter { it.type in MEMBERSHIP_EVENT_TYPES }
-            .sortedWith(
-                compareByDescending<MemberEvent> { membershipEvidencePriority(it.source) }
-                    .thenByDescending { it.id },
-            )
-            .forEach { candidate ->
-                val duplicate = selected.any { existing ->
-                    existing.uid == candidate.uid &&
-                        membershipBoundary(existing.type) == membershipBoundary(candidate.type) &&
-                        kotlin.math.abs(
-                            (existing.occurredAt ?: existing.observedAt).toEpochMilli() -
-                                (candidate.occurredAt ?: candidate.observedAt).toEpochMilli(),
-                        ) <= MEMBERSHIP_DISPLAY_DEDUPLICATION_MILLIS &&
-                        !(existing.source == EvidenceSource.GAME_UPDATES &&
-                            candidate.source == EvidenceSource.GAME_UPDATES)
-                }
-                if (!duplicate) selected += candidate
-            }
-        return selected.sortedWith(
-            compareBy<MemberEvent>({ it.occurredAt == null }, { it.occurredAt ?: it.observedAt }, { it.id }),
-        )
-    }
-
-    private fun membershipBoundary(type: MemberEventType): Int = when (type) {
-        MemberEventType.JOINED, MemberEventType.REJOINED -> 1
-        MemberEventType.LEFT, MemberEventType.REMOVED -> 2
-        MemberEventType.RENAMED -> 0
     }
 
     private fun addNote(note: WeeklyNote) {
@@ -1039,16 +1014,9 @@ class WeeklyReportActivity : LocalizedActivity() {
         cornerRadius = dp(3).toFloat()
     }
 
-    private fun membershipEvidencePriority(source: EvidenceSource): Int = when (source) {
-        EvidenceSource.GAME_UPDATES -> 3
-        EvidenceSource.MANUAL -> 2
-        EvidenceSource.SNAPSHOT, EvidenceSource.LEGACY_IMPORT -> 1
-    }
-
     companion object {
         private val DATE = DateTimeFormatter.ofPattern("yy/MM/dd")
         private val DAY = DateTimeFormatter.ofPattern("MM/dd")
-        private val EVENT_TIME = DateTimeFormatter.ofPattern("HH:mm")
         private val FILE_DATE = DateTimeFormatter.BASIC_ISO_DATE
         private const val REQUEST_EXPORT_WEEKLY = 201
         private const val HEADER_HEIGHT = 40
@@ -1060,20 +1028,6 @@ class WeeklyReportActivity : LocalizedActivity() {
         private val EDITABLE_FIELD_COLOR = Color.rgb(47, 58, 72)
         private val EDITABLE_FIELD_BORDER_COLOR = Color.rgb(126, 164, 218)
         private val WARNING_COLOR = Color.rgb(255, 193, 7)
-        private const val MEMBERSHIP_DISPLAY_DEDUPLICATION_MILLIS =
-            48L * 60L * 60L * 1000L
-        private val MEMBERSHIP_EVENT_TYPES = setOf(
-            MemberEventType.JOINED,
-            MemberEventType.REJOINED,
-            MemberEventType.LEFT,
-            MemberEventType.REMOVED,
-        )
-        private val DISPLAYED_MEMBERSHIP_EVENT_SOURCES = setOf(
-            EvidenceSource.SNAPSHOT,
-            EvidenceSource.LEGACY_IMPORT,
-            EvidenceSource.GAME_UPDATES,
-            EvidenceSource.MANUAL,
-        )
         private val SUCCESS_GREEN = Color.rgb(45, 170, 75)
         private val FAILURE_RED = Color.rgb(215, 60, 55)
         private val CUTLINE_YELLOW = Color.rgb(232, 174, 22)

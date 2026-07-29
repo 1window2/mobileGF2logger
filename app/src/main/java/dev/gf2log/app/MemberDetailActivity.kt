@@ -13,7 +13,8 @@ import android.widget.Toast
 import dev.gf2log.app.management.MemberStatus
 import dev.gf2log.app.management.MembershipTenure
 import dev.gf2log.app.management.PlatoonRepository
-import dev.gf2log.app.management.EvidenceSource
+import dev.gf2log.app.management.isImmutableMembershipBoundary
+import dev.gf2log.app.management.isValidMembershipRange
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -113,21 +114,38 @@ class MemberDetailActivity : LocalizedActivity() {
         text = getString(
             R.string.tenure_summary,
             index + 1,
-            format(tenure.joinedAt),
-            format(tenure.leftAt),
-            tenure.joinedPrecision.name,
-            tenure.leftPrecision?.name ?: "-",
+            format(
+                tenure.joinedDate,
+                tenure.joinedAt,
+                tenure.joinedTimeKnown,
+            ),
+            format(
+                tenure.leftDate,
+                tenure.leftAt,
+                tenure.leftTimeKnown ?: (tenure.leftAt != null),
+            ),
         )
-        val immutable = tenure.joinedSource == EvidenceSource.GAME_UPDATES ||
-            tenure.leftSource == EvidenceSource.GAME_UPDATES
-        isEnabled = !immutable
-        alpha = if (immutable) 0.72f else 1f
         setOnClickListener { editTenure(tenure) }
     }
 
     private fun editTenure(tenure: MembershipTenure) {
-        val joined = DateTimePickerInput(this, getString(R.string.join_field), tenure.joinedAt)
-        val left = DateTimePickerInput(this, getString(R.string.withdraw_field), tenure.leftAt)
+        val joined = DateTimePickerInput(
+            context = this,
+            label = getString(R.string.join_field),
+            initialValue = tenure.joinedAt,
+            initialDate = tenure.joinedDate,
+            initialTimeKnown = tenure.joinedTimeKnown,
+            dateRequired = true,
+            editable = !tenure.joinedSource.isImmutableMembershipBoundary(),
+        )
+        val left = DateTimePickerInput(
+            context = this,
+            label = getString(R.string.withdraw_field),
+            initialValue = tenure.leftAt,
+            initialDate = tenure.leftDate,
+            initialTimeKnown = tenure.leftTimeKnown ?: (tenure.leftAt != null),
+            editable = tenure.leftSource?.isImmutableMembershipBoundary() != true,
+        )
         val note = EditText(this).apply {
             hint = getString(R.string.membership_note_hint)
             setText(tenure.note)
@@ -144,11 +162,15 @@ class MemberDetailActivity : LocalizedActivity() {
             .setView(content)
             .setNegativeButton(android.R.string.cancel, null)
             .setPositiveButton(R.string.save_member) { _, _ ->
-                val saved = runCatching {
+                val joinedBoundary = joined.boundary
+                val leftBoundary = left.boundary
+                val saved = joinedBoundary != null &&
+                    isValidMembershipRange(joinedBoundary, leftBoundary) &&
+                    runCatching {
                     repository.updateTenure(
                         tenure.id,
-                        joined.instant,
-                        left.instant,
+                        joinedBoundary,
+                        leftBoundary,
                         note.text.toString(),
                     )
                 }.getOrDefault(false)
@@ -163,7 +185,11 @@ class MemberDetailActivity : LocalizedActivity() {
     }
 
     private fun addMembershipHistory(status: MemberStatus) {
-        val joined = DateTimePickerInput(this, getString(R.string.join_field))
+        val joined = DateTimePickerInput(
+            this,
+            getString(R.string.join_field),
+            dateRequired = true,
+        )
         val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_field))
         val note = EditText(this).apply {
             hint = getString(R.string.membership_note_hint)
@@ -184,16 +210,15 @@ class MemberDetailActivity : LocalizedActivity() {
             .create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val joinedAt = joined.instant
-                val withdrewAt = withdrew.instant
-                val validRange = joinedAt == null ||
-                    withdrewAt == null ||
-                    !withdrewAt.isBefore(joinedAt)
-                val saved = validRange && runCatching {
+                val joinedBoundary = joined.boundary
+                val withdrewBoundary = withdrew.boundary
+                val saved = joinedBoundary != null &&
+                    isValidMembershipRange(joinedBoundary, withdrewBoundary) &&
+                    runCatching {
                     repository.addTenure(
                         status.uid,
-                        joinedAt,
-                        withdrewAt,
+                        joinedBoundary,
+                        withdrewBoundary,
                         note.text.toString(),
                     )
                 }.getOrDefault(false)
@@ -208,8 +233,19 @@ class MemberDetailActivity : LocalizedActivity() {
         dialog.show()
     }
 
-    private fun format(instant: Instant?): String =
-        instant?.atZone(ZoneId.systemDefault())?.format(DISPLAY_TIME) ?: getString(R.string.unknown)
+    private fun format(
+        date: java.time.LocalDate?,
+        instant: Instant?,
+        timeKnown: Boolean,
+    ): String {
+        val displayDate = date ?: instant?.atZone(ZoneId.systemDefault())?.toLocalDate()
+            ?: return getString(R.string.unknown)
+        return if (timeKnown && instant != null) {
+            instant.atZone(ZoneId.systemDefault()).format(DISPLAY_TIME)
+        } else {
+            displayDate.format(DISPLAY_DATE)
+        }
+    }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private fun matchWidth() = ViewGroup.LayoutParams(
@@ -220,5 +256,6 @@ class MemberDetailActivity : LocalizedActivity() {
     companion object {
         const val EXTRA_UID = "uid"
         private val DISPLAY_TIME = DateTimeFormatter.ofPattern("yy/MM/dd HH:mm")
+        private val DISPLAY_DATE = DateTimeFormatter.ofPattern("yy/MM/dd")
     }
 }

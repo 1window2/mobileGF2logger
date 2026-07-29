@@ -21,6 +21,7 @@ import dev.gf2log.app.management.MemberStatus
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonMemberCsv
 import dev.gf2log.app.management.SnapshotMember
+import dev.gf2log.app.management.isValidMembershipRange
 import java.io.File
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -271,8 +272,16 @@ class PlatoonActivity : LocalizedActivity() {
             hint = getString(R.string.member_nickname)
             setSingleLine(true)
         }
-        val joined = DateTimePickerInput(this, getString(R.string.join_field))
-        val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_field))
+        val joined = DateTimePickerInput(
+            this,
+            getString(R.string.join_field),
+            dateRequired = true,
+        )
+        val withdrew = DateTimePickerInput(
+            this,
+            getString(R.string.withdraw_field),
+            dateRequired = true,
+        )
         val noteInput = EditText(this).apply {
             hint = getString(R.string.membership_note_hint)
             minLines = 2
@@ -296,18 +305,18 @@ class PlatoonActivity : LocalizedActivity() {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val uid = uidInput.text.toString().trim().toLongOrNull()
                 val nickname = nicknameInput.text.toString().trim()
-                val joinedAt = joined.instant
-                val withdrewAt = withdrew.instant
-                val validRange = joinedAt == null ||
-                    withdrewAt == null ||
-                    !withdrewAt.isBefore(joinedAt)
+                val joinedBoundary = joined.boundary
+                val withdrewBoundary = withdrew.boundary
+                val validRange = joinedBoundary != null &&
+                    withdrewBoundary != null &&
+                    isValidMembershipRange(joinedBoundary, withdrewBoundary)
                 val saved = uid != null && uid > 0 && nickname.isNotBlank() && validRange &&
                     runCatching {
                         repository.addWithdrawnMember(
                             uid,
                             nickname,
-                            joinedAt,
-                            withdrewAt,
+                            requireNotNull(joinedBoundary),
+                            requireNotNull(withdrewBoundary),
                             noteInput.text.toString(),
                         )
                     }.getOrDefault(false)

@@ -162,6 +162,8 @@ static int send_client_callback(
     if (written != (ssize_t) packet->len) {
         if (written < 0 && (errno == EIO || errno == EBADF)) {
             atomic_store(&context->running, false);
+        } else if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            LOGW("TUN output queue is full; dropping one packet");
         } else {
             LOGE("TUN write failed: expected=%u actual=%zd errno=%d", packet->len, written, errno);
         }
@@ -301,7 +303,7 @@ static void *capture_thread_main(void *argument) {
 
     int descriptor_flags = fcntl(context->tun_fd, F_GETFL, 0);
     if (descriptor_flags >= 0) {
-        fcntl(context->tun_fd, F_SETFL, descriptor_flags & ~O_NONBLOCK);
+        fcntl(context->tun_fd, F_SETFL, descriptor_flags | O_NONBLOCK);
     }
 
     char *packet_buffer = malloc(PACKET_BUFFER_SIZE);

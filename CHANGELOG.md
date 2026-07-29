@@ -35,6 +35,9 @@ All notable changes to mobileGF2logger are documented here.
 - Require dates but allow unknown times for manually entered membership
   boundaries, displaying date-only tenure summaries and `??:??` in weekly
   Join/Withdraw rows.
+- Reconcile standard-week merit against every captured counter and recent-login
+  timestamp instead of finalizing unsupported daily estimates.
+- Treat only UID-safe Updates kind `8` records as exact Daily Patrol evidence.
 - Keep packet-derived membership boundaries immutable without locking the
   editable manual boundary or private note on the same tenure.
 - Hide internal evidence-precision labels from membership-history buttons.

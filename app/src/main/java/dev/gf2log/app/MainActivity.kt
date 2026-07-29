@@ -429,6 +429,8 @@ class MainActivity : LocalizedActivity() {
 
     private fun localizedPayloadTag(payloadType: Int?): String = when (payloadType) {
         Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS -> getString(R.string.payload_tag_platoon)
+        Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY -> getString(R.string.payload_tag_activity)
+        Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES -> getString(R.string.payload_tag_updates)
         Gfl2PayloadDecoder.TYPE_WEAPONS -> getString(R.string.payload_tag_weapons)
         Gfl2PayloadDecoder.TYPE_ATTACHMENTS -> getString(R.string.payload_tag_attachments)
         Gfl2PayloadDecoder.TYPE_COMMON_KEYS -> getString(R.string.payload_tag_common_keys)

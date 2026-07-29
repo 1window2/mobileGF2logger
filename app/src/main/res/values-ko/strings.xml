@@ -118,6 +118,8 @@
     <string name="payload_name_common_keys">공용키</string>
     <string name="payload_name_formations">편성</string>
     <string name="payload_tag_platoon">서클</string>
+    <string name="payload_tag_activity">활동</string>
+    <string name="payload_tag_updates">동향</string>
     <string name="payload_tag_weapons">무기</string>
     <string name="payload_tag_attachments">파츠</string>
     <string name="payload_tag_common_keys">공용키</string>

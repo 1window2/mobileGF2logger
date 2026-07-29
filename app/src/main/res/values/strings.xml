@@ -118,6 +118,8 @@
     <string name="payload_name_common_keys">COMMON KEYS</string>
     <string name="payload_name_formations">FORMATIONS</string>
     <string name="payload_tag_platoon">PLATOON</string>
+    <string name="payload_tag_activity">ACTIVITY</string>
+    <string name="payload_tag_updates">UPDATES</string>
     <string name="payload_tag_weapons">WEAPONS</string>
     <string name="payload_tag_attachments">ATTACHMENTS</string>
     <string name="payload_tag_common_keys">COMMON KEYS</string>

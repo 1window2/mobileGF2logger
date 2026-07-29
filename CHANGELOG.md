@@ -19,6 +19,7 @@ All notable changes to mobileGF2logger are documented here.
   including exact device-local times and an unknown-date group for inferred
   events.
 - Use locale-independent identity keys when correlating roster names.
+- Localize Activity and Updates packet-history badges in Korean.
 - Allow enough one-shot navigation time to open both Members and Updates.
 - Project weekly rows from the latest complete active roster so withdrawn
   members disappear immediately while their immutable Join/Withdraw records

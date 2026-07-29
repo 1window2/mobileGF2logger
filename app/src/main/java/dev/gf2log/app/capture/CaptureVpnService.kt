@@ -19,8 +19,10 @@ import dev.gf2log.app.settings.PayloadHistoryPreferences
 import dev.gf2log.app.settings.CapturePreferences
 import dev.gf2log.protocol.Gfl2StreamParser
 import dev.gf2log.protocol.Gfl2PayloadDecoder
+import dev.gf2log.protocol.PayloadCatalog
 import dev.gf2log.protocol.model.ParseEvent
 import dev.gf2log.protocol.model.PlatoonActivityData
+import dev.gf2log.protocol.model.PlatoonUpdatesData
 import java.io.File
 import java.time.Instant
 import java.util.concurrent.ArrayBlockingQueue
@@ -56,7 +58,11 @@ class CaptureVpnService : VpnService() {
             CaptureStatus.isRunning &&
             Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS in capturedRequiredTypes
         ) {
-            stopCapture("Captured Platoon roster; no activity update arrived during the grace period")
+            val missing = REQUIRED_CAPTURE_TYPES
+                .minus(capturedRequiredTypes)
+                .map(PayloadCatalog::tag)
+                .joinToString()
+            stopCapture("Captured Platoon roster; missing $missing after the navigation period")
         }
     }
     private val migrationExecutor = Executors.newSingleThreadExecutor { runnable ->
@@ -300,6 +306,15 @@ class CaptureVpnService : VpnService() {
                     }
                     .onFailure { CaptureStatus.update("Unable to update Platoon activity history") }
             }
+            val updates = event.value.data as? PlatoonUpdatesData
+            if (updates != null) {
+                runCatching { platoonRepository.ingestUpdates(updates) }
+                    .onSuccess {
+                        capturedRequiredTypes += Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES
+                        maybeStopCaptureOnce()
+                    }
+                    .onFailure { CaptureStatus.update("Unable to update exact Platoon history") }
+            }
             runCatching { guildMembersWriter.accept(event.value, flowEnded) }
                 .onSuccess { saved ->
                     if (saved != null) {
@@ -322,7 +337,7 @@ class CaptureVpnService : VpnService() {
                 CaptureStatus.isRunning &&
                 capturedRequiredTypes.containsAll(REQUIRED_CAPTURE_TYPES)
             ) {
-                stopCapture("Captured Platoon roster and activity")
+                stopCapture("Captured Platoon roster, activity, and updates")
             }
         }
     }
@@ -473,10 +488,11 @@ class CaptureVpnService : VpnService() {
         private const val PARSER_QUEUE_CAPACITY = 256
         private const val PARSER_DRAIN_TIMEOUT_SECONDS = 3L
         private const val TRAFFIC_REPORT_BYTES = 64 * 1024
-        private const val CAPTURE_ONCE_GRACE_MILLIS = 15_000L
+        private const val CAPTURE_ONCE_GRACE_MILLIS = 60_000L
         private val REQUIRED_CAPTURE_TYPES = setOf(
             Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
             Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY,
+            Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES,
         )
     }
 }

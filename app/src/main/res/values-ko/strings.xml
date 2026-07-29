@@ -92,6 +92,7 @@
     <string name="join_withdraw">가입/탈퇴</string>
     <string name="join_label">가입</string>
     <string name="withdraw_label">탈퇴</string>
+    <string name="unknown_date">불명</string>
     <string name="note_hint">선택한 게임 날짜의 비고 추가</string>
     <string name="add_note">비고 추가</string>
     <string name="delete_note">비고 삭제</string>
@@ -111,6 +112,7 @@
     <string name="unknown_payload_type">알 수 없음</string>
     <string name="payload_name_platoon_members">서클 멤버</string>
     <string name="payload_name_platoon_activity">서클 활동</string>
+    <string name="payload_name_platoon_updates">서클 동향</string>
     <string name="payload_name_weapons">무기</string>
     <string name="payload_name_attachments">파츠</string>
     <string name="payload_name_common_keys">공용키</string>
@@ -121,7 +123,8 @@
     <string name="payload_tag_common_keys">공용키</string>
     <string name="payload_tag_formations">편성</string>
     <string name="payload_description_platoon_members">서클 멤버, 공적 합계, 점수 및 최근 접속 시각입니다.</string>
-    <string name="payload_description_platoon_activity">시각이 포함된 서클 활동입니다. 일일 과업은 자동 반영하며, 가입·탈퇴 시각은 21917 명단 변화에서 단 하나의 UID로 식별될 때만 연결합니다.</string>
+    <string name="payload_description_platoon_activity">증분 방식의 일일 과업 근거 등을 포함한 시각 기반 서클 활동입니다.</string>
+    <string name="payload_description_platoon_updates">UID와 정확한 시각이 포함된 가입, 탈퇴, 추방 및 일일 과업 동향입니다.</string>
     <string name="payload_description_weapons">보유 무기와 강화 정보입니다.</string>
     <string name="payload_description_attachments">보유 무기 파츠와 속성 정보입니다.</string>
     <string name="payload_description_common_keys">보유 공용키입니다. uid는 플레이어 UID가 아니라 인벤토리 항목 ID입니다.</string>

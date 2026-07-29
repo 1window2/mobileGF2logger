@@ -796,94 +796,118 @@ class WeeklyReportActivity : LocalizedActivity() {
             setPadding(0, dp(16), 0, dp(4))
         }, matchWidth())
         val namesByUid = repository.listMemberStatuses().associate { it.uid to it.name }
+        val membershipEvents = deduplicateMembershipEvents(events)
+        body.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(membershipHeader(getString(R.string.join_label)), weightedCell())
+            addView(membershipHeader(getString(R.string.withdraw_label)), weightedCell())
+        }, matchWidth())
+
+        val datedEvents = membershipEvents
+            .filter { it.occurredAt != null }
+            .groupBy { event ->
+                PlatoonPeriods.gameDay(requireNotNull(event.occurredAt), zoneId)
+            }
         report.days.forEach { day ->
-            val dayEvents = events
-                .filter { event ->
-                    PlatoonPeriods.gameDay(event.occurredAt ?: event.observedAt, zoneId) == day
-                }
-                .groupBy { event ->
-                    event.uid to when (event.type) {
-                        MemberEventType.JOINED, MemberEventType.REJOINED -> MemberEventType.JOINED
-                        MemberEventType.LEFT, MemberEventType.REMOVED -> MemberEventType.LEFT
-                        else -> event.type
-                    }
-                }
-                .values
-                .map { candidates ->
-                    candidates.maxWith(
-                        compareBy<MemberEvent>({ membershipEvidencePriority(it.source) }, { it.id }),
-                    )
-                }
+            val dayEvents = datedEvents[day].orEmpty()
             if (dayEvents.isEmpty()) return@forEach
             body.addView(TextView(this).apply {
                 text = day.format(DATE)
                 setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, dp(8), 0, dp(2))
             }, matchWidth())
-            val joins = dayEvents.filter { it.type == MemberEventType.JOINED || it.type == MemberEventType.REJOINED }
-            val withdrawals = dayEvents.filter {
-                it.type == MemberEventType.LEFT || it.type == MemberEventType.REMOVED
-            }
-            body.addView(LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                addView(
-                    membershipEventCell(
-                        getString(R.string.join_label),
-                        joins,
-                        namesByUid,
-                        zoneId,
-                    ),
-                    LinearLayout.LayoutParams(0, wrap(), 1f).apply {
-                        marginEnd = dp(4)
-                    },
-                )
-                addView(
-                    membershipEventCell(
-                        getString(R.string.withdraw_label),
-                        withdrawals,
-                        namesByUid,
-                        zoneId,
-                    ),
-                    LinearLayout.LayoutParams(0, wrap(), 1f).apply {
-                        marginStart = dp(4)
-                    },
-                )
+            addMembershipEventRow(dayEvents, namesByUid, zoneId)
+        }
+
+        val unknownEvents = membershipEvents.filter { it.occurredAt == null }
+        if (unknownEvents.isNotEmpty()) {
+            body.addView(TextView(this).apply {
+                text = getString(R.string.unknown_date)
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, dp(8), 0, dp(2))
             }, matchWidth())
+            addMembershipEventRow(unknownEvents, namesByUid, zoneId)
         }
     }
 
+    private fun addMembershipEventRow(
+        events: List<MemberEvent>,
+        namesByUid: Map<Long, String>,
+        zoneId: ZoneId,
+    ) {
+        val joins = events.filter {
+            it.type == MemberEventType.JOINED || it.type == MemberEventType.REJOINED
+        }
+        val withdrawals = events.filter {
+            it.type == MemberEventType.LEFT || it.type == MemberEventType.REMOVED
+        }
+        body.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(membershipEventCell(joins, namesByUid, zoneId), weightedCell())
+            addView(membershipEventCell(withdrawals, namesByUid, zoneId), weightedCell())
+        }, matchWidth())
+    }
+
+    private fun membershipHeader(label: String) = TextView(this).apply {
+        text = label
+        setTypeface(typeface, Typeface.BOLD)
+        setPadding(0, dp(4), dp(8), dp(4))
+    }
+
+    private fun weightedCell() = LinearLayout.LayoutParams(0, wrap(), 1f).apply {
+        marginEnd = dp(8)
+    }
+
     private fun membershipEventCell(
-        label: String,
         events: List<MemberEvent>,
         namesByUid: Map<Long, String>,
         zoneId: ZoneId,
     ) = TextView(this).apply {
-        text = buildString {
-            append(label)
-            append(": ")
-            if (events.isEmpty()) {
-                append("-")
+        text = events.joinToString("\n") { event ->
+            val eventName = namesByUid[event.uid].orEmpty().ifBlank { event.note }
+            val identity = eventName.takeIf { it.isNotBlank() }
+                ?.let { "$it (#${event.uid})" }
+                ?: "#${event.uid}"
+            if (event.source == EvidenceSource.GAME_UPDATES && event.occurredAt != null) {
+                val time = EVENT_TIME.format(event.occurredAt.atZone(zoneId))
+                "$time $identity"
             } else {
-                append(
-                    events.joinToString(", ") { event ->
-                        val eventName = namesByUid[event.uid].orEmpty()
-                            .ifBlank { event.note }
-                        val identity = eventName.takeIf { it.isNotBlank() }
-                            ?.let { "$it (#${event.uid})" }
-                            ?: "#${event.uid}"
-                        val time = EVENT_TIME.format(
-                            (event.occurredAt ?: event.observedAt).atZone(zoneId),
-                        )
-                        if (event.occurredAt == null) {
-                            "$identity ${getString(R.string.observed_at_time, time)}"
-                        } else {
-                            "$identity $time"
-                        }
-                    },
-                )
+                identity
             }
         }
-        setPadding(dp(10), dp(8), dp(10), dp(8))
-        background = membershipEventBackground()
+        setPadding(0, dp(2), dp(8), dp(4))
+    }
+
+    private fun deduplicateMembershipEvents(events: List<MemberEvent>): List<MemberEvent> {
+        val selected = mutableListOf<MemberEvent>()
+        events
+            .filter { it.type in MEMBERSHIP_EVENT_TYPES }
+            .sortedWith(
+                compareByDescending<MemberEvent> { membershipEvidencePriority(it.source) }
+                    .thenByDescending { it.id },
+            )
+            .forEach { candidate ->
+                val duplicate = selected.any { existing ->
+                    existing.uid == candidate.uid &&
+                        membershipBoundary(existing.type) == membershipBoundary(candidate.type) &&
+                        kotlin.math.abs(
+                            (existing.occurredAt ?: existing.observedAt).toEpochMilli() -
+                                (candidate.occurredAt ?: candidate.observedAt).toEpochMilli(),
+                        ) <= MEMBERSHIP_DISPLAY_DEDUPLICATION_MILLIS &&
+                        !(existing.source == EvidenceSource.GAME_UPDATES &&
+                            candidate.source == EvidenceSource.GAME_UPDATES)
+                }
+                if (!duplicate) selected += candidate
+            }
+        return selected.sortedWith(
+            compareBy<MemberEvent>({ it.occurredAt == null }, { it.occurredAt ?: it.observedAt }, { it.id }),
+        )
+    }
+
+    private fun membershipBoundary(type: MemberEventType): Int = when (type) {
+        MemberEventType.JOINED, MemberEventType.REJOINED -> 1
+        MemberEventType.LEFT, MemberEventType.REMOVED -> 2
+        MemberEventType.RENAMED -> 0
     }
 
     private fun addNote(note: WeeklyNote) {
@@ -1015,11 +1039,6 @@ class WeeklyReportActivity : LocalizedActivity() {
         cornerRadius = dp(3).toFloat()
     }
 
-    private fun membershipEventBackground() = GradientDrawable().apply {
-        setColor(MEMBERSHIP_EVENT_COLOR)
-        cornerRadius = dp(8).toFloat()
-    }
-
     private fun membershipEvidencePriority(source: EvidenceSource): Int = when (source) {
         EvidenceSource.GAME_UPDATES -> 3
         EvidenceSource.MANUAL -> 2
@@ -1041,7 +1060,8 @@ class WeeklyReportActivity : LocalizedActivity() {
         private val EDITABLE_FIELD_COLOR = Color.rgb(47, 58, 72)
         private val EDITABLE_FIELD_BORDER_COLOR = Color.rgb(126, 164, 218)
         private val WARNING_COLOR = Color.rgb(255, 193, 7)
-        private val MEMBERSHIP_EVENT_COLOR = Color.rgb(45, 45, 45)
+        private const val MEMBERSHIP_DISPLAY_DEDUPLICATION_MILLIS =
+            48L * 60L * 60L * 1000L
         private val MEMBERSHIP_EVENT_TYPES = setOf(
             MemberEventType.JOINED,
             MemberEventType.REJOINED,

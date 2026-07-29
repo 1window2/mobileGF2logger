@@ -5,6 +5,7 @@ import dev.gf2log.app.capture.GuildMembersCsvWriter
 import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.model.GuildMember
 import dev.gf2log.protocol.model.PlatoonActivityData
+import dev.gf2log.protocol.model.PlatoonUpdatesData
 import java.io.File
 import java.time.Instant
 
@@ -41,6 +42,35 @@ class PlatoonRepository(context: Context) {
                         actionId = it.actionId.toLong(),
                         kind = it.kind.toLong(),
                         memberName = it.memberName,
+                    )
+                }
+            },
+            capturedAt = capturedAt,
+        )
+
+    fun ingestUpdates(
+        data: PlatoonUpdatesData,
+        capturedAt: Instant = Instant.now(),
+    ): PlatoonDatabase.UpdatesIngestResult =
+        database.ingestPlatoonUpdates(
+            observations = data.entries.mapNotNull { entry ->
+                if (entry.occurredAt == 0u || entry.kind == 0u) {
+                    null
+                } else {
+                    PlatoonUpdateObservation(
+                        kind = entry.kind.toLong(),
+                        occurredAt = Instant.ofEpochSecond(entry.occurredAt.toLong()),
+                        members = entry.members.mapNotNull { member ->
+                            if (member.uid == 0u || member.name.isBlank()) {
+                                null
+                            } else {
+                                PlatoonUpdateMemberObservation(
+                                    role = member.role.toLong(),
+                                    uid = member.uid.toLong(),
+                                    name = member.name,
+                                )
+                            }
+                        },
                     )
                 }
             },

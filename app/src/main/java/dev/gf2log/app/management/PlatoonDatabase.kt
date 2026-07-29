@@ -410,6 +410,301 @@ class PlatoonDatabase(context: Context) :
     }
 
     @Synchronized
+    fun ingestPlatoonUpdates(
+        observations: List<PlatoonUpdateObservation>,
+        capturedAt: Instant,
+    ): UpdatesIngestResult {
+        if (observations.isEmpty()) return UpdatesIngestResult(0, 0)
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            var membershipEvents = 0
+            var patrolFacts = 0
+            observations
+                .filter { it.members.isNotEmpty() }
+                .distinctBy { observation ->
+                    listOf(
+                        observation.kind,
+                        observation.occurredAt,
+                        observation.members.map { listOf(it.role, it.uid, it.name) },
+                    )
+                }
+                .sortedBy(PlatoonUpdateObservation::occurredAt)
+                .forEach { observation ->
+                    observation.members.forEach {
+                        ensureUpdateMember(db, it, observation.occurredAt)
+                    }
+                    when (observation.kind) {
+                        UPDATE_KIND_JOIN -> observation.members.forEach { member ->
+                            if (applyExactUpdateBoundary(
+                                    db = db,
+                                    member = member,
+                                    type = MemberEventType.JOINED,
+                                    boundary = MembershipBoundary.JOIN,
+                                    occurredAt = observation.occurredAt,
+                                    observedAt = capturedAt,
+                                )
+                            ) {
+                                membershipEvents += 1
+                            }
+                        }
+                        UPDATE_KIND_WITHDRAW -> observation.members.lastOrNull()?.let { member ->
+                            if (applyExactUpdateBoundary(
+                                    db = db,
+                                    member = member,
+                                    type = MemberEventType.LEFT,
+                                    boundary = MembershipBoundary.WITHDRAW,
+                                    occurredAt = observation.occurredAt,
+                                    observedAt = capturedAt,
+                                )
+                            ) {
+                                membershipEvents += 1
+                            }
+                        }
+                        UPDATE_KIND_REMOVED -> observation.members.lastOrNull()?.let { member ->
+                            if (applyExactUpdateBoundary(
+                                    db = db,
+                                    member = member,
+                                    type = MemberEventType.REMOVED,
+                                    boundary = MembershipBoundary.WITHDRAW,
+                                    occurredAt = observation.occurredAt,
+                                    observedAt = capturedAt,
+                                )
+                            ) {
+                                membershipEvents += 1
+                            }
+                        }
+                        UPDATE_KIND_DAILY_PATROL -> observation.members.forEach { member ->
+                            val inserted = db.insertWithOnConflict(
+                                "platoon_activity",
+                                null,
+                                ContentValues().apply {
+                                    put("occurred_at", observation.occurredAt.toEpochMilli())
+                                    put("action_id", DAILY_PATROL_ACTION_ID)
+                                    put("kind", observation.kind)
+                                    put("member_name", member.name)
+                                    put("captured_at", capturedAt.toEpochMilli())
+                                    put("resolved_uid", member.uid)
+                                    put("resolution", ActivityResolution.EXACT_UPDATE.name)
+                                },
+                                SQLiteDatabase.CONFLICT_IGNORE,
+                            )
+                            if (inserted != -1L) patrolFacts += 1
+                        }
+                    }
+                }
+            db.setTransactionSuccessful()
+            return UpdatesIngestResult(membershipEvents, patrolFacts)
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    private fun ensureUpdateMember(
+        db: SQLiteDatabase,
+        member: PlatoonUpdateMemberObservation,
+        observedAt: Instant,
+    ) {
+        if (memberExists(db, member.uid)) return
+        db.insertOrThrow(
+            "members",
+            null,
+            ContentValues().apply {
+                put("uid", member.uid)
+                put("current_name", member.name)
+                put("current_level", 0)
+                put("is_active", 0)
+                put("first_seen_at", observedAt.toEpochMilli())
+                put("last_seen_at", observedAt.toEpochMilli())
+                put("note", "")
+            },
+        )
+    }
+
+    private fun applyExactUpdateBoundary(
+        db: SQLiteDatabase,
+        member: PlatoonUpdateMemberObservation,
+        type: MemberEventType,
+        boundary: MembershipBoundary,
+        occurredAt: Instant,
+        observedAt: Instant,
+    ): Boolean {
+        val boundaryTypes = when (boundary) {
+            MembershipBoundary.JOIN -> listOf(MemberEventType.JOINED, MemberEventType.REJOINED)
+            MembershipBoundary.WITHDRAW -> listOf(MemberEventType.LEFT, MemberEventType.REMOVED)
+        }
+        val exactExists = db.rawQuery(
+            """
+            SELECT 1
+            FROM member_events
+            WHERE uid = ?
+              AND source = ?
+              AND occurred_at = ?
+              AND event_type IN (?, ?)
+            LIMIT 1
+            """.trimIndent(),
+            arrayOf(
+                member.uid.toString(),
+                EvidenceSource.GAME_UPDATES.name,
+                occurredAt.toEpochMilli().toString(),
+                boundaryTypes[0].name,
+                boundaryTypes[1].name,
+            ),
+        ).use(Cursor::moveToFirst)
+        if (exactExists) return false
+
+        val candidates = db.rawQuery(
+            """
+            SELECT id, tenure_id,
+                   ABS(COALESCE(occurred_at, observed_at) - ?) AS distance
+            FROM member_events
+            WHERE uid = ?
+              AND event_type IN (?, ?)
+              AND ABS(COALESCE(occurred_at, observed_at) - ?) <= ?
+            ORDER BY distance,
+                     CASE source
+                       WHEN '${EvidenceSource.GAME_UPDATES.name}' THEN 0
+                       WHEN '${EvidenceSource.MANUAL.name}' THEN 1
+                       ELSE 2
+                     END,
+                     id DESC
+            """.trimIndent(),
+            arrayOf(
+                occurredAt.toEpochMilli().toString(),
+                member.uid.toString(),
+                boundaryTypes[0].name,
+                boundaryTypes[1].name,
+                occurredAt.toEpochMilli().toString(),
+                EXACT_UPDATE_CORRELATION_WINDOW_MILLIS.toString(),
+            ),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        BoundaryEventCandidate(
+                            id = cursor.getLong(0),
+                            tenureId = cursor.getNullableLong(1),
+                        ),
+                    )
+                }
+            }
+        }
+        val tenureId = candidates.firstNotNullOfOrNull(BoundaryEventCandidate::tenureId)
+            ?: findOrCreateUpdateTenure(db, member.uid, boundary, occurredAt)
+
+        candidates.forEach { candidate ->
+            db.delete("member_events", "id = ?", arrayOf(candidate.id.toString()))
+        }
+        candidates.mapNotNull(BoundaryEventCandidate::tenureId)
+            .filter { it != tenureId }
+            .distinct()
+            .forEach { candidateTenureId ->
+                deleteShadowInferredTenure(db, candidateTenureId, boundary, occurredAt)
+            }
+
+        applyExactMembershipBoundary(
+            db = db,
+            tenureId = tenureId,
+            uid = member.uid,
+            memberName = member.name,
+            type = if (boundary == MembershipBoundary.JOIN &&
+                hasEarlierTenure(db, member.uid, tenureId)
+            ) {
+                MemberEventType.REJOINED
+            } else {
+                type
+            },
+            boundary = boundary,
+            occurredAt = occurredAt,
+            observedAt = observedAt,
+            activityIds = emptyList(),
+        )
+        return true
+    }
+
+    private fun findOrCreateUpdateTenure(
+        db: SQLiteDatabase,
+        uid: Long,
+        boundary: MembershipBoundary,
+        occurredAt: Instant,
+    ): Long {
+        val boundaryColumn = if (boundary == MembershipBoundary.JOIN) "joined_at" else "left_at"
+        val nearby = db.rawQuery(
+            """
+            SELECT id
+            FROM tenures
+            WHERE uid = ?
+              AND (
+                $boundaryColumn IS NULL
+                OR ABS($boundaryColumn - ?) <= ?
+              )
+            ORDER BY
+              CASE WHEN $boundaryColumn IS NULL THEN 1 ELSE 0 END,
+              ABS(COALESCE($boundaryColumn, ?) - ?),
+              id DESC
+            LIMIT 1
+            """.trimIndent(),
+            arrayOf(
+                uid.toString(),
+                occurredAt.toEpochMilli().toString(),
+                EXACT_UPDATE_CORRELATION_WINDOW_MILLIS.toString(),
+                occurredAt.toEpochMilli().toString(),
+                occurredAt.toEpochMilli().toString(),
+            ),
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
+        if (nearby != null) return nearby
+        return insertTenure(
+            db = db,
+            uid = uid,
+            joinedAt = if (boundary == MembershipBoundary.JOIN) occurredAt else null,
+            precision = if (boundary == MembershipBoundary.JOIN) {
+                EvidencePrecision.EXACT
+            } else {
+                EvidencePrecision.UNKNOWN
+            },
+            source = EvidenceSource.GAME_UPDATES,
+        )
+    }
+
+    private fun deleteShadowInferredTenure(
+        db: SQLiteDatabase,
+        tenureId: Long,
+        boundary: MembershipBoundary,
+        occurredAt: Instant,
+    ) {
+        val boundaryColumn = if (boundary == MembershipBoundary.JOIN) "joined_at" else "left_at"
+        val precisionColumn = if (boundary == MembershipBoundary.JOIN) {
+            "joined_precision"
+        } else {
+            "left_precision"
+        }
+        val isShadow = db.rawQuery(
+            """
+            SELECT 1
+            FROM tenures
+            WHERE id = ?
+              AND joined_at IS NULL
+              AND $precisionColumn IN (?, ?)
+              AND (
+                $boundaryColumn IS NULL
+                OR ABS($boundaryColumn - ?) <= ?
+              )
+            LIMIT 1
+            """.trimIndent(),
+            arrayOf(
+                tenureId.toString(),
+                EvidencePrecision.INFERRED.name,
+                EvidencePrecision.UNKNOWN.name,
+                occurredAt.toEpochMilli().toString(),
+                EXACT_UPDATE_CORRELATION_WINDOW_MILLIS.toString(),
+            ),
+        ).use(Cursor::moveToFirst)
+        if (!isShadow) return
+        db.delete("member_events", "tenure_id = ?", arrayOf(tenureId.toString()))
+        db.delete("tenures", "id = ?", arrayOf(tenureId.toString()))
+    }
+
+    @Synchronized
     fun listDailyPatrolFacts(from: Instant, until: Instant): List<DailyPatrolFact> {
         require(!until.isBefore(from))
         return readableDatabase.query(
@@ -1628,6 +1923,11 @@ class PlatoonDatabase(context: Context) :
         val resolved: Int,
     )
 
+    data class UpdatesIngestResult(
+        val membershipEvents: Int,
+        val patrolFacts: Int,
+    )
+
     private enum class MembershipBoundary {
         JOIN,
         WITHDRAW,
@@ -1658,6 +1958,11 @@ class PlatoonDatabase(context: Context) :
         val inferredAt: Instant,
     )
 
+    private data class BoundaryEventCandidate(
+        val id: Long,
+        val tenureId: Long?,
+    )
+
     private data class TenureForUpdate(
         val uid: Long,
         val joinedSource: EvidenceSource,
@@ -1678,6 +1983,12 @@ class PlatoonDatabase(context: Context) :
         private const val DAILY_PATROL_COMPANION_ACTION_ID = 801005L
         private const val NAME_RESOLUTION_WINDOW_MILLIS = 30L * 24L * 60L * 60L * 1000L
         private const val MEMBERSHIP_CORRELATION_WINDOW_MILLIS = 12L * 60L * 60L * 1000L
+        private const val EXACT_UPDATE_CORRELATION_WINDOW_MILLIS =
+            48L * 60L * 60L * 1000L
+        private const val UPDATE_KIND_JOIN = 3L
+        private const val UPDATE_KIND_WITHDRAW = 4L
+        private const val UPDATE_KIND_REMOVED = 5L
+        private const val UPDATE_KIND_DAILY_PATROL = 8L
         private val SNAPSHOT_EVENT_SOURCES = setOf(
             EvidenceSource.SNAPSHOT,
             EvidenceSource.LEGACY_IMPORT,

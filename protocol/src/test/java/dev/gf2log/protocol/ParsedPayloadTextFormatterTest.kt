@@ -6,6 +6,9 @@ import dev.gf2log.protocol.model.ParsedPayload
 import dev.gf2log.protocol.model.PlatoonActivityData
 import dev.gf2log.protocol.model.PlatoonActivityEntry
 import dev.gf2log.protocol.model.PlatoonActivitySummary
+import dev.gf2log.protocol.model.PlatoonUpdateEntry
+import dev.gf2log.protocol.model.PlatoonUpdateMember
+import dev.gf2log.protocol.model.PlatoonUpdatesData
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -46,6 +49,29 @@ class ParsedPayloadTextFormatterTest {
 
         assertTrue(text.contains("summary,7,,123,802001,1,"))
         assertTrue(text.contains("entry,,2,123,802001,,\"Name,WithComma\""))
+    }
+
+    @Test
+    fun platoonUpdatesPacketFormatsExactMemberEvidence() {
+        val payload = ParsedPayload(
+            messageId = 9,
+            payloadType = Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES,
+            isEndOfMessage = true,
+            data = PlatoonUpdatesData(
+                listOf(
+                    PlatoonUpdateEntry(
+                        kind = 3u,
+                        members = listOf(PlatoonUpdateMember(1u, 4_161_407u, "Name,WithComma")),
+                        occurredAt = 1_785_121_625u,
+                    ),
+                ),
+            ),
+        )
+
+        val text = ParsedPayloadTextFormatter.format(payload, "2026-07-29T00:00:00Z")
+
+        assertTrue(text.contains("kind,occurredAt,memberIndex,role,uid,memberName"))
+        assertTrue(text.contains("3,1785121625,0,1,4161407,\"Name,WithComma\""))
     }
 
     private fun member(uid: UInt, name: String) = GuildMember(

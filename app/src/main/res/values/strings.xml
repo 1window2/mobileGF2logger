@@ -92,6 +92,7 @@
     <string name="join_withdraw">Join / Withdraw</string>
     <string name="join_label">Join</string>
     <string name="withdraw_label">Withdraw</string>
+    <string name="unknown_date">unknown</string>
     <string name="note_hint">Add a note for the selected game day</string>
     <string name="add_note">Add note</string>
     <string name="delete_note">Delete note</string>
@@ -111,6 +112,7 @@
     <string name="unknown_payload_type">unknown</string>
     <string name="payload_name_platoon_members">PLATOON MEMBERS</string>
     <string name="payload_name_platoon_activity">PLATOON ACTIVITY</string>
+    <string name="payload_name_platoon_updates">PLATOON UPDATES</string>
     <string name="payload_name_weapons">WEAPONS</string>
     <string name="payload_name_attachments">ATTACHMENTS</string>
     <string name="payload_name_common_keys">COMMON KEYS</string>
@@ -121,7 +123,8 @@
     <string name="payload_tag_common_keys">COMMON KEYS</string>
     <string name="payload_tag_formations">FORMATIONS</string>
     <string name="payload_description_platoon_members">Platoon members, merit totals, scores, and last-login times.</string>
-    <string name="payload_description_platoon_activity">Timestamped Platoon activity. Daily Patrol records are applied automatically; membership timestamps are linked only when the 21917 roster change identifies one unique UID.</string>
+    <string name="payload_description_platoon_activity">Timestamped Platoon activity, including incremental Daily Patrol evidence.</string>
+    <string name="payload_description_platoon_updates">Exact join, withdrawal, removal, and Daily Patrol updates with member UIDs and timestamps.</string>
     <string name="payload_description_weapons">Owned weapons and their upgrade data.</string>
     <string name="payload_description_attachments">Owned weapon attachments and their attributes.</string>
     <string name="payload_description_common_keys">Owned Common Keys. The uid is an inventory-instance ID, not a player UID.</string>

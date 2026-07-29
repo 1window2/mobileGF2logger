@@ -74,6 +74,18 @@ data class PlatoonActivityObservation(
     val memberName: String,
 )
 
+data class PlatoonUpdateObservation(
+    val kind: Long,
+    val occurredAt: Instant,
+    val members: List<PlatoonUpdateMemberObservation>,
+)
+
+data class PlatoonUpdateMemberObservation(
+    val role: Long,
+    val uid: Long,
+    val name: String,
+)
+
 data class DailyPatrolFact(
     val uid: Long,
     val occurredAt: Instant,
@@ -83,6 +95,7 @@ enum class ActivityResolution {
     UNRESOLVED,
     UNIQUE_ROSTER_NAME,
     MEMBERSHIP_CORRELATION,
+    EXACT_UPDATE,
 }
 
 enum class MemberEventType {

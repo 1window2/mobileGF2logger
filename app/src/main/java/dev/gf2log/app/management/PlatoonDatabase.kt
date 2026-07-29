@@ -259,92 +259,70 @@ class PlatoonDatabase(context: Context) :
                     ).groupBy { it.second.lowercase(Locale.ROOT) }
                     .mapValues { (_, identities) -> identities.map { it.first }.distinct().size }
                 changes.joined.forEach { member ->
-                    val tenureId = insertTenure(
-                        db,
-                        member.uid,
-                        snapshot.capturedAt,
-                        EvidencePrecision.INFERRED,
-                        source,
-                    )
-                    insertSnapshotBoundaryEvent(
-                        db,
-                        tenureId,
-                        member.uid,
-                        member.name,
-                        MemberEventType.JOINED,
-                        snapshot.capturedAt,
-                        source,
-                    )
-                    correlateMembershipBoundary(
+                    recordSnapshotJoin(
                         db = db,
-                        tenureId = tenureId,
                         member = member,
                         type = MemberEventType.JOINED,
-                        boundary = MembershipBoundary.JOIN,
                         observedAt = snapshot.capturedAt,
-                        from = priorCapturedAt,
+                        priorCapturedAt = priorCapturedAt,
+                        source = source,
                         nameIsUnique = changedNameCounts[member.name.lowercase(Locale.ROOT)] == 1 &&
                             rosterNameUidCounts[member.name.lowercase(Locale.ROOT)] == 1,
                     )
                 }
                 changes.rejoined.forEach { member ->
-                    val tenureId = insertTenure(
-                        db,
-                        member.uid,
-                        snapshot.capturedAt,
-                        EvidencePrecision.INFERRED,
-                        source,
-                    )
-                    insertSnapshotBoundaryEvent(
-                        db,
-                        tenureId,
-                        member.uid,
-                        member.name,
-                        MemberEventType.REJOINED,
-                        snapshot.capturedAt,
-                        source,
-                    )
-                    correlateMembershipBoundary(
+                    recordSnapshotJoin(
                         db = db,
-                        tenureId = tenureId,
                         member = member,
                         type = MemberEventType.REJOINED,
-                        boundary = MembershipBoundary.JOIN,
                         observedAt = snapshot.capturedAt,
-                        from = priorCapturedAt,
+                        priorCapturedAt = priorCapturedAt,
+                        source = source,
                         nameIsUnique = changedNameCounts[member.name.lowercase(Locale.ROOT)] == 1 &&
                             rosterNameUidCounts[member.name.lowercase(Locale.ROOT)] == 1,
                     )
                 }
                 changes.left.forEach { member ->
-                    val tenureId = closeLatestTenure(
-                        db,
-                        member.uid,
-                        snapshot.capturedAt,
-                        EvidencePrecision.INFERRED,
-                        source,
+                    val exactTenureId = findRosterConfirmedExactTenure(
+                        db = db,
+                        uid = member.uid,
+                        boundary = MembershipBoundary.WITHDRAW,
+                        from = priorCapturedAt,
+                        observedAt = snapshot.capturedAt,
+                    )
+                    val tenureId = exactTenureId ?: closeLatestTenure(
+                        db = db,
+                        uid = member.uid,
+                        leftAt = snapshot.capturedAt,
+                        precision = EvidencePrecision.INFERRED,
+                        source = source,
                     )
                     markInactive(db, member.uid, snapshot.capturedAt)
-                    insertSnapshotBoundaryEvent(
-                        db,
-                        tenureId,
-                        member.uid,
-                        member.name,
-                        MemberEventType.LEFT,
-                        snapshot.capturedAt,
-                        source,
-                    )
-                    correlateMembershipBoundary(
-                        db = db,
-                        tenureId = tenureId,
-                        member = SnapshotMember(member.uid, member.name, 0, 0, 0, 0, 0, 0),
-                        type = MemberEventType.LEFT,
-                        boundary = MembershipBoundary.WITHDRAW,
-                        observedAt = snapshot.capturedAt,
-                        from = priorCapturedAt,
-                        nameIsUnique = changedNameCounts[member.name.lowercase(Locale.ROOT)] == 1 &&
-                            rosterNameUidCounts[member.name.lowercase(Locale.ROOT)] == 1,
-                    )
+                    if (exactTenureId == null) {
+                        insertSnapshotBoundaryEvent(
+                            db,
+                            tenureId,
+                            member.uid,
+                            member.name,
+                            MemberEventType.LEFT,
+                            snapshot.capturedAt,
+                            source,
+                        )
+                        correlateMembershipBoundary(
+                            db = db,
+                            tenureId = tenureId,
+                            member = SnapshotMember(member.uid, member.name, 0, 0, 0, 0, 0, 0),
+                            type = MemberEventType.LEFT,
+                            boundary = MembershipBoundary.WITHDRAW,
+                            observedAt = snapshot.capturedAt,
+                            from = priorCapturedAt,
+                            nameIsUnique =
+                                changedNameCounts[member.name.lowercase(Locale.ROOT)] == 1 &&
+                                    rosterNameUidCounts[
+                                        member.name.lowercase(Locale.ROOT)
+                                    ] == 1,
+                        )
+                    }
                 }
                 changes.renamed.forEach { rename ->
                     insertEvent(
@@ -543,6 +521,101 @@ class PlatoonDatabase(context: Context) :
         )
     }
 
+    private fun recordSnapshotJoin(
+        db: SQLiteDatabase,
+        member: SnapshotMember,
+        type: MemberEventType,
+        observedAt: Instant,
+        priorCapturedAt: Instant?,
+        source: EvidenceSource,
+        nameIsUnique: Boolean,
+    ) {
+        val exactTenureId = findRosterConfirmedExactTenure(
+            db = db,
+            uid = member.uid,
+            boundary = MembershipBoundary.JOIN,
+            from = priorCapturedAt,
+            observedAt = observedAt,
+        )
+        if (exactTenureId != null) return
+
+        val tenureId = insertTenure(
+            db = db,
+            uid = member.uid,
+            joinedAt = observedAt,
+            precision = EvidencePrecision.INFERRED,
+            source = source,
+        )
+        insertSnapshotBoundaryEvent(
+            db = db,
+            tenureId = tenureId,
+            uid = member.uid,
+            memberName = member.name,
+            type = type,
+            observedAt = observedAt,
+            source = source,
+        )
+        correlateMembershipBoundary(
+            db = db,
+            tenureId = tenureId,
+            member = member,
+            type = type,
+            boundary = MembershipBoundary.JOIN,
+            observedAt = observedAt,
+            from = priorCapturedAt,
+            nameIsUnique = nameIsUnique,
+        )
+    }
+
+    private fun findRosterConfirmedExactTenure(
+        db: SQLiteDatabase,
+        uid: Long,
+        boundary: MembershipBoundary,
+        from: Instant?,
+        observedAt: Instant,
+    ): Long? {
+        val boundaryColumn = if (boundary == MembershipBoundary.JOIN) "joined_at" else "left_at"
+        val sourceColumn = if (boundary == MembershipBoundary.JOIN) {
+            "joined_source"
+        } else {
+            "left_source"
+        }
+        val precisionColumn = if (boundary == MembershipBoundary.JOIN) {
+            "joined_precision"
+        } else {
+            "left_precision"
+        }
+        val compatibility = if (boundary == MembershipBoundary.JOIN) {
+            "(left_at IS NULL OR left_at >= ?)"
+        } else {
+            "(joined_at IS NULL OR joined_at <= ?)"
+        }
+        val fromClause = if (from == null) "" else "AND $boundaryColumn > ?"
+        val arguments = buildList {
+            add(uid.toString())
+            add(EvidenceSource.GAME_UPDATES.name)
+            add(EvidencePrecision.EXACT.name)
+            add(observedAt.toEpochMilli().toString())
+            if (from != null) add(from.toEpochMilli().toString())
+            add(observedAt.toEpochMilli().toString())
+        }.toTypedArray()
+        return db.rawQuery(
+            """
+            SELECT id
+            FROM tenures
+            WHERE uid = ?
+              AND $sourceColumn = ?
+              AND $precisionColumn = ?
+              AND $boundaryColumn <= ?
+              $fromClause
+              AND $compatibility
+            ORDER BY $boundaryColumn DESC, id DESC
+            LIMIT 1
+            """.trimIndent(),
+            arguments,
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
+    }
+
     private fun applyExactUpdateBoundary(
         db: SQLiteDatabase,
         member: PlatoonUpdateMemberObservation,
@@ -634,7 +707,13 @@ class PlatoonDatabase(context: Context) :
             .filter { it != tenureId }
             .distinct()
             .forEach { candidateTenureId ->
-                deleteShadowInferredTenure(db, candidateTenureId, boundary, occurredAt)
+                mergeShadowInferredTenure(
+                    db = db,
+                    selectedTenureId = tenureId,
+                    shadowTenureId = candidateTenureId,
+                    boundary = boundary,
+                    occurredAt = occurredAt,
+                )
             }
 
         applyExactMembershipBoundary(
@@ -776,9 +855,10 @@ class PlatoonDatabase(context: Context) :
         )
     }
 
-    private fun deleteShadowInferredTenure(
+    private fun mergeShadowInferredTenure(
         db: SQLiteDatabase,
-        tenureId: Long,
+        selectedTenureId: Long,
+        shadowTenureId: Long,
         boundary: MembershipBoundary,
         occurredAt: Instant,
     ) {
@@ -788,12 +868,15 @@ class PlatoonDatabase(context: Context) :
         } else {
             "left_precision"
         }
-        val isShadow = db.rawQuery(
+        val shadow = db.rawQuery(
             """
-            SELECT 1
+            SELECT joined_at, left_at,
+                   joined_date, left_date,
+                   joined_time_known, left_time_known,
+                   joined_precision, left_precision,
+                   joined_source, left_source
             FROM tenures
             WHERE id = ?
-              AND joined_at IS NULL
               AND $precisionColumn IN (?, ?)
               AND (
                 $boundaryColumn IS NULL
@@ -802,16 +885,78 @@ class PlatoonDatabase(context: Context) :
             LIMIT 1
             """.trimIndent(),
             arrayOf(
-                tenureId.toString(),
+                shadowTenureId.toString(),
                 EvidencePrecision.INFERRED.name,
                 EvidencePrecision.UNKNOWN.name,
                 occurredAt.toEpochMilli().toString(),
                 EXACT_UPDATE_CORRELATION_WINDOW_MILLIS.toString(),
             ),
-        ).use(Cursor::moveToFirst)
-        if (!isShadow) return
-        db.delete("member_events", "tenure_id = ?", arrayOf(tenureId.toString()))
-        db.delete("tenures", "id = ?", arrayOf(tenureId.toString()))
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) {
+                null
+            } else {
+                ShadowTenure(
+                    joinedAt = cursor.getNullableLong(0),
+                    leftAt = cursor.getNullableLong(1),
+                    joinedDate = cursor.getNullableLong(2),
+                    leftDate = cursor.getNullableLong(3),
+                    joinedTimeKnown = cursor.getNullableInt(4),
+                    leftTimeKnown = cursor.getNullableInt(5),
+                    joinedPrecision = cursor.getNullableString(6),
+                    leftPrecision = cursor.getNullableString(7),
+                    joinedSource = cursor.getNullableString(8),
+                    leftSource = cursor.getNullableString(9),
+                )
+            }
+        } ?: return
+
+        val oppositePrefix = if (boundary == MembershipBoundary.JOIN) "left" else "joined"
+        val oppositeAt = if (boundary == MembershipBoundary.JOIN) shadow.leftAt else shadow.joinedAt
+        if (oppositeAt != null) {
+            val selectedHasOpposite = db.rawQuery(
+                "SELECT ${oppositePrefix}_at FROM tenures WHERE id = ?",
+                arrayOf(selectedTenureId.toString()),
+            ).use { cursor -> cursor.moveToFirst() && !cursor.isNull(0) }
+            if (selectedHasOpposite) return
+
+            val values = ContentValues().apply {
+                put("${oppositePrefix}_at", oppositeAt)
+                if (boundary == MembershipBoundary.JOIN) {
+                    putNullableLong("${oppositePrefix}_date", shadow.leftDate)
+                    putNullableInt("${oppositePrefix}_time_known", shadow.leftTimeKnown)
+                    put("${oppositePrefix}_precision", shadow.leftPrecision)
+                    put("${oppositePrefix}_source", shadow.leftSource)
+                } else {
+                    putNullableLong("${oppositePrefix}_date", shadow.joinedDate)
+                    putNullableInt("${oppositePrefix}_time_known", shadow.joinedTimeKnown)
+                    put("${oppositePrefix}_precision", shadow.joinedPrecision)
+                    put("${oppositePrefix}_source", shadow.joinedSource)
+                }
+            }
+            db.update(
+                "tenures",
+                values,
+                "id = ?",
+                arrayOf(selectedTenureId.toString()),
+            )
+            val oppositeTypes = if (boundary == MembershipBoundary.JOIN) {
+                listOf(MemberEventType.LEFT, MemberEventType.REMOVED)
+            } else {
+                listOf(MemberEventType.JOINED, MemberEventType.REJOINED)
+            }
+            db.update(
+                "member_events",
+                ContentValues().apply { put("tenure_id", selectedTenureId) },
+                "tenure_id = ? AND event_type IN (?, ?)",
+                arrayOf(
+                    shadowTenureId.toString(),
+                    oppositeTypes[0].name,
+                    oppositeTypes[1].name,
+                ),
+            )
+        }
+        db.delete("member_events", "tenure_id = ?", arrayOf(shadowTenureId.toString()))
+        db.delete("tenures", "id = ?", arrayOf(shadowTenureId.toString()))
     }
 
     @Synchronized
@@ -2292,6 +2437,19 @@ class PlatoonDatabase(context: Context) :
             members = members,
         )
     }
+
+    private data class ShadowTenure(
+        val joinedAt: Long?,
+        val leftAt: Long?,
+        val joinedDate: Long?,
+        val leftDate: Long?,
+        val joinedTimeKnown: Int?,
+        val leftTimeKnown: Int?,
+        val joinedPrecision: String?,
+        val leftPrecision: String?,
+        val joinedSource: String?,
+        val leftSource: String?,
+    )
 
     private data class ManualTenureBoundary(
         val tenureId: Long,

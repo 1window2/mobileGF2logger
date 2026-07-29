@@ -70,6 +70,7 @@ object MembershipEventPresentation {
                             (existing.occurredAt ?: existing.observedAt).toEpochMilli() -
                                 (candidate.occurredAt ?: candidate.observedAt).toEpochMilli(),
                         ) <= DEDUPLICATION_MILLIS &&
+                        !hasOppositeBoundaryBetween(events, existing, candidate) &&
                         !(existing.source == EvidenceSource.GAME_UPDATES &&
                             candidate.source == EvidenceSource.GAME_UPDATES)
                 }
@@ -109,5 +110,22 @@ object MembershipEventPresentation {
         MemberEventType.JOINED, MemberEventType.REJOINED -> 1
         MemberEventType.LEFT, MemberEventType.REMOVED -> 2
         MemberEventType.RENAMED -> 0
+    }
+
+    private fun hasOppositeBoundaryBetween(
+        events: List<MemberEvent>,
+        first: MemberEvent,
+        second: MemberEvent,
+    ): Boolean {
+        val firstTime = first.occurredAt ?: first.observedAt
+        val secondTime = second.occurredAt ?: second.observedAt
+        val start = minOf(firstTime, secondTime)
+        val end = maxOf(firstTime, secondTime)
+        val oppositeBoundary = if (boundary(first.type) == 1) 2 else 1
+        return events.any { event ->
+            event.uid == first.uid &&
+                boundary(event.type) == oppositeBoundary &&
+                (event.occurredAt ?: event.observedAt).let { it.isAfter(start) && it.isBefore(end) }
+        }
     }
 }

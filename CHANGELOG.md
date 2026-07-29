@@ -15,6 +15,11 @@ All notable changes to mobileGF2logger are documented here.
 
 - Reconcile exact Updates events with nearby manual and snapshot boundaries so
   the same Join or Withdraw event is shown only once.
+- Reuse an exact Updates tenure when the following roster snapshot confirms it,
+  avoiding duplicate open tenures and withdrawal-ingestion rollback.
+- Preserve rapid rejoin/withdraw histories when an opposite boundary separates
+  otherwise nearby same-side events, and merge safe inferred shadow tenures
+  without discarding their independent boundary.
 - Present Join/Withdraw history as a compact borderless two-column table,
   including exact device-local times and an unknown-date group for inferred
   events.

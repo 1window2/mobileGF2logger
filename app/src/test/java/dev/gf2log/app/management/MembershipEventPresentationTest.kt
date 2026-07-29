@@ -71,16 +71,50 @@ class MembershipEventPresentationTest {
         assertEquals(listOf(exact), MembershipEventPresentation.deduplicate(listOf(snapshot, exact)))
     }
 
+    @Test
+    fun `opposite boundary preserves two nearby same-side events`() {
+        val firstJoin = event(
+            id = 1,
+            source = EvidenceSource.SNAPSHOT,
+            occurredAt = Instant.parse("2026-07-27T00:00:00Z"),
+            eventDate = null,
+            timeKnown = true,
+            type = MemberEventType.JOINED,
+        )
+        val withdrawal = event(
+            id = 2,
+            source = EvidenceSource.GAME_UPDATES,
+            occurredAt = Instant.parse("2026-07-27T12:00:00Z"),
+            eventDate = null,
+            timeKnown = true,
+            type = MemberEventType.LEFT,
+        )
+        val rejoin = event(
+            id = 3,
+            source = EvidenceSource.GAME_UPDATES,
+            occurredAt = Instant.parse("2026-07-28T00:00:00Z"),
+            eventDate = null,
+            timeKnown = true,
+            type = MemberEventType.REJOINED,
+        )
+
+        assertEquals(
+            listOf(firstJoin, withdrawal, rejoin),
+            MembershipEventPresentation.deduplicate(listOf(firstJoin, withdrawal, rejoin)),
+        )
+    }
+
     private fun event(
         id: Long,
         source: EvidenceSource,
         occurredAt: Instant?,
         eventDate: LocalDate?,
         timeKnown: Boolean,
+        type: MemberEventType = MemberEventType.LEFT,
     ) = MemberEvent(
         id = id,
         uid = 42,
-        type = MemberEventType.LEFT,
+        type = type,
         occurredAt = occurredAt,
         eventDate = eventDate,
         timeKnown = timeKnown,

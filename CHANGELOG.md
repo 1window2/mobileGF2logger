@@ -4,8 +4,22 @@ All notable changes to mobileGF2logger are documented here.
 
 ## Unreleased
 
+### Added
+
+- Parse mandatory Platoon Updates payload `21960` with exact member UIDs,
+  event kinds, and Unix timestamps.
+- Apply exact Updates evidence to Join/Withdraw history and UID-resolved Daily
+  Patrol facts.
+
 ### Fixed
 
+- Reconcile exact Updates events with nearby manual and snapshot boundaries so
+  the same Join or Withdraw event is shown only once.
+- Present Join/Withdraw history as a compact borderless two-column table,
+  including exact device-local times and an unknown-date group for inferred
+  events.
+- Use locale-independent identity keys when correlating roster names.
+- Allow enough one-shot navigation time to open both Members and Updates.
 - Project weekly rows from the latest complete active roster so withdrawn
   members disappear immediately while their immutable Join/Withdraw records
   remain in the weekly event section.

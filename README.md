@@ -10,15 +10,26 @@ mobileGF2logger is a lightweight, non-root app for Platoon masters who want to r
 
 ## Features
 
-- Captures and parses the Platoon member response without a computer or root access.
-- Offers one-shot Platoon capture that stops automatically after a complete roster is parsed.
+- Captures the required Platoon Members (`21917`) and Platoon Activity (`21935`)
+  responses without a computer or root access.
+- Offers one-shot Platoon capture that stops automatically after both required
+  responses are parsed.
 - Shows the latest 100 parsed packets in `yy/MM/dd HH:mm:ss` format with fixed-size payload-role tags.
 - Displays history times in the Android device timezone while keeping exported CSV timestamps in UTC.
-- Provides a gear-shaped payload-options screen for Weapons, Attachments, Common Keys, and Formations; optional history capture is off by default while Platoon Members is always enabled.
+- Provides a gear-shaped payload-options screen for Weapons, Attachments,
+  Common Keys, and Formations; optional history capture is off by default while
+  Platoon Members and Platoon Activity are always enabled.
 - Keeps up to 50 selected packets in a separate saved collection until manually deleted.
 - Opens parsed results as a clean table, with access to the complete raw CSV text and clipboard copy.
 - Supports selecting and deleting recent or saved history entries.
-- Tracks active and withdrawn members, repeat tenures, roster changes, and editable member notes in private on-device storage.
+- Tracks active and withdrawn members, repeat tenures, roster changes, editable
+  nicknames, and private member notes in on-device storage.
+- Uses timestamped Platoon Activity records as immutable Daily Patrol and
+  membership evidence. Because activity records do not contain UIDs, a
+  membership timestamp is linked only when the 21917 roster identifies one
+  unique member; duplicate names remain unresolved.
+- Lets leaders manually add historical withdrawn members and additional
+  join/withdraw tenures with Android date-and-time pickers.
 - Builds Sunday-to-Saturday weekly tables around the 05:00 game reset and the
   three-week Gunsmoke Frontline cycle.
 - Keeps Standard Week tables compact by showing only Merit, Login, and Daily
@@ -34,11 +45,11 @@ mobileGF2logger is a lightweight, non-root app for Platoon masters who want to r
 - Recalculates the weekly table from each newly captured roster, including a
   confirmed newcomer's first observed merit.
 - Separates immutable packet-derived Join/Withdraw events from deletable manual
-  Notes.
+  Notes, and assigns tenure numbers chronologically from the oldest join date.
 - Marks live same-day values as partial lower bounds. When captures are sparse,
-  it uses Total Merit to preserve a supported interval total and visibly marks
-  plausible `90`/`50`/`0` daily allocations as approximate rather than
-  presenting them as measured facts.
+  it reconciles the Monday-based cumulative Weekly Merit counter and visibly
+  marks ambiguous Monday-first `90`/`50`/`0` daily allocations as
+  approximate rather than presenting them as measured facts.
 - Keeps missing Gunsmoke days unknown instead of inventing daily score or
   attempts, while using captured counters to preserve the strongest supported
   Total-column value.
@@ -58,9 +69,12 @@ uid,name,level,weeklyMerit,totalMerit,highScore,totalScore,lastLogin,logTime
 1. Install the ARM64 APK on Android 8.0 or newer.
 2. Open **GF2logger**, confirm the game package, and select **Capture one Platoon roster**.
 3. Approve Android's VPN prompt, then open the game.
-4. Enter **Platoon(서클)** and open **Members(멤버)**.
+4. Enter **Platoon(서클)** and open **Updates(동향)** and **Members(멤버)**.
 5. Return to GF2logger to review packet history or open **Platoon management**.
 
 The app keeps parsed history and generated CSV files in private on-device storage. It does not bypass TLS, certificate pinning, or anti-cheat systems, and it does not modify game traffic.
+Platoon Activity is an incremental server response, so the app can preserve
+only the history supplied during captures; older missing tenures can be entered
+manually.
 
 Licensed under GPL-3.0. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for bundled components.

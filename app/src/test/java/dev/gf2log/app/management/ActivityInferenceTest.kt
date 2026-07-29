@@ -78,9 +78,15 @@ class ActivityInferenceTest {
 
     @Test
     fun leavesUnsupportedNonGunsmokeDeltaAmbiguous() {
-        val result = ActivityInference.infer(meritDelta = 75, scoreDelta = 0, gunsmokeActive = false)
+        listOf(40L, 75L).forEach { merit ->
+            val result = ActivityInference.infer(
+                meritDelta = merit,
+                scoreDelta = 0,
+                gunsmokeActive = false,
+            )
 
-        assertEquals(EvidencePrecision.AMBIGUOUS, result.precision)
-        assertFalse(result.candidates.isNotEmpty())
+            assertEquals(EvidencePrecision.AMBIGUOUS, result.precision)
+            assertFalse(result.candidates.isNotEmpty())
+        }
     }
 }

@@ -8,6 +8,7 @@ import dev.gf2log.protocol.model.GameData
 import dev.gf2log.protocol.model.GuildMembersData
 import dev.gf2log.protocol.model.ParseEvent
 import dev.gf2log.protocol.model.ParsedPayload
+import dev.gf2log.protocol.model.PlatoonActivityData
 import dev.gf2log.protocol.model.WeaponsData
 
 class Gfl2StreamParser(
@@ -156,6 +157,11 @@ class Gfl2StreamParser(
         first is CommonKeysData && second is CommonKeysData -> CommonKeysData(first.keys + second.keys)
         first is GuildMembersData && second is GuildMembersData ->
             GuildMembersData(first.members + second.members)
+        first is PlatoonActivityData && second is PlatoonActivityData ->
+            PlatoonActivityData(
+                summaries = first.summaries + second.summaries,
+                entries = first.entries + second.entries,
+            )
         first is FormationsData && second is FormationsData ->
             FormationsData(first.formations + second.formations)
         else -> second

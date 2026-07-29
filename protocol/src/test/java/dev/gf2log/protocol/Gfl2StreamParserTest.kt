@@ -5,6 +5,7 @@ import dev.gf2log.protocol.model.CommonKeysData
 import dev.gf2log.protocol.model.FormationsData
 import dev.gf2log.protocol.model.GuildMembersData
 import dev.gf2log.protocol.model.ParseEvent
+import dev.gf2log.protocol.model.PlatoonActivityData
 import dev.gf2log.protocol.model.WeaponsData
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -90,6 +91,25 @@ class Gfl2StreamParserTest {
         assertEquals("Alpha", formation.name)
         assertEquals(listOf(10uL, 11uL), formation.dolls.single().attachmentUids)
         assertEquals(listOf(20u, 21u), formation.dolls.single().fixedKeyIds)
+    }
+
+    @Test
+    fun platoonActivityPreservesTimestampsActionsAndNames() {
+        val parser = Gfl2StreamParser()
+        val message = outerMessage(
+            101,
+            payload(Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY, platoonActivityPayload()),
+        )
+
+        val data = parser.accept(message).singlePayload().value.data as PlatoonActivityData
+
+        assertEquals(1, data.summaries.size)
+        assertEquals(9_007_199_254_740_993uL, data.summaries.single().id)
+        assertEquals(802001u, data.summaries.single().actionId)
+        assertEquals(1_785_252_994u, data.summaries.single().occurredAt)
+        assertEquals(1u, data.summaries.single().count)
+        assertEquals(2u, data.entries.single().kind)
+        assertEquals("지휘관", data.entries.single().memberName)
     }
 
     @Test
@@ -219,6 +239,18 @@ class Gfl2StreamParserTest {
         val formation = stringField(1, "Alpha") + messageField(2, doll)
         val formations = messageField(1, formation)
         return messageField(1, formations)
+    }
+
+    private fun platoonActivityPayload(): ByteArray {
+        val summary = uintField(1, 9_007_199_254_740_993uL) +
+            uintField(2, 802001uL) +
+            uintField(3, 1_785_252_994uL) +
+            uintField(4, 1uL)
+        val entry = uintField(2, 2uL) +
+            uintField(3, 1_785_252_994uL) +
+            uintField(4, 802001uL) +
+            stringField(5, "지휘관")
+        return messageField(1, summary) + messageField(2, entry)
     }
 
     private fun List<ParseEvent>.singlePayload(): ParseEvent.Payload =

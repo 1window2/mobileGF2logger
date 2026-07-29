@@ -13,8 +13,8 @@ import android.widget.Toast
 import dev.gf2log.app.management.MemberStatus
 import dev.gf2log.app.management.MembershipTenure
 import dev.gf2log.app.management.PlatoonRepository
+import dev.gf2log.app.management.EvidenceSource
 import java.time.Instant
-import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -35,12 +35,12 @@ class MemberDetailActivity : LocalizedActivity() {
             return
         }
         val nameInput = EditText(this).apply {
-            hint = getString(R.string.member_name)
+            hint = getString(R.string.member_nickname)
             setText(status.name)
             setSingleLine(true)
         }
         val noteInput = EditText(this).apply {
-            hint = getString(R.string.member_note)
+            hint = getString(R.string.member_private_note)
             setText(status.note)
             minLines = 2
         }
@@ -87,6 +87,10 @@ class MemberDetailActivity : LocalizedActivity() {
                         ).show()
                     }
                 }, matchWidth())
+                addView(Button(context).apply {
+                    text = getString(R.string.add_membership_history)
+                    setOnClickListener { addMembershipHistory(status) }
+                }, matchWidth())
                 addView(TextView(context).apply {
                     text = getString(R.string.membership_history)
                     textSize = 21f
@@ -108,26 +112,24 @@ class MemberDetailActivity : LocalizedActivity() {
         isAllCaps = false
         text = getString(
             R.string.tenure_summary,
-            status.tenures.size - index,
+            index + 1,
             format(tenure.joinedAt),
             format(tenure.leftAt),
             tenure.joinedPrecision.name,
             tenure.leftPrecision?.name ?: "-",
         )
+        val immutable = tenure.joinedSource == EvidenceSource.GAME_UPDATES ||
+            tenure.leftSource == EvidenceSource.GAME_UPDATES
+        isEnabled = !immutable
+        alpha = if (immutable) 0.72f else 1f
         setOnClickListener { editTenure(tenure) }
     }
 
     private fun editTenure(tenure: MembershipTenure) {
-        val joined = EditText(this).apply {
-            hint = getString(R.string.joined_at_hint)
-            setText(formatForEdit(tenure.joinedAt))
-        }
-        val left = EditText(this).apply {
-            hint = getString(R.string.left_at_hint)
-            setText(formatForEdit(tenure.leftAt))
-        }
+        val joined = DateTimePickerInput(this, getString(R.string.join_field), tenure.joinedAt)
+        val left = DateTimePickerInput(this, getString(R.string.withdraw_field), tenure.leftAt)
         val note = EditText(this).apply {
-            hint = getString(R.string.member_note)
+            hint = getString(R.string.membership_note_hint)
             setText(tenure.note)
         }
         val content = LinearLayout(this).apply {
@@ -142,12 +144,13 @@ class MemberDetailActivity : LocalizedActivity() {
             .setView(content)
             .setNegativeButton(android.R.string.cancel, null)
             .setPositiveButton(R.string.save_member) { _, _ ->
-                val joinedAt = parseLocal(joined.text.toString())
-                val leftAt = parseLocal(left.text.toString())
-                val valid = joined.text.isBlank() || joinedAt != null
-                val validLeft = left.text.isBlank() || leftAt != null
-                val saved = valid && validLeft && runCatching {
-                    repository.updateTenure(tenure.id, joinedAt, leftAt, note.text.toString())
+                val saved = runCatching {
+                    repository.updateTenure(
+                        tenure.id,
+                        joined.instant,
+                        left.instant,
+                        note.text.toString(),
+                    )
                 }.getOrDefault(false)
                 Toast.makeText(
                     this,
@@ -159,20 +162,54 @@ class MemberDetailActivity : LocalizedActivity() {
             .show()
     }
 
+    private fun addMembershipHistory(status: MemberStatus) {
+        val joined = DateTimePickerInput(this, getString(R.string.join_field))
+        val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_field))
+        val note = EditText(this).apply {
+            hint = getString(R.string.membership_note_hint)
+            minLines = 2
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), 0, dp(16), 0)
+            addView(joined, matchWidth())
+            addView(withdrew, matchWidth())
+            addView(note, matchWidth())
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.add_membership_history)
+            .setView(content)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.add, null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val joinedAt = joined.instant
+                val withdrewAt = withdrew.instant
+                val validRange = joinedAt == null ||
+                    withdrewAt == null ||
+                    !withdrewAt.isBefore(joinedAt)
+                val saved = validRange && runCatching {
+                    repository.addTenure(
+                        status.uid,
+                        joinedAt,
+                        withdrewAt,
+                        note.text.toString(),
+                    )
+                }.getOrDefault(false)
+                if (saved) {
+                    dialog.dismiss()
+                    render()
+                } else {
+                    Toast.makeText(this, R.string.invalid_date, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        dialog.show()
+    }
+
     private fun format(instant: Instant?): String =
         instant?.atZone(ZoneId.systemDefault())?.format(DISPLAY_TIME) ?: getString(R.string.unknown)
-
-    private fun formatForEdit(instant: Instant?): String =
-        instant?.atZone(ZoneId.systemDefault())?.format(EDIT_TIME).orEmpty()
-
-    private fun parseLocal(value: String): Instant? {
-        if (value.isBlank()) return null
-        return runCatching {
-            LocalDateTime.parse(value.trim(), EDIT_TIME)
-                .atZone(ZoneId.systemDefault())
-                .toInstant()
-        }.getOrNull()
-    }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private fun matchWidth() = ViewGroup.LayoutParams(
@@ -183,6 +220,5 @@ class MemberDetailActivity : LocalizedActivity() {
     companion object {
         const val EXTRA_UID = "uid"
         private val DISPLAY_TIME = DateTimeFormatter.ofPattern("yy/MM/dd HH:mm")
-        private val EDIT_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
     }
 }

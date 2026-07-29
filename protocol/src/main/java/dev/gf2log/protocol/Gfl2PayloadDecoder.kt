@@ -11,6 +11,9 @@ import dev.gf2log.protocol.model.FormationsData
 import dev.gf2log.protocol.model.GameData
 import dev.gf2log.protocol.model.GuildMember
 import dev.gf2log.protocol.model.GuildMembersData
+import dev.gf2log.protocol.model.PlatoonActivityData
+import dev.gf2log.protocol.model.PlatoonActivityEntry
+import dev.gf2log.protocol.model.PlatoonActivitySummary
 import dev.gf2log.protocol.model.Weapon
 import dev.gf2log.protocol.model.WeaponsData
 
@@ -19,6 +22,7 @@ object Gfl2PayloadDecoder {
     const val TYPE_ATTACHMENTS = 11061
     const val TYPE_COMMON_KEYS = 11138
     const val TYPE_GUILD_MEMBERS = 21917
+    const val TYPE_PLATOON_ACTIVITY = 21935
     const val TYPE_FORMATIONS = 23201
 
     val supportedTypes: Set<Int> = setOf(
@@ -26,6 +30,7 @@ object Gfl2PayloadDecoder {
         TYPE_ATTACHMENTS,
         TYPE_COMMON_KEYS,
         TYPE_GUILD_MEMBERS,
+        TYPE_PLATOON_ACTIVITY,
         TYPE_FORMATIONS,
     )
 
@@ -35,6 +40,7 @@ object Gfl2PayloadDecoder {
         TYPE_ATTACHMENTS -> decodeAttachments(ProtoReader(bytes))
         TYPE_COMMON_KEYS -> decodeCommonKeys(ProtoReader(bytes))
         TYPE_GUILD_MEMBERS -> decodeGuildMembers(ProtoReader(bytes))
+        TYPE_PLATOON_ACTIVITY -> decodePlatoonActivity(ProtoReader(bytes))
         TYPE_FORMATIONS -> decodeFormationsResponse(ProtoReader(bytes))
         else -> null
     }
@@ -196,6 +202,56 @@ object Gfl2PayloadDecoder {
         }
 
         return GuildMember(uid, name, level, weeklyMerit, totalMerit, highScore, totalScore, lastLogin)
+    }
+
+    private fun decodePlatoonActivity(reader: ProtoReader): PlatoonActivityData {
+        val summaries = mutableListOf<PlatoonActivitySummary>()
+        val entries = mutableListOf<PlatoonActivityEntry>()
+        while (!reader.exhausted) {
+            val field = reader.nextField() ?: break
+            when (field.number) {
+                1 -> summaries += decodePlatoonActivitySummary(reader.readMessage(field))
+                2 -> entries += decodePlatoonActivityEntry(reader.readMessage(field))
+                else -> reader.skip(field)
+            }
+        }
+        return PlatoonActivityData(summaries, entries)
+    }
+
+    private fun decodePlatoonActivitySummary(reader: ProtoReader): PlatoonActivitySummary {
+        var id = 0uL
+        var actionId = 0u
+        var occurredAt = 0u
+        var count = 0u
+        while (!reader.exhausted) {
+            val field = reader.nextField() ?: break
+            when (field.number) {
+                1 -> id = reader.readUInt(field)
+                2 -> actionId = reader.readUInt(field).toUInt()
+                3 -> occurredAt = reader.readUInt(field).toUInt()
+                4 -> count = reader.readUInt(field).toUInt()
+                else -> reader.skip(field)
+            }
+        }
+        return PlatoonActivitySummary(id, actionId, occurredAt, count)
+    }
+
+    private fun decodePlatoonActivityEntry(reader: ProtoReader): PlatoonActivityEntry {
+        var kind = 0u
+        var occurredAt = 0u
+        var actionId = 0u
+        var memberName = ""
+        while (!reader.exhausted) {
+            val field = reader.nextField() ?: break
+            when (field.number) {
+                2 -> kind = reader.readUInt(field).toUInt()
+                3 -> occurredAt = reader.readUInt(field).toUInt()
+                4 -> actionId = reader.readUInt(field).toUInt()
+                5 -> memberName = reader.readString(field)
+                else -> reader.skip(field)
+            }
+        }
+        return PlatoonActivityEntry(kind, occurredAt, actionId, memberName)
     }
 
     private fun decodePlayer(reader: ProtoReader): Pair<String, UInt> {

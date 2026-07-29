@@ -20,7 +20,7 @@ Native zdtun forwarding/reassembly core
 Gfl2StreamParser (one bounded instance per live TCP flow)
         |
         v
-Gfl2PayloadDecoder (five recognized protobuf message types)
+Gfl2PayloadDecoder (six recognized protobuf message types)
         |
         v
 Typed GameData events
@@ -58,6 +58,7 @@ Recognized inner types:
 | 11061 | Attachments |
 | 11138 | Common keys |
 | 21917 | Platoon members |
+| 21935 | Platoon activity |
 | 23201 | Formations |
 
 Unknown payload types are skipped without allocation. A recognized but malformed protobuf payload produces a warning event and does not terminate parsing of later messages.
@@ -72,7 +73,10 @@ Unknown payload types are skipped without allocation. A recognized but malformed
 - Queue saturation is counted and surfaced in the capture status instead of being silently discarded.
 - Raw IP packets and application payloads are not persisted.
 
-The single worker is deliberate: these five responses are sparse, and avoiding a worker pool reduces scheduling, memory, and ordering complexity. If benchmarking later proves this insufficient, partition work by flow while preserving in-flow ordering.
+The single worker is deliberate: these six responses are sparse, and avoiding
+a worker pool reduces scheduling, memory, and ordering complexity. If
+benchmarking later proves this insufficient, partition work by flow while
+preserving in-flow ordering.
 
 ## Native integration contract
 
@@ -83,7 +87,23 @@ The single worker is deliberate: these five responses are sparse, and avoiding a
 
 The listener reports candidate plaintext payloads after TCP reassembly, flow closure, unexpected native termination, and aggregate byte counters. Every upstream socket is passed through `VpnService.protect()` so forwarded traffic cannot re-enter the VPN.
 
-The implementation uses zdtun rather than introducing a new TCP/IP stack. General PCAP export, nDPI classification, TLS decryption, root capture, remote collectors, and the full PCAPdroid UI are not included.
+The implementation uses zdtun rather than introducing a new TCP/IP stack.
+General PCAP export, nDPI classification, TLS decryption, root capture, remote
+collectors, and the full PCAPdroid UI are not included.
+
+## Structured Platoon evidence
+
+The private management database stores 21917 roster snapshots and 21935
+activity facts separately. The roster is authoritative for stable UID
+identity. Activity entries supply an action, name, and Unix timestamp but no
+UID, so a fact is linked only when nearby roster snapshots map the name to
+exactly one member. Ambiguous duplicate names remain stored but unresolved.
+
+Observed action `802001` is deduplicated to one Daily Patrol fact per UID and
+matching 05:00-based game day. Membership boundaries remain available as
+UID-safe 21917 observation facts and are upgraded to exact, non-deletable
+21935 timestamps only after the same strict identity check. Manual tenures
+remain available for history absent from incremental responses.
 
 ## HTTPS and application-layer encryption
 

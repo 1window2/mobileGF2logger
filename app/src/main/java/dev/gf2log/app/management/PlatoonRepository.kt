@@ -4,6 +4,7 @@ import android.content.Context
 import dev.gf2log.app.capture.GuildMembersCsvWriter
 import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.model.GuildMember
+import dev.gf2log.protocol.model.PlatoonActivityData
 import java.io.File
 import java.time.Instant
 
@@ -24,6 +25,26 @@ class PlatoonRepository(context: Context) {
                 sourceFile = batch.file.name,
             ),
             source = EvidenceSource.SNAPSHOT,
+        )
+
+    fun ingestActivity(
+        data: PlatoonActivityData,
+        capturedAt: Instant = Instant.now(),
+    ): PlatoonDatabase.ActivityIngestResult =
+        database.ingestPlatoonActivity(
+            observations = data.entries.mapNotNull {
+                if (it.occurredAt == 0u || it.actionId == 0u || it.memberName.isBlank()) {
+                    null
+                } else {
+                    PlatoonActivityObservation(
+                        occurredAt = Instant.ofEpochSecond(it.occurredAt.toLong()),
+                        actionId = it.actionId.toLong(),
+                        kind = it.kind.toLong(),
+                        memberName = it.memberName,
+                    )
+                }
+            },
+            capturedAt = capturedAt,
         )
 
     fun importLegacyCsvFiles(directory: File): ImportResult {
@@ -77,6 +98,9 @@ class PlatoonRepository(context: Context) {
     fun listEvents(from: Instant, until: Instant): List<MemberEvent> =
         database.listEvents(from, until)
 
+    fun listDailyPatrolFacts(from: Instant, until: Instant): List<DailyPatrolFact> =
+        database.listDailyPatrolFacts(from, until)
+
     fun updateMember(uid: Long, name: String, note: String): Boolean =
         database.updateMember(uid, name, note)
 
@@ -86,6 +110,21 @@ class PlatoonRepository(context: Context) {
         leftAt: Instant?,
         note: String,
     ): Boolean = database.updateTenure(tenureId, joinedAt, leftAt, note)
+
+    fun addWithdrawnMember(
+        uid: Long,
+        name: String,
+        joinedAt: Instant?,
+        withdrewAt: Instant?,
+        note: String,
+    ): Boolean = database.addWithdrawnMember(uid, name, joinedAt, withdrewAt, note)
+
+    fun addTenure(
+        uid: Long,
+        joinedAt: Instant?,
+        withdrewAt: Instant?,
+        note: String,
+    ): Boolean = database.addTenure(uid, joinedAt, withdrewAt, note)
 
     fun addWeeklyNote(periodStartEpochDay: Long, gameDayEpochDay: Long, text: String): Long =
         database.addWeeklyNote(periodStartEpochDay, gameDayEpochDay, text)

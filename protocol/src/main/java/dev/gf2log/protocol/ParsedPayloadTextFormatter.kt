@@ -5,6 +5,7 @@ import dev.gf2log.protocol.model.CommonKeysData
 import dev.gf2log.protocol.model.FormationsData
 import dev.gf2log.protocol.model.GuildMembersData
 import dev.gf2log.protocol.model.ParsedPayload
+import dev.gf2log.protocol.model.PlatoonActivityData
 import dev.gf2log.protocol.model.WeaponsData
 
 object ParsedPayloadTextFormatter {
@@ -18,6 +19,18 @@ object ParsedPayloadTextFormatter {
             is GuildMembersData -> {
                 appendLine(GuildMembersCsv.HEADER)
                 data.members.forEach { appendLine(GuildMembersCsv.row(it, capturedAt)) }
+            }
+            is PlatoonActivityData -> {
+                appendLine("recordType,id,kind,occurredAt,actionId,count,memberName")
+                data.summaries.forEach {
+                    appendLine("summary,${it.id},,${it.occurredAt},${it.actionId},${it.count},")
+                }
+                data.entries.forEach {
+                    appendLine(
+                        "entry,,${it.kind},${it.occurredAt},${it.actionId},," +
+                            csvEscape(it.memberName),
+                    )
+                }
             }
             is WeaponsData -> {
                 appendLine("id,level,rank,uid")

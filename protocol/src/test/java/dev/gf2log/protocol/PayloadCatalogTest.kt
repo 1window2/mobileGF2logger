@@ -13,14 +13,21 @@ class PayloadCatalogTest {
         assertEquals("ATTACHMENTS", PayloadCatalog.tag(11061))
         assertEquals("KEYS", PayloadCatalog.tag(11138))
         assertEquals("PLATOON", PayloadCatalog.tag(21917))
+        assertEquals("ACTIVITY", PayloadCatalog.tag(21935))
         assertEquals("FORMATIONS", PayloadCatalog.tag(23201))
     }
 
     @Test
-    fun `only Platoon members is required`() {
-        val platoon = PayloadCatalog.find(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS)!!
-        assertTrue(platoon.isRequired)
-        assertTrue(PayloadCatalog.categories.filterNot { it == platoon }.all { !it.isRequired })
+    fun `Platoon members and activity are required`() {
+        val required = PayloadCatalog.categories.filter(PayloadCategory::isRequired)
+        assertEquals(
+            setOf(
+                Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
+                Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY,
+            ),
+            required.map(PayloadCategory::payloadType).toSet(),
+        )
+        assertTrue(required.all(PayloadCategory::isRequired))
         assertFalse(PayloadCatalog.find(Gfl2PayloadDecoder.TYPE_FORMATIONS)!!.isRequired)
     }
 

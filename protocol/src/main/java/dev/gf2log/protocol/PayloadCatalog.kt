@@ -18,6 +18,13 @@ object PayloadCatalog {
             isRequired = true,
         ),
         PayloadCategory(
+            payloadType = Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY,
+            name = "PLATOON ACTIVITY",
+            tag = "ACTIVITY",
+            description = "Timestamped Platoon activity, including Daily Patrol records.",
+            isRequired = true,
+        ),
+        PayloadCategory(
             payloadType = Gfl2PayloadDecoder.TYPE_WEAPONS,
             name = "WEAPONS",
             tag = "WEAPONS",

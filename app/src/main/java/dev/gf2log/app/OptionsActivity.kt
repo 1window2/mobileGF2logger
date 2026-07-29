@@ -157,6 +157,7 @@ class OptionsActivity : LocalizedActivity() {
     private fun payloadName(payloadType: Int): String = getString(
         when (payloadType) {
             Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS -> R.string.payload_name_platoon_members
+            Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY -> R.string.payload_name_platoon_activity
             Gfl2PayloadDecoder.TYPE_WEAPONS -> R.string.payload_name_weapons
             Gfl2PayloadDecoder.TYPE_ATTACHMENTS -> R.string.payload_name_attachments
             Gfl2PayloadDecoder.TYPE_COMMON_KEYS -> R.string.payload_name_common_keys
@@ -168,6 +169,8 @@ class OptionsActivity : LocalizedActivity() {
     private fun payloadDescription(payloadType: Int): String = getString(
         when (payloadType) {
             Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS -> R.string.payload_description_platoon_members
+            Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY ->
+                R.string.payload_description_platoon_activity
             Gfl2PayloadDecoder.TYPE_WEAPONS -> R.string.payload_description_weapons
             Gfl2PayloadDecoder.TYPE_ATTACHMENTS -> R.string.payload_description_attachments
             Gfl2PayloadDecoder.TYPE_COMMON_KEYS -> R.string.payload_description_common_keys

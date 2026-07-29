@@ -43,6 +43,25 @@ data class GuildMember(
     val lastLogin: UInt,
 )
 
+data class PlatoonActivityData(
+    val summaries: List<PlatoonActivitySummary>,
+    val entries: List<PlatoonActivityEntry>,
+) : GameData
+
+data class PlatoonActivitySummary(
+    val id: ULong,
+    val actionId: UInt,
+    val occurredAt: UInt,
+    val count: UInt,
+)
+
+data class PlatoonActivityEntry(
+    val kind: UInt,
+    val occurredAt: UInt,
+    val actionId: UInt,
+    val memberName: String,
+)
+
 data class FormationsData(val formations: List<Formation>) : GameData
 
 data class Formation(

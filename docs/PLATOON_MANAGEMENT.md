@@ -1,7 +1,7 @@
 # Platoon management model
 
 This document defines the management rules implemented by GF2logger. The
-reference workbook is the leader-maintained `부엉이 관리현황` spreadsheet.
+reference workbook is a leader-maintained Platoon management spreadsheet.
 Spreadsheet labels and formulas are evidence, but capture timestamps and the
 rules below take precedence over stale copied dates in archived templates.
 

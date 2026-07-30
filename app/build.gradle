@@ -1,15 +1,130 @@
+import java.security.KeyStore
+import java.security.MessageDigest
+import org.gradle.api.GradleException
+
 plugins {
     id 'com.android.application'
 }
 
+def expectedReleaseSignerSha256 =
+        '3B:6A:F9:A1:70:76:75:49:4E:FD:04:2A:17:D7:23:B2:3E:CB:96:C9:FF:53:DB:92:55:77:9C:F5:A5:FC:BF:01'
 def releaseSigningProperties = new Properties()
 def releaseSigningFile = rootProject.file('keystore.properties')
 if (releaseSigningFile.isFile()) {
     releaseSigningFile.withInputStream { releaseSigningProperties.load(it) }
 }
-def releaseSigningKeys = ['storeFile', 'storePassword', 'keyAlias', 'keyPassword']
-def hasReleaseSigning = releaseSigningKeys.every {
-    releaseSigningProperties.getProperty(it)?.trim()
+
+def requiredReleaseSigningProperties = [
+        'storeFile',
+        'storePassword',
+        'keyAlias',
+        'keyPassword',
+]
+def missingReleaseSigningProperties = requiredReleaseSigningProperties.findAll { propertyName ->
+    !releaseSigningProperties.getProperty(propertyName)?.trim()
+}
+def releaseStoreFile = null
+def releaseSigningProblem = null
+
+if (!releaseSigningFile.isFile()) {
+    releaseSigningProblem = "${releaseSigningFile} is missing"
+} else if (!missingReleaseSigningProperties.isEmpty()) {
+    releaseSigningProblem =
+            "keystore.properties is missing: ${missingReleaseSigningProperties.join(', ')}"
+} else {
+    def configuredStorePath = releaseSigningProperties.getProperty('storeFile').trim()
+    def configuredStoreFile = new File(configuredStorePath)
+    releaseStoreFile = configuredStoreFile.isAbsolute()
+            ? configuredStoreFile
+            : rootProject.file(configuredStorePath)
+
+    if (!releaseStoreFile.isFile()) {
+        releaseSigningProblem = "Release keystore is missing at ${releaseStoreFile}"
+    } else {
+        try {
+            def keyStore = KeyStore.getInstance('PKCS12')
+            releaseStoreFile.withInputStream { input ->
+                keyStore.load(
+                        input,
+                        releaseSigningProperties.getProperty('storePassword').toCharArray(),
+                )
+            }
+            def keyAlias = releaseSigningProperties.getProperty('keyAlias').trim()
+            def certificate = keyStore.getCertificate(keyAlias)
+            if (certificate == null) {
+                releaseSigningProblem =
+                        "Release certificate alias '${keyAlias}' is missing from ${releaseStoreFile}"
+            } else if (!keyStore.isKeyEntry(keyAlias)) {
+                releaseSigningProblem =
+                        "Release alias '${keyAlias}' does not contain a private key"
+            } else {
+                def keyPassword = releaseSigningProperties
+                        .getProperty('keyPassword')
+                        .toCharArray()
+                if (keyStore.getKey(keyAlias, keyPassword) == null) {
+                    releaseSigningProblem =
+                            "Release private key '${keyAlias}' could not be loaded"
+                } else {
+                    def actualReleaseSignerSha256 = MessageDigest
+                            .getInstance('SHA-256')
+                            .digest(certificate.encoded)
+                            .collect { value -> String.format('%02X', value & 0xFF) }
+                            .join(':')
+                    if (actualReleaseSignerSha256 != expectedReleaseSignerSha256) {
+                        releaseSigningProblem =
+                                'Release certificate does not match the permanent ' +
+                                'mobileGF2logger signing lineage. Expected ' +
+                                "${expectedReleaseSignerSha256}, but found " +
+                                "${actualReleaseSignerSha256}."
+                    }
+                }
+            }
+        } catch (Exception exception) {
+            releaseSigningProblem =
+                    "Release keystore could not be validated: ${exception.message}"
+        }
+    }
+}
+
+def hasReleaseSigning = releaseSigningProblem == null
+def unsignedReleaseRequested = providers
+        .gradleProperty('allowUnsignedRelease')
+        .map { value -> value.toBoolean() }
+        .orElse(false)
+        .get()
+def runningInCi = providers
+        .environmentVariable('CI')
+        .map { value -> value.equalsIgnoreCase('true') }
+        .orElse(false)
+        .get()
+def allowUnsignedRelease = unsignedReleaseRequested && runningInCi
+def releaseArtifactRequested = gradle.startParameter.taskNames.any { requestedTask ->
+    def taskPathParts = requestedTask.tokenize(':')
+    def taskName = taskPathParts.last()
+    def requestedProject = taskPathParts.size() > 1
+            ? taskPathParts[0..-2].join(':')
+            : ''
+    def targetsApplication = requestedProject.isEmpty() || requestedProject == 'app'
+
+    targetsApplication &&
+            (taskName in ['assemble', 'build', 'bundle'] ||
+            taskName ==~ /(?i)(assemble|bundle|package|install|sign).*Release.*/
+            )
+}
+
+if (unsignedReleaseRequested && !runningInCi) {
+    throw new GradleException(
+            '-PallowUnsignedRelease=true is restricted to CI verification builds.',
+    )
+}
+
+if (releaseArtifactRequested && !hasReleaseSigning && !allowUnsignedRelease) {
+    throw new GradleException(
+            'A release artifact was requested without the permanent production signer. ' +
+            "${releaseSigningProblem}. Configure the ignored root-level " +
+            'keystore.properties file. Unsigned release packaging is allowed only in ' +
+            'CI verification builds.',
+    )
 }
 
 android {
@@ -20,8 +135,8 @@ android {
         applicationId = 'dev.gf2log'
         minSdk = 26
         targetSdk = 36
-        versionCode = 20001
-        versionName = '2.0.1'
+        versionCode = 20002
+        versionName = '2.0.2'
 
         ndk {
             abiFilters 'arm64-v8a'
@@ -37,7 +152,7 @@ android {
     signingConfigs {
         if (hasReleaseSigning) {
             release {
-                storeFile = rootProject.file(releaseSigningProperties.getProperty('storeFile'))
+                storeFile = releaseStoreFile
                 storePassword = releaseSigningProperties.getProperty('storePassword')
                 keyAlias = releaseSigningProperties.getProperty('keyAlias')
                 keyPassword = releaseSigningProperties.getProperty('keyPassword')
@@ -53,7 +168,7 @@ android {
         release {
             minifyEnabled = true
             shrinkResources = true
-            if (hasReleaseSigning) {
+            if (hasReleaseSigning && !allowUnsignedRelease) {
                 signingConfig = signingConfigs.release
             }
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'

@@ -39,19 +39,45 @@ jobs:
         run: |
           "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "cmake;3.22.1"
 
-      - name: Test, lint, and build release
+      - name: Test, lint, and build unsigned verification release
         run: >
           ./gradlew
           :protocol:testDebugUnitTest
           :app:testDebugUnitTest
           :app:lintDebug
           :app:assembleRelease
+          -PallowUnsignedRelease=true
           --no-daemon
           --stacktrace
 
-      - name: Upload release APK
+      - name: Verify and stage non-distributable artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          apk="app/build/outputs/apk/release/app-release-unsigned.apk"
+          test -f "${apk}"
+
+          apksigner="$(find "${ANDROID_HOME}/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          test -x "${apksigner}"
+
+          if "${apksigner}" verify "${apk}"; then
+            echo "CI verification APK was unexpectedly signed." >&2
+            exit 1
+          fi
+
+          mkdir -p ci-artifacts
+          cp "${apk}" \
+            ci-artifacts/mobileGF2logger-v2.0.2-unsigned-verification-only.apk
+          cat > ci-artifacts/DO_NOT_DISTRIBUTE.txt <<'EOF'
+          This unsigned APK exists only to verify compilation, lint, native
+          packaging, minification, and resource shrinking in CI. It cannot be
+          installed as a production update and must not be published.
+          EOF
+
+      - name: Upload unsigned verification artifact
         uses: actions/upload-artifact@v7
         with:
-          name: app-release-unsigned
-          path: app/build/outputs/apk/release/*.apk
+          name: unsigned-verification-only-do-not-distribute
+          path: ci-artifacts/
           retention-days: 14

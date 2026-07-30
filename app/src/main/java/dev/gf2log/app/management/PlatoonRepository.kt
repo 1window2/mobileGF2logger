@@ -7,6 +7,8 @@ import dev.gf2log.protocol.model.PlatoonActivityData
 import dev.gf2log.protocol.model.PlatoonUpdatesData
 import java.io.File
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.withLock
 
@@ -190,6 +192,31 @@ class PlatoonRepository(context: Context) {
 
     fun listWeeklyOverrides(periodStartEpochDay: Long): List<WeeklyCellOverride> =
         access { it.listWeeklyOverrides(periodStartEpochDay) }
+
+    fun buildWeeklyReport(
+        referenceDay: LocalDate,
+        zoneId: ZoneId,
+        asOf: Instant = Instant.now(),
+    ): WeeklyReportBuilder.Report {
+        val periodStart = PlatoonPeriods.weekStart(referenceDay)
+        val from = PlatoonPeriods.periodStartInstant(periodStart, zoneId)
+        val until = PlatoonPeriods.periodStartInstant(periodStart.plusDays(7), zoneId)
+        return WeeklyReportBuilder.build(
+            referenceDay = referenceDay,
+            zoneId = zoneId,
+            snapshots = listSnapshotsForPeriod(from, until),
+            overrides = listWeeklyOverrides(periodStart.toEpochDay()),
+            dailyPatrolFacts = listDailyPatrolFacts(from, until),
+            asOf = asOf,
+        )
+    }
+
+    fun listAllWeeklyReports(
+        zoneId: ZoneId,
+        asOf: Instant = Instant.now(),
+    ): List<WeeklyReportBuilder.Report> = WeeklyReportRange
+        .periodStarts(access { it.listWeeklyEvidenceDays(zoneId) })
+        .map { buildWeeklyReport(it, zoneId, asOf) }
 
     fun replaceWeeklyOverrides(
         periodStartEpochDay: Long,

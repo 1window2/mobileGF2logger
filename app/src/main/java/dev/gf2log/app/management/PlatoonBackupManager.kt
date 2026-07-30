@@ -2,18 +2,11 @@ package dev.gf2log.app.management
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
-import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
+import dev.gf2log.app.settings.AppBackupSettingsCodec
+import dev.gf2log.app.settings.AppSettingsStore
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
-import java.security.MessageDigest
-import java.util.Properties
-import java.util.zip.ZipEntry
-import java.util.zip.ZipInputStream
-import java.util.zip.ZipOutputStream
 
 class PlatoonBackupManager(context: Context) {
     private val appContext = context.applicationContext
@@ -22,21 +15,15 @@ class PlatoonBackupManager(context: Context) {
 
     fun export(output: OutputStream) {
         PlatoonRepository.withExclusiveDatabase {
-            val source = databaseFile
-            require(source.isFile) { "No Platoon database exists" }
-            require(source.length() <= MAX_DATABASE_BYTES) { "Platoon database is too large" }
-            val checksum = source.sha256()
-            ZipOutputStream(BufferedOutputStream(output)).use { zip ->
-                zip.putNextEntry(ZipEntry(MANIFEST_ENTRY))
-                Properties().apply {
-                    setProperty("formatVersion", FORMAT_VERSION.toString())
-                    setProperty("databaseSha256", checksum)
-                }.store(zip, "GF2logger Platoon management backup")
-                zip.closeEntry()
-                zip.putNextEntry(ZipEntry(DATABASE_ENTRY))
-                source.inputStream().use { it.copyTo(zip) }
-                zip.closeEntry()
-            }
+            BackupArchive.write(output, databaseFile, settings = null)
+        }
+    }
+
+    fun exportFull(output: OutputStream) {
+        val settings = AppSettingsStore(appContext).read()
+        PlatoonRepository.withExclusiveDatabase {
+            ensureDatabaseExists()
+            BackupArchive.write(output, databaseFile, AppBackupSettingsCodec.encode(settings))
         }
     }
 
@@ -46,45 +33,13 @@ class PlatoonBackupManager(context: Context) {
         if (stagedDatabase.exists() && !stagedDatabase.delete()) {
             error("Unable to clear a previous staged restore")
         }
-        var manifest: Properties? = null
-        var databaseSeen = false
+        val staged = BackupArchive.stage(input, stagedDatabase)
         try {
-            ZipInputStream(BufferedInputStream(input)).use { zip ->
-                while (true) {
-                    val entry = zip.nextEntry ?: break
-                    require(!entry.isDirectory) { "Backup cannot contain directories" }
-                    when (entry.name) {
-                        MANIFEST_ENTRY -> {
-                            require(manifest == null) { "Duplicate backup manifest" }
-                            val bytes = ByteArrayOutputStream().also { output ->
-                                zip.copyBoundedTo(output, MAX_MANIFEST_BYTES)
-                            }.toByteArray()
-                            manifest = Properties().apply {
-                                ByteArrayInputStream(bytes).use { load(it) }
-                            }
-                        }
-                        DATABASE_ENTRY -> {
-                            require(!databaseSeen) { "Duplicate database entry" }
-                            databaseSeen = true
-                            stagedDatabase.outputStream().use { output ->
-                                zip.copyBoundedTo(output, MAX_DATABASE_BYTES)
-                            }
-                        }
-                        else -> error("Unexpected backup entry: ${entry.name}")
-                    }
-                    zip.closeEntry()
-                }
-            }
-            val metadata = requireNotNull(manifest) { "Backup manifest is missing" }
-            require(databaseSeen && stagedDatabase.isFile) { "Backup database is missing" }
-            require(metadata.getProperty("formatVersion") == FORMAT_VERSION.toString()) {
-                "Unsupported backup version"
-            }
-            require(
-                metadata.getProperty("databaseSha256")
-                    ?.equals(stagedDatabase.sha256(), ignoreCase = true) == true,
-            ) { "Backup checksum does not match" }
-            validateDatabase(stagedDatabase)
+            BackupFormatPolicy.requirePlatoonOnly(
+                staged.formatVersion,
+                staged.settings != null,
+            )
+            validateDatabase(stagedDatabase, requireCurrentSchema = false)
             PlatoonRepository.withExclusiveDatabase {
                 replaceDatabase(stagedDatabase)
                 PlatoonRepository.markLegacyImportComplete(appContext)
@@ -94,7 +49,38 @@ class PlatoonBackupManager(context: Context) {
         }
     }
 
-    private fun validateDatabase(file: File) {
+    fun restoreFull(input: InputStream) {
+        val restoreDirectory = File(appContext.cacheDir, "platoon-restore").apply { mkdirs() }
+        val stagedDatabase = File(restoreDirectory, "platoon.db.staged")
+        if (stagedDatabase.exists() && !stagedDatabase.delete()) {
+            error("Unable to clear a previous staged restore")
+        }
+        val staged = BackupArchive.stage(input, stagedDatabase)
+        try {
+            BackupFormatPolicy.requireComplete(staged.formatVersion, staged.settings != null)
+            val restoredSettings = AppBackupSettingsCodec.decode(requireNotNull(staged.settings))
+            validateDatabase(stagedDatabase, requireCurrentSchema = true)
+            val settingsStore = AppSettingsStore(appContext)
+            val previousSettings = settingsStore.read()
+            PlatoonRepository.withExclusiveDatabase {
+                replaceDatabase(stagedDatabase) {
+                    try {
+                        settingsStore.replace(restoredSettings)
+                        PlatoonRepository.markLegacyImportComplete(appContext)
+                    } catch (error: Exception) {
+                        runCatching { settingsStore.replace(previousSettings) }
+                            .exceptionOrNull()
+                            ?.let(error::addSuppressed)
+                        throw error
+                    }
+                }
+            }
+        } finally {
+            stagedDatabase.delete()
+        }
+    }
+
+    private fun validateDatabase(file: File, requireCurrentSchema: Boolean) {
         file.inputStream().use { input ->
             val header = ByteArray(SQLITE_HEADER.size)
             require(input.read(header) == header.size && header.contentEquals(SQLITE_HEADER)) {
@@ -108,6 +94,9 @@ class PlatoonBackupManager(context: Context) {
             }
             require(version in PlatoonSchema.MIN_BACKUP_VERSION..PlatoonSchema.CURRENT_VERSION) {
                 "Unsupported Platoon database schema"
+            }
+            require(!requireCurrentSchema || version == PlatoonSchema.CURRENT_VERSION) {
+                "Full backup does not contain the complete current Platoon schema"
             }
             db.rawQuery("PRAGMA quick_check", null).use { cursor ->
                 require(cursor.moveToFirst() && cursor.getString(0).equals("ok", ignoreCase = true)) {
@@ -138,13 +127,29 @@ class PlatoonBackupManager(context: Context) {
                         missingColumns.sorted().joinToString()
                 }
             }
+            if (version == PlatoonSchema.CURRENT_VERSION) validateCurrentSchema(db)
             db.rawQuery("PRAGMA foreign_key_check", null).use { cursor ->
                 require(!cursor.moveToFirst()) { "Backup database has invalid references" }
             }
         }
     }
 
-    private fun replaceDatabase(staged: File) {
+    private fun validateCurrentSchema(database: SQLiteDatabase) {
+        appContext.deleteDatabase(SCHEMA_REFERENCE_DATABASE)
+        try {
+            PlatoonDatabase(appContext, SCHEMA_REFERENCE_DATABASE).use { helper ->
+                val expected = DatabaseSchemaContract.read(helper.readableDatabase)
+                val actual = DatabaseSchemaContract.read(database)
+                require(actual == expected) {
+                    "Full backup database does not match the current Platoon schema"
+                }
+            }
+        } finally {
+            appContext.deleteDatabase(SCHEMA_REFERENCE_DATABASE)
+        }
+    }
+
+    private fun replaceDatabase(staged: File, afterInstall: () -> Unit = {}) {
         databaseFile.parentFile?.mkdirs()
         val previous = File(
             databaseFile.parentFile,
@@ -174,6 +179,8 @@ class PlatoonBackupManager(context: Context) {
                     check(cursor.moveToFirst())
                 }
             }
+            validateDatabase(databaseFile, requireCurrentSchema = true)
+            afterInstall()
             previous.delete()
         } catch (error: Exception) {
             listOf("", "-wal", "-shm", "-journal").forEach { suffix ->
@@ -188,38 +195,19 @@ class PlatoonBackupManager(context: Context) {
         }
     }
 
-    private fun InputStream.copyBoundedTo(output: OutputStream, maximum: Long) {
-        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-        var total = 0L
-        while (true) {
-            val count = read(buffer)
-            if (count < 0) break
-            total += count
-            require(total <= maximum) { "Backup database exceeds the size limit" }
-            output.write(buffer, 0, count)
-        }
-    }
-
-    private fun File.sha256(): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        inputStream().use { input ->
-            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                digest.update(buffer, 0, count)
+    private fun ensureDatabaseExists() {
+        if (databaseFile.isFile) return
+        PlatoonDatabase(appContext).use { helper ->
+            helper.writableDatabase.rawQuery("SELECT COUNT(*) FROM members", null).use { cursor ->
+                check(cursor.moveToFirst())
             }
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     companion object {
         const val FILE_EXTENSION = "gf2backup"
-        private const val DATABASE_ENTRY = "platoon.db"
-        private const val MANIFEST_ENTRY = "manifest.properties"
-        private const val FORMAT_VERSION = 1
-        private const val MAX_MANIFEST_BYTES = 64L * 1024
-        private const val MAX_DATABASE_BYTES = 50L * 1024 * 1024
+        const val MIME_TYPE = "application/vnd.dev.gf2log.backup"
+        private const val SCHEMA_REFERENCE_DATABASE = "platoon-schema-reference.db"
         private val SQLITE_HEADER = "SQLite format 3\u0000".toByteArray(Charsets.US_ASCII)
     }
 }

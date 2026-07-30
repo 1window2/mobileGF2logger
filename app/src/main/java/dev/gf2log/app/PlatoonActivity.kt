@@ -69,6 +69,7 @@ class PlatoonActivity : LocalizedActivity() {
             addView(summary, matchWidth())
             addView(Button(context).apply {
                 text = getString(R.string.weekly_table)
+                usePrimaryActionStyle()
                 setOnClickListener {
                     startActivity(Intent(this@PlatoonActivity, WeeklyReportActivity::class.java))
                 }

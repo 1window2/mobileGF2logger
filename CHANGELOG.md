@@ -4,6 +4,30 @@ All notable changes to mobileGF2logger are documented here.
 
 ## Unreleased
 
+## 2.1.0 - 2026-07-31
+
+### Added
+
+- Add complete `.gf2backup` export and atomic restore for app settings,
+  structured Platoon/member/tenure history, and all weekly-table evidence.
+- Validate complete-backup extension, archive identity, manifest, checksums,
+  settings schema, SQLite integrity, current schema, and foreign-key references
+  before replacing user data.
+- Export all available weekly tables as one chronological CSV with one header.
+- Add direct access to Weekly Table from the main screen.
+
+### Changed
+
+- Emphasize Prepare Capture, Open Platoon Management, and Weekly Table with a
+  restrained filled accent style and accessible light/dark contrast.
+- Keep the v1 Platoon-only `.gf2backup` path available for compatibility while
+  requiring complete v2 backups for Settings restore.
+
+### Verified
+
+- v2.1.0 remains on the permanent v2.0.2 production signing lineage and can
+  update v2.0.2 in place without clearing application data.
+
 ## 2.0.2 - 2026-07-30
 
 ### Changed

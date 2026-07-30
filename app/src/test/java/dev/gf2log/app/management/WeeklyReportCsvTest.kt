@@ -84,4 +84,40 @@ class WeeklyReportCsvTest {
                 .contains(",50,,,false,true,MANUAL,MANUAL,"),
         )
     }
+
+    @Test
+    fun `exports multiple weeks chronologically with one header`() {
+        val later = reportFor(LocalDate.of(2026, 7, 26), uid = 2)
+        val earlier = reportFor(LocalDate.of(2026, 7, 19), uid = 1)
+
+        val lines = WeeklyReportCsv.formatAll(listOf(later, earlier)).lines()
+
+        assertEquals(1, lines.count { it == WeeklyReportCsv.HEADER })
+        assertTrue(lines[1].startsWith("2026-07-19,2026-07-25"))
+        assertTrue(lines[2].startsWith("2026-07-26,2026-08-01"))
+    }
+
+    private fun reportFor(day: LocalDate, uid: Long) = WeeklyReportBuilder.Report(
+        periodStart = day,
+        periodEnd = day.plusDays(6),
+        isGunsmokeWeek = false,
+        days = listOf(day),
+        members = listOf(
+            WeeklyReportBuilder.MemberRow(
+                uid = uid,
+                name = "Member $uid",
+                days = listOf(
+                    WeeklyReportBuilder.DayCell(
+                        gameDay = day,
+                        meritDelta = 50,
+                        scoreDelta = 0,
+                        inference = ActivityInference.infer(50, 0, gunsmokeActive = false),
+                        evidence = DailyEvidence.ATTRIBUTED,
+                    ),
+                ),
+                totalMerit = 50,
+                totalScore = 0,
+            ),
+        ),
+    )
 }

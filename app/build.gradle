@@ -112,6 +112,11 @@ def releaseArtifactRequested = gradle.startParameter.taskNames.any { requestedTa
             )
 }
 
+def isReleaseArtifactTask = { task ->
+    task.project == project &&
+            task.name ==~ /(?i)(assemble|bundle|package|install|sign).*Release.*/
+}
+
 if (unsignedReleaseRequested && !runningInCi) {
     throw new GradleException(
             '-PallowUnsignedRelease=true is restricted to CI verification builds.',
@@ -127,6 +132,20 @@ if (releaseArtifactRequested && !hasReleaseSigning && !allowUnsignedRelease) {
     )
 }
 
+// Check the resolved graph as well as literal command-line task names so
+// abbreviations and tasks that depend on release packaging cannot bypass the signer gate.
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any(isReleaseArtifactTask) &&
+            !hasReleaseSigning && !allowUnsignedRelease) {
+        throw new GradleException(
+                'A release artifact task resolved without the permanent production signer. ' +
+                "${releaseSigningProblem}. Configure the ignored root-level " +
+                'keystore.properties file. Unsigned release packaging is allowed only in ' +
+                'CI verification builds.',
+        )
+    }
+}
+
 android {
     namespace = 'dev.gf2log.app'
     compileSdk = 36
@@ -135,8 +154,8 @@ android {
         applicationId = 'dev.gf2log'
         minSdk = 26
         targetSdk = 36
-        versionCode = 20002
-        versionName = '2.0.2'
+        versionCode = 20100
+        versionName = '2.1.0'
 
         ndk {
             abiFilters 'arm64-v8a'

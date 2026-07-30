@@ -45,6 +45,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.Executors
 
 class WeeklyReportActivity : LocalizedActivity() {
     private lateinit var repository: PlatoonRepository
@@ -52,6 +53,9 @@ class WeeklyReportActivity : LocalizedActivity() {
     private var referenceDay: LocalDate =
         PlatoonPeriods.gameDay(Instant.now(), ZoneId.systemDefault())
     private var pendingCsv: String? = null
+    private val exportExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "GF2WeeklyExport")
+    }
     private var editingPeriodStart: LocalDate? = null
     private val editDraft = mutableMapOf<CellKey, EditableCell>()
 
@@ -70,27 +74,18 @@ class WeeklyReportActivity : LocalizedActivity() {
         render()
     }
 
+    override fun onDestroy() {
+        exportExecutor.shutdownNow()
+        super.onDestroy()
+    }
+
     private fun render() {
         body.removeAllViews()
         val zone = ZoneId.systemDefault()
         val periodStart = PlatoonPeriods.weekStart(referenceDay)
-        val periodStartInstant = PlatoonPeriods.periodStartInstant(periodStart, zone)
-        val periodEndInstant = PlatoonPeriods.periodStartInstant(periodStart.plusDays(7), zone)
         val membershipStartInstant = periodStart.atStartOfDay(zone).toInstant()
         val membershipEndInstant = periodStart.plusDays(7).atStartOfDay(zone).toInstant()
-        val report = WeeklyReportBuilder.build(
-            referenceDay = referenceDay,
-            zoneId = zone,
-            snapshots = repository.listSnapshotsForPeriod(
-                periodStartInstant,
-                periodEndInstant,
-            ),
-            overrides = repository.listWeeklyOverrides(periodStart.toEpochDay()),
-            dailyPatrolFacts = repository.listDailyPatrolFacts(
-                periodStartInstant,
-                periodEndInstant,
-            ),
-        )
+        val report = repository.buildWeeklyReport(referenceDay, zone)
         val notes = repository.listWeeklyNotes(report.periodStart.toEpochDay())
             .filterNot(WeeklyNote::isAutomatic)
         val events = repository.listEvents(
@@ -204,6 +199,11 @@ class WeeklyReportActivity : LocalizedActivity() {
                 isEnabled = !isEditing
                 setOnClickListener { copyWeeklyCsv(report) }
             }, LinearLayout.LayoutParams(0, wrap(), 1f))
+        }, matchWidth())
+        body.addView(Button(this).apply {
+            text = getString(R.string.export_all_weekly_tables)
+            isEnabled = !isEditing
+            setOnClickListener { exportAllWeeklyTables() }
         }, matchWidth())
         body.addView(Button(this).apply {
             text = getString(R.string.edit_member_order)
@@ -938,6 +938,31 @@ class WeeklyReportActivity : LocalizedActivity() {
                 "GF2logger-week-${report.periodStart.format(FILE_DATE)}.csv",
             )
         startActivityForResult(intent, REQUEST_EXPORT_WEEKLY)
+    }
+
+    private fun exportAllWeeklyTables() {
+        exportExecutor.execute {
+            val content = runCatching {
+                repository.listAllWeeklyReports(ZoneId.systemDefault())
+                    .takeIf(List<*>::isNotEmpty)
+                    ?.let(WeeklyReportCsv::formatAll)
+            }.getOrNull()
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (content == null) {
+                    Toast.makeText(this, R.string.no_weekly_tables_to_export, Toast.LENGTH_SHORT)
+                        .show()
+                    return@runOnUiThread
+                }
+                pendingCsv = content
+                val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("text/csv")
+                    .putExtra(Intent.EXTRA_TITLE, "mobileGF2logger-all-weekly-tables.csv")
+                @Suppress("DEPRECATION")
+                startActivityForResult(intent, REQUEST_EXPORT_WEEKLY)
+            }
+        }
     }
 
     private fun addNoteEditor(report: WeeklyReportBuilder.Report) {

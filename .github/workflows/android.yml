@@ -68,7 +68,7 @@ jobs:
 
           mkdir -p ci-artifacts
           cp "${apk}" \
-            ci-artifacts/mobileGF2logger-v2.0.2-unsigned-verification-only.apk
+            ci-artifacts/mobileGF2logger-v2.1.0-unsigned-verification-only.apk
           cat > ci-artifacts/DO_NOT_DISTRIBUTE.txt <<'EOF'
           This unsigned APK exists only to verify compilation, lint, native
           packaging, minification, and resource shrinking in CI. It cannot be

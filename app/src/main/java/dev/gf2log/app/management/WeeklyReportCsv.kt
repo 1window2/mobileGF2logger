@@ -6,32 +6,36 @@ object WeeklyReportCsv {
             "attempts,attendance,dailyPatrol,precision,dailyEvidence,weeklyMeritTotal,weeklyScoreTotal," +
             "weeklyAttemptsTotal,weeklyLoginDays,weeklyPatrolDays"
 
-    fun format(report: WeeklyReportBuilder.Report): String = buildString {
+    fun format(report: WeeklyReportBuilder.Report): String = formatAll(listOf(report))
+
+    fun formatAll(reports: List<WeeklyReportBuilder.Report>): String = buildString {
         appendLine(HEADER)
-        report.members.forEach { member ->
-            member.days.forEach { cell ->
-                appendLine(
-                    listOf(
-                        report.periodStart,
-                        report.periodEnd,
-                        report.isGunsmokeWeek,
-                        cell.gameDay,
-                        member.uid,
-                        member.name,
-                        cell.meritDelta,
-                        cell.scoreDelta,
-                        cell.attempts,
-                        cell.attended,
-                        cell.dailyPatrol,
-                        cell.precision,
-                        cell.evidence,
-                        member.totalMerit,
-                        member.totalScore,
-                        member.totalAttempts,
-                        member.loginDays,
-                        member.patrolDays,
-                    ).joinToString(",", transform = ::escape),
-                )
+        reports.sortedBy { it.periodStart }.forEach { report ->
+            report.members.forEach { member ->
+                member.days.forEach { cell ->
+                    appendLine(
+                        listOf(
+                            report.periodStart,
+                            report.periodEnd,
+                            report.isGunsmokeWeek,
+                            cell.gameDay,
+                            member.uid,
+                            member.name,
+                            cell.meritDelta,
+                            cell.scoreDelta,
+                            cell.attempts,
+                            cell.attended,
+                            cell.dailyPatrol,
+                            cell.precision,
+                            cell.evidence,
+                            member.totalMerit,
+                            member.totalScore,
+                            member.totalAttempts,
+                            member.loginDays,
+                            member.patrolDays,
+                        ).joinToString(",", transform = ::escape),
+                    )
+                }
             }
         }
     }.trimEnd() + "\n"

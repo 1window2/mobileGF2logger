@@ -5,14 +5,17 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.database.Cursor
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.OpenableColumns
 import android.view.ViewGroup
 import android.view.Gravity
 import android.widget.Button
@@ -28,6 +31,7 @@ import dev.gf2log.app.capture.GuildMembersCsvWriter
 import dev.gf2log.app.history.CaptureHistoryStore
 import dev.gf2log.app.history.SavedHistoryStore
 import dev.gf2log.app.management.PlatoonBackupManager
+import dev.gf2log.app.management.BackupFileName
 import dev.gf2log.protocol.Gfl2PayloadDecoder
 import dev.gf2log.protocol.PayloadCatalog
 import java.io.File
@@ -127,6 +131,10 @@ class MainActivity : LocalizedActivity() {
             requestCode == REQUEST_BACKUP_IMPORT -> {
                 val source = data?.data
                 if (resultCode != RESULT_OK || source == null) return
+                if (!hasBackupExtension(source)) {
+                    statusText.text = getString(R.string.invalid_platoon_backup)
+                    return
+                }
                 runFileOperation(
                     successMessage = { getString(R.string.status_backup_restored) },
                     failureMessage = { getString(R.string.status_backup_failed) },
@@ -187,15 +195,13 @@ class MainActivity : LocalizedActivity() {
             packageNameInput = EditText(context).apply {
                 hint = getString(R.string.target_package_hint)
                 setSingleLine(true)
-                setText(
-                    getPreferences(MODE_PRIVATE)
-                        .getString(KEY_TARGET_PACKAGE, DEFAULT_TARGET_PACKAGE),
-                )
+                setText(TargetPackagePreferences.get(context))
             }
             addView(packageNameInput, matchWidth())
 
             addView(Button(context).apply {
                 text = getString(R.string.prepare_capture)
+                usePrimaryActionStyle()
                 setOnClickListener { requestVpnAndStart(captureOnce = false) }
             }, matchWidth())
             addView(Button(context).apply {
@@ -215,8 +221,16 @@ class MainActivity : LocalizedActivity() {
             addView(statusText, matchWidth())
             addView(Button(context).apply {
                 text = getString(R.string.open_platoon_management)
+                usePrimaryActionStyle()
                 setOnClickListener {
                     startActivity(Intent(this@MainActivity, PlatoonActivity::class.java))
+                }
+            }, matchWidth())
+            addView(Button(context).apply {
+                text = getString(R.string.weekly_table)
+                usePrimaryActionStyle()
+                setOnClickListener {
+                    startActivity(Intent(this@MainActivity, WeeklyReportActivity::class.java))
                 }
             }, matchWidth())
             addView(Button(context).apply {
@@ -273,7 +287,7 @@ class MainActivity : LocalizedActivity() {
     private fun requestVpnAndStart(captureOnce: Boolean) {
         val targetPackage = packageNameInput.text.toString().trim()
         captureOnceRequested = captureOnce
-        getPreferences(MODE_PRIVATE).edit().putString(KEY_TARGET_PACKAGE, targetPackage).apply()
+        TargetPackagePreferences.set(this, targetPackage)
         val permissionIntent = VpnService.prepare(this)
         if (permissionIntent == null) {
             startCaptureService()
@@ -318,7 +332,7 @@ class MainActivity : LocalizedActivity() {
             PlatoonBackupManager.FILE_EXTENSION
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
-            .setType("application/zip")
+            .setType(PlatoonBackupManager.MIME_TYPE)
             .putExtra(Intent.EXTRA_TITLE, title)
         startActivityForResult(intent, REQUEST_BACKUP_EXPORT)
     }
@@ -340,8 +354,22 @@ class MainActivity : LocalizedActivity() {
     private fun importPlatoonBackup() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
-            .setType("application/zip")
+            .setType("*/*")
+            .putExtra(Intent.EXTRA_MIME_TYPES, BACKUP_MIME_TYPES)
         startActivityForResult(intent, REQUEST_BACKUP_IMPORT)
+    }
+
+    private fun hasBackupExtension(uri: Uri): Boolean {
+        val name = contentResolver.query(
+            uri,
+            arrayOf(OpenableColumns.DISPLAY_NAME),
+            null,
+            null,
+            null,
+        )?.use { cursor: Cursor ->
+            if (!cursor.moveToFirst()) null else cursor.getString(0)
+        } ?: return false
+        return BackupFileName.isValid(name)
     }
 
     @Suppress("DEPRECATION")
@@ -536,9 +564,12 @@ class MainActivity : LocalizedActivity() {
         const val REQUEST_EXPORT = 102
         const val REQUEST_BACKUP_EXPORT = 103
         const val REQUEST_BACKUP_IMPORT = 104
-        const val KEY_TARGET_PACKAGE = "target_package"
-        const val DEFAULT_TARGET_PACKAGE = "com.haoplay.game.and.exilium"
         const val STATUS_REFRESH_MILLIS = 1_000L
         val BACKUP_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
+        val BACKUP_MIME_TYPES = arrayOf(
+            PlatoonBackupManager.MIME_TYPE,
+            "application/zip",
+            "application/octet-stream",
+        )
     }
 }

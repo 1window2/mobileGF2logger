@@ -144,3 +144,24 @@ ingestion.
 Every completed recognized payload is formatted in protocol order and written atomically to the app's private `files/capture-history` directory. `CaptureHistoryStore` returns entries newest-first, trims the oldest files once the count exceeds 100, rejects path-like identifiers, and supports explicit deletion of user-selected entries. `SavedHistoryStore` atomically copies selected entries into `files/saved-history`, rejects duplicates, caps the collection at 50 without FIFO deletion, and keeps saved entries independent from recent-history rotation.
 
 The main activity renders both collections with timestamp-only titles in `yy/MM/dd HH:mm:ss` using the Android device timezone. Selecting a title opens a cleaned table parsed from the stored CSV body; the same screen can reveal the complete raw stored text and copy it to the clipboard. Android backup rules exclude all private files, including recent history, saved history, generated Platoon CSV files, and the structured management database. A user can separately invoke the explicit Platoon backup export, which contains parsed management data but never raw traffic.
+
+## Explicit backup boundary
+
+The canonical `.gf2backup` container is a bounded ZIP with a checksummed
+manifest and SQLite management database. Legacy format v1 remains a
+Platoon-only compatibility backup. Format v2 adds a checksummed, strictly
+typed settings payload containing only user-owned configuration; capture
+diagnostics, raw packet history, signing material, and internal migration flags
+are excluded.
+
+Complete restore validates the filename, archive entries and identity,
+checksums, settings completeness and ranges, current database schema, SQLite
+integrity, and foreign keys before mutation. Database replacement runs under
+the repository maintenance lock. The previous database and a settings snapshot
+are retained until both resources commit, so any failure restores the prior
+state instead of leaving a partial import.
+
+Weekly tables remain projections over persisted snapshots, activity facts,
+membership events, notes, and manual overrides. The repository owns available
+period discovery and report construction; Activities only request reports and
+format them for display or CSV export.

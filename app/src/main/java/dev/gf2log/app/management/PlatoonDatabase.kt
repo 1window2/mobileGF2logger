@@ -10,10 +10,13 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Locale
 
-class PlatoonDatabase(context: Context) :
+class PlatoonDatabase(
+    context: Context,
+    databaseName: String = PlatoonSchema.DATABASE_NAME,
+) :
     SQLiteOpenHelper(
         context.applicationContext,
-        PlatoonSchema.DATABASE_NAME,
+        databaseName,
         null,
         PlatoonSchema.CURRENT_VERSION,
     ) {
@@ -1459,6 +1462,43 @@ class PlatoonDatabase(context: Context) :
                 }
             }
         }
+
+    @Synchronized
+    fun listWeeklyEvidenceDays(zoneId: ZoneId): List<LocalDate> {
+        val db = readableDatabase
+        val days = mutableListOf<LocalDate>()
+        listOf(
+            "snapshots" to "captured_at",
+            "platoon_activity" to "occurred_at",
+            "member_events" to "COALESCE(occurred_at, observed_at)",
+        ).forEach { (table, expression) ->
+            db.rawQuery("SELECT MIN($expression), MAX($expression) FROM $table", null).use { cursor ->
+                if (cursor.moveToFirst()) {
+                    if (!cursor.isNull(0)) {
+                        days += PlatoonPeriods.gameDay(Instant.ofEpochMilli(cursor.getLong(0)), zoneId)
+                    }
+                    if (!cursor.isNull(1)) {
+                        days += PlatoonPeriods.gameDay(Instant.ofEpochMilli(cursor.getLong(1)), zoneId)
+                    }
+                }
+            }
+        }
+        listOf("weekly_notes", "weekly_overrides").forEach { table ->
+            db.rawQuery("SELECT MIN(period_start), MAX(period_start) FROM $table", null).use { cursor ->
+                if (cursor.moveToFirst()) {
+                    if (!cursor.isNull(0)) days += LocalDate.ofEpochDay(cursor.getLong(0))
+                    if (!cursor.isNull(1)) days += LocalDate.ofEpochDay(cursor.getLong(1))
+                }
+            }
+        }
+        db.rawQuery("SELECT MIN(event_date), MAX(event_date) FROM member_events", null).use { cursor ->
+            if (cursor.moveToFirst()) {
+                if (!cursor.isNull(0)) days += LocalDate.ofEpochDay(cursor.getLong(0))
+                if (!cursor.isNull(1)) days += LocalDate.ofEpochDay(cursor.getLong(1))
+            }
+        }
+        return days
+    }
 
     @Synchronized
     fun replaceWeeklyOverrides(

@@ -1,0 +1,255 @@
+name: Deploy project page to GitHub Pages
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Prepare Pages source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f README.md
+          test -f README_KR.md
+
+          rm -rf .pages-src _site
+          mkdir -p .pages-src/_layouts
+
+          cat > .pages-src/_config.yml <<'EOF'
+          title: "mobileGF2logger"
+          description: "Android Platoon management tool for GIRLS' FRONTLINE 2: EXILIUM"
+          url: "https://1window2.github.io"
+          baseurl: "/mobileGF2logger"
+          repository: "1window2/mobileGF2logger"
+          markdown: "kramdown"
+          strict_front_matter: true
+          EOF
+
+          cat > .pages-src/_layouts/default.html <<'EOF'
+          <!doctype html>
+          <html lang="{{ page.lang | default: 'en' }}">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>{{ page.title | escape }}</title>
+              <meta name="description" content="{{ page.description | escape }}">
+              <meta name="robots" content="index, follow">
+              <link rel="canonical" href="https://1window2.github.io/mobileGF2logger{{ page.url }}">
+              <style>
+                :root { color-scheme: light dark; }
+
+                body {
+                  max-width: 960px;
+                  margin: 0 auto;
+                  padding: 32px 20px 64px;
+                  font-family:
+                    -apple-system,
+                    BlinkMacSystemFont,
+                    "Segoe UI",
+                    sans-serif;
+                  line-height: 1.65;
+                }
+
+                nav {
+                  margin-bottom: 32px;
+                }
+
+                nav a {
+                  margin-right: 16px;
+                }
+
+                img {
+                  max-width: 100%;
+                  height: auto;
+                }
+
+                pre {
+                  overflow-x: auto;
+                  padding: 16px;
+                }
+
+                code {
+                  overflow-wrap: anywhere;
+                }
+
+                table {
+                  display: block;
+                  max-width: 100%;
+                  overflow-x: auto;
+                  border-collapse: collapse;
+                }
+
+                th,
+                td {
+                  padding: 8px 12px;
+                  border: 1px solid currentColor;
+                }
+              </style>
+            </head>
+
+            <body>
+              <nav aria-label="Language and repository links">
+                <a href="https://1window2.github.io/mobileGF2logger/">
+                  English
+                </a>
+
+                <a href="https://1window2.github.io/mobileGF2logger/README_KR.html">
+                  한국어
+                </a>
+
+                <a href="https://github.com/1window2/mobileGF2logger">
+                  GitHub repository
+                </a>
+              </nav>
+
+              <main>
+                {{ content }}
+              </main>
+            </body>
+          </html>
+          EOF
+
+          {
+            cat <<'EOF'
+          ---
+          layout: "default"
+          lang: "en"
+          title: "mobileGF2logger"
+          description: "Android Platoon management tool for GIRLS' FRONTLINE 2: EXILIUM"
+          permalink: "/"
+          ---
+
+          EOF
+
+            sed 's/README_KR\.md/README_KR.html/g' README.md
+          } > .pages-src/index.md
+
+          {
+            cat <<'EOF'
+          ---
+          layout: "default"
+          lang: "ko"
+          title: "mobileGF2logger - 한국어 설명"
+          description: "GIRLS' FRONTLINE 2: EXILIUM Android 클라이언트용 서클 관리 도구"
+          permalink: "/README_KR.html"
+          ---
+
+          EOF
+
+            cat README_KR.md
+          } > .pages-src/README_KR.md
+
+          printf '%s\n' \
+            'google-site-verification: google1d4c3f230e6af424.html' \
+            > .pages-src/google1d4c3f230e6af424.html
+
+          cat > .pages-src/robots.txt <<'EOF'
+          User-agent: *
+          Allow: /
+          Sitemap: https://1window2.github.io/mobileGF2logger/sitemap.xml
+          EOF
+
+          cat > .pages-src/sitemap.xml <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+            <url>
+              <loc>https://1window2.github.io/mobileGF2logger/</loc>
+            </url>
+
+            <url>
+              <loc>https://1window2.github.io/mobileGF2logger/README_KR.html</loc>
+            </url>
+          </urlset>
+          EOF
+
+      - name: Validate generated source files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -s .pages-src/_config.yml
+          test -s .pages-src/_layouts/default.html
+          test -s .pages-src/index.md
+          test -s .pages-src/README_KR.md
+          test -s .pages-src/robots.txt
+          test -s .pages-src/sitemap.xml
+          test -s .pages-src/google1d4c3f230e6af424.html
+
+          test "$(cat .pages-src/google1d4c3f230e6af424.html)" = \
+            'google-site-verification: google1d4c3f230e6af424.html'
+
+      - name: Build with Jekyll
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./.pages-src
+          destination: ./_site
+
+      - name: Validate built site
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -s _site/index.html
+          test -s _site/README_KR.html
+          test -s _site/robots.txt
+          test -s _site/sitemap.xml
+          test -s _site/google1d4c3f230e6af424.html
+
+          grep -Fq \
+            '<title>mobileGF2logger</title>' \
+            _site/index.html
+
+          grep -Fq \
+            'https://github.com/1window2/mobileGF2logger' \
+            _site/index.html
+
+          grep -Fq \
+            'https://1window2.github.io/mobileGF2logger/' \
+            _site/sitemap.xml
+
+          test "$(cat _site/google1d4c3f230e6af424.html)" = \
+            'google-site-verification: google1d4c3f230e6af424.html'
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ./_site
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

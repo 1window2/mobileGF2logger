@@ -39,7 +39,6 @@ internal data class DatabaseSchemaContract(
     )
 
     data class IndexColumnContract(
-        val columnId: Int,
         val name: String?,
         val descending: Boolean,
         val collation: String,
@@ -179,7 +178,6 @@ internal data class DatabaseSchemaContract(
                 while (cursor.moveToNext()) {
                     add(
                         IndexColumnContract(
-                            columnId = cursor.getInt(1),
                             name = cursor.getStringOrNull(2),
                             descending = cursor.getInt(3) == 1,
                             collation = cursor.getString(4),

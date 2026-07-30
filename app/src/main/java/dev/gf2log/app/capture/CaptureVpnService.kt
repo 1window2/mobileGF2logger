@@ -316,18 +316,22 @@ class CaptureVpnService : VpnService() {
             val activity = event.value.data as? PlatoonActivityData
             if (activity != null) {
                 runCatching { platoonRepository.ingestActivity(activity) }
-                    .onSuccess {
-                        capturedRequiredTypes += Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY
-                        maybeStopCaptureOnce()
+                    .onSuccess { result ->
+                        if (result.acceptedObservations > 0) {
+                            capturedRequiredTypes += Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY
+                            maybeStopCaptureOnce()
+                        }
                     }
                     .onFailure { CaptureStatus.update("Unable to update Platoon activity history") }
             }
             val updates = event.value.data as? PlatoonUpdatesData
             if (updates != null) {
                 runCatching { platoonRepository.ingestUpdates(updates) }
-                    .onSuccess {
-                        capturedRequiredTypes += Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES
-                        maybeStopCaptureOnce()
+                    .onSuccess { result ->
+                        if (result.acceptedObservations > 0) {
+                            capturedRequiredTypes += Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES
+                            maybeStopCaptureOnce()
+                        }
                     }
                     .onFailure { CaptureStatus.update("Unable to update exact Platoon history") }
             }

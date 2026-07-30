@@ -15,11 +15,13 @@ data class SnapshotIngestResult(
 }
 
 data class ActivityIngestResult(
+    val acceptedObservations: Int,
     val inserted: Int,
     val resolved: Int,
 )
 
 data class UpdatesIngestResult(
+    val acceptedObservations: Int,
     val membershipEvents: Int,
     val patrolFacts: Int,
 )

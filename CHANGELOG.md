@@ -4,6 +4,34 @@ All notable changes to mobileGF2logger are documented here.
 
 ## Unreleased
 
+## 2.0.2 - 2026-07-30
+
+### Changed
+
+- Start the permanent production-signing lineage with a dedicated private key.
+- Remove a redundant recent-login and Daily Patrol caution from the Standard
+  Week evidence explanation.
+- Label CI's unsigned release APK as verification-only and package it with a
+  non-distribution notice.
+
+### Security
+
+- Reject distributable release builds when the production keystore is missing,
+  incomplete, unreadable, or signed by a certificate outside the pinned
+  production lineage.
+- Restrict unsigned release packaging to explicitly opted-in CI verification
+  builds.
+
+### Migration notice
+
+- v2.0.2 cannot update v2.0.1 or earlier in place because those releases used
+  the legacy Android debug certificate. Export any needed management backup,
+  uninstall the old version, install v2.0.2, and import the backup.
+- Future releases remain update-compatible with v2.0.2 when signed by the same
+  permanent production key.
+
+## 2.0.1 - 2026-07-29
+
 ### Added
 
 - Parse mandatory Platoon Updates payload `21960` with exact member UIDs,

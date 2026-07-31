@@ -58,6 +58,8 @@ class WeeklyReportActivity : LocalizedActivity() {
     }
     private var editingPeriodStart: LocalDate? = null
     private val editDraft = mutableMapOf<CellKey, EditableCell>()
+    private var reconciliationGeneration = 0
+    private var screenResumed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,7 +73,24 @@ class WeeklyReportActivity : LocalizedActivity() {
 
     override fun onResume() {
         super.onResume()
-        render()
+        screenResumed = true
+        val generation = ++reconciliationGeneration
+        exportExecutor.execute {
+            runCatching { repository.reconcileRetainedCsvFiles() }
+            runOnUiThread {
+                if (generation == reconciliationGeneration && screenResumed &&
+                    !isFinishing && !isDestroyed
+                ) {
+                    render()
+                }
+            }
+        }
+    }
+
+    override fun onPause() {
+        screenResumed = false
+        reconciliationGeneration += 1
+        super.onPause()
     }
 
     override fun onDestroy() {

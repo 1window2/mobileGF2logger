@@ -3,4 +3,5 @@
     <color name="ic_launcher_background">#111214</color>
     <color name="primary_action_background">#315DA8</color>
     <color name="primary_action_foreground">#FFFFFF</color>
+    <color name="destructive_action">#C43D5C</color>
 </resources>

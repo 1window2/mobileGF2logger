@@ -77,30 +77,40 @@ class CaptureVpnService : VpnService() {
         super.onCreate()
         platoonRepository = PlatoonRepository(this)
         guildMembersWriter = GuildMembersCsvWriter(
-            File(filesDir, GuildMembersCsvWriter.OUTPUT_DIRECTORY),
+            File(filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY),
         ) { batch ->
-            runCatching {
+            val directResult = runCatching {
                 platoonRepository.ingest(
                     capturedAt = Instant.parse(batch.logTime),
                     members = batch.members,
                     sourceFile = batch.file.name,
                 )
             }
-                .onSuccess { result ->
-                    if (!result.duplicate) {
-                        CaptureStatus.update(
-                            "Updated Platoon roster: +${result.joined + result.rejoined}, " +
-                                "-${result.left}",
-                        )
-                    }
-                    capturedRequiredTypes += Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS
-                    if (captureOnce) {
-                        mainHandler.removeCallbacks(captureOnceGraceStop)
-                        mainHandler.postDelayed(captureOnceGraceStop, CAPTURE_ONCE_GRACE_MILLIS)
-                    }
-                    maybeStopCaptureOnce()
+            if (directResult.isSuccess) {
+                val result = directResult.getOrThrow()
+                if (!result.duplicate) {
+                    CaptureStatus.update(
+                        "Updated Platoon roster: +${result.joined + result.rejoined}, " +
+                            "-${result.left}",
+                    )
                 }
-                .onFailure { CaptureStatus.update("Unable to update Platoon database") }
+                markRosterCaptured()
+            } else {
+                val recovery = runCatching {
+                    require(batch.file.isFile) { "Completed roster CSV was not published" }
+                    platoonRepository.reconcileRetainedCsvFiles(
+                        requireNotNull(batch.file.parentFile),
+                    )
+                    check(platoonRepository.hasSnapshotSource(batch.file.name)) {
+                        "Completed roster CSV was not reconciled"
+                    }
+                }
+                if (recovery.isFailure) {
+                    throw directResult.exceptionOrNull() ?: recovery.exceptionOrNull()!!
+                }
+                CaptureStatus.update("Recovered Platoon database from the completed roster CSV")
+                markRosterCaptured()
+            }
         }
         historyStore = CaptureHistoryStore(
             File(filesDir, CaptureHistoryStore.HISTORY_DIRECTORY),
@@ -162,8 +172,8 @@ class CaptureVpnService : VpnService() {
         captureStartPending = true
         migrationExecutor.execute {
             val migration = runCatching {
-                platoonRepository.importLegacyCsvFiles(
-                    File(filesDir, GuildMembersCsvWriter.OUTPUT_DIRECTORY),
+                platoonRepository.reconcileRetainedCsvFiles(
+                    File(filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY),
                 )
             }
             mainHandler.post {
@@ -360,6 +370,15 @@ class CaptureVpnService : VpnService() {
                 stopCapture("Captured Platoon roster, activity, and updates")
             }
         }
+    }
+
+    private fun markRosterCaptured() {
+        capturedRequiredTypes += Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS
+        if (captureOnce) {
+            mainHandler.removeCallbacks(captureOnceGraceStop)
+            mainHandler.postDelayed(captureOnceGraceStop, CAPTURE_ONCE_GRACE_MILLIS)
+        }
+        maybeStopCaptureOnce()
     }
 
     private fun recordTraffic(observed: Long, inspected: Long) {

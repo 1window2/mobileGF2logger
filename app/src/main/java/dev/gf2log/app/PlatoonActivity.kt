@@ -22,9 +22,9 @@ import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonMemberCsv
 import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.management.isValidMembershipRange
-import java.io.File
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.Executors
 
 class PlatoonActivity : LocalizedActivity() {
     private lateinit var repository: PlatoonRepository
@@ -37,19 +37,43 @@ class PlatoonActivity : LocalizedActivity() {
     private var latestMembers = emptyMap<Long, SnapshotMember>()
     private val selectedUids = linkedSetOf<Long>()
     private var pendingMemberCsv: String? = null
+    private val reconciliationExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "GF2PlatoonReconciliation")
+    }
+    private var reconciliationGeneration = 0
+    private var screenResumed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         repository = PlatoonRepository(this)
-        repository.importLegacyCsvFiles(
-            File(filesDir, dev.gf2log.app.capture.GuildMembersCsvWriter.OUTPUT_DIRECTORY),
-        )
         setContentView(buildContentView())
     }
 
     override fun onResume() {
         super.onResume()
-        refresh()
+        screenResumed = true
+        val generation = ++reconciliationGeneration
+        reconciliationExecutor.execute {
+            runCatching { repository.reconcileRetainedCsvFiles() }
+            runOnUiThread {
+                if (generation == reconciliationGeneration && screenResumed &&
+                    !isFinishing && !isDestroyed
+                ) {
+                    refresh()
+                }
+            }
+        }
+    }
+
+    override fun onPause() {
+        screenResumed = false
+        reconciliationGeneration += 1
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        reconciliationExecutor.shutdownNow()
+        super.onDestroy()
     }
 
     private fun buildContentView(): ScrollView {
@@ -135,6 +159,7 @@ class PlatoonActivity : LocalizedActivity() {
         val snapshots = repository.listSnapshots(1)
         val latest = snapshots.firstOrNull()
         statuses = repository.listMemberStatuses()
+        selectedUids.retainAll(statuses.mapTo(mutableSetOf(), MemberStatus::uid))
         latestMembers = latest?.members.orEmpty().associateBy(SnapshotMember::uid)
         val active = statuses.count(MemberStatus::isActive)
         val departed = statuses.size - active

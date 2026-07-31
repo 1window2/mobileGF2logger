@@ -14,14 +14,16 @@ class PlatoonBackupManager(context: Context) {
         get() = appContext.getDatabasePath(PlatoonSchema.DATABASE_NAME)
 
     fun export(output: OutputStream) {
+        PlatoonRepository(appContext).reconcileRetainedCsvFiles()
         PlatoonRepository.withExclusiveDatabase {
             BackupArchive.write(output, databaseFile, settings = null)
         }
     }
 
     fun exportFull(output: OutputStream) {
-        val settings = AppSettingsStore(appContext).read()
+        PlatoonRepository(appContext).reconcileRetainedCsvFiles()
         PlatoonRepository.withExclusiveDatabase {
+            val settings = AppSettingsStore(appContext).read()
             ensureDatabaseExists()
             BackupArchive.write(output, databaseFile, AppBackupSettingsCodec.encode(settings))
         }
@@ -42,7 +44,6 @@ class PlatoonBackupManager(context: Context) {
             validateDatabase(stagedDatabase, requireCurrentSchema = false)
             PlatoonRepository.withExclusiveDatabase {
                 replaceDatabase(stagedDatabase)
-                PlatoonRepository.markLegacyImportComplete(appContext)
             }
         } finally {
             stagedDatabase.delete()
@@ -66,7 +67,6 @@ class PlatoonBackupManager(context: Context) {
                 replaceDatabase(stagedDatabase) {
                     try {
                         settingsStore.replace(restoredSettings)
-                        PlatoonRepository.markLegacyImportComplete(appContext)
                     } catch (error: Exception) {
                         runCatching { settingsStore.replace(previousSettings) }
                             .exceptionOrNull()

@@ -70,6 +70,10 @@
     <string name="save_failed">저장할 수 없습니다</string>
     <string name="membership_history">가입 이력</string>
     <string name="add_membership_history">가입 이력 추가</string>
+    <string name="delete_member">멤버 삭제</string>
+    <string name="delete_member_warning">멤버를 삭제하면 되돌릴 수 없습니다.</string>
+    <string name="member_deleted">멤버를 삭제했습니다</string>
+    <string name="member_delete_failed">멤버를 삭제할 수 없습니다</string>
     <string name="add_withdrawn_member">탈퇴한 멤버 수동 추가</string>
     <string name="join_field">가입:</string>
     <string name="withdraw_field">탈퇴:</string>

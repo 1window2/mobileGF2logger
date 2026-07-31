@@ -71,8 +71,10 @@ internal object UserSettingsPreferences {
         )
     }
 
-    fun setMemberOrder(context: Context, uids: List<Long>) = edit(context) {
-        putString(KEY_MEMBER_ORDER, uids.distinct().joinToString(","))
+    fun setMemberOrder(context: Context, uids: List<Long>): Boolean = synchronized(lock) {
+        preferencesLocked(context.applicationContext).edit()
+            .putString(KEY_MEMBER_ORDER, uids.distinct().joinToString(","))
+            .commit()
     }
 
     fun clearMemberOrder(context: Context) = edit(context) { remove(KEY_MEMBER_ORDER) }
@@ -100,7 +102,9 @@ internal object UserSettingsPreferences {
         context: Context,
         mutation: SharedPreferences.Editor.() -> SharedPreferences.Editor,
     ) = synchronized(lock) {
-        preferencesLocked(context.applicationContext).edit().mutation().apply()
+        val editor = preferencesLocked(context.applicationContext).edit()
+        editor.mutation()
+        editor.apply()
     }
 
     private fun preferencesLocked(context: Context): SharedPreferences {

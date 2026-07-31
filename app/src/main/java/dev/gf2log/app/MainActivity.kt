@@ -27,10 +27,10 @@ import android.widget.ScrollView
 import android.widget.TextView
 import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.capture.CaptureVpnService
-import dev.gf2log.app.capture.GuildMembersCsvWriter
 import dev.gf2log.app.history.CaptureHistoryStore
 import dev.gf2log.app.history.SavedHistoryStore
 import dev.gf2log.app.management.PlatoonBackupManager
+import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.BackupFileName
 import dev.gf2log.protocol.Gfl2PayloadDecoder
 import dev.gf2log.protocol.PayloadCatalog
@@ -374,7 +374,7 @@ class MainActivity : LocalizedActivity() {
 
     @Suppress("DEPRECATION")
     private fun exportLatestPlatoonCsv() {
-        val directory = File(filesDir, GuildMembersCsvWriter.OUTPUT_DIRECTORY)
+        val directory = File(filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY)
         val latest = directory.listFiles()
             .orEmpty()
             .filter { it.isFile && it.extension.equals("csv", ignoreCase = true) }

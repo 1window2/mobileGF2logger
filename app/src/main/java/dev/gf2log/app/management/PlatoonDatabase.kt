@@ -215,6 +215,7 @@ class PlatoonDatabase(
     fun ingestSnapshot(
         snapshot: PlatoonSnapshot,
         source: EvidenceSource,
+        historicalOnly: Boolean = false,
     ): SnapshotIngestResult {
         require(snapshot.members.isNotEmpty()) { "A Platoon snapshot cannot be empty" }
         require(snapshot.members.map(SnapshotMember::uid).distinct().size == snapshot.members.size) {
@@ -230,6 +231,14 @@ class PlatoonDatabase(
 
             val hasPriorSnapshot = count(db, "snapshots") > 0
             val priorCapturedAt = latestSnapshotCapturedAt(db)
+            if (historicalOnly) {
+                require(priorCapturedAt != null && !snapshot.capturedAt.isAfter(priorCapturedAt)) {
+                    "Historical snapshots must not be newer than current structured data"
+                }
+                val snapshotId = insertSnapshotRows(db, snapshot)
+                db.setTransactionSuccessful()
+                return SnapshotIngestResult.historical(snapshotId)
+            }
             val known = readKnownMembers(db)
             val changes = SnapshotReconciler.reconcile(
                 known = known,
@@ -361,6 +370,43 @@ class PlatoonDatabase(
         } finally {
             db.endTransaction()
         }
+    }
+
+    @Synchronized
+    fun latestSnapshotIdentity(): Pair<Instant, String?>? = readableDatabase.rawQuery(
+        "SELECT captured_at, source_file FROM snapshots " +
+            "ORDER BY captured_at DESC, source_file DESC, id DESC LIMIT 1",
+        null,
+    ).use { cursor ->
+        if (cursor.moveToFirst()) {
+            Instant.ofEpochMilli(cursor.getLong(0)) to cursor.getNullableString(1)
+        } else {
+            null
+        }
+    }
+
+    @Synchronized
+    fun snapshotSourceFiles(): Set<String> = readableDatabase.rawQuery(
+        "SELECT source_file FROM snapshots WHERE source_file IS NOT NULL",
+        null,
+    ).use { cursor ->
+        buildSet {
+            while (cursor.moveToNext()) add(cursor.getString(0))
+        }
+    }
+
+    private fun insertSnapshotRows(db: SQLiteDatabase, snapshot: PlatoonSnapshot): Long {
+        val snapshotId = db.insertOrThrow(
+            "snapshots",
+            null,
+            ContentValues().apply {
+                put("captured_at", snapshot.capturedAt.toEpochMilli())
+                put("source_file", snapshot.sourceFile)
+                put("game_version", snapshot.gameVersion)
+            },
+        )
+        snapshot.members.forEach { member -> insertSnapshotMember(db, snapshotId, member) }
+        return snapshotId
     }
 
     @Synchronized
@@ -1283,6 +1329,39 @@ class PlatoonDatabase(
             put("note", note.trim())
         }
         return writableDatabase.update("members", values, "uid = ?", arrayOf(uid.toString())) == 1
+    }
+
+    @Synchronized
+    fun deleteMember(uid: Long): Boolean {
+        require(uid > 0)
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            if (!memberExists(db, uid)) return false
+            val uidArgument = arrayOf(uid.toString())
+            db.delete("weekly_overrides", "uid = ?", uidArgument)
+            db.delete(
+                "platoon_activity",
+                "resolved_uid = ? OR member_event_id IN " +
+                    "(SELECT id FROM member_events WHERE uid = ?)",
+                arrayOf(uid.toString(), uid.toString()),
+            )
+            db.delete(
+                "weekly_notes",
+                "is_automatic = 1 AND event_id IN " +
+                    "(SELECT id FROM member_events WHERE uid = ?)",
+                uidArgument,
+            )
+            db.delete("member_events", "uid = ?", uidArgument)
+            db.delete("tenures", "uid = ?", uidArgument)
+            db.delete("snapshot_members", "uid = ?", uidArgument)
+            val deleted = db.delete("members", "uid = ?", uidArgument) == 1
+            check(deleted) { "Member disappeared during deletion" }
+            db.setTransactionSuccessful()
+            return true
+        } finally {
+            db.endTransaction()
+        }
     }
 
     @Synchronized

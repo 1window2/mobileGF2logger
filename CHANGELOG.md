@@ -15,6 +15,8 @@ All notable changes to mobileGF2logger are documented here.
   before replacing user data.
 - Export all available weekly tables as one chronological CSV with one header.
 - Add direct access to Weekly Table from the main screen.
+- Add coordinated manual member deletion with explicit destructive-action
+  confirmation and transactional cleanup of linked member records.
 
 ### Changed
 
@@ -22,6 +24,9 @@ All notable changes to mobileGF2logger are documented here.
   restrained filled accent style and accessible light/dark contrast.
 - Keep the v1 Platoon-only `.gf2backup` path available for compatibility while
   requiring complete v2 backups for Settings restore.
+- Reconcile retained completed roster CSV files idempotently after restore and
+  before management, weekly-table, and backup operations. Incomplete captures
+  remain unpublished, and screen reconciliation runs outside the UI thread.
 
 ### Verified
 

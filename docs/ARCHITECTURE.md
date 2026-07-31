@@ -123,7 +123,8 @@ plaintext TCP streams. Do not add pinning or anti-cheat bypasses.
 - `capture` owns the VPN/native lifecycle, bounded per-flow parsing, and
   translation of completed capture batches into management-domain input.
 - `management` owns evidence policy, reporting rules, the repository facade,
-  and private SQLite persistence. It does not depend on the capture package.
+  private SQLite persistence, and the retained completed-roster directory.
+  It does not depend on the capture package.
 - Activities own Android presentation and delegate evidence precedence,
   inference, ordering, and CSV construction to pure policy objects.
 
@@ -165,3 +166,10 @@ Weekly tables remain projections over persisted snapshots, activity facts,
 membership events, notes, and manual overrides. The repository owns available
 period discovery and report construction; Activities only request reports and
 format them for display or CSV export.
+
+Completed roster captures are written under a non-importable temporary suffix
+and atomically published as `.csv` only after protocol completion. Retained CSV
+reconciliation runs off the UI thread, skips represented source identities,
+and imports older evidence without rewriting current membership. Both backup
+exports reconcile completed retained evidence before taking their locked
+database snapshot.

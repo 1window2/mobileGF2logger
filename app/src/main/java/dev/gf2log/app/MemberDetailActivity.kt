@@ -92,6 +92,11 @@ class MemberDetailActivity : LocalizedActivity() {
                     text = getString(R.string.add_membership_history)
                     setOnClickListener { addMembershipHistory(status) }
                 }, matchWidth())
+                addView(Button(context).apply {
+                    text = getString(R.string.delete_member)
+                    setTextColor(getColor(R.color.destructive_action))
+                    setOnClickListener { confirmMemberDeletion(status) }
+                }, matchWidth())
                 addView(TextView(context).apply {
                     text = getString(R.string.membership_history)
                     textSize = 21f
@@ -103,6 +108,41 @@ class MemberDetailActivity : LocalizedActivity() {
                 }
             }, matchWidth())
         })
+    }
+
+    private fun confirmMemberDeletion(status: MemberStatus) {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.delete_member)
+            .setMessage(R.string.delete_member_warning)
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.delete, null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
+                setTextColor(getColor(R.color.destructive_action))
+                setOnClickListener {
+                    val deleted = runCatching {
+                        repository.deleteMember(status.uid)
+                    }.getOrDefault(false)
+                    if (deleted) {
+                        dialog.dismiss()
+                        Toast.makeText(
+                            this@MemberDetailActivity,
+                            R.string.member_deleted,
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                        finish()
+                    } else {
+                        Toast.makeText(
+                            this@MemberDetailActivity,
+                            R.string.member_delete_failed,
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun tenureButton(

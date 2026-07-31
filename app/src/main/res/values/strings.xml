@@ -70,6 +70,10 @@
     <string name="save_failed">Unable to save</string>
     <string name="membership_history">Membership history</string>
     <string name="add_membership_history">Add Membership History</string>
+    <string name="delete_member">Delete member</string>
+    <string name="delete_member_warning">Deleting this member cannot be undone.</string>
+    <string name="member_deleted">Member deleted</string>
+    <string name="member_delete_failed">Unable to delete member</string>
     <string name="add_withdrawn_member">Manually Add Withdrawn Member</string>
     <string name="join_field">Join:</string>
     <string name="withdraw_field">Withdraw:</string>

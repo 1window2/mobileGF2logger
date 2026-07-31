@@ -7,9 +7,8 @@ class MemberOrderPreferences(context: Context) {
 
     fun read(): List<Long> = UserSettingsPreferences.memberOrder(appContext)
 
-    fun write(uids: List<Long>) {
+    fun write(uids: List<Long>): Boolean =
         UserSettingsPreferences.setMemberOrder(appContext, uids)
-    }
 
     fun clear() {
         UserSettingsPreferences.clearMemberOrder(appContext)

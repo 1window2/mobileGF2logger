@@ -687,6 +687,69 @@ class WeeklyReportBuilderTest {
         assertEquals(DailyEvidence.PARTIAL_DAY, patrol.evidence)
     }
 
+    @Test
+    fun postTwoAmFinalSaturdayCaptureFinalizesScoreButNotTheGameDay() {
+        val baseline = member(uid = 1, name = "Final score", weekly = 1_000, score = 10_000)
+            .copy(totalMerit = 20_000)
+        val final = baseline.copy(
+            weeklyMerit = 1_120,
+            totalMerit = 20_120,
+            totalScore = 10_300,
+        )
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 25),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-24T19:59:00Z", baseline),
+                snapshotWithMembers("2026-07-25T17:02:00Z", final),
+            ),
+        )
+
+        val member = report.members.single()
+        val saturday = member.days.last()
+        assertTrue(member.hasFinalGunsmokeScore)
+        assertEquals(10_300L, member.totalScore)
+        assertTrue(saturday.hasFinalGunsmokeScore)
+        assertEquals(300L, saturday.scoreDelta)
+        assertEquals(DailyEvidence.PARTIAL_DAY, saturday.evidence)
+    }
+
+    @Test
+    fun preTwoAmFinalSaturdayCaptureLeavesScoreOpen() {
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 25),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshot("2026-07-24T19:59:00Z", weekly = 1_000, score = 10_000),
+                snapshot("2026-07-25T16:59:59Z", weekly = 1_120, score = 10_300),
+            ),
+        )
+
+        val member = report.members.single()
+        assertTrue(!member.hasFinalGunsmokeScore)
+        assertTrue(!member.days.last().hasFinalGunsmokeScore)
+    }
+
+    @Test
+    fun finalSaturdayTotalIsConfirmedWithoutInventingADailyDelta() {
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 25),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshot("2026-07-25T17:02:17Z", weekly = 20_142, score = 221_445),
+            ),
+        )
+
+        val member = report.members.single()
+        val saturday = member.days.last()
+        assertTrue(member.hasFinalGunsmokeScore)
+        assertEquals(221_445L, member.totalScore)
+        assertTrue(saturday.hasFinalGunsmokeScore)
+        assertNull(saturday.scoreDelta)
+        assertNull(saturday.attempts)
+        assertEquals(DailyEvidence.INCOMPLETE_BOUNDARY, saturday.evidence)
+    }
+
     private fun snapshot(time: String, weekly: Long, score: Long) =
         PlatoonSnapshot(
             id = 0,

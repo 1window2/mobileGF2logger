@@ -30,6 +30,7 @@ object WeeklyReportBuilder {
         val totalMerit: Long,
         val totalScore: Long,
         val isGunsmokeWeek: Boolean = false,
+        val hasFinalGunsmokeScore: Boolean = false,
     ) {
         val observedDays: List<DayCell>
             get() = days.filter { it.observed }
@@ -78,6 +79,7 @@ object WeeklyReportBuilder {
         val manualOverride: WeeklyCellOverride? = null,
         val hasDailyPatrolFact: Boolean = false,
         val hasLoginFact: Boolean = false,
+        val hasFinalGunsmokeScore: Boolean = false,
     ) {
         val attempts: Int?
             get() = if (manualOverride != null) manualOverride.attempts else inference?.selected?.attempts
@@ -213,6 +215,7 @@ object WeeklyReportBuilder {
                     derivedScoreTotal
                 },
                 isGunsmokeWeek = isGunsmoke,
+                hasFinalGunsmokeScore = cells.any(DayCell::hasFinalGunsmokeScore),
             )
         }.filter { row ->
             // Weekly rows represent the roster that is active at the end of the
@@ -265,19 +268,26 @@ object WeeklyReportBuilder {
                 !snapshot.capturedAt.isBefore(start.minus(BOUNDARY_WINDOW_MINUTES, ChronoUnit.MINUTES))
         }
         val before = baselineSnapshot?.member(uid)
-        val after = observations.asReversed().firstNotNullOfOrNull { it.member(uid) }
+        val lastObservation = observations.asReversed().firstNotNullOfOrNull { snapshot ->
+            snapshot.member(uid)?.let { snapshot to it }
+        }
+        val after = lastObservation?.second
+        val hasFinalGunsmokeScore = lastObservation?.let { (snapshot, _) ->
+            PlatoonPeriods.isFinalGunsmokeScoreCapture(day, snapshot.capturedAt, zoneId)
+        } == true
         if (baselineSnapshot == null) {
             return applyActivityFacts(
                 DayCell(
-                gameDay = day,
-                meritDelta = null,
-                scoreDelta = null,
-                inference = null,
-                evidence = if (after == null) {
-                    DailyEvidence.NO_OBSERVATION
-                } else {
-                    DailyEvidence.INCOMPLETE_BOUNDARY
-                },
+                    gameDay = day,
+                    meritDelta = null,
+                    scoreDelta = null,
+                    inference = null,
+                    evidence = if (after == null) {
+                        DailyEvidence.NO_OBSERVATION
+                    } else {
+                        DailyEvidence.INCOMPLETE_BOUNDARY
+                    },
+                    hasFinalGunsmokeScore = hasFinalGunsmokeScore,
                 ),
                 isGunsmoke,
                 hasDailyPatrolFact,
@@ -329,6 +339,7 @@ object WeeklyReportBuilder {
                 // boundary: merit can change before reset. Exactness is
                 // established later by the counter constraint solver.
                 evidence = DailyEvidence.PARTIAL_DAY,
+                hasFinalGunsmokeScore = hasFinalGunsmokeScore,
             ),
             isGunsmoke,
             hasDailyPatrolFact,

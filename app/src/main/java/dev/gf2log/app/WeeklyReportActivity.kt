@@ -515,27 +515,29 @@ class WeeklyReportActivity : LocalizedActivity() {
             if (gunsmokeWeek) {
                 when {
                     incomplete -> "?"
-                    partial && cell.scoreDelta != null -> "≥${cell.scoreDelta}"
+                    partial && !cell.hasFinalGunsmokeScore && cell.scoreDelta != null ->
+                        "≥${cell.scoreDelta}"
                     else -> cell.scoreDelta?.toString() ?: "-"
                 }
             } else {
                 "-"
             },
-            gunsmokeWeek && !partial &&
+            gunsmokeWeek && (!partial || cell.hasFinalGunsmokeScore) &&
                 cell.scoreDelta?.let(cutlines::belowDailyScore) == true,
         ),
         attempts = metricText(
             getString(R.string.attempt_short),
             if (gunsmokeWeek) {
                 when {
-                    partial && cell.attempts != null -> "≥${cell.attempts}"
+                    partial && !cell.hasFinalGunsmokeScore && cell.attempts != null ->
+                        "≥${cell.attempts}"
                     else -> cell.attempts?.toString()
                         ?: if (cell.manualOverride != null) "-" else "?"
                 }
             } else {
                 "-"
             },
-            gunsmokeWeek && !partial &&
+            gunsmokeWeek && (!partial || cell.hasFinalGunsmokeScore) &&
                 cell.attempts?.let(cutlines::belowDailyAttempts) == true,
         ),
         login = statusText(
@@ -573,8 +575,14 @@ class WeeklyReportActivity : LocalizedActivity() {
         ),
         score = metricText(
             getString(R.string.point_short),
-            if (gunsmokeWeek) lowerBound(member.totalScore) else "-",
-            gunsmokeWeek && !incomplete && cutlines.belowWeeklyScore(member.totalScore),
+            if (gunsmokeWeek) {
+                if (member.hasFinalGunsmokeScore) member.totalScore.toString()
+                else lowerBound(member.totalScore)
+            } else {
+                "-"
+            },
+            gunsmokeWeek && (!incomplete || member.hasFinalGunsmokeScore) &&
+                cutlines.belowWeeklyScore(member.totalScore),
         ),
         attempts = metricText(
             getString(R.string.attempt_short),

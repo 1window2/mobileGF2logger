@@ -21,6 +21,11 @@ rules below take precedence over stale copied dates in archived templates.
 - A merit week begins Monday at 05:00 and ends the next Monday at 05:00.
 - A Gunsmoke week begins Sunday at 05:00 and contains seven game days through
   the following Sunday at 05:00.
+- Gunsmoke scoring closes at 02:00 on the final Sunday. A Saturday snapshot at
+  or after 02:00 therefore confirms the final cumulative Gunsmoke score, while
+  merit, login, Daily Patrol, and the Saturday game day remain open until
+  05:00. A daily Saturday score delta still requires a trustworthy opening
+  boundary; the app does not invent one from the final total alone.
 - Gunsmoke runs for one week followed by two off weeks. The verified cycle
   anchor is Sunday, 2026-07-19 at 05:00. Other verified starts are 2026-02-22,
   2026-03-15, 2026-04-05, 2026-04-26, 2026-05-17, 2026-06-07, and 2026-06-28.

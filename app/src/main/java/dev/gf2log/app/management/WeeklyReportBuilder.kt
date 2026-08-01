@@ -32,6 +32,8 @@ object WeeklyReportBuilder {
         val totalScore: Long,
         val isGunsmokeWeek: Boolean = false,
         val hasFinalGunsmokeScore: Boolean = false,
+        val resolvedGunsmokeTotals: ResolvedGunsmokeTotals? = null,
+        val gunsmokeAttemptsFloor: Int? = null,
     ) {
         val observedDays: List<DayCell>
             get() = days.filter { it.observed }
@@ -40,13 +42,20 @@ object WeeklyReportBuilder {
             get() {
                 val known = days.mapNotNull(DayCell::attempts)
                 val total = known.sum()
-                return total.takeIf {
+                val dailyTotal = total.takeIf {
                     known.isNotEmpty() && (total > 0 || days.all { day -> day.attempts != null })
                 }
+                return listOfNotNull(
+                    dailyTotal,
+                    gunsmokeAttemptsFloor,
+                    resolvedGunsmokeTotals?.attempts,
+                ).maxOrNull()
             }
 
         val totalAttemptsCertainty: MetricCertainty
             get() = when {
+                resolvedGunsmokeTotals?.attemptsCertainty == MetricCertainty.EXACT &&
+                    totalAttempts == resolvedGunsmokeTotals.attempts -> MetricCertainty.EXACT
                 totalAttempts == null -> MetricCertainty.UNKNOWN
                 totalAttempts == ActivityInference.MAX_WEEKLY_ATTEMPTS -> MetricCertainty.EXACT
                 days.all { it.attemptsCertainty == MetricCertainty.EXACT } -> MetricCertainty.EXACT
@@ -55,6 +64,8 @@ object WeeklyReportBuilder {
 
         val totalMeritCertainty: MetricCertainty
             get() = when {
+                resolvedGunsmokeTotals?.meritCertainty == MetricCertainty.EXACT &&
+                    totalMerit == resolvedGunsmokeTotals.merit -> MetricCertainty.EXACT
                 !isGunsmokeWeek && totalMerit == MAX_STANDARD_WEEKLY_MERIT -> MetricCertainty.EXACT
                 days.all { it.meritCertainty == MetricCertainty.EXACT } -> MetricCertainty.EXACT
                 totalMerit > 0L || days.any { it.meritDelta != null } -> MetricCertainty.LOWER_BOUND
@@ -71,25 +82,47 @@ object WeeklyReportBuilder {
             }
 
         val loginDays: Int?
-            get() = days.count { it.attended == true }.takeIf { count ->
-                count > 0 || days.all { it.attended != null }
+            get() {
+                val daily = days.count { it.attended == true }.takeIf { count ->
+                    count > 0 || days.all { it.attended != null }
+                }
+                return listOfNotNull(daily, resolvedGunsmokeTotals?.loginDays).maxOrNull()
             }
 
         val loginDaysCertainty: MetricCertainty
-            get() = aggregateBooleanCertainty(days.map(DayCell::attended), loginDays)
+            get() = if (
+                resolvedGunsmokeTotals?.loginDaysCertainty == MetricCertainty.EXACT &&
+                loginDays == resolvedGunsmokeTotals.loginDays
+            ) {
+                MetricCertainty.EXACT
+            } else {
+                aggregateBooleanCertainty(days.map(DayCell::attended), loginDays)
+            }
 
         val patrolDays: Int?
-            get() = days.count { it.dailyPatrol == true }.takeIf { count ->
-                count > 0 || days.all { it.dailyPatrol != null }
+            get() {
+                val daily = days.count { it.dailyPatrol == true }.takeIf { count ->
+                    count > 0 || days.all { it.dailyPatrol != null }
+                }
+                return listOfNotNull(daily, resolvedGunsmokeTotals?.patrolDays).maxOrNull()
             }
 
         val patrolDaysCertainty: MetricCertainty
-            get() = aggregateBooleanCertainty(days.map(DayCell::dailyPatrol), patrolDays)
+            get() = if (
+                resolvedGunsmokeTotals?.patrolDaysCertainty == MetricCertainty.EXACT &&
+                patrolDays == resolvedGunsmokeTotals.patrolDays
+            ) {
+                MetricCertainty.EXACT
+            } else {
+                aggregateBooleanCertainty(days.map(DayCell::dailyPatrol), patrolDays)
+            }
 
         val hasUnknownGunsmokeActivityTotals: Boolean
-            get() = isGunsmokeWeek && days.any { cell ->
-                cell.isGunsmokeActivityUnknown
-            }
+            get() = isGunsmokeWeek && listOf(
+                totalAttemptsCertainty,
+                loginDaysCertainty,
+                patrolDaysCertainty,
+            ).any { certainty -> certainty != MetricCertainty.EXACT }
 
         val hasIncompleteEvidence: Boolean
             get() = days.any {
@@ -99,6 +132,17 @@ object WeeklyReportBuilder {
                     it.evidence == DailyEvidence.SPARSE_INFERRED
             }
     }
+
+    data class ResolvedGunsmokeTotals(
+        val merit: Long,
+        val meritCertainty: MetricCertainty,
+        val attempts: Int,
+        val attemptsCertainty: MetricCertainty,
+        val loginDays: Int,
+        val loginDaysCertainty: MetricCertainty,
+        val patrolDays: Int,
+        val patrolDaysCertainty: MetricCertainty,
+    )
 
     data class DayCell(
         val gameDay: LocalDate,
@@ -320,8 +364,8 @@ object WeeklyReportBuilder {
                     hasLoginFact = latestKnown.uid to day in loginFactsByMemberDay,
                 )
             }
-            val cells = if (isGunsmoke) {
-                GunsmokeWeekSolver.solve(
+            val gunsmokeResolution = if (isGunsmoke) {
+                GunsmokeWeekSolver.resolve(
                     uid = latestKnown.uid,
                     days = days,
                     zoneId = zoneId,
@@ -330,6 +374,9 @@ object WeeklyReportBuilder {
                     dailyPatrolFacts = dailyPatrolFacts,
                 )
             } else {
+                null
+            }
+            val cells = gunsmokeResolution?.cells ?: if (!isGunsmoke) {
                 inferStandardWeekCells(
                     uid = latestKnown.uid,
                     days = days,
@@ -338,6 +385,8 @@ object WeeklyReportBuilder {
                     cells = derivedCells,
                     asOf = asOf,
                 )
+            } else {
+                derivedCells
             }
             val snapshotsInPeriod = sortedSnapshots.mapNotNull { snapshot ->
                 val gameDay = PlatoonPeriods.gameDay(snapshot.capturedAt, zoneId)
@@ -358,7 +407,11 @@ object WeeklyReportBuilder {
                 uid = latestKnown.uid,
                 name = latestKnown.name,
                 days = cells,
-                totalMerit = maxOf(derivedMeritTotal, sundayMerit + mondayThroughSaturday),
+                totalMerit = maxOf(
+                    derivedMeritTotal,
+                    sundayMerit + mondayThroughSaturday,
+                    gunsmokeResolution?.totals?.merit ?: 0L,
+                ),
                 totalScore = if (isGunsmoke) {
                     maxOf(derivedScoreTotal, latestCapturedScore)
                 } else {
@@ -366,6 +419,8 @@ object WeeklyReportBuilder {
                 },
                 isGunsmokeWeek = isGunsmoke,
                 hasFinalGunsmokeScore = cells.any(DayCell::hasFinalGunsmokeScore),
+                resolvedGunsmokeTotals = gunsmokeResolution?.totals,
+                gunsmokeAttemptsFloor = gunsmokeResolution?.attemptsFloor,
             )
         }.filter { row ->
             // Weekly rows represent the roster that is active at the end of the
@@ -485,6 +540,28 @@ object WeeklyReportBuilder {
                     null,
                     DailyEvidence.NO_OBSERVATION,
                     isGunsmokeWeek = isGunsmoke,
+                ),
+                isGunsmoke,
+                dailyPatrolFact,
+                hasLoginFact,
+            )
+        }
+        if (isGunsmoke && baselineSnapshot.capturedAt != start) {
+            // A near-boundary capture can contain the previous day's tail.
+            // Its counter delta is an interval total, not a safe lower bound
+            // for the new Gunsmoke day. The path solver may still reconcile it
+            // with adjacent checkpoints; otherwise keep the daily metrics unknown.
+            return applyActivityFacts(
+                DayCell(
+                    gameDay = day,
+                    meritDelta = null,
+                    scoreDelta = null,
+                    inference = null,
+                    evidence = DailyEvidence.INCOMPLETE_BOUNDARY,
+                    hasFinalGunsmokeScore = hasFinalGunsmokeScore,
+                    isGunsmokeWeek = true,
+                    metricObservedAt = lastObservation?.first?.capturedAt,
+                    hasClosingBoundary = hasClosingBoundary,
                 ),
                 isGunsmoke,
                 dailyPatrolFact,

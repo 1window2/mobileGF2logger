@@ -605,8 +605,11 @@ class WeeklyReportActivity : LocalizedActivity() {
         merit = metricText(
             getString(R.string.merit_short),
             WeeklyMetricPresentation.format(cell.meritDelta, cell.meritCertainty),
-            cell.meritCertainty == MetricCertainty.EXACT &&
-                cell.meritDelta?.let(cutlines::belowDailyMerit) == true,
+            WeeklyMetricPresentation.warnsBelowCutline(
+                cell.meritDelta,
+                cell.meritCertainty,
+                cutlines::belowDailyMerit,
+            ),
         ),
         score = metricText(
             getString(R.string.point_short),
@@ -615,8 +618,11 @@ class WeeklyReportActivity : LocalizedActivity() {
             } else {
                 "-"
             },
-            gunsmokeWeek && cell.scoreCertainty == MetricCertainty.EXACT &&
-                cell.scoreDelta?.let(cutlines::belowDailyScore) == true,
+            gunsmokeWeek && WeeklyMetricPresentation.warnsBelowCutline(
+                cell.scoreDelta,
+                cell.scoreCertainty,
+                cutlines::belowDailyScore,
+            ),
         ),
         attempts = metricText(
             getString(R.string.attempt_short),
@@ -629,8 +635,11 @@ class WeeklyReportActivity : LocalizedActivity() {
             } else {
                 "-"
             },
-            gunsmokeWeek && cell.attemptsCertainty == MetricCertainty.EXACT &&
-                cell.attempts?.let(cutlines::belowDailyAttempts) == true,
+            gunsmokeWeek && WeeklyMetricPresentation.warnsBelowCutline(
+                cell.attempts,
+                cell.attemptsCertainty,
+                cutlines::belowDailyAttempts,
+            ),
         ),
         login = statusText(
             getString(R.string.login_short),
@@ -661,8 +670,11 @@ class WeeklyReportActivity : LocalizedActivity() {
         merit = metricText(
             getString(R.string.merit_short),
             WeeklyMetricPresentation.format(member.totalMerit, member.totalMeritCertainty),
-            member.totalMeritCertainty == MetricCertainty.EXACT &&
-                cutlines.belowWeeklyMerit(member.totalMerit),
+            WeeklyMetricPresentation.warnsBelowCutline(
+                member.totalMerit,
+                member.totalMeritCertainty,
+                cutlines::belowWeeklyMerit,
+            ),
         ),
         score = metricText(
             getString(R.string.point_short),
@@ -671,8 +683,11 @@ class WeeklyReportActivity : LocalizedActivity() {
             } else {
                 "-"
             },
-            gunsmokeWeek && member.totalScoreCertainty == MetricCertainty.EXACT &&
-                cutlines.belowWeeklyScore(member.totalScore),
+            gunsmokeWeek && WeeklyMetricPresentation.warnsBelowCutline(
+                member.totalScore,
+                member.totalScoreCertainty,
+                cutlines::belowWeeklyScore,
+            ),
         ),
         attempts = metricText(
             getString(R.string.attempt_short),
@@ -684,20 +699,29 @@ class WeeklyReportActivity : LocalizedActivity() {
             } else {
                 "-"
             },
-            gunsmokeWeek && member.totalAttemptsCertainty == MetricCertainty.EXACT &&
-                member.totalAttempts?.let(cutlines::belowWeeklyAttempts) == true,
+            gunsmokeWeek && WeeklyMetricPresentation.warnsBelowCutline(
+                member.totalAttempts,
+                member.totalAttemptsCertainty,
+                cutlines::belowWeeklyAttempts,
+            ),
         ),
         login = metricText(
             getString(R.string.login_short),
             WeeklyMetricPresentation.format(member.loginDays, member.loginDaysCertainty),
-            member.loginDaysCertainty == MetricCertainty.EXACT &&
-                member.loginDays?.let(cutlines::belowWeeklyLoginDays) == true,
+            WeeklyMetricPresentation.warnsBelowCutline(
+                member.loginDays,
+                member.loginDaysCertainty,
+                cutlines::belowWeeklyLoginDays,
+            ),
         ),
         patrol = metricText(
             getString(R.string.patrol_short),
             WeeklyMetricPresentation.format(member.patrolDays, member.patrolDaysCertainty),
-            member.patrolDaysCertainty == MetricCertainty.EXACT &&
-                member.patrolDays?.let(cutlines::belowWeeklyPatrolDays) == true,
+            WeeklyMetricPresentation.warnsBelowCutline(
+                member.patrolDays,
+                member.patrolDaysCertainty,
+                cutlines::belowWeeklyPatrolDays,
+            ),
         ),
     )
     }

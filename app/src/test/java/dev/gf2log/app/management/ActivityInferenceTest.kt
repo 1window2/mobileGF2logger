@@ -32,6 +32,51 @@ class ActivityInferenceTest {
     }
 
     @Test
+    fun capturedHighScoreFixesAggregateAttemptRounding() {
+        val candidates = ActivityInference.candidatesForScore(
+            scoreDelta = 31_635,
+            maximumAttemptScore = 10_545,
+        )
+
+        assertEquals(setOf(3), candidates.map { it.attempts }.toSet())
+        assertEquals(setOf(3_162L), candidates.map { it.scoreMerit }.toSet())
+    }
+
+    @Test
+    fun highScoreCompatibilityMatchesEverySmallPerAttemptDistribution() {
+        for (maximum in 1L..25L) {
+            var possible = setOf(0L to 0L)
+            for (attempts in 0..ActivityInference.MAX_WEEKLY_ATTEMPTS) {
+                for (score in 0L..maximum * attempts) {
+                    for (scoreMerit in 0L..score / ActivityInference.SCORE_POINTS_PER_MERIT) {
+                        assertEquals(
+                            "$maximum/$attempts/$score/$scoreMerit",
+                            score to scoreMerit in possible,
+                            ActivityInference.isCompatibleScore(
+                                scoreDelta = score,
+                                scoreMerit = scoreMerit,
+                                attempts = attempts,
+                                maximumAttemptScore = maximum,
+                            ),
+                        )
+                    }
+                }
+                possible = buildSet {
+                    possible.forEach { (score, scoreMerit) ->
+                        for (attemptScore in 0L..maximum) {
+                            add(
+                                score + attemptScore to
+                                    scoreMerit +
+                                    attemptScore / ActivityInference.SCORE_POINTS_PER_MERIT,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     fun infersTwoMaxScoreAttemptsFromWorkbookRow() {
         val result = ActivityInference.infer(
             meritDelta = 2_258,

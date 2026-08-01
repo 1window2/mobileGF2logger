@@ -35,7 +35,17 @@ All notable changes to mobileGF2logger are documented here.
   blank protobuf-optional counters while still rejecting malformed values.
 - Distinguish exact weekly metrics from confirmed lower bounds and unknown
   values. Daily Gunsmoke participation at the three-attempt cap, its paired
-  score, and the 21-attempt weekly cap now display as exact values.
+  score, and any whole-week attempt total shared by every valid final-event
+  history now display as exact values, even when the shortfall day is ambiguous.
+- Use the captured single-attempt high score and per-attempt rounding equations
+  to constrain Gunsmoke paths, and derive conservative end-event Login, Daily
+  Patrol, merit, and attempt totals without requiring a synthetic 05:00 anchor.
+- Preserve every fully solved daily prefix when a later transition reaches the
+  search budget, reject pre-05:00 captures as exact next-day openings, and merge
+  aggregate fallback results with stronger timestamped and daily lower bounds.
+- Highlight exact values and confirmed lower bounds that remain below a
+  configured cutoff, while leaving unknown values and minimums that already
+  meet the cutoff neutral.
 - Keep ambiguous Standard Week allocations unknown instead of selecting a
   Monday-first estimate. Solve each contiguous Gunsmoke capture run
   independently so an earlier missing day cannot suppress later exact facts;

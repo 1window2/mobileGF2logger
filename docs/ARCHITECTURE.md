@@ -152,7 +152,8 @@ The canonical `.gf2backup` container is a bounded ZIP with a checksummed
 manifest and SQLite management database. Legacy format v1 remains a
 Platoon-only compatibility backup; restoring it atomically retires unrelated
 target-device roster CSV evidence so later reconciliation cannot mutate the
-selected state. Format v2 adds a checksummed, strictly
+selected state without reading, validating, or replacing app settings. Format
+v2 adds a checksummed, strictly
 typed settings payload containing only user-owned configuration; capture
 diagnostics, raw packet history, signing material, and internal migration flags
 are excluded.

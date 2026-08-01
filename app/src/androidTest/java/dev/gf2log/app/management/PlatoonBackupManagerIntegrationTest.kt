@@ -4,7 +4,9 @@ import android.content.ContentValues
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import dev.gf2log.app.TargetPackagePreferences
 import dev.gf2log.app.settings.AppBackupSettings
+import dev.gf2log.app.settings.AppBackupSettingsCodec
 import dev.gf2log.app.settings.AppSettingsStore
 import dev.gf2log.app.settings.BackupSettingsStore
 import dev.gf2log.app.settings.WeeklyCutlines
@@ -13,8 +15,11 @@ import dev.gf2log.protocol.PayloadCatalog
 import dev.gf2log.protocol.model.GuildMember
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.EOFException
+import java.io.InputStream
 import java.time.Instant
 import java.time.LocalDate
+import java.util.zip.ZipException
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -85,10 +90,14 @@ class PlatoonBackupManagerIntegrationTest {
 
         replaceDatabaseWithCurrentState()
         settingsStore.replace(currentSettings())
+        TargetPackagePreferences.set(context, INVALID_TARGET_PACKAGE)
         writeRetainedCsv(CURRENT_UID, "Cached current member")
         PlatoonBackupManager(context).restore(ByteArrayInputStream(archive))
 
-        assertEquals(currentSettings(), settingsStore.read())
+        assertEquals(
+            currentSettings().copy(targetPackage = INVALID_TARGET_PACKAGE),
+            settingsStore.read(),
+        )
         assertFalse(FilePaths.retainedCsvDirectory(context).exists())
         assertEquals(
             PlatoonRepository.ImportResult(0, 0, 0, 0),
@@ -102,6 +111,80 @@ class PlatoonBackupManagerIntegrationTest {
         }
         assertFalse(FilePaths.preRestoreDatabase(context).exists())
         assertFalse(FilePaths.previousRetainedCsvDirectory(context).exists())
+        assertFalse(FilePaths.restoreTransactionDirectory(context).exists())
+    }
+
+    @Test
+    fun platoonOnlyRollbackDoesNotReadOrReplaceUnrelatedSettings() {
+        seedDatabase(ARCHIVED_UID, "Archived member", "archived-source.csv")
+        val archive = ByteArrayOutputStream().also {
+            PlatoonBackupManager(context).export(it)
+        }.toByteArray()
+
+        replaceDatabaseWithCurrentState()
+        settingsStore.replace(currentSettings())
+        TargetPackagePreferences.set(context, INVALID_TARGET_PACKAGE)
+        val retainedCsv = writeRetainedCsv(CURRENT_UID, "Cached current member")
+        val inaccessibleSettings = object : BackupSettingsStore {
+            override fun read(): AppBackupSettings = error("Legacy restore must not read settings")
+
+            override fun replace(settings: AppBackupSettings) {
+                error("Legacy restore must not replace settings")
+            }
+        }
+
+        assertThrows(IllegalStateException::class.java) {
+            PlatoonBackupManager(
+                context = context,
+                settingsStore = inaccessibleSettings,
+                restoreObserver = { checkpoint ->
+                    if (checkpoint == PlatoonBackupManager.RestoreCheckpoint.RETAINED_CSV_RETIRED) {
+                        error("simulated legacy restore failure")
+                    }
+                },
+            ).restore(ByteArrayInputStream(archive))
+        }
+
+        assertEquals(INVALID_TARGET_PACKAGE, TargetPackagePreferences.get(context))
+        assertTrue(retainedCsv.isFile)
+        PlatoonDatabase(context).use { database ->
+            val db = database.readableDatabase
+            assertEquals(1L, count(db, "members", "uid = ?", CURRENT_UID))
+            assertEquals(0L, count(db, "members", "uid = ?", ARCHIVED_UID))
+        }
+        assertFalse(FilePaths.preRestoreDatabase(context).exists())
+        assertFalse(FilePaths.previousRetainedCsvDirectory(context).exists())
+        assertFalse(FilePaths.restoreTransactionDirectory(context).exists())
+    }
+
+    @Test
+    fun corruptOrTruncatedZipReadFailureIsClassifiedAsAnInvalidBackup() {
+        listOf(
+            ZipException("corrupt compressed data"),
+            EOFException("truncated compressed data"),
+        ).forEach { readFailure ->
+            val invalidArchive = object : InputStream() {
+                override fun read(): Int = throw readFailure
+            }
+
+            assertThrows(InvalidBackupException::class.java) {
+                PlatoonBackupManager(context).restoreFull(invalidArchive)
+            }
+        }
+    }
+
+    @Test
+    fun preMarkerPreparedRestoreTransactionStillRecoversSettings() {
+        settingsStore.replace(currentSettings())
+        FilePaths.restoreSettingsFile(context).apply {
+            parentFile?.mkdirs()
+            writeBytes(AppBackupSettingsCodec.encode(archivedSettings()))
+        }
+        FilePaths.restoreStateFile(context).writeText("PREPARED", Charsets.US_ASCII)
+
+        PlatoonBackupManager.recoverInterruptedFullRestore(context, settingsStore)
+
+        assertEquals(archivedSettings(), settingsStore.read())
         assertFalse(FilePaths.restoreTransactionDirectory(context).exists())
     }
 
@@ -520,6 +603,12 @@ class PlatoonBackupManagerIntegrationTest {
         fun restoreTransactionDirectory(context: Context) =
             java.io.File(context.filesDir, "platoon-full-restore")
 
+        fun restoreSettingsFile(context: Context) =
+            java.io.File(restoreTransactionDirectory(context), "settings.pre_restore")
+
+        fun restoreStateFile(context: Context) =
+            java.io.File(restoreTransactionDirectory(context), "state")
+
         fun retiredCsvCleanupDirectories(context: Context): List<java.io.File> =
             restoreDirectory(context).listFiles()
                 .orEmpty()
@@ -546,6 +635,7 @@ class PlatoonBackupManagerIntegrationTest {
         const val ARCHIVED_UID = 1001L
         const val CURRENT_UID = 2002L
         const val ARCHIVED_NOTE = "Weekly review"
+        const val INVALID_TARGET_PACKAGE = "not a package"
         val PERIOD_START: LocalDate = LocalDate.of(2026, 7, 26)
     }
 }

@@ -29,6 +29,7 @@
     <string name="full_backup_exported">전체 정보 백업을 저장했습니다</string>
     <string name="full_backup_restored">전체 정보 백업을 복원했습니다</string>
     <string name="full_backup_export_failed">전체 정보 백업을 저장할 수 없습니다</string>
+    <string name="full_backup_restore_failed">전체 정보 백업을 복원할 수 없습니다</string>
     <string name="payload_history">패킷 기록</string>
     <string name="platoon_management">서클 관리</string>
     <string name="weekly_table">주간 과업표</string>

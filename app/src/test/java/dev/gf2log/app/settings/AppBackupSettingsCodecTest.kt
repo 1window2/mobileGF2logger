@@ -58,7 +58,7 @@ class AppBackupSettingsCodecTest {
             setProperty("payloadHistory.$requiredPayload", "false")
         }
 
-        assertThrows(IllegalStateException::class.java) {
+        assertThrows(IllegalArgumentException::class.java) {
             AppBackupSettingsCodec.decode(malformedBoolean.toBytes())
         }
         assertThrows(IllegalArgumentException::class.java) {

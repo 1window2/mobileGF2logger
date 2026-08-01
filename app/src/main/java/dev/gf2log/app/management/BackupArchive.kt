@@ -18,6 +18,9 @@ internal object BackupArchive {
     fun write(output: OutputStream, database: File, settings: ByteArray?) {
         require(database.isFile) { "No Platoon database exists" }
         require(database.length() <= MAX_DATABASE_BYTES) { "Platoon database is too large" }
+        require(settings == null || settings.size <= MAX_SETTINGS_BYTES) {
+            "Backup settings are too large"
+        }
         val formatVersion = if (settings == null) {
             BackupFormatPolicy.PLATOON_ONLY_VERSION
         } else {

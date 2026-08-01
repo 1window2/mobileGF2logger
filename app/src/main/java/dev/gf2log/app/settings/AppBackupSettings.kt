@@ -130,7 +130,7 @@ object AppBackupSettingsCodec {
     private fun Properties.strictBoolean(key: String): Boolean = when (val value = required(key)) {
         "true" -> true
         "false" -> false
-        else -> error("Backup setting $key is not a Boolean")
+        else -> throw IllegalArgumentException("Backup setting $key is not a Boolean")
     }
 
     private fun Properties.optionalLong(key: String): Long? {

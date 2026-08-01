@@ -27,8 +27,8 @@ class WeeklyReportBuilderTest {
         assertTrue(report.isGunsmokeWeek)
         assertEquals(LocalDate.of(2026, 7, 19), report.periodStart)
         assertEquals(90L, report.members.single().days[1].meritDelta)
-        assertEquals(114L, report.members.single().days[2].meritDelta)
-        assertEquals(25L, report.members.single().days[2].scoreDelta)
+        assertNull(report.members.single().days[2].meritDelta)
+        assertNull(report.members.single().days[2].scoreDelta)
     }
 
     @Test
@@ -710,7 +710,6 @@ class WeeklyReportBuilderTest {
             referenceDay = LocalDate.of(2026, 7, 25),
             zoneId = zone,
             snapshots = listOf(
-                sheetSnapshot("2026-07-18T19:59:00Z", 540, 433_125, 218_925),
                 sheetSnapshot("2026-07-19T19:29:33Z", 3_882, 436_467, 31_635),
                 sheetSnapshot("2026-07-20T19:53:20Z", 3_342, 439_809, 63_270),
                 sheetSnapshot("2026-07-21T19:11:09Z", 6_684, 443_151, 94_905),
@@ -765,7 +764,8 @@ class WeeklyReportBuilderTest {
         )
 
         val member = report.members.single()
-        assertNull(member.loginDays)
+        assertEquals(1, member.loginDays)
+        assertEquals(MetricCertainty.LOWER_BOUND, member.loginDaysCertainty)
         assertNull(member.patrolDays)
         assertTrue(member.hasUnknownGunsmokeActivityTotals)
     }
@@ -1055,8 +1055,8 @@ class WeeklyReportBuilderTest {
         assertTrue(member.hasFinalGunsmokeScore)
         assertEquals(10_300L, member.totalScore)
         assertTrue(saturday.hasFinalGunsmokeScore)
-        assertEquals(300L, saturday.scoreDelta)
-        assertEquals(DailyEvidence.PARTIAL_DAY, saturday.evidence)
+        assertNull(saturday.scoreDelta)
+        assertEquals(DailyEvidence.INCOMPLETE_BOUNDARY, saturday.evidence)
     }
 
     @Test
@@ -1093,6 +1093,26 @@ class WeeklyReportBuilderTest {
         assertNull(saturday.scoreDelta)
         assertNull(saturday.attempts)
         assertEquals(DailyEvidence.INCOMPLETE_BOUNDARY, saturday.evidence)
+    }
+
+    @Test
+    fun nearFiveAmCaptureDoesNotBecomeTheNextDaysGunsmokeOpeningBoundary() {
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 21),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshot("2026-07-20T19:53:20Z", weekly = 2_518, score = 46_903),
+                snapshot("2026-07-21T19:11:09Z", weekly = 5_019, score = 70_129),
+            ),
+        )
+
+        val tuesday = report.members.single().days[2]
+        assertNull(tuesday.meritDelta)
+        assertNull(tuesday.scoreDelta)
+        assertNull(tuesday.attempts)
+        assertEquals(MetricCertainty.UNKNOWN, tuesday.meritCertainty)
+        assertEquals(MetricCertainty.UNKNOWN, tuesday.scoreCertainty)
+        assertEquals(MetricCertainty.UNKNOWN, tuesday.attemptsCertainty)
     }
 
     private fun snapshot(time: String, weekly: Long, score: Long) =

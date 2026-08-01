@@ -2,6 +2,7 @@ package dev.gf2log.app.management
 
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -175,6 +176,81 @@ class WeeklyMetricCertaintyTest {
         assertEquals(18, row.totalAttempts)
         assertEquals(MetricCertainty.LOWER_BOUND, row.totalAttemptsCertainty)
         assertEquals("\u226518", WeeklyMetricPresentation.format(row.totalAttempts, row.totalAttemptsCertainty))
+    }
+
+    @Test
+    fun aggregateFallbackCannotEraseStrongerDailyActivityFloors() {
+        val days = (0L..6L).map { offset ->
+            WeeklyReportBuilder.DayCell(
+                gameDay = sunday.plusDays(offset),
+                meritDelta = 90L.takeIf { offset < 5L },
+                scoreDelta = null,
+                inference = null,
+                evidence = DailyEvidence.PARTIAL_DAY,
+                hasDailyPatrolFact = offset < 5L,
+                isGunsmokeWeek = true,
+            )
+        }
+        val row = WeeklyReportBuilder.MemberRow(
+            uid = 1,
+            name = "Member",
+            days = days,
+            totalMerit = 450,
+            totalScore = 0,
+            isGunsmokeWeek = true,
+            resolvedGunsmokeTotals = WeeklyReportBuilder.ResolvedGunsmokeTotals(
+                merit = 360,
+                meritCertainty = MetricCertainty.LOWER_BOUND,
+                attempts = 0,
+                attemptsCertainty = MetricCertainty.LOWER_BOUND,
+                loginDays = 4,
+                loginDaysCertainty = MetricCertainty.LOWER_BOUND,
+                patrolDays = 4,
+                patrolDaysCertainty = MetricCertainty.LOWER_BOUND,
+            ),
+        )
+
+        assertEquals(5, row.loginDays)
+        assertEquals(MetricCertainty.LOWER_BOUND, row.loginDaysCertainty)
+        assertEquals(5, row.patrolDays)
+        assertEquals(MetricCertainty.LOWER_BOUND, row.patrolDaysCertainty)
+        assertEquals(MetricCertainty.LOWER_BOUND, row.totalMeritCertainty)
+    }
+
+    @Test
+    fun lowerBoundsBelowCutlinesRemainWarningsUntilTheirMinimumMeetsTheCutline() {
+        assertTrue(
+            WeeklyMetricPresentation.warnsBelowCutline(
+                79_999L,
+                MetricCertainty.LOWER_BOUND,
+            ) { it < 80_000L },
+        )
+        listOf(3 to 14, 4 to 5, 0 to 5).forEach { (lowerBound, cutline) ->
+            assertTrue(
+                WeeklyMetricPresentation.warnsBelowCutline(
+                    lowerBound,
+                    MetricCertainty.LOWER_BOUND,
+                ) { it < cutline },
+            )
+        }
+        assertTrue(
+            WeeklyMetricPresentation.warnsBelowCutline(
+                4,
+                MetricCertainty.EXACT,
+            ) { it < 5 },
+        )
+        assertFalse(
+            WeeklyMetricPresentation.warnsBelowCutline(
+                14,
+                MetricCertainty.LOWER_BOUND,
+            ) { it < 14 },
+        )
+        assertFalse(
+            WeeklyMetricPresentation.warnsBelowCutline(
+                4,
+                MetricCertainty.UNKNOWN,
+            ) { it < 5 },
+        )
     }
 
     @Test

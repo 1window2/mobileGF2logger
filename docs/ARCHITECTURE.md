@@ -186,13 +186,31 @@ changes, and the activity adds nested member rows in small display-frame
 batches. The Gunsmoke solver merges equivalent partial histories instead of
 retaining every complete path and enforces deterministic state/operation
 budgets; evidence beyond those budgets stays conservative rather than blocking
-Android input or publishing an unsupported estimate.
+Android input or publishing an unsupported estimate. Per-day state consensus
+and whole-week aggregate consensus are retained separately, so a final 02:00
+event packet can prove a weekly attempt total without assigning the shortfall
+to an unsupported day. If detailed daily expansion reaches its budget, a
+bounded aggregate solver uses the Monday merit reset, final score, captured
+high score, daily attempt cap, and score-rounding equations without inventing a
+daily allocation.
+
+Each completely enumerated prefix is projected before the solver advances, so
+a later ambiguous transition cannot erase earlier evidence when the search
+budget is reached. The cumulative event score and captured high score provide
+an independent monotonic weekly-attempt floor. Broad aggregate fallback values
+are merged with, rather than substituted for, stronger daily and timestamped
+Login or Daily Patrol floors.
 
 Metric certainty is evaluated in the report domain. Exact 05:00 boundaries
 close the preceding game day, while sparse Updates facts retain their event
 timestamp until the builder verifies they preceded the captured counters.
+Captures shortly before 05:00 remain cross-boundary interval evidence and are
+never published as the next day's Gunsmoke delta without solver reconciliation.
 Manual corrections overlay only explicitly edited fields; untouched derived
 values keep their original exact, lower-bound, or unknown certainty.
+Presentation applies the cutoff warning color to both exact values and lower
+bounds whose displayed minimum remains below the configured threshold. Unknown
+values and lower bounds that already meet the threshold remain neutral.
 
 Completed roster captures are written under a non-importable temporary suffix
 and atomically published as `.csv` only after protocol completion. Retained CSV

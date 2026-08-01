@@ -26,6 +26,9 @@ rules below take precedence over stale copied dates in archived templates.
   merit, login, Daily Patrol, and the Saturday game day remain open until
   05:00. A daily Saturday score delta still requires a trustworthy opening
   boundary; the app does not invent one from the final total alone.
+- A capture shortly before 05:00 is not an exact opening boundary for the next
+  day. Its following counter delta can include the previous day's tail, so the
+  daily Gunsmoke cell stays unknown unless adjacent counters reconcile the split.
 - Gunsmoke runs for one week followed by two off weeks. The verified cycle
   anchor is Sunday, 2026-07-19 at 05:00. Other verified starts are 2026-02-22,
   2026-03-15, 2026-04-05, 2026-04-26, 2026-05-17, 2026-06-07, and 2026-06-28.
@@ -60,7 +63,9 @@ The calculation is accepted when the remaining merit is one of `0`, `50`, or
 ambiguous and are shown for manual confirmation; the app does not fabricate an
 exact count. Three attempts are the daily cap, so they finalize the attempt
 count and the paired captured score. Twenty-one attempts are the weekly cap and
-finalize the weekly attempt count.
+finalize the weekly attempt count. The captured single-attempt high score is an
+additional upper bound: when an aggregate saturates that bound, it can also fix
+the attempt count and the otherwise ambiguous per-attempt rounding merit.
 
 Counter resets are handled by treating a negative delta as the current counter
 value. Daily activity is derived from Total Merit because Merit This Week
@@ -94,8 +99,16 @@ resets on Monday while a Gunsmoke week begins on Sunday.
   missing earlier day therefore cannot suppress exact facts in a later usable
   run, while the unobserved gap remains unknown.
 - On the final Saturday, a capture at or after 02:00 finalizes the captured
-  weekly Gunsmoke score. The 05:00 game-day boundary still controls merit,
-  attendance, Daily Patrol, and the week transition.
+  weekly Gunsmoke score and allows the solver to reconcile whole-week attempt,
+  Login, and Daily Patrol totals across every compatible history. A weekly
+  total is exact when every history agrees even if the day containing a
+  shortfall remains ambiguous. The 05:00 game-day boundary still controls
+  merit, attendance, Daily Patrol, and the week transition; unresolved values
+  therefore remain lower bounds.
+- If a later transition exceeds the bounded detailed search, already solved
+  earlier days remain visible. The cumulative score/high-score attempt floor
+  and timestamped Login or Daily Patrol facts are retained even when a broader
+  aggregate fallback admits a smaller value.
 - The separate Join/Withdraw section combines UID-safe 21917 roster changes,
   exact 21960 Updates timestamps, and manually entered membership history.
   Snapshot-only boundaries are labelled with their observation time instead of
@@ -104,8 +117,10 @@ resets on Monday while a Gunsmoke week begins on Sunday.
   manually confirmed.
 - Missing daily Gunsmoke score and attempt values stay unknown. Confirmed
   subtotals remain visible as lower bounds, while exact daily/weekly caps are
-  displayed without `≥`, `?`, or `-`. The user can apply a manual correction
-  when they have independent evidence.
+  displayed without `≥`, `?`, or `-`. Exact values and lower bounds below a
+  configured cutoff use the yellow warning color until the displayed minimum
+  reaches that cutoff. The user can apply a manual correction when they have
+  independent evidence.
 - If a Gunsmoke day is completely unobserved, weekly Login and Daily Patrol
   totals also stay unknown unless a timestamped activity fact or manual edit
   independently proves them.

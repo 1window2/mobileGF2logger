@@ -11,15 +11,19 @@ data class SnapshotIngestResult(
 ) {
     companion object {
         fun duplicate() = SnapshotIngestResult(null, true, false, 0, 0, 0, 0)
+        fun historical(snapshotId: Long) =
+            SnapshotIngestResult(snapshotId, false, false, 0, 0, 0, 0)
     }
 }
 
 data class ActivityIngestResult(
+    val acceptedObservations: Int,
     val inserted: Int,
     val resolved: Int,
 )
 
 data class UpdatesIngestResult(
+    val acceptedObservations: Int,
     val membershipEvents: Int,
     val patrolFacts: Int,
 )

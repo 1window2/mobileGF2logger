@@ -9,6 +9,9 @@ import java.io.BufferedWriter
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStreamWriter
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -17,6 +20,7 @@ import java.time.format.DateTimeFormatter
 class GuildMembersCsvWriter(
     private val outputDirectory: File,
     private val clock: Clock = Clock.systemUTC(),
+    private val publisher: (File, File) -> Unit = ::publishCompletedFile,
     private val onBatchClosed: (CompletedBatch) -> Unit = {},
 ) : AutoCloseable {
     private var activeBatch: Batch? = null
@@ -44,13 +48,14 @@ class GuildMembersCsvWriter(
         batch.writer.flush()
         batch.previousMessageId = payload.messageId
 
-        val result = SaveResult(batch.file, batch.rows)
         if (payload.messageId != 0 && payload.isEndOfMessage) {
-            closeActiveBatch(completed = true)
+            return closeActiveBatch(completed = true)?.let {
+                SaveResult(it.file, batch.rows)
+            }
         } else if (flowEnded) {
             closeActiveBatch(completed = false)
         }
-        return result
+        return null
     }
 
     @Synchronized
@@ -62,37 +67,79 @@ class GuildMembersCsvWriter(
         outputDirectory.mkdirs()
         val instant = Instant.now(clock)
         val filenameStem = "gf2log_platoonmembers_${FILE_TIME_FORMAT.format(instant)}"
-        val file = uniqueFile(filenameStem)
-        val writer = BufferedWriter(OutputStreamWriter(FileOutputStream(file), Charsets.UTF_8))
+        val finalFile = uniqueFile(filenameStem)
+        val workingFile = File(finalFile.parentFile, "${finalFile.name}.partial")
+        val writer = BufferedWriter(
+            OutputStreamWriter(FileOutputStream(workingFile), Charsets.UTF_8),
+        )
         writer.appendLine(GuildMembersCsv.HEADER)
         writer.flush()
-        return Batch(file, LOG_TIME_FORMAT.format(instant), writer)
+        return Batch(workingFile, finalFile, LOG_TIME_FORMAT.format(instant), writer)
     }
 
     private fun uniqueFile(filenameStem: String): File {
         var suffix = 1
         var candidate = File(outputDirectory, "$filenameStem.csv")
-        while (candidate.exists()) {
+        while (candidate.exists() || File(candidate.parentFile, "${candidate.name}.partial").exists()) {
             suffix += 1
             candidate = File(outputDirectory, "${filenameStem}_$suffix.csv")
         }
         return candidate
     }
 
-    private fun closeActiveBatch(completed: Boolean) {
-        val batch = activeBatch ?: return
-        activeBatch = null
+    private fun closeActiveBatch(completed: Boolean): CompletedBatch? {
+        val batch = activeBatch ?: return null
         batch.writer.close()
         if (completed && batch.members.isNotEmpty()) {
-            onBatchClosed(
-                CompletedBatch(
-                    file = batch.file,
-                    logTime = batch.logTime,
-                    members = batch.members.values.toList(),
-                ),
+            val result = CompletedBatch(
+                file = batch.finalFile,
+                logTime = batch.logTime,
+                members = batch.members.values.toList(),
             )
+            try {
+                writeCanonicalRoster(batch)
+                publishWithRetry(batch.workingFile, batch.finalFile)
+            } catch (error: Exception) {
+                activeBatch = null
+                runCatching { onBatchClosed(result) }
+                    .exceptionOrNull()
+                    ?.let(error::addSuppressed)
+                throw error
+            }
+            activeBatch = null
+            onBatchClosed(result)
+            return result
         } else {
-            batch.file.delete()
+            activeBatch = null
+            batch.workingFile.delete()
+        }
+        return null
+    }
+
+    private fun writeCanonicalRoster(batch: Batch) {
+        batch.workingFile.bufferedWriter(Charsets.UTF_8).use { writer ->
+            writer.appendLine(GuildMembersCsv.HEADER)
+            batch.members.values.forEach { member ->
+                writer.appendLine(GuildMembersCsv.row(member, batch.logTime))
+            }
+        }
+    }
+
+    private fun publishWithRetry(workingFile: File, finalFile: File) {
+        var firstFailure: Exception? = null
+        repeat(PUBLISH_ATTEMPTS) { attempt ->
+            try {
+                publisher(workingFile, finalFile)
+                return
+            } catch (error: Exception) {
+                if (finalFile.isFile && !workingFile.exists()) return
+                if (attempt == 0) {
+                    firstFailure = error
+                } else {
+                    firstFailure?.let(error::addSuppressed)
+                    throw error
+                }
+            }
         }
     }
 
@@ -105,7 +152,8 @@ class GuildMembersCsvWriter(
     )
 
     private data class Batch(
-        val file: File,
+        val workingFile: File,
+        val finalFile: File,
         val logTime: String,
         val writer: BufferedWriter,
         val members: LinkedHashMap<UInt, GuildMember> = linkedMapOf(),
@@ -114,7 +162,20 @@ class GuildMembersCsvWriter(
     )
 
     companion object {
-        internal const val OUTPUT_DIRECTORY = "guild-members"
+        private const val PUBLISH_ATTEMPTS = 2
+
+        private fun publishCompletedFile(workingFile: File, finalFile: File) {
+            try {
+                Files.move(
+                    workingFile.toPath(),
+                    finalFile.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                )
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(workingFile.toPath(), finalFile.toPath())
+            }
+        }
+
         val FILE_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter
             .ofPattern("yyyyMMdd'T'HHmmss'Z'")
             .withZone(ZoneOffset.UTC)

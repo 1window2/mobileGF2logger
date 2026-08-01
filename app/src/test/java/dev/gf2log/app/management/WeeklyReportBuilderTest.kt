@@ -4,6 +4,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -112,7 +113,7 @@ class WeeklyReportBuilderTest {
     }
 
     @Test
-    fun sparseMultiDayDeltaIsDistributedInsteadOfAssignedOnlyToLatestDay() {
+    fun sparseMultiDayDeltaKeepsUnanchoredSundayUnknownAndDistributesRemainingDays() {
         val report = WeeklyReportBuilder.build(
             referenceDay = LocalDate.of(2026, 7, 28),
             zoneId = zone,
@@ -123,14 +124,15 @@ class WeeklyReportBuilderTest {
         )
 
         val cells = report.members.single().days
-        assertEquals(listOf(0L, 90L, 90L), cells.take(3).map { it.meritDelta })
-        assertEquals(DailyEvidence.SPARSE_INFERRED, cells[0].evidence)
+        assertEquals(listOf(null, 90L, 90L), cells.take(3).map { it.meritDelta })
+        assertEquals(DailyEvidence.INCOMPLETE_BOUNDARY, cells[0].evidence)
+        assertEquals(MetricCertainty.UNKNOWN, cells[0].meritCertainty)
         assertTrue(cells.drop(1).take(2).all { it.evidence == DailyEvidence.ATTRIBUTED })
         assertTrue(report.hasIncompleteDailyEvidence)
     }
 
     @Test
-    fun sparseStandardAggregateUsesMarkedMondayFirstAllocation() {
+    fun sparseStandardAggregateKeepsAmbiguousDaysUnknown() {
         val earlier = member(uid = 1, name = "Sparse", weekly = 0, score = 0)
             .copy(totalMerit = 10_000)
         val later = earlier.copy(weeklyMerit = 230, totalMerit = 10_230)
@@ -144,7 +146,7 @@ class WeeklyReportBuilderTest {
         )
 
         assertEquals(
-            listOf(90L, 90L, 50L),
+            listOf(null, null, null),
             report.members.single().days
                 .filter { it.gameDay in LocalDate.of(2026, 7, 28)..LocalDate.of(2026, 7, 30) }
                 .map { it.meritDelta },
@@ -154,16 +156,11 @@ class WeeklyReportBuilderTest {
                 it.evidence == DailyEvidence.SPARSE_INFERRED
             },
         )
-        assertTrue(
-            report.members.single().days.any {
-                it.evidence == DailyEvidence.PARTIAL_DAY
-            },
-        )
         assertTrue(report.hasIncompleteDailyEvidence)
     }
 
     @Test
-    fun mondayResetSeparatesMondayMeritFromPreviousSunday() {
+    fun mondayResetDoesNotInventMeritBeforeTheFirstSundayCapture() {
         val sunday = member(uid = 1, name = "Reset anchor", weekly = 4_000, score = 0)
             .copy(totalMerit = 20_000)
         val monday = sunday.copy(weeklyMerit = 50, totalMerit = 20_140)
@@ -176,8 +173,9 @@ class WeeklyReportBuilderTest {
             ),
         )
 
-        assertEquals(90L, report.members.single().days.first().meritDelta)
-        assertEquals(DailyEvidence.SPARSE_INFERRED, report.members.single().days.first().evidence)
+        assertNull(report.members.single().days.first().meritDelta)
+        assertEquals(DailyEvidence.INCOMPLETE_BOUNDARY, report.members.single().days.first().evidence)
+        assertEquals(MetricCertainty.UNKNOWN, report.members.single().days.first().meritCertainty)
     }
 
     @Test
@@ -204,7 +202,7 @@ class WeeklyReportBuilderTest {
     }
 
     @Test
-    fun ambiguousWeeklyCounterUsesMarkedMondayFirstValues() {
+    fun ambiguousWeeklyCounterDoesNotExposeASelectedAllocation() {
         val monday = member(uid = 1, name = "Ambiguous", weekly = 0, score = 0)
             .copy(totalMerit = 20_000)
         val tuesday = monday.copy(weeklyMerit = 90, totalMerit = 20_090)
@@ -218,7 +216,7 @@ class WeeklyReportBuilderTest {
         )
 
         val cells = report.members.single().days
-        assertEquals(listOf(90L, 0L), cells.drop(1).take(2).map { it.meritDelta })
+        assertEquals(listOf(null, null), cells.drop(1).take(2).map { it.meritDelta })
         assertTrue(
             cells.drop(1).take(2).all { it.evidence == DailyEvidence.SPARSE_INFERRED },
         )
@@ -291,6 +289,88 @@ class WeeklyReportBuilderTest {
     }
 
     @Test
+    fun exactUpdatesAfterLatestSnapshotProjectTheEffectiveWeeklyRoster() {
+        val existing = member(uid = 1, name = "Existing", weekly = 90, score = 1_000)
+            .copy(totalMerit = 10_000)
+        val leaving = member(uid = 2, name = "Leaving", weekly = 50, score = 500)
+            .copy(totalMerit = 5_000)
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 27),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-27T03:00:00Z", existing, leaving),
+            ),
+            membershipEvents = listOf(
+                exactEvent(
+                    id = 1,
+                    uid = 2,
+                    type = MemberEventType.LEFT,
+                    occurredAt = "2026-07-27T04:00:00Z",
+                    name = "Leaving",
+                ),
+                exactEvent(
+                    id = 2,
+                    uid = 3,
+                    type = MemberEventType.JOINED,
+                    occurredAt = "2026-07-27T05:00:00Z",
+                    name = "Real newcomer",
+                ),
+            ),
+            asOf = Instant.parse("2026-07-27T06:00:00Z"),
+        )
+
+        assertEquals(setOf(1L, 3L), report.members.map { it.uid }.toSet())
+        assertEquals("Real newcomer", report.members.single { it.uid == 3L }.name)
+    }
+
+    @Test
+    fun exactJoinWithoutAnySnapshotCreatesARealIdentityWeeklyRow() {
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 27),
+            zoneId = zone,
+            snapshots = emptyList(),
+            membershipEvents = listOf(
+                exactEvent(
+                    id = 1,
+                    uid = 3,
+                    type = MemberEventType.JOINED,
+                    occurredAt = "2026-07-27T05:00:00Z",
+                    name = "Packet newcomer",
+                ),
+            ),
+            asOf = Instant.parse("2026-07-27T06:00:00Z"),
+        )
+
+        assertEquals(listOf(3L), report.members.map { it.uid })
+        assertEquals("Packet newcomer", report.members.single().name)
+        assertTrue(report.members.single().days.all { it.evidence == DailyEvidence.NO_OBSERVATION })
+        assertTrue(report.hasIncompleteDailyEvidence)
+    }
+
+    @Test
+    fun exactUpdateBeforeLatestSnapshotDoesNotOverrideAuthoritativeRoster() {
+        val member = member(uid = 1, name = "Present", weekly = 90, score = 1_000)
+            .copy(totalMerit = 10_000)
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 27),
+            zoneId = zone,
+            snapshots = listOf(snapshotWithMembers("2026-07-27T05:00:00Z", member)),
+            membershipEvents = listOf(
+                exactEvent(
+                    id = 1,
+                    uid = 1,
+                    type = MemberEventType.LEFT,
+                    occurredAt = "2026-07-27T04:00:00Z",
+                    name = "Present",
+                ),
+            ),
+            asOf = Instant.parse("2026-07-27T06:00:00Z"),
+        )
+
+        assertEquals(listOf(1L), report.members.map { it.uid })
+    }
+
+    @Test
     fun mondayWeeklyResetDoesNotCorruptDailyMeritDelta() {
         val sunday = member(uid = 1, name = "Reset", weekly = 4_000, score = 1_000)
             .copy(totalMerit = 20_000)
@@ -355,10 +435,133 @@ class WeeklyReportBuilderTest {
 
         val cell = report.members.single().days.first()
         assertEquals(42L, cell.meritDelta)
-        assertEquals(false, cell.attended)
+        assertEquals(true, cell.attended)
         assertEquals(true, cell.dailyPatrol)
         assertEquals(EvidencePrecision.MANUAL, cell.precision)
         assertEquals(42L, report.members.single().totalMerit)
+    }
+
+    @Test
+    fun partialManualPatrolOverridePreservesDerivedMetricCertainty() {
+        val periodStart = LocalDate.of(2026, 7, 19)
+        val baseline = member(uid = 1, name = "Partial", weekly = 0, score = 0)
+            .copy(totalMerit = 10_000, totalScore = 20_000)
+        val complete = baseline.copy(totalMerit = 13_342, totalScore = 51_635)
+        val report = WeeklyReportBuilder.build(
+            referenceDay = periodStart,
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-18T20:00:00Z", baseline),
+                snapshotWithMembers("2026-07-19T19:59:00Z", complete),
+            ),
+            overrides = listOf(
+                WeeklyCellOverride(
+                    uid = 1,
+                    periodStart = periodStart,
+                    gameDay = periodStart,
+                    meritDelta = null,
+                    scoreDelta = null,
+                    attempts = null,
+                    attended = null,
+                    dailyPatrol = true,
+                ),
+            ),
+            asOf = Instant.parse("2026-07-19T20:01:00Z"),
+        )
+
+        val cell = report.members.single().days.first()
+        assertEquals(3_342L, cell.meritDelta)
+        assertEquals(31_635L, cell.scoreDelta)
+        assertEquals(3, cell.attempts)
+        assertEquals(true, cell.attended)
+        assertEquals(true, cell.dailyPatrol)
+        assertEquals(MetricCertainty.EXACT, cell.meritCertainty)
+        assertEquals(MetricCertainty.EXACT, cell.scoreCertainty)
+        assertEquals(MetricCertainty.EXACT, cell.attemptsCertainty)
+    }
+
+    @Test
+    fun patrolAfterMetricSnapshotDoesNotDoubleCountAnIncludedReward() {
+        val periodStart = LocalDate.of(2026, 7, 19)
+        val baseline = member(uid = 1, name = "Patrol after snapshot", weekly = 0, score = 0)
+            .copy(totalMerit = 10_000, totalScore = 20_000)
+        val complete = baseline.copy(totalMerit = 13_342, totalScore = 51_635)
+        val report = WeeklyReportBuilder.build(
+            referenceDay = periodStart,
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-18T20:00:00Z", baseline),
+                snapshotWithMembers("2026-07-19T19:58:00Z", complete),
+            ),
+            dailyPatrolFacts = listOf(
+                DailyPatrolFact(1, Instant.parse("2026-07-19T19:59:00Z")),
+            ),
+            asOf = Instant.parse("2026-07-19T20:01:00Z"),
+        )
+
+        val cell = report.members.single().days.first()
+        assertEquals(3_342L, cell.meritDelta)
+        assertEquals(31_635L, cell.scoreDelta)
+        assertEquals(3, cell.attempts)
+        assertEquals(true, cell.attended)
+        assertEquals(true, cell.dailyPatrol)
+        assertEquals(MetricCertainty.EXACT, cell.meritCertainty)
+        assertEquals(MetricCertainty.EXACT, cell.scoreCertainty)
+        assertEquals(MetricCertainty.EXACT, cell.attemptsCertainty)
+    }
+
+    @Test
+    fun patrolAfterMetricSnapshotKeepsMeritLowerBoundBeforeDailyAttemptCap() {
+        val periodStart = LocalDate.of(2026, 7, 19)
+        val baseline = member(uid = 1, name = "Open day", weekly = 0, score = 0)
+            .copy(totalMerit = 10_000, totalScore = 20_000)
+        val partial = baseline.copy(totalMerit = 12_258, totalScore = 41_090)
+        val report = WeeklyReportBuilder.build(
+            referenceDay = periodStart,
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-18T20:00:00Z", baseline),
+                snapshotWithMembers("2026-07-19T19:58:00Z", partial),
+            ),
+            dailyPatrolFacts = listOf(
+                DailyPatrolFact(1, Instant.parse("2026-07-19T19:59:00Z")),
+            ),
+            asOf = Instant.parse("2026-07-19T19:59:30Z"),
+        )
+
+        val cell = report.members.single().days.first()
+        assertEquals(2_258L, cell.meritDelta)
+        assertEquals(21_090L, cell.scoreDelta)
+        assertEquals(2, cell.attempts)
+        assertEquals(MetricCertainty.LOWER_BOUND, cell.meritCertainty)
+        assertEquals(MetricCertainty.LOWER_BOUND, cell.scoreCertainty)
+        assertEquals(MetricCertainty.LOWER_BOUND, cell.attemptsCertainty)
+    }
+
+    @Test
+    fun fiveAmBoundaryClosesThePrecedingGunsmokeDay() {
+        val day = LocalDate.of(2026, 7, 19)
+        val baseline = member(uid = 1, name = "Boundary", weekly = 0, score = 0)
+            .copy(totalMerit = 10_000, totalScore = 20_000)
+        val closing = baseline.copy(totalMerit = 12_258, totalScore = 41_090)
+        val report = WeeklyReportBuilder.build(
+            referenceDay = day,
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-18T20:00:00Z", baseline),
+                snapshotWithMembers("2026-07-19T20:00:00Z", closing),
+            ),
+            asOf = Instant.parse("2026-07-19T20:00:01Z"),
+        )
+
+        val cell = report.members.single().days.first()
+        assertTrue(cell.hasClosingBoundary)
+        assertEquals(2_258L, cell.meritDelta)
+        assertEquals(21_090L, cell.scoreDelta)
+        assertEquals(2, cell.attempts)
+        assertEquals(MetricCertainty.EXACT, cell.meritCertainty)
+        assertEquals(MetricCertainty.EXACT, cell.scoreCertainty)
+        assertEquals(MetricCertainty.EXACT, cell.attemptsCertainty)
     }
 
     @Test
@@ -406,6 +609,148 @@ class WeeklyReportBuilderTest {
         assertNull(wednesday.attempts)
         assertEquals(true, wednesday.dailyPatrol)
         assertEquals(DailyEvidence.PARTIAL_DAY, wednesday.evidence)
+    }
+
+    @Test
+    fun exactUpdatesPatrolFactFinalizesOtherwiseExactGunsmokeMerit() {
+        val baseline = member(uid = 1, name = "Patrol", weekly = 0, score = 0)
+            .copy(totalMerit = 10_000, totalScore = 20_000)
+        val complete = baseline.copy(
+            weeklyMerit = 3_342,
+            totalMerit = 13_342,
+            totalScore = 51_635,
+        )
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 19),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-18T20:00:00Z", baseline),
+                snapshotWithMembers("2026-07-19T19:59:00Z", complete),
+            ),
+            dailyPatrolFacts = listOf(
+                DailyPatrolFact(1, Instant.parse("2026-07-19T00:00:00Z")),
+            ),
+            asOf = Instant.parse("2026-07-19T20:01:00Z"),
+        )
+
+        val sunday = report.members.single().days.first()
+        assertEquals(3_342L, sunday.meritDelta)
+        assertEquals(31_635L, sunday.scoreDelta)
+        assertEquals(3, sunday.attempts)
+        assertEquals(true, sunday.attended)
+        assertEquals(true, sunday.dailyPatrol)
+        assertEquals(MetricCertainty.EXACT, sunday.meritCertainty)
+        assertEquals(MetricCertainty.EXACT, sunday.scoreCertainty)
+        assertEquals(MetricCertainty.EXACT, sunday.attemptsCertainty)
+    }
+
+    @Test
+    fun exactCounterArithmeticProvesPatrolWithoutAnUpdatesPacket() {
+        val baseline = member(uid = 1, name = "No update", weekly = 0, score = 0)
+            .copy(totalMerit = 10_000, totalScore = 20_000)
+        val complete = baseline.copy(
+            weeklyMerit = 3_342,
+            totalMerit = 13_342,
+            totalScore = 51_635,
+        )
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 19),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-18T20:00:00Z", baseline),
+                snapshotWithMembers("2026-07-19T19:59:00Z", complete),
+            ),
+            asOf = Instant.parse("2026-07-19T20:01:00Z"),
+        )
+
+        val sunday = report.members.single().days.first()
+        assertEquals(3, sunday.attempts)
+        assertEquals(true, sunday.attended)
+        assertEquals(true, sunday.dailyPatrol)
+        assertEquals(MetricCertainty.EXACT, sunday.meritCertainty)
+    }
+
+    @Test
+    fun completeSevenDaySequencesResolveEverySharedActivityState() {
+        fun sheetMember(
+            uid: Long,
+            name: String,
+            weeklyMerit: Long,
+            totalMerit: Long,
+            totalScore: Long,
+            time: String,
+        ) = SnapshotMember(
+            uid = uid,
+            name = name,
+            level = 60,
+            weeklyMerit = weeklyMerit,
+            totalMerit = totalMerit,
+            highScore = 10_545,
+            totalScore = totalScore,
+            lastLogin = Instant.parse(time).epochSecond,
+        )
+        fun sheetSnapshot(
+            time: String,
+            weeklyMerit: Long,
+            firstTotalMerit: Long,
+            firstTotalScore: Long,
+        ) = snapshotWithMembers(
+            time,
+            sheetMember(40_630, "Kim Duhan", weeklyMerit, firstTotalMerit, firstTotalScore, time),
+            sheetMember(
+                uid = 99_999,
+                name = "Independent member",
+                weeklyMerit = weeklyMerit,
+                totalMerit = firstTotalMerit + 50_000,
+                totalScore = firstTotalScore,
+                time = time,
+            ),
+        )
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 25),
+            zoneId = zone,
+            snapshots = listOf(
+                sheetSnapshot("2026-07-18T19:59:00Z", 540, 433_125, 218_925),
+                sheetSnapshot("2026-07-19T19:29:33Z", 3_882, 436_467, 31_635),
+                sheetSnapshot("2026-07-20T19:53:20Z", 3_342, 439_809, 63_270),
+                sheetSnapshot("2026-07-21T19:11:09Z", 6_684, 443_151, 94_905),
+                sheetSnapshot("2026-07-22T15:06:39Z", 10_026, 446_493, 126_540),
+                sheetSnapshot("2026-07-23T15:46:30Z", 13_368, 449_835, 158_175),
+                sheetSnapshot("2026-07-24T15:59:38Z", 16_710, 453_177, 189_810),
+                sheetSnapshot("2026-07-25T17:02:17Z", 20_052, 456_519, 221_445),
+            ),
+            dailyPatrolFacts = listOf(
+                DailyPatrolFact(40_630, Instant.parse("2026-07-19T00:38:37Z")),
+                DailyPatrolFact(99_999, Instant.parse("2026-07-19T00:38:37Z")),
+            ),
+            asOf = Instant.parse("2026-07-25T17:03:00Z"),
+        )
+
+        assertEquals(setOf(40_630L, 99_999L), report.members.map { it.uid }.toSet())
+        report.members.forEach { row ->
+            assertEquals(List(7) { 3_342L }, row.days.map { it.meritDelta })
+            assertEquals(List(7) { 31_635L }, row.days.map { it.scoreDelta })
+            assertEquals(List(7) { 3 }, row.days.map { it.attempts })
+            assertTrue(row.days.all { it.meritCertainty == MetricCertainty.EXACT })
+            assertTrue(row.days.all { it.scoreCertainty == MetricCertainty.EXACT })
+            assertTrue(row.days.all { it.attemptsCertainty == MetricCertainty.EXACT })
+            assertTrue(row.days.all { it.attended == true })
+            assertTrue(row.days.all { it.dailyPatrol == true })
+            assertTrue(row.days.all { day ->
+                !WeeklyMetricPresentation.format(day.meritDelta, day.meritCertainty)
+                    .startsWith("\u2265")
+            })
+            assertEquals(23_394L, row.totalMerit)
+            assertEquals(MetricCertainty.EXACT, row.totalMeritCertainty)
+            assertEquals(221_445L, row.totalScore)
+            assertEquals(MetricCertainty.EXACT, row.totalScoreCertainty)
+            assertEquals(21, row.totalAttempts)
+            assertEquals(MetricCertainty.EXACT, row.totalAttemptsCertainty)
+            assertEquals(7, row.loginDays)
+            assertEquals(MetricCertainty.EXACT, row.loginDaysCertainty)
+            assertEquals(7, row.patrolDays)
+            assertEquals(MetricCertainty.EXACT, row.patrolDaysCertainty)
+        }
     }
 
     @Test
@@ -509,7 +854,7 @@ class WeeklyReportBuilderTest {
         )
 
         val cells = report.members.single().days
-        assertEquals(listOf(90L, 50L), cells.drop(1).take(2).map { it.meritDelta })
+        assertEquals(listOf(null, null), cells.drop(1).take(2).map { it.meritDelta })
         assertTrue(cells.drop(1).take(2).all { it.evidence == DailyEvidence.SPARSE_INFERRED })
         assertEquals(true, cells[2].attended)
         assertNull(cells[2].dailyPatrol)
@@ -589,7 +934,7 @@ class WeeklyReportBuilderTest {
         )
 
         val cells = report.members.single().days
-        assertEquals(listOf(90L, 90L, 50L), cells.drop(1).take(3).map { it.meritDelta })
+        assertEquals(listOf(null, null, 50L), cells.drop(1).take(3).map { it.meritDelta })
         assertEquals(DailyEvidence.SPARSE_INFERRED, cells[1].evidence)
         assertEquals(DailyEvidence.SPARSE_INFERRED, cells[2].evidence)
         assertEquals(DailyEvidence.PARTIAL_DAY, cells[3].evidence)
@@ -631,7 +976,7 @@ class WeeklyReportBuilderTest {
         )
 
         val cells = report.members.single().days
-        assertEquals(listOf(90L, 50L, 90L), cells.drop(1).take(3).map { it.meritDelta })
+        assertEquals(listOf(null, null, 90L), cells.drop(1).take(3).map { it.meritDelta })
         assertTrue(cells.drop(1).take(2).all { it.evidence == DailyEvidence.SPARSE_INFERRED })
         assertEquals(DailyEvidence.ATTRIBUTED, cells[3].evidence)
         assertEquals(true, cells[3].dailyPatrol)
@@ -687,6 +1032,69 @@ class WeeklyReportBuilderTest {
         assertEquals(DailyEvidence.PARTIAL_DAY, patrol.evidence)
     }
 
+    @Test
+    fun postTwoAmFinalSaturdayCaptureFinalizesScoreButNotTheGameDay() {
+        val baseline = member(uid = 1, name = "Final score", weekly = 1_000, score = 10_000)
+            .copy(totalMerit = 20_000)
+        val final = baseline.copy(
+            weeklyMerit = 1_120,
+            totalMerit = 20_120,
+            totalScore = 10_300,
+        )
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 25),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-24T19:59:00Z", baseline),
+                snapshotWithMembers("2026-07-25T17:02:00Z", final),
+            ),
+        )
+
+        val member = report.members.single()
+        val saturday = member.days.last()
+        assertTrue(member.hasFinalGunsmokeScore)
+        assertEquals(10_300L, member.totalScore)
+        assertTrue(saturday.hasFinalGunsmokeScore)
+        assertEquals(300L, saturday.scoreDelta)
+        assertEquals(DailyEvidence.PARTIAL_DAY, saturday.evidence)
+    }
+
+    @Test
+    fun preTwoAmFinalSaturdayCaptureLeavesScoreOpen() {
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 25),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshot("2026-07-24T19:59:00Z", weekly = 1_000, score = 10_000),
+                snapshot("2026-07-25T16:59:59Z", weekly = 1_120, score = 10_300),
+            ),
+        )
+
+        val member = report.members.single()
+        assertTrue(!member.hasFinalGunsmokeScore)
+        assertTrue(!member.days.last().hasFinalGunsmokeScore)
+    }
+
+    @Test
+    fun finalSaturdayTotalIsConfirmedWithoutInventingADailyDelta() {
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 25),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshot("2026-07-25T17:02:17Z", weekly = 20_142, score = 221_445),
+            ),
+        )
+
+        val member = report.members.single()
+        val saturday = member.days.last()
+        assertTrue(member.hasFinalGunsmokeScore)
+        assertEquals(221_445L, member.totalScore)
+        assertTrue(saturday.hasFinalGunsmokeScore)
+        assertNull(saturday.scoreDelta)
+        assertNull(saturday.attempts)
+        assertEquals(DailyEvidence.INCOMPLETE_BOUNDARY, saturday.evidence)
+    }
+
     private fun snapshot(time: String, weekly: Long, score: Long) =
         PlatoonSnapshot(
             id = 0,
@@ -696,6 +1104,25 @@ class WeeklyReportBuilderTest {
 
     private fun snapshotWithMembers(time: String, vararg members: SnapshotMember) =
         PlatoonSnapshot(0, Instant.parse(time), members.toList())
+
+    private fun exactEvent(
+        id: Long,
+        uid: Long,
+        type: MemberEventType,
+        occurredAt: String,
+        name: String,
+    ) = MemberEvent(
+        id = id,
+        uid = uid,
+        type = type,
+        occurredAt = Instant.parse(occurredAt),
+        eventDate = null,
+        timeKnown = true,
+        observedAt = Instant.parse(occurredAt),
+        precision = EvidencePrecision.EXACT,
+        source = EvidenceSource.GAME_UPDATES,
+        note = name,
+    )
 
     private fun member(
         uid: Long,

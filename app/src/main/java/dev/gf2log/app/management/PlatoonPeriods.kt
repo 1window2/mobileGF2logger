@@ -11,6 +11,7 @@ import java.time.temporal.TemporalAdjusters
 
 object PlatoonPeriods {
     const val RESET_HOUR = 5
+    const val GUNSMOKE_FINAL_SCORE_HOUR = 2
     val GUNSMOKE_ANCHOR: LocalDate = LocalDate.of(2026, 7, 19)
 
     fun gameDay(instant: Instant, zoneId: ZoneId): LocalDate =
@@ -27,6 +28,21 @@ object PlatoonPeriods {
 
     fun periodStartInstant(date: LocalDate, zoneId: ZoneId): Instant =
         ZonedDateTime.of(date, LocalTime.of(RESET_HOUR, 0), zoneId).toInstant()
+
+    fun isFinalGunsmokeScoreCapture(
+        gameDay: LocalDate,
+        capturedAt: Instant,
+        zoneId: ZoneId,
+    ): Boolean {
+        if (!isGunsmokeWeek(gameDay) || gameDay.dayOfWeek != DayOfWeek.SATURDAY) return false
+        val scoreClose = ZonedDateTime.of(
+            gameDay.plusDays(1),
+            LocalTime.of(GUNSMOKE_FINAL_SCORE_HOUR, 0),
+            zoneId,
+        ).toInstant()
+        return !capturedAt.isBefore(scoreClose) &&
+            capturedAt.isBefore(periodStartInstant(gameDay.plusDays(1), zoneId))
+    }
 
     private const val GUNSMOKE_CYCLE_WEEKS = 3L
 }

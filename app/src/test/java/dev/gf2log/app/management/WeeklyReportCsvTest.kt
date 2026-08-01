@@ -38,7 +38,12 @@ class WeeklyReportCsvTest {
 
         assertEquals(WeeklyReportCsv.HEADER, lines.first())
         assertTrue(lines[1].contains("\"Leader, \"\"One\"\"\""))
-        assertTrue(lines[1].endsWith(",0,true,true,INFERRED,ATTRIBUTED,90,0,0,1,1"))
+        assertTrue(
+            lines[1].endsWith(
+                ",0,EXACT,EXACT,EXACT,true,true,INFERRED,ATTRIBUTED," +
+                    "90,EXACT,0,EXACT,0,EXACT,1,EXACT,1,EXACT",
+            ),
+        )
     }
 
     @Test
@@ -51,7 +56,7 @@ class WeeklyReportCsvTest {
             meritDelta = 50,
             scoreDelta = null,
             attempts = null,
-            attended = false,
+            attended = true,
             dailyPatrol = true,
         )
         val report = WeeklyReportBuilder.Report(
@@ -81,7 +86,92 @@ class WeeklyReportCsvTest {
 
         assertTrue(
             WeeklyReportCsv.format(report).lines()[1]
-                .contains(",50,,,false,true,MANUAL,MANUAL,"),
+                .contains(",50,,,EXACT,UNKNOWN,UNKNOWN,true,true,MANUAL,MANUAL,"),
         )
     }
+
+    @Test
+    fun exportsLowerBoundAndUnknownCertaintyWithoutPresentationMarkers() {
+        val day = LocalDate.of(2026, 7, 19)
+        val lowerBound = WeeklyReportBuilder.DayCell(
+            gameDay = day,
+            meritDelta = 2_258,
+            scoreDelta = 21_090,
+            inference = ActivityInference.infer(2_258, 21_090, gunsmokeActive = true),
+            evidence = DailyEvidence.PARTIAL_DAY,
+            isGunsmokeWeek = true,
+        )
+        val unknown = WeeklyReportBuilder.DayCell(
+            gameDay = day.plusDays(1),
+            meritDelta = null,
+            scoreDelta = null,
+            inference = null,
+            evidence = DailyEvidence.NO_OBSERVATION,
+            isGunsmokeWeek = true,
+        )
+        val report = WeeklyReportBuilder.Report(
+            periodStart = day,
+            periodEnd = day.plusDays(6),
+            isGunsmokeWeek = true,
+            days = listOf(day, day.plusDays(1)),
+            members = listOf(
+                WeeklyReportBuilder.MemberRow(
+                    uid = 1,
+                    name = "Member",
+                    days = listOf(lowerBound, unknown),
+                    totalMerit = 2_258,
+                    totalScore = 21_090,
+                    isGunsmokeWeek = true,
+                ),
+            ),
+        )
+
+        val rows = WeeklyReportCsv.format(report).lines()
+        val header = rows.first().split(',')
+        val first = rows[1].split(',')
+        val second = rows[2].split(',')
+
+        assertEquals("LOWER_BOUND", first[header.indexOf("meritCertainty")])
+        assertEquals("LOWER_BOUND", first[header.indexOf("scoreCertainty")])
+        assertEquals("LOWER_BOUND", first[header.indexOf("attemptsCertainty")])
+        assertEquals("UNKNOWN", second[header.indexOf("meritCertainty")])
+        assertEquals("", second[header.indexOf("meritDelta")])
+        assertTrue(rows.drop(1).none { it.contains('≥') || it.contains('?') })
+    }
+
+    @Test
+    fun `exports multiple weeks chronologically with one header`() {
+        val later = reportFor(LocalDate.of(2026, 7, 26), uid = 2)
+        val earlier = reportFor(LocalDate.of(2026, 7, 19), uid = 1)
+
+        val lines = WeeklyReportCsv.formatAll(listOf(later, earlier)).lines()
+
+        assertEquals(1, lines.count { it == WeeklyReportCsv.HEADER })
+        assertTrue(lines[1].startsWith("2026-07-19,2026-07-25"))
+        assertTrue(lines[2].startsWith("2026-07-26,2026-08-01"))
+    }
+
+    private fun reportFor(day: LocalDate, uid: Long) = WeeklyReportBuilder.Report(
+        periodStart = day,
+        periodEnd = day.plusDays(6),
+        isGunsmokeWeek = false,
+        days = listOf(day),
+        members = listOf(
+            WeeklyReportBuilder.MemberRow(
+                uid = uid,
+                name = "Member $uid",
+                days = listOf(
+                    WeeklyReportBuilder.DayCell(
+                        gameDay = day,
+                        meritDelta = 50,
+                        scoreDelta = 0,
+                        inference = ActivityInference.infer(50, 0, gunsmokeActive = false),
+                        evidence = DailyEvidence.ATTRIBUTED,
+                    ),
+                ),
+                totalMerit = 50,
+                totalScore = 0,
+            ),
+        ),
+    )
 }

@@ -44,4 +44,35 @@ class PlatoonPeriodsTest {
         assertFalse(PlatoonPeriods.isGunsmokeWeek(LocalDate.of(2026, 8, 2)))
         assertTrue(PlatoonPeriods.isGunsmokeWeek(LocalDate.of(2026, 8, 9)))
     }
+
+    @Test
+    fun finalGunsmokeScoreClosesAtTwoAmWithoutChangingTheFiveAmGameDay() {
+        val saturday = LocalDate.of(2026, 7, 25)
+
+        assertFalse(
+            PlatoonPeriods.isFinalGunsmokeScoreCapture(
+                saturday,
+                Instant.parse("2026-07-25T16:59:59Z"),
+                seoul,
+            ),
+        )
+        assertTrue(
+            PlatoonPeriods.isFinalGunsmokeScoreCapture(
+                saturday,
+                Instant.parse("2026-07-25T17:00:00Z"),
+                seoul,
+            ),
+        )
+        assertFalse(
+            PlatoonPeriods.isFinalGunsmokeScoreCapture(
+                saturday,
+                Instant.parse("2026-07-25T20:00:00Z"),
+                seoul,
+            ),
+        )
+        assertEquals(
+            saturday,
+            PlatoonPeriods.gameDay(Instant.parse("2026-07-25T17:00:00Z"), seoul),
+        )
+    }
 }

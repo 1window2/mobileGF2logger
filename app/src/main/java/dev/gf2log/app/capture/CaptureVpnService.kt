@@ -21,8 +21,6 @@ import dev.gf2log.protocol.Gfl2StreamParser
 import dev.gf2log.protocol.Gfl2PayloadDecoder
 import dev.gf2log.protocol.PayloadCatalog
 import dev.gf2log.protocol.model.ParseEvent
-import dev.gf2log.protocol.model.PlatoonActivityData
-import dev.gf2log.protocol.model.PlatoonUpdatesData
 import java.io.File
 import java.time.Instant
 import java.util.concurrent.ArrayBlockingQueue
@@ -52,6 +50,7 @@ class CaptureVpnService : VpnService() {
     private lateinit var payloadHistoryPreferences: PayloadHistoryPreferences
     private lateinit var capturePreferences: CapturePreferences
     private lateinit var diagnosticsStore: CaptureDiagnosticsStore
+    private lateinit var platoonPayloadDispatcher: PlatoonPayloadDispatcher
     private var sessionStartedAt: Instant? = null
     private var captureOnce = false
     private val captureOnceGraceStop = Runnable {
@@ -77,30 +76,40 @@ class CaptureVpnService : VpnService() {
         super.onCreate()
         platoonRepository = PlatoonRepository(this)
         guildMembersWriter = GuildMembersCsvWriter(
-            File(filesDir, GuildMembersCsvWriter.OUTPUT_DIRECTORY),
+            File(filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY),
         ) { batch ->
-            runCatching {
+            val directResult = runCatching {
                 platoonRepository.ingest(
                     capturedAt = Instant.parse(batch.logTime),
                     members = batch.members,
                     sourceFile = batch.file.name,
                 )
             }
-                .onSuccess { result ->
-                    if (!result.duplicate) {
-                        CaptureStatus.update(
-                            "Updated Platoon roster: +${result.joined + result.rejoined}, " +
-                                "-${result.left}",
-                        )
-                    }
-                    capturedRequiredTypes += Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS
-                    if (captureOnce) {
-                        mainHandler.removeCallbacks(captureOnceGraceStop)
-                        mainHandler.postDelayed(captureOnceGraceStop, CAPTURE_ONCE_GRACE_MILLIS)
-                    }
-                    maybeStopCaptureOnce()
+            if (directResult.isSuccess) {
+                val result = directResult.getOrThrow()
+                if (!result.duplicate) {
+                    CaptureStatus.update(
+                        "Updated Platoon roster: +${result.joined + result.rejoined}, " +
+                            "-${result.left}",
+                    )
                 }
-                .onFailure { CaptureStatus.update("Unable to update Platoon database") }
+                markRosterCaptured()
+            } else {
+                val recovery = runCatching {
+                    require(batch.file.isFile) { "Completed roster CSV was not published" }
+                    platoonRepository.reconcileRetainedCsvFiles(
+                        requireNotNull(batch.file.parentFile),
+                    )
+                    check(platoonRepository.hasSnapshotSource(batch.file.name)) {
+                        "Completed roster CSV was not reconciled"
+                    }
+                }
+                if (recovery.isFailure) {
+                    throw directResult.exceptionOrNull() ?: recovery.exceptionOrNull()!!
+                }
+                CaptureStatus.update("Recovered Platoon database from the completed roster CSV")
+                markRosterCaptured()
+            }
         }
         historyStore = CaptureHistoryStore(
             File(filesDir, CaptureHistoryStore.HISTORY_DIRECTORY),
@@ -108,6 +117,11 @@ class CaptureVpnService : VpnService() {
         payloadHistoryPreferences = PayloadHistoryPreferences(this)
         capturePreferences = CapturePreferences(this)
         diagnosticsStore = CaptureDiagnosticsStore(this)
+        platoonPayloadDispatcher = PlatoonPayloadDispatcher(
+            onMembers = guildMembersWriter::accept,
+            onActivity = { platoonRepository.ingestActivity(it).acceptedObservations > 0 },
+            onUpdates = { platoonRepository.ingestUpdates(it).acceptedObservations > 0 },
+        )
         createNotificationChannel()
     }
 
@@ -162,8 +176,8 @@ class CaptureVpnService : VpnService() {
         captureStartPending = true
         migrationExecutor.execute {
             val migration = runCatching {
-                platoonRepository.importLegacyCsvFiles(
-                    File(filesDir, GuildMembersCsvWriter.OUTPUT_DIRECTORY),
+                platoonRepository.reconcileRetainedCsvFiles(
+                    File(filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY),
                 )
             }
             mainHandler.post {
@@ -313,25 +327,24 @@ class CaptureVpnService : VpnService() {
                 runCatching { historyStore.save(event.value) }
                     .onFailure { CaptureStatus.update("Unable to save parsed-packet history") }
             }
-            val activity = event.value.data as? PlatoonActivityData
-            if (activity != null) {
-                runCatching { platoonRepository.ingestActivity(activity) }
-                    .onSuccess {
+            val routed = platoonPayloadDispatcher.dispatch(event.value, flowEnded)
+            routed.activity
+                ?.onSuccess { accepted ->
+                    if (accepted) {
                         capturedRequiredTypes += Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY
                         maybeStopCaptureOnce()
                     }
-                    .onFailure { CaptureStatus.update("Unable to update Platoon activity history") }
-            }
-            val updates = event.value.data as? PlatoonUpdatesData
-            if (updates != null) {
-                runCatching { platoonRepository.ingestUpdates(updates) }
-                    .onSuccess {
+                }
+                ?.onFailure { CaptureStatus.update("Unable to update Platoon activity history") }
+            routed.updates
+                ?.onSuccess { accepted ->
+                    if (accepted) {
                         capturedRequiredTypes += Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES
                         maybeStopCaptureOnce()
                     }
-                    .onFailure { CaptureStatus.update("Unable to update exact Platoon history") }
-            }
-            runCatching { guildMembersWriter.accept(event.value, flowEnded) }
+                }
+                ?.onFailure { CaptureStatus.update("Unable to update exact Platoon history") }
+            routed.members
                 .onSuccess { saved ->
                     if (saved != null) {
                         CaptureStatus.update(
@@ -356,6 +369,15 @@ class CaptureVpnService : VpnService() {
                 stopCapture("Captured Platoon roster, activity, and updates")
             }
         }
+    }
+
+    private fun markRosterCaptured() {
+        capturedRequiredTypes += Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS
+        if (captureOnce) {
+            mainHandler.removeCallbacks(captureOnceGraceStop)
+            mainHandler.postDelayed(captureOnceGraceStop, CAPTURE_ONCE_GRACE_MILLIS)
+        }
+        maybeStopCaptureOnce()
     }
 
     private fun recordTraffic(observed: Long, inspected: Long) {

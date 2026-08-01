@@ -123,7 +123,8 @@ plaintext TCP streams. Do not add pinning or anti-cheat bypasses.
 - `capture` owns the VPN/native lifecycle, bounded per-flow parsing, and
   translation of completed capture batches into management-domain input.
 - `management` owns evidence policy, reporting rules, the repository facade,
-  and private SQLite persistence. It does not depend on the capture package.
+  private SQLite persistence, and the retained completed-roster directory.
+  It does not depend on the capture package.
 - Activities own Android presentation and delegate evidence precedence,
   inference, ordering, and CSV construction to pure policy objects.
 
@@ -144,3 +145,55 @@ ingestion.
 Every completed recognized payload is formatted in protocol order and written atomically to the app's private `files/capture-history` directory. `CaptureHistoryStore` returns entries newest-first, trims the oldest files once the count exceeds 100, rejects path-like identifiers, and supports explicit deletion of user-selected entries. `SavedHistoryStore` atomically copies selected entries into `files/saved-history`, rejects duplicates, caps the collection at 50 without FIFO deletion, and keeps saved entries independent from recent-history rotation.
 
 The main activity renders both collections with timestamp-only titles in `yy/MM/dd HH:mm:ss` using the Android device timezone. Selecting a title opens a cleaned table parsed from the stored CSV body; the same screen can reveal the complete raw stored text and copy it to the clipboard. Android backup rules exclude all private files, including recent history, saved history, generated Platoon CSV files, and the structured management database. A user can separately invoke the explicit Platoon backup export, which contains parsed management data but never raw traffic.
+
+## Explicit backup boundary
+
+The canonical `.gf2backup` container is a bounded ZIP with a checksummed
+manifest and SQLite management database. Legacy format v1 remains a
+Platoon-only compatibility backup. Format v2 adds a checksummed, strictly
+typed settings payload containing only user-owned configuration; capture
+diagnostics, raw packet history, signing material, and internal migration flags
+are excluded.
+
+Complete restore validates the filename, archive entries and identity,
+checksums, settings completeness and ranges, current database schema, SQLite
+integrity, and foreign keys before mutation. Database replacement runs under
+the repository maintenance lock. The previous database and a settings snapshot
+are retained until both resources commit, so any failure restores the prior
+state instead of leaving a partial import. A fresh install records that no
+database existed so rollback removes the staged replacement rather than
+mistaking it for prior state. Schema introspection uses the extended SQLite
+column metadata where available and the equivalent ordinary-column metadata on
+the older SQLite engine shipped with the supported Android 8 minimum.
+
+After a successful complete restore, the target device's retained roster CSV
+ingestion cache is retired. Export already materializes those files into the
+backed-up database, and keeping unrelated target-side files would allow a later
+screen startup to mutate the restored state. If any commit step fails, the
+retained cache is restored alongside the previous database and settings.
+
+Weekly tables remain projections over persisted snapshots, activity facts,
+membership events, notes, and manual overrides. The repository owns available
+period discovery and report construction; Activities only request reports and
+format them for display or CSV export.
+
+`WeeklyReportActivity` loads one immutable projection on a serialized worker.
+A generation token rejects results superseded by navigation or lifecycle
+changes, and the activity adds nested member rows in small display-frame
+batches. The Gunsmoke solver merges equivalent partial histories instead of
+retaining every complete path and enforces deterministic state/operation
+budgets; evidence beyond those budgets stays conservative rather than blocking
+Android input or publishing an unsupported estimate.
+
+Metric certainty is evaluated in the report domain. Exact 05:00 boundaries
+close the preceding game day, while sparse Updates facts retain their event
+timestamp until the builder verifies they preceded the captured counters.
+Manual corrections overlay only explicitly edited fields; untouched derived
+values keep their original exact, lower-bound, or unknown certainty.
+
+Completed roster captures are written under a non-importable temporary suffix
+and atomically published as `.csv` only after protocol completion. Retained CSV
+reconciliation runs off the UI thread, skips represented source identities,
+and imports older evidence without rewriting current membership. Both backup
+exports reconcile completed retained evidence before taking their locked
+database snapshot.

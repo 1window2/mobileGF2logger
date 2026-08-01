@@ -22,6 +22,15 @@ object GuildMembersCsv {
         return "\"${value.replace("\"", "\"\"")}\""
     }
 
+    // Function Name: parse
+    // Description:
+    // - Parses a complete roster snapshot while preserving member names exactly.
+    // - Tolerates surrounding whitespace in scalar fields introduced by spreadsheet copies.
+    // Parameters:
+    // - content: CSV text containing one roster snapshot.
+    // Returns:
+    // - Returns the parsed snapshot when the schema and rows are valid.
+    // - Returns null when any required field is malformed or capture times disagree.
     fun parse(content: String): Snapshot? {
         val records = parseRecords(content) ?: return null
         val header = records.firstOrNull() ?: return null
@@ -32,18 +41,18 @@ object GuildMembersCsv {
             .filterNot { row -> row.all(String::isBlank) }
             .map { row ->
                 if (row.size != header.size) return null
-                val rowLogTime = row[8].takeIf(String::isNotBlank) ?: return null
+                val rowLogTime = row[8].trim().takeIf(String::isNotBlank) ?: return null
                 if (logTime == null) logTime = rowLogTime
                 if (rowLogTime != logTime) return null
                 GuildMember(
-                    uid = row[0].toUIntOrNull() ?: return null,
+                    uid = row[0].trim().toUIntOrNull() ?: return null,
                     name = row[1],
-                    level = row[2].toUIntOrNull() ?: return null,
-                    weeklyMerit = row[3].toUIntOrNull() ?: return null,
-                    totalMerit = row[4].toUIntOrNull() ?: return null,
-                    highScore = row[5].toUIntOrNull() ?: 0u,
-                    totalScore = row[6].toUIntOrNull() ?: 0u,
-                    lastLogin = row[7].toUIntOrNull() ?: return null,
+                    level = row[2].trim().toUIntOrNull() ?: return null,
+                    weeklyMerit = parseOptionalCounter(row[3]) ?: return null,
+                    totalMerit = parseOptionalCounter(row[4]) ?: return null,
+                    highScore = parseOptionalCounter(row[5]) ?: return null,
+                    totalScore = parseOptionalCounter(row[6]) ?: return null,
+                    lastLogin = row[7].trim().toUIntOrNull() ?: return null,
                 )
             }
         if (members.isEmpty() || logTime == null) return null
@@ -94,6 +103,19 @@ object GuildMembersCsv {
         }
         return records
     }
+
+    // Function Name: parseOptionalCounter
+    // Description:
+    // - Matches protobuf scalar semantics by treating an omitted counter as zero.
+    // - Rejects non-empty malformed values instead of silently converting them.
+    // Parameters:
+    // - value: One unsigned counter field from a CSV row.
+    // Returns:
+    // - Returns zero for a blank field, the parsed value for valid digits, or null otherwise.
+    private fun parseOptionalCounter(value: String): UInt? =
+        value.trim().let { normalized ->
+            if (normalized.isEmpty()) 0u else normalized.toUIntOrNull()
+        }
 
     data class Snapshot(
         val logTime: String,

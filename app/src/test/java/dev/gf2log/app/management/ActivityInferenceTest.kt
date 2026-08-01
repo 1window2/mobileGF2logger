@@ -57,17 +57,19 @@ class ActivityInferenceTest {
     }
 
     @Test
-    fun zeroScoreGunsmokeBaselineMeansZeroAttempts() {
-        listOf(50L, 90L).forEach { merit ->
-            val result = ActivityInference.infer(
-                meritDelta = merit,
-                scoreDelta = 0,
-                gunsmokeActive = true,
-            )
+    fun zeroScoreGunsmokeKeepsAttemptArithmetic() {
+        val loginOnly = ActivityInference.infer(50, 0, gunsmokeActive = true)
+        val oneAttempt = ActivityInference.infer(80, 0, gunsmokeActive = true)
+        val twoAttempts = ActivityInference.infer(110, 0, gunsmokeActive = true)
+        val patrolOrThreeAttempts = ActivityInference.infer(90, 0, gunsmokeActive = true)
 
-            assertEquals(EvidencePrecision.INFERRED, result.precision)
-            assertEquals(0, result.selected!!.attempts)
-        }
+        assertEquals(0, loginOnly.exactAttempts)
+        assertEquals(1, oneAttempt.exactAttempts)
+        assertEquals(2, twoAttempts.exactAttempts)
+        assertEquals(setOf(0), patrolOrThreeAttempts.candidates.map { it.attempts }.toSet())
+        assertEquals(0, patrolOrThreeAttempts.exactAttempts)
+        assertEquals(true, patrolOrThreeAttempts.attended)
+        assertEquals(true, patrolOrThreeAttempts.dailyPatrol)
     }
 
     @Test

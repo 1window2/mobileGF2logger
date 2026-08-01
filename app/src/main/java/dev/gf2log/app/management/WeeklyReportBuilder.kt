@@ -16,7 +16,8 @@ object WeeklyReportBuilder {
         val hasIncompleteDailyEvidence: Boolean
             get() = members.any { row ->
                 row.days.any {
-                    it.evidence == DailyEvidence.INCOMPLETE_BOUNDARY ||
+                    it.evidence == DailyEvidence.NO_OBSERVATION ||
+                        it.evidence == DailyEvidence.INCOMPLETE_BOUNDARY ||
                         it.evidence == DailyEvidence.PARTIAL_DAY ||
                         it.evidence == DailyEvidence.SPARSE_INFERRED
                 }
@@ -30,31 +31,60 @@ object WeeklyReportBuilder {
         val totalMerit: Long,
         val totalScore: Long,
         val isGunsmokeWeek: Boolean = false,
+        val hasFinalGunsmokeScore: Boolean = false,
     ) {
         val observedDays: List<DayCell>
             get() = days.filter { it.observed }
 
         val totalAttempts: Int?
             get() {
-                val attempts = observedDays.map(DayCell::attempts)
-                return attempts.takeIf { values -> values.all { it != null } }
-                    ?.filterNotNull()
-                    ?.sum()
+                val known = days.mapNotNull(DayCell::attempts)
+                val total = known.sum()
+                return total.takeIf {
+                    known.isNotEmpty() && (total > 0 || days.all { day -> day.attempts != null })
+                }
+            }
+
+        val totalAttemptsCertainty: MetricCertainty
+            get() = when {
+                totalAttempts == null -> MetricCertainty.UNKNOWN
+                totalAttempts == ActivityInference.MAX_WEEKLY_ATTEMPTS -> MetricCertainty.EXACT
+                days.all { it.attemptsCertainty == MetricCertainty.EXACT } -> MetricCertainty.EXACT
+                else -> MetricCertainty.LOWER_BOUND
+            }
+
+        val totalMeritCertainty: MetricCertainty
+            get() = when {
+                !isGunsmokeWeek && totalMerit == MAX_STANDARD_WEEKLY_MERIT -> MetricCertainty.EXACT
+                days.all { it.meritCertainty == MetricCertainty.EXACT } -> MetricCertainty.EXACT
+                totalMerit > 0L || days.any { it.meritDelta != null } -> MetricCertainty.LOWER_BOUND
+                else -> MetricCertainty.UNKNOWN
+            }
+
+        val totalScoreCertainty: MetricCertainty
+            get() = when {
+                !isGunsmokeWeek -> MetricCertainty.EXACT
+                hasFinalGunsmokeScore -> MetricCertainty.EXACT
+                days.all { it.scoreCertainty == MetricCertainty.EXACT } -> MetricCertainty.EXACT
+                totalScore > 0L || days.any { it.scoreDelta != null } -> MetricCertainty.LOWER_BOUND
+                else -> MetricCertainty.UNKNOWN
             }
 
         val loginDays: Int?
-            get() = if (hasUnknownGunsmokeActivityTotals) {
-                null
-            } else {
-                observedDays.count { it.attended == true }
+            get() = days.count { it.attended == true }.takeIf { count ->
+                count > 0 || days.all { it.attended != null }
             }
 
+        val loginDaysCertainty: MetricCertainty
+            get() = aggregateBooleanCertainty(days.map(DayCell::attended), loginDays)
+
         val patrolDays: Int?
-            get() = if (hasUnknownGunsmokeActivityTotals) {
-                null
-            } else {
-                observedDays.count { it.dailyPatrol == true }
+            get() = days.count { it.dailyPatrol == true }.takeIf { count ->
+                count > 0 || days.all { it.dailyPatrol != null }
             }
+
+        val patrolDaysCertainty: MetricCertainty
+            get() = aggregateBooleanCertainty(days.map(DayCell::dailyPatrol), patrolDays)
 
         val hasUnknownGunsmokeActivityTotals: Boolean
             get() = isGunsmokeWeek && days.any { cell ->
@@ -63,7 +93,8 @@ object WeeklyReportBuilder {
 
         val hasIncompleteEvidence: Boolean
             get() = days.any {
-                it.evidence == DailyEvidence.INCOMPLETE_BOUNDARY ||
+                it.evidence == DailyEvidence.NO_OBSERVATION ||
+                    it.evidence == DailyEvidence.INCOMPLETE_BOUNDARY ||
                     it.evidence == DailyEvidence.PARTIAL_DAY ||
                     it.evidence == DailyEvidence.SPARSE_INFERRED
             }
@@ -78,35 +109,105 @@ object WeeklyReportBuilder {
         val manualOverride: WeeklyCellOverride? = null,
         val hasDailyPatrolFact: Boolean = false,
         val hasLoginFact: Boolean = false,
+        val hasFinalGunsmokeScore: Boolean = false,
+        val isGunsmokeWeek: Boolean = false,
+        val metricObservedAt: Instant? = null,
+        val hasClosingBoundary: Boolean = false,
+        val solvedAttempts: Int? = null,
+        val solvedMeritCertainty: MetricCertainty? = null,
+        val solvedScoreCertainty: MetricCertainty? = null,
+        val solvedAttemptsCertainty: MetricCertainty? = null,
+        val solvedAttended: Boolean? = null,
+        val solvedDailyPatrol: Boolean? = null,
     ) {
         val attempts: Int?
-            get() = if (manualOverride != null) manualOverride.attempts else inference?.selected?.attempts
+            get() = manualOverride?.attempts
+                ?: solvedAttempts
+                ?: inference?.exactAttempts?.takeUnless {
+                    it == 0 && evidence == DailyEvidence.PARTIAL_DAY
+                }
+                ?: inference?.attemptsLowerBound?.takeIf { it > 0 }
+                ?: 1.takeIf { scoreDelta?.let { it > 0L } == true }
+
+        val meritCertainty: MetricCertainty
+            get() = when {
+                meritDelta == null -> MetricCertainty.UNKNOWN
+                manualOverride?.meritDelta != null -> MetricCertainty.EXACT
+                solvedMeritCertainty != null -> solvedMeritCertainty
+                hasClosingBoundary ||
+                    evidence == DailyEvidence.ATTRIBUTED ||
+                    hasExactGunsmokeMeritComponents -> MetricCertainty.EXACT
+                evidence == DailyEvidence.PARTIAL_DAY -> MetricCertainty.LOWER_BOUND
+                else -> MetricCertainty.UNKNOWN
+            }
+
+        val attemptsCertainty: MetricCertainty
+            get() = when {
+                attempts == null -> MetricCertainty.UNKNOWN
+                manualOverride?.attempts != null -> MetricCertainty.EXACT
+                solvedAttemptsCertainty != null -> solvedAttemptsCertainty
+                hasClosingBoundary && inference?.exactAttempts != null -> MetricCertainty.EXACT
+                evidence == DailyEvidence.ATTRIBUTED && inference?.exactAttempts != null ->
+                    MetricCertainty.EXACT
+                attempts == ActivityInference.MAX_DAILY_ATTEMPTS -> MetricCertainty.EXACT
+                else -> MetricCertainty.LOWER_BOUND
+            }
+
+        val scoreCertainty: MetricCertainty
+            get() = when {
+                scoreDelta == null -> MetricCertainty.UNKNOWN
+                manualOverride?.scoreDelta != null -> MetricCertainty.EXACT
+                solvedScoreCertainty != null -> solvedScoreCertainty
+                hasClosingBoundary || hasFinalGunsmokeScore -> MetricCertainty.EXACT
+                evidence == DailyEvidence.ATTRIBUTED && inference?.exactAttempts != null ->
+                    MetricCertainty.EXACT
+                attempts == ActivityInference.MAX_DAILY_ATTEMPTS -> MetricCertainty.EXACT
+                else -> MetricCertainty.LOWER_BOUND
+            }
 
         val attended: Boolean?
-            get() = if (manualOverride != null) {
-                manualOverride.attended
-            } else {
-                true.takeIf { hasDailyPatrolFact || hasLoginFact }
-                    ?: inference?.selected?.attended?.takeIf {
-                        evidence == DailyEvidence.ATTRIBUTED
-                    }
-            }
+            get() = true.takeIf {
+                hasDailyPatrolFact || manualOverride?.dailyPatrol == true || hasLoginFact ||
+                    scoreDelta?.let { it > 0L } == true ||
+                    attempts?.let { it > 0 } == true ||
+                    inference?.attended == true
+            } ?: manualOverride?.attended
+                ?: solvedAttended
+                ?: inference?.attended?.takeIf { evidence == DailyEvidence.ATTRIBUTED }
 
         val dailyPatrol: Boolean?
-            get() = if (manualOverride != null) {
-                manualOverride.dailyPatrol
-            } else {
-                true.takeIf { hasDailyPatrolFact }
-                    ?: inference?.selected?.dailyPatrol?.takeIf {
+            get() = true.takeIf { hasDailyPatrolFact }
+                ?: manualOverride?.dailyPatrol
+                ?: solvedDailyPatrol
+                ?: inference?.dailyPatrol?.takeIf {
+                    if (!isGunsmokeWeek) {
                         evidence == DailyEvidence.ATTRIBUTED
+                    } else {
+                        attemptsCertainty == MetricCertainty.EXACT &&
+                            scoreCertainty == MetricCertainty.EXACT &&
+                            attended == true &&
+                            (it || hasClosingBoundary || evidence == DailyEvidence.ATTRIBUTED)
                     }
-            }
+                }
+
+        private val hasExactGunsmokeMeritComponents: Boolean
+            get() = isGunsmokeWeek &&
+                scoreCertainty == MetricCertainty.EXACT &&
+                attemptsCertainty == MetricCertainty.EXACT &&
+                attended == true &&
+                dailyPatrol == true &&
+                inference?.candidates?.singleOrNull()?.let { candidate ->
+                    candidate.attempts == attempts &&
+                        candidate.attended &&
+                        candidate.dailyPatrol
+                } == true
 
         val precision: EvidencePrecision?
             get() = if (manualOverride != null) EvidencePrecision.MANUAL else inference?.precision
 
         val observed: Boolean
-            get() = evidence == DailyEvidence.MANUAL ||
+            get() = manualOverride != null ||
+                evidence == DailyEvidence.MANUAL ||
                 evidence == DailyEvidence.ATTRIBUTED ||
                 evidence == DailyEvidence.PARTIAL_DAY ||
                 evidence == DailyEvidence.SPARSE_INFERRED
@@ -126,6 +227,7 @@ object WeeklyReportBuilder {
         referenceDay: LocalDate,
         zoneId: ZoneId,
         snapshots: List<PlatoonSnapshot>,
+        membershipEvents: List<MemberEvent> = emptyList(),
         overrides: List<WeeklyCellOverride> = emptyList(),
         dailyPatrolFacts: List<DailyPatrolFact> = emptyList(),
         asOf: Instant = Instant.now(),
@@ -138,9 +240,9 @@ object WeeklyReportBuilder {
             .associateBy { it.uid to it.gameDay }
         val sortedSnapshots = snapshots.sortedBy(PlatoonSnapshot::capturedAt)
         val patrolFactsByMemberDay = dailyPatrolFacts
-            .map { it.uid to PlatoonPeriods.gameDay(it.occurredAt, zoneId) }
-            .filter { it.second in days }
-            .toSet()
+            .filter { PlatoonPeriods.gameDay(it.occurredAt, zoneId) in days }
+            .groupBy { it.uid to PlatoonPeriods.gameDay(it.occurredAt, zoneId) }
+            .mapValues { (_, facts) -> facts.minBy(DailyPatrolFact::occurredAt) }
         val loginFactsByMemberDay = sortedSnapshots
             .flatMap { snapshot ->
                 snapshot.members.mapNotNull { member ->
@@ -152,15 +254,58 @@ object WeeklyReportBuilder {
             }
             .filter { it.second in days }
             .toSet()
+        val rosterCutoff = minOf(
+            PlatoonPeriods.periodStartInstant(start.plusDays(7), zoneId),
+            asOf.plusMillis(1),
+        )
         val uids = sortedSnapshots.flatMap { it.members }.associateBy(SnapshotMember::uid).toMutableMap()
+        val latestSnapshotAtByUid = buildMap {
+            sortedSnapshots.forEach { snapshot ->
+                snapshot.members.forEach { member -> put(member.uid, snapshot.capturedAt) }
+            }
+        }
+        membershipEvents.asSequence()
+            .filter { event ->
+                event.source == EvidenceSource.GAME_UPDATES &&
+                    event.precision == EvidencePrecision.EXACT &&
+                    event.occurredAt?.isBefore(rosterCutoff) == true
+            }
+            .sortedWith(membershipEventComparator())
+            .forEach { event ->
+                val occurredAt = requireNotNull(event.occurredAt)
+                val snapshotAt = latestSnapshotAtByUid[event.uid]
+                if (snapshotAt != null && !occurredAt.isAfter(snapshotAt)) return@forEach
+                val existing = uids[event.uid]
+                if (existing != null && event.note.isNotBlank()) {
+                    uids[event.uid] = existing.copy(name = event.note)
+                } else if (
+                    existing == null &&
+                    event.type in setOf(MemberEventType.JOINED, MemberEventType.REJOINED)
+                ) {
+                    uids[event.uid] = SnapshotMember(
+                        uid = event.uid,
+                        name = event.note.ifBlank { "#${event.uid}" },
+                        level = 0,
+                        weeklyMerit = 0,
+                        totalMerit = 0,
+                        highScore = 0,
+                        totalScore = 0,
+                        lastLogin = 0,
+                    )
+                }
+            }
         overridesByCell.keys.map { it.first }.forEach { uid ->
             if (uid !in uids) {
                 uids[uid] = SnapshotMember(uid, "#$uid", 0, 0, 0, 0, 0, 0)
             }
         }
-        val rosterAtPeriodEnd = sortedSnapshots.lastBefore(
-            PlatoonPeriods.periodStartInstant(start.plusDays(7), zoneId),
-        )?.members?.map(SnapshotMember::uid).orEmpty().toSet()
+        val rosterSnapshot = sortedSnapshots.lastBefore(rosterCutoff)
+        val rosterAtPeriodEnd = applyMembershipEventsToRoster(
+            rosterSnapshot?.members?.map(SnapshotMember::uid).orEmpty().toSet(),
+            membershipEvents,
+            rosterSnapshot?.capturedAt,
+            rosterCutoff,
+        )
 
         val rows = uids.values.map { latestKnown ->
             val derivedCells = days.map { day ->
@@ -171,12 +316,19 @@ object WeeklyReportBuilder {
                     snapshots = sortedSnapshots,
                     isGunsmoke = isGunsmoke,
                     manualOverride = overridesByCell[latestKnown.uid to day],
-                    hasDailyPatrolFact = latestKnown.uid to day in patrolFactsByMemberDay,
+                    dailyPatrolFact = patrolFactsByMemberDay[latestKnown.uid to day],
                     hasLoginFact = latestKnown.uid to day in loginFactsByMemberDay,
                 )
             }
             val cells = if (isGunsmoke) {
-                derivedCells
+                GunsmokeWeekSolver.solve(
+                    uid = latestKnown.uid,
+                    days = days,
+                    zoneId = zoneId,
+                    snapshots = sortedSnapshots,
+                    cells = derivedCells,
+                    dailyPatrolFacts = dailyPatrolFacts,
+                )
             } else {
                 inferStandardWeekCells(
                     uid = latestKnown.uid,
@@ -213,6 +365,7 @@ object WeeklyReportBuilder {
                     derivedScoreTotal
                 },
                 isGunsmokeWeek = isGunsmoke,
+                hasFinalGunsmokeScore = cells.any(DayCell::hasFinalGunsmokeScore),
             )
         }.filter { row ->
             // Weekly rows represent the roster that is active at the end of the
@@ -242,61 +395,99 @@ object WeeklyReportBuilder {
         snapshots: List<PlatoonSnapshot>,
         isGunsmoke: Boolean,
         manualOverride: WeeklyCellOverride?,
-        hasDailyPatrolFact: Boolean,
+        dailyPatrolFact: DailyPatrolFact?,
         hasLoginFact: Boolean,
     ): DayCell {
-        val start = PlatoonPeriods.periodStartInstant(day, zoneId)
-        val end = PlatoonPeriods.periodStartInstant(day.plusDays(1), zoneId)
         if (manualOverride != null) {
-            return DayCell(
-                gameDay = day,
-                meritDelta = manualOverride.meritDelta,
-                scoreDelta = manualOverride.scoreDelta,
-                inference = null,
-                evidence = DailyEvidence.MANUAL,
-                manualOverride = manualOverride,
-                hasDailyPatrolFact = hasDailyPatrolFact,
+            val derived = buildCell(
+                uid = uid,
+                day = day,
+                zoneId = zoneId,
+                snapshots = snapshots,
+                isGunsmoke = isGunsmoke,
+                manualOverride = null,
+                dailyPatrolFact = dailyPatrolFact,
                 hasLoginFact = hasLoginFact,
             )
+            val merit = manualOverride.meritDelta ?: derived.meritDelta
+            val score = manualOverride.scoreDelta ?: derived.scoreDelta
+            return derived.copy(
+                meritDelta = merit,
+                scoreDelta = score,
+                inference = if (merit != null && score != null) {
+                    ActivityInference.infer(merit, score, isGunsmoke)
+                } else {
+                    derived.inference
+                },
+                manualOverride = manualOverride,
+            )
         }
-        val observations = snapshots.filter { it.capturedAt.isAfter(start) && it.capturedAt.isBefore(end) }
+        val start = PlatoonPeriods.periodStartInstant(day, zoneId)
+        val end = PlatoonPeriods.periodStartInstant(day.plusDays(1), zoneId)
+        val observations = snapshots.filter {
+            it.capturedAt.isAfter(start) && !it.capturedAt.isAfter(end)
+        }
         val baselineSnapshot = snapshots.lastOrNull { snapshot ->
             !snapshot.capturedAt.isAfter(start) &&
                 !snapshot.capturedAt.isBefore(start.minus(BOUNDARY_WINDOW_MINUTES, ChronoUnit.MINUTES))
         }
         val before = baselineSnapshot?.member(uid)
-        val after = observations.asReversed().firstNotNullOfOrNull { it.member(uid) }
+        val lastObservation = observations.asReversed().firstNotNullOfOrNull { snapshot ->
+            snapshot.member(uid)?.let { snapshot to it }
+        }
+        val after = lastObservation?.second
+        val hasFinalGunsmokeScore = lastObservation?.let { (snapshot, _) ->
+            PlatoonPeriods.isFinalGunsmokeScoreCapture(day, snapshot.capturedAt, zoneId)
+        } == true
+        val hasClosingBoundary = lastObservation?.first?.capturedAt == end
         if (baselineSnapshot == null) {
             return applyActivityFacts(
                 DayCell(
-                gameDay = day,
-                meritDelta = null,
-                scoreDelta = null,
-                inference = null,
-                evidence = if (after == null) {
-                    DailyEvidence.NO_OBSERVATION
-                } else {
-                    DailyEvidence.INCOMPLETE_BOUNDARY
-                },
+                    gameDay = day,
+                    meritDelta = null,
+                    scoreDelta = null,
+                    inference = null,
+                    evidence = if (after == null) {
+                        DailyEvidence.NO_OBSERVATION
+                    } else {
+                        DailyEvidence.INCOMPLETE_BOUNDARY
+                    },
+                    hasFinalGunsmokeScore = hasFinalGunsmokeScore,
+                    isGunsmokeWeek = isGunsmoke,
+                    hasClosingBoundary = hasClosingBoundary,
                 ),
                 isGunsmoke,
-                hasDailyPatrolFact,
+                dailyPatrolFact,
                 hasLoginFact,
             )
         }
         if (observations.isEmpty()) {
             return applyActivityFacts(
-                DayCell(day, null, null, null, DailyEvidence.NO_OBSERVATION),
+                DayCell(
+                    day,
+                    null,
+                    null,
+                    null,
+                    DailyEvidence.NO_OBSERVATION,
+                    isGunsmokeWeek = isGunsmoke,
+                ),
                 isGunsmoke,
-                hasDailyPatrolFact,
+                dailyPatrolFact,
                 hasLoginFact,
             )
         }
         if (after == null && before == null) {
             return applyActivityFacts(
-                DayCell(day, null, null, null, DailyEvidence.NO_OBSERVATION),
+                DayCell(
+                    day,
+                    null,
+                    null,
+                    null,
+                    DailyEvidence.NO_OBSERVATION,
+                    isGunsmokeWeek = isGunsmoke,
+                ),
                 isGunsmoke,
-                hasDailyPatrolFact,
+                dailyPatrolFact,
                 hasLoginFact,
             )
         }
@@ -329,9 +520,13 @@ object WeeklyReportBuilder {
                 // boundary: merit can change before reset. Exactness is
                 // established later by the counter constraint solver.
                 evidence = DailyEvidence.PARTIAL_DAY,
+                hasFinalGunsmokeScore = hasFinalGunsmokeScore,
+                isGunsmokeWeek = isGunsmoke,
+                metricObservedAt = lastObservation?.first?.capturedAt,
+                hasClosingBoundary = hasClosingBoundary,
             ),
             isGunsmoke,
-            hasDailyPatrolFact,
+            dailyPatrolFact,
             hasLoginFact,
         )
     }
@@ -339,13 +534,16 @@ object WeeklyReportBuilder {
     private fun applyActivityFacts(
         cell: DayCell,
         isGunsmoke: Boolean,
-        hasDailyPatrolFact: Boolean,
+        dailyPatrolFact: DailyPatrolFact?,
         hasLoginFact: Boolean,
     ): DayCell {
-        if (cell.manualOverride != null) return cell
+        val hasDailyPatrolFact = dailyPatrolFact != null
         if (!hasDailyPatrolFact && !hasLoginFact) return cell
         val minimumMerit = if (hasDailyPatrolFact) STANDARD_PATROL_MERIT else STANDARD_LOGIN_MERIT
-        val merit = maxOf(cell.meritDelta ?: 0L, minimumMerit)
+        val merit = when {
+            cell.meritDelta == null -> minimumMerit
+            else -> maxOf(cell.meritDelta, minimumMerit)
+        }
         val score = cell.scoreDelta ?: if (isGunsmoke) null else 0L
         return cell.copy(
             meritDelta = merit,
@@ -366,16 +564,61 @@ object WeeklyReportBuilder {
     private fun List<PlatoonSnapshot>.lastBefore(instant: Instant): PlatoonSnapshot? =
         lastOrNull { it.capturedAt.isBefore(instant) }
 
+    private fun applyMembershipEventsToRoster(
+        snapshotRoster: Set<Long>,
+        events: List<MemberEvent>,
+        snapshotAt: Instant?,
+        cutoff: Instant,
+    ): Set<Long> = snapshotRoster.toMutableSet().apply {
+        events.asSequence()
+            .filter { event ->
+                event.source == EvidenceSource.GAME_UPDATES &&
+                    event.precision == EvidencePrecision.EXACT &&
+                    event.occurredAt?.let { occurredAt ->
+                        occurredAt.isBefore(cutoff) &&
+                            (snapshotAt == null || occurredAt.isAfter(snapshotAt))
+                    } == true
+            }
+            .sortedWith(membershipEventComparator())
+            .forEach { event ->
+                when (event.type) {
+                    MemberEventType.JOINED, MemberEventType.REJOINED -> add(event.uid)
+                    MemberEventType.LEFT, MemberEventType.REMOVED -> remove(event.uid)
+                    MemberEventType.RENAMED -> Unit
+                }
+            }
+    }
+
+    private fun membershipEventComparator(): Comparator<MemberEvent> =
+        compareBy<MemberEvent> { it.occurredAt }
+            .thenBy { event ->
+                when (event.type) {
+                    MemberEventType.JOINED, MemberEventType.REJOINED -> 0
+                    MemberEventType.RENAMED -> 1
+                    MemberEventType.LEFT, MemberEventType.REMOVED -> 2
+                }
+            }
+            .thenBy(MemberEvent::id)
+
+    private fun aggregateBooleanCertainty(
+        values: List<Boolean?>,
+        count: Int?,
+    ): MetricCertainty = when {
+        count == null -> MetricCertainty.UNKNOWN
+        count == values.size -> MetricCertainty.EXACT
+        values.all { it != null } -> MetricCertainty.EXACT
+        else -> MetricCertainty.LOWER_BOUND
+    }
+
     /**
      * Reconciles Monday-through-Saturday cells with the latest weekly counter.
      *
      * The game's weekly counter resets on Monday while this report starts on
      * Sunday. Every standard-week merit day is one of 0/50/90, so the
      * captured cumulative counter can be solved into all compatible daily
-     * sequences. Values shared by every sequence are exact; ambiguous values
-     * use the documented Monday-first estimate instead of remaining unknown.
-     * The latest in-progress day remains a lower bound until it reaches the
-     * daily maximum or a boundary capture closes it.
+     * sequences. Values shared by every sequence are exact. Ambiguous closed
+     * days remain unknown, while the latest in-progress stage is a lower bound
+     * until it reaches the daily maximum.
      */
     private fun inferStandardWeekCells(
         uid: Long,
@@ -445,9 +688,8 @@ object WeeklyReportBuilder {
         )
         if (compatible.isEmpty()) return mutable
 
-        // Prefer the smallest final total consistent with captured progress;
-        // ties retain the documented Monday-first 90/50/0 ordering. This keeps
-        // unobserved future activity out of the displayed estimate.
+        // Selection is used only when every compatible allocation agrees for a
+        // day. Ambiguous positions never expose an arbitrary allocation.
         val selected = compatible.minWith(
             compareBy<List<Long>> { it.sum() }
                 .thenComparator { left, right ->
@@ -476,17 +718,19 @@ object WeeklyReportBuilder {
                     )
                 }
             }.orEmpty()
-            val currentLowerBound = stageValues.minOrNull()
+            val currentLowerBound = stageValues.minOrNull()?.takeIf { it > 0L }
+            val openLatestDay = day == latestDay && !dayClosed
             val merit = when {
-                day == latestDay && !dayClosed && !exactAcrossCandidates ->
-                    currentLowerBound ?: existing.meritDelta
-                else -> selectedMerit
+                existing.hasDailyPatrolFact -> MAX_STANDARD_DAILY_MERIT
+                openLatestDay -> currentLowerBound
+                exactAcrossCandidates -> selectedMerit
+                else -> null
             }
             val evidence = when {
                 existing.hasDailyPatrolFact -> DailyEvidence.ATTRIBUTED
-                exactAcrossCandidates && (dayClosed || selectedMerit == MAX_STANDARD_DAILY_MERIT) ->
+                openLatestDay && currentLowerBound == MAX_STANDARD_DAILY_MERIT ->
                     DailyEvidence.ATTRIBUTED
-                day == latestDay && !dayClosed -> DailyEvidence.PARTIAL_DAY
+                openLatestDay -> DailyEvidence.PARTIAL_DAY
                 exactAcrossCandidates -> DailyEvidence.ATTRIBUTED
                 else -> DailyEvidence.SPARSE_INFERRED
             }
@@ -534,14 +778,11 @@ object WeeklyReportBuilder {
         val remainingSundayMerit = laterMember.totalMerit -
             sundayMember.totalMerit -
             laterMember.weeklyMerit
-        if (remainingSundayMerit < 0L) return cells
+        if (remainingSundayMerit !in STANDARD_DAILY_STAGE) return cells
 
-        val merit = (sundayCell.meritDelta ?: 0L) + remainingSundayMerit
-        val evidence = if (sundayCell.meritDelta != null) {
-            DailyEvidence.ATTRIBUTED
-        } else {
-            DailyEvidence.SPARSE_INFERRED
-        }
+        val observedSundayPrefix = sundayCell.meritDelta ?: return cells
+        val merit = observedSundayPrefix + remainingSundayMerit
+        if (merit !in STANDARD_DAILY_STAGE) return cells
         return cells.toMutableList().apply {
             this[0] = sundayCell.copy(
                 meritDelta = merit,
@@ -551,7 +792,7 @@ object WeeklyReportBuilder {
                     scoreDelta = 0L,
                     gunsmokeActive = false,
                 ),
-                evidence = evidence,
+                evidence = DailyEvidence.ATTRIBUTED,
             )
         }
     }
@@ -651,6 +892,7 @@ object WeeklyReportBuilder {
 
     private const val BOUNDARY_WINDOW_MINUTES = 15L
     private const val MAX_STANDARD_DAILY_MERIT = 90L
+    private const val MAX_STANDARD_WEEKLY_MERIT = MAX_STANDARD_DAILY_MERIT * 7
     private const val STANDARD_LOGIN_MERIT = 50L
     private const val STANDARD_PATROL_MERIT = 90L
     private val STANDARD_DAILY_MERIT = longArrayOf(90L, 50L, 0L)

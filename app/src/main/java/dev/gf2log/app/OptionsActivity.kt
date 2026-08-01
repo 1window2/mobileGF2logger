@@ -24,6 +24,7 @@ import dev.gf2log.app.settings.CapturePreferences
 import dev.gf2log.app.capture.CaptureDiagnosticsStore
 import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.management.BackupFileName
+import dev.gf2log.app.management.InvalidBackupException
 import dev.gf2log.app.management.PlatoonBackupManager
 import dev.gf2log.protocol.Gfl2PayloadDecoder
 import java.time.ZoneId
@@ -57,7 +58,7 @@ class OptionsActivity : LocalizedActivity() {
         when (requestCode) {
             REQUEST_FULL_BACKUP_EXPORT -> runBackupOperation(
                 successMessage = R.string.full_backup_exported,
-                failureMessage = R.string.full_backup_export_failed,
+                failureMessage = { R.string.full_backup_export_failed },
             ) {
                 val output = TrustedExportDestination.openOutputStream(contentResolver, uri)
                     ?: error("Document provider did not open an output stream")
@@ -70,7 +71,7 @@ class OptionsActivity : LocalizedActivity() {
                 }
                 runBackupOperation(
                     successMessage = R.string.full_backup_restored,
-                    failureMessage = R.string.invalid_full_backup,
+                    failureMessage = ::fullBackupRestoreFailureMessage,
                 ) {
                     val input = TrustedImportSource.openInputStream(contentResolver, uri)
                         ?: error("Document provider did not open an input stream")
@@ -279,11 +280,14 @@ class OptionsActivity : LocalizedActivity() {
 
     private fun runBackupOperation(
         successMessage: Int,
-        failureMessage: Int,
+        failureMessage: (Throwable) -> Int,
         operation: () -> Unit,
     ) {
         fileIoExecutor.execute {
-            val message = if (runCatching(operation).isSuccess) successMessage else failureMessage
+            val message = runCatching(operation).fold(
+                onSuccess = { successMessage },
+                onFailure = failureMessage,
+            )
             mainHandler.post {
                 if (!isFinishing && !isDestroyed) {
                     showBackupMessage(message)
@@ -350,3 +354,19 @@ class OptionsActivity : LocalizedActivity() {
         private const val REQUEST_FULL_BACKUP_RESTORE = 302
     }
 }
+
+// Function Name: fullBackupRestoreFailureMessage
+// Description:
+// - Keeps known backup validation failures distinct from operational restore failures.
+// - Prevents storage, document-provider, and unexpected errors from blaming the selected file.
+// Parameters:
+// - error: Failure raised while opening, validating, or restoring a complete backup.
+// Returns:
+// - Returns the invalid-backup message for validation failures.
+// - Returns the operational restore-failure message for every other failure.
+internal fun fullBackupRestoreFailureMessage(error: Throwable): Int =
+    if (error is InvalidBackupException) {
+        R.string.invalid_full_backup
+    } else {
+        R.string.full_backup_restore_failed
+    }

@@ -29,6 +29,7 @@
     <string name="full_backup_exported">Complete backup saved</string>
     <string name="full_backup_restored">Complete backup restored</string>
     <string name="full_backup_export_failed">Unable to save the complete backup</string>
+    <string name="full_backup_restore_failed">Unable to restore the complete backup</string>
     <string name="payload_history">Packet history</string>
     <string name="platoon_management">Platoon management</string>
     <string name="weekly_table">Weekly task table</string>

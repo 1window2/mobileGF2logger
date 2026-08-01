@@ -150,7 +150,9 @@ The main activity renders both collections with timestamp-only titles in `yy/MM/
 
 The canonical `.gf2backup` container is a bounded ZIP with a checksummed
 manifest and SQLite management database. Legacy format v1 remains a
-Platoon-only compatibility backup. Format v2 adds a checksummed, strictly
+Platoon-only compatibility backup; restoring it atomically retires unrelated
+target-device roster CSV evidence so later reconciliation cannot mutate the
+selected state. Format v2 adds a checksummed, strictly
 typed settings payload containing only user-owned configuration; capture
 diagnostics, raw packet history, signing material, and internal migration flags
 are excluded.

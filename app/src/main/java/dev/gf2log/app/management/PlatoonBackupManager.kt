@@ -2,7 +2,9 @@ package dev.gf2log.app.management
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteException
 import android.util.AtomicFile
+import dev.gf2log.app.settings.AppBackupSettings
 import dev.gf2log.app.settings.AppBackupSettingsCodec
 import dev.gf2log.app.settings.AppSettingsStore
 import dev.gf2log.app.settings.BackupSettingsStore
@@ -47,16 +49,18 @@ class PlatoonBackupManager internal constructor(
         if (stagedDatabase.exists() && !stagedDatabase.delete()) {
             error("Unable to clear a previous staged restore")
         }
-        val staged = BackupArchive.stage(input, stagedDatabase)
+        val staged = validateSelectedBackup {
+            BackupArchive.stage(input, stagedDatabase)
+        }
         try {
-            BackupFormatPolicy.requirePlatoonOnly(
-                staged.formatVersion,
-                staged.settings != null,
-            )
-            validateDatabase(stagedDatabase, requireCurrentSchema = false)
-            PlatoonRepository.withExclusiveDatabase {
-                replaceDatabase(stagedDatabase)
+            validateSelectedBackup {
+                BackupFormatPolicy.requirePlatoonOnly(
+                    staged.formatVersion,
+                    staged.settings != null,
+                )
+                validateDatabase(stagedDatabase, requireCurrentSchema = false)
             }
+            replaceRestoredState(stagedDatabase, restoredSettings = null)
         } finally {
             stagedDatabase.delete()
         }
@@ -65,6 +69,55 @@ class PlatoonBackupManager internal constructor(
     fun restoreFull(input: InputStream) {
         val restoreDirectory = File(appContext.cacheDir, "platoon-restore").apply { mkdirs() }
         val stagedDatabase = File(restoreDirectory, "platoon.db.staged")
+        if (stagedDatabase.exists() && !stagedDatabase.delete()) {
+            error("Unable to clear a previous staged restore")
+        }
+        val staged = validateSelectedBackup {
+            BackupArchive.stage(input, stagedDatabase)
+        }
+        try {
+            val restoredSettings = validateSelectedBackup {
+                BackupFormatPolicy.requireComplete(staged.formatVersion, staged.settings != null)
+                AppBackupSettingsCodec.decode(requireNotNull(staged.settings)).also {
+                    validateDatabase(stagedDatabase, requireCurrentSchema = true)
+                }
+            }
+            replaceRestoredState(stagedDatabase, restoredSettings)
+        } finally {
+            stagedDatabase.delete()
+        }
+    }
+
+    // Function Name: validateSelectedBackup
+    // Description:
+    // - Converts expected archive, settings, and SQLite validation failures into a typed error.
+    // - Leaves provider I/O and local restore-state failures distinct for accurate UI reporting.
+    // Parameters:
+    // - validation: Read-only validation operation for the selected backup.
+    // Returns:
+    // - Returns the validation result when the selected backup is valid.
+    private inline fun <T> validateSelectedBackup(validation: () -> T): T = try {
+        validation()
+    } catch (error: IllegalArgumentException) {
+        throw InvalidBackupException(error)
+    } catch (error: SQLiteException) {
+        throw InvalidBackupException(error)
+    }
+
+    // Function Name: replaceRestoredState
+    // Description:
+    // - Replaces the validated database and retires target-device roster CSV evidence atomically.
+    // - Replaces settings only for a complete backup while preserving them for a v1 backup.
+    // - Uses the durable restore journal so a process death or failure rolls every resource back.
+    // Parameters:
+    // - stagedDatabase: Validated database extracted from the selected backup.
+    // - restoredSettings: Complete-backup settings, or null for Platoon-only compatibility restore.
+    // Returns:
+    // - Returns normally after the restored state commits and rollback artifacts are cleaned.
+    private fun replaceRestoredState(
+        stagedDatabase: File,
+        restoredSettings: AppBackupSettings?,
+    ) {
         val retainedCsvDirectory = File(
             appContext.filesDir,
             PlatoonRepository.RETAINED_CSV_DIRECTORY,
@@ -73,44 +126,35 @@ class PlatoonBackupManager internal constructor(
             appContext.filesDir,
             "${PlatoonRepository.RETAINED_CSV_DIRECTORY}.pre_restore",
         )
-        if (stagedDatabase.exists() && !stagedDatabase.delete()) {
-            error("Unable to clear a previous staged restore")
-        }
-        val staged = BackupArchive.stage(input, stagedDatabase)
         try {
-            BackupFormatPolicy.requireComplete(staged.formatVersion, staged.settings != null)
-            val restoredSettings = AppBackupSettingsCodec.decode(requireNotNull(staged.settings))
-            validateDatabase(stagedDatabase, requireCurrentSchema = true)
-            try {
-                PlatoonRepository.withExclusiveDatabase {
-                    beginFullRestore(
-                        previousSettings = settingsStore.read(),
-                        databaseExisted = databaseFile.isFile,
-                    )
-                    replaceDatabase(stagedDatabase, preservePrevious = true)
-                    restoreObserver(RestoreCheckpoint.DATABASE_INSTALLED)
+            PlatoonRepository.withExclusiveDatabase {
+                beginFullRestore(
+                    previousSettings = settingsStore.read(),
+                    databaseExisted = databaseFile.isFile,
+                )
+                replaceDatabase(stagedDatabase, preservePrevious = true)
+                restoreObserver(RestoreCheckpoint.DATABASE_INSTALLED)
+                if (restoredSettings != null) {
                     settingsStore.replace(restoredSettings)
                     restoreObserver(RestoreCheckpoint.SETTINGS_REPLACED)
-                    retireRetainedCsvCache(
-                        retainedCsvDirectory,
-                        previousRetainedCsvDirectory,
-                    )
-                    restoreObserver(RestoreCheckpoint.RETAINED_CSV_RETIRED)
-                    writeRestoreState(RestoreState.COMMITTED)
-                    restoreObserver(RestoreCheckpoint.COMMITTED)
-                    cleanupCommittedFullRestore(
-                        previousRetainedCsvDirectory,
-                        previousDatabaseFile(),
-                    )
                 }
-            } catch (error: Exception) {
-                runCatching { recoverInterruptedFullRestore(appContext, settingsStore) }
-                    .exceptionOrNull()
-                    ?.let(error::addSuppressed)
-                throw error
+                retireRetainedCsvCache(
+                    retainedCsvDirectory,
+                    previousRetainedCsvDirectory,
+                )
+                restoreObserver(RestoreCheckpoint.RETAINED_CSV_RETIRED)
+                writeRestoreState(RestoreState.COMMITTED)
+                restoreObserver(RestoreCheckpoint.COMMITTED)
+                cleanupCommittedFullRestore(
+                    previousRetainedCsvDirectory,
+                    previousDatabaseFile(),
+                )
             }
-        } finally {
-            stagedDatabase.delete()
+        } catch (error: Exception) {
+            runCatching { recoverInterruptedFullRestore(appContext, settingsStore) }
+                .exceptionOrNull()
+                ?.let(error::addSuppressed)
+            throw error
         }
     }
 
@@ -250,7 +294,7 @@ class PlatoonBackupManager internal constructor(
     }
 
     private fun beginFullRestore(
-        previousSettings: dev.gf2log.app.settings.AppBackupSettings,
+        previousSettings: AppBackupSettings,
         databaseExisted: Boolean,
     ) {
         val transactionDirectory = restoreTransactionDirectory(appContext)
@@ -463,3 +507,12 @@ class PlatoonBackupManager internal constructor(
         COMMITTED,
     }
 }
+
+// Class Name: InvalidBackupException
+// Role: Identifies failures that prove the selected backup is invalid.
+// Responsibilities:
+//   - Error classification: Separates backup validation failures from operational restore errors.
+// Attributes:
+//   - cause: Validation exception raised while reading the selected backup.
+internal class InvalidBackupException(cause: Exception) :
+    Exception("Selected backup failed validation", cause)

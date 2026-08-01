@@ -76,6 +76,36 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     @Test
+    fun platoonOnlyRestoreRetiresUnrelatedRetainedRosterEvidence() {
+        seedDatabase(ARCHIVED_UID, "Archived member", "archived-source.csv")
+        settingsStore.replace(archivedSettings())
+        val archive = ByteArrayOutputStream().also {
+            PlatoonBackupManager(context).export(it)
+        }.toByteArray()
+
+        replaceDatabaseWithCurrentState()
+        settingsStore.replace(currentSettings())
+        writeRetainedCsv(CURRENT_UID, "Cached current member")
+        PlatoonBackupManager(context).restore(ByteArrayInputStream(archive))
+
+        assertEquals(currentSettings(), settingsStore.read())
+        assertFalse(FilePaths.retainedCsvDirectory(context).exists())
+        assertEquals(
+            PlatoonRepository.ImportResult(0, 0, 0, 0),
+            PlatoonRepository(context).reconcileRetainedCsvFiles(),
+        )
+        PlatoonDatabase(context).use { database ->
+            val db = database.readableDatabase
+            assertEquals(1L, count(db, "members", "uid = ?", ARCHIVED_UID))
+            assertEquals(0L, count(db, "members", "uid = ?", CURRENT_UID))
+            assertFalse(db.rawQuery("PRAGMA foreign_key_check", null).use { it.moveToFirst() })
+        }
+        assertFalse(FilePaths.preRestoreDatabase(context).exists())
+        assertFalse(FilePaths.previousRetainedCsvDirectory(context).exists())
+        assertFalse(FilePaths.restoreTransactionDirectory(context).exists())
+    }
+
+    @Test
     fun settingsFailureRollsBackDatabaseAndSettingsTogether() {
         seedDatabase(ARCHIVED_UID, "Archived member", "archived-source.csv")
         settingsStore.replace(archivedSettings())
@@ -274,7 +304,7 @@ class PlatoonBackupManagerIntegrationTest {
         seedDatabase(CURRENT_UID, "Current member", "current-source.csv")
         settingsStore.replace(currentSettings())
 
-        assertThrows(Exception::class.java) {
+        assertThrows(InvalidBackupException::class.java) {
             PlatoonBackupManager(context).restoreFull(
                 ByteArrayInputStream("not a mobileGF2logger backup".toByteArray()),
             )

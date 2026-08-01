@@ -185,6 +185,18 @@ class BackupArchiveTest {
         )
     }
 
+    @Test
+    fun `rejects oversized settings before writing an unrestorable archive`() {
+        val database = temporaryFile("platoon.db", realisticDatabaseBytes())
+        val oversizedSettings = ByteArray(256 * 1024 + 1) { 'x'.code.toByte() }
+        val output = ByteArrayOutputStream()
+
+        assertThrows(IllegalArgumentException::class.java) {
+            BackupArchive.write(output, database, oversizedSettings)
+        }
+        assertEquals(0, output.size())
+    }
+
     private fun assertRejected(archive: ByteArray, name: String) {
         val staged = temporaryPath("$name.db")
         assertThrows(Exception::class.java) {

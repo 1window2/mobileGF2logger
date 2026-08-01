@@ -47,6 +47,8 @@ All notable changes to mobileGF2logger are documented here.
 
 ### Fixed
 
+- Keep v1 Platoon-only restore deterministic by atomically retiring retained
+  target-device roster CSV evidence that is not represented by the backup.
 - Prevent previous/next weekly-table navigation from blocking Android input:
   load immutable report projections on a serialized worker, discard stale
   results, build table rows in frame-sized batches, and bound the Gunsmoke

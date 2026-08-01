@@ -3,23 +3,15 @@ package dev.gf2log.app.settings
 import android.content.Context
 
 class MemberOrderPreferences(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences(
-        PREFERENCES,
-        Context.MODE_PRIVATE,
-    )
+    private val appContext = context.applicationContext
 
-    fun read(): List<Long> = preferences.getString(KEY_ORDER, null)
-        .orEmpty()
-        .split(',')
-        .mapNotNull(String::toLongOrNull)
-        .distinct()
+    fun read(): List<Long> = UserSettingsPreferences.memberOrder(appContext)
 
-    fun write(uids: List<Long>) {
-        preferences.edit().putString(KEY_ORDER, uids.distinct().joinToString(",")).apply()
-    }
+    fun write(uids: List<Long>): Boolean =
+        UserSettingsPreferences.setMemberOrder(appContext, uids)
 
     fun clear() {
-        preferences.edit().remove(KEY_ORDER).apply()
+        UserSettingsPreferences.clearMemberOrder(appContext)
     }
 
     fun <T> apply(items: List<T>, uid: (T) -> Long): List<T> {
@@ -29,10 +21,5 @@ class MemberOrderPreferences(context: Context) {
             compareBy<T> { positions[uid(it)] ?: Int.MAX_VALUE }
                 .thenBy { items.indexOf(it) },
         )
-    }
-
-    private companion object {
-        const val PREFERENCES = "weekly_member_order"
-        const val KEY_ORDER = "uids"
     }
 }

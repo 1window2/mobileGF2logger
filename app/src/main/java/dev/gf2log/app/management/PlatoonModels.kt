@@ -144,6 +144,12 @@ enum class DailyEvidence {
     MANUAL,
 }
 
+enum class MetricCertainty {
+    UNKNOWN,
+    LOWER_BOUND,
+    EXACT,
+}
+
 data class WeeklyNote(
     val id: Long,
     val periodStart: LocalDate,

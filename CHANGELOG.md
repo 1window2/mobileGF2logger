@@ -4,6 +4,64 @@ All notable changes to mobileGF2logger are documented here.
 
 ## Unreleased
 
+## 2.1.0 - 2026-08-01
+
+### Added
+
+- Add complete `.gf2backup` export and atomic restore for app settings,
+  structured Platoon/member/tenure history, and all weekly-table evidence.
+- Validate complete-backup extension, archive identity, manifest, checksums,
+  settings schema, SQLite integrity, current schema, and foreign-key references
+  before replacing user data.
+- Export all available weekly tables as one chronological CSV with one header.
+- Add direct access to Weekly Table from the main screen.
+- Add coordinated manual member deletion with explicit destructive-action
+  confirmation and transactional cleanup of linked member records.
+
+### Changed
+
+- Emphasize Prepare Capture, Open Platoon Management, and Weekly Table with a
+  restrained filled accent style and accessible light/dark contrast.
+- Keep the v1 Platoon-only `.gf2backup` path available for compatibility while
+  requiring complete v2 backups for Settings restore.
+- Materialize retained completed roster CSV files before backup, then retire
+  the target device's unrelated retained CSV cache after a successful complete
+  restore so the selected archive remains deterministic. Failed restores roll
+  the database, settings, and retained cache back together.
+- Reconcile retained completed roster CSV files idempotently before management,
+  weekly-table, and backup operations. Incomplete captures remain unpublished,
+  and screen reconciliation runs outside the UI thread.
+- Accept spreadsheet-copied roster CSVs with surrounding scalar whitespace and
+  blank protobuf-optional counters while still rejecting malformed values.
+- Distinguish exact weekly metrics from confirmed lower bounds and unknown
+  values. Daily Gunsmoke participation at the three-attempt cap, its paired
+  score, and the 21-attempt weekly cap now display as exact values.
+- Keep ambiguous Standard Week allocations unknown instead of selecting a
+  Monday-first estimate. Solve each contiguous Gunsmoke capture run
+  independently so an earlier missing day cannot suppress later exact facts;
+  negative attendance or Daily Patrol remains unknown until a boundary or
+  direct fact proves it.
+- Preserve exact 05:00 closing boundaries, require timestamp ordering before a
+  Daily Patrol Updates fact can finalize captured Gunsmoke merit, and keep
+  untouched inferred fields provisional when manually correcting one field.
+
+### Fixed
+
+- Prevent previous/next weekly-table navigation from blocking Android input:
+  load immutable report projections on a serialized worker, discard stale
+  results, build table rows in frame-sized batches, and bound the Gunsmoke
+  counter solver with conservative fallback for pathological ambiguity.
+- Show the incomplete-evidence warning when a weekly row contains a wholly
+  unobserved packet day.
+- Roll a failed complete restore back to a genuinely database-free fresh-install
+  state, and keep strict schema validation compatible with Android 8 SQLite.
+
+### Release verification required
+
+- Before publication, verify that the exact merged v2.1.0 APK remains on the
+  permanent v2.0.2 signing lineage and updates v2.0.2 in place without clearing
+  application data.
+
 ## 2.0.2 - 2026-07-30
 
 ### Changed

@@ -1,21 +1,24 @@
 package dev.gf2log.app.management
 
 import android.content.Context
+import dev.gf2log.app.settings.MemberOrderPreferences
 import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.model.GuildMember
 import dev.gf2log.protocol.model.PlatoonActivityData
 import dev.gf2log.protocol.model.PlatoonUpdatesData
 import java.io.File
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.withLock
 
 class PlatoonRepository(context: Context) {
     private val appContext = context.applicationContext
-    private val migrationPreferences = appContext.getSharedPreferences(
-        MIGRATION_PREFERENCES,
-        Context.MODE_PRIVATE,
-    )
+
+    init {
+        PlatoonBackupManager.recoverInterruptedFullRestore(appContext)
+    }
 
     fun ingest(
         capturedAt: Instant,
@@ -67,7 +70,7 @@ class PlatoonRepository(context: Context) {
                         kind = entry.kind.toLong(),
                         occurredAt = Instant.ofEpochSecond(entry.occurredAt.toLong()),
                         members = entry.members.mapNotNull { member ->
-                            if (member.uid == 0u || member.name.isBlank()) {
+                            if (member.uid == 0u) {
                                 null
                             } else {
                                 PlatoonUpdateMemberObservation(
@@ -84,53 +87,70 @@ class PlatoonRepository(context: Context) {
         )
     }
 
-    fun importLegacyCsvFiles(directory: File): ImportResult = access { database ->
-        if (migrationPreferences.getBoolean(LEGACY_IMPORT_COMPLETE, false)) {
-            return@access ImportResult(
-                alreadyComplete = true,
-                imported = 0,
-                skipped = 0,
-                invalid = 0,
-            )
-        }
-
+    fun reconcileRetainedCsvFiles(
+        directory: File = File(appContext.filesDir, RETAINED_CSV_DIRECTORY),
+    ): ImportResult = access { database ->
         var imported = 0
+        var historical = 0
         var skipped = 0
         var invalid = 0
+        val representedFiles = database.snapshotSourceFiles()
+        var latestStructuredSnapshot = database.latestSnapshotIdentity()?.let {
+            SnapshotIdentity(it.first, it.second)
+        }
         directory.listFiles()
             .orEmpty()
             .filter { it.isFile && it.extension.equals("csv", ignoreCase = true) }
-            .sortedBy(File::getName)
-            .forEach { file ->
+            .filter { file ->
+                if (file.name in representedFiles) {
+                    skipped += 1
+                    false
+                } else {
+                    true
+                }
+            }
+            .mapNotNull { file ->
                 val parsed = runCatching {
                     GuildMembersCsv.parse(file.readText(Charsets.UTF_8))
                 }.getOrNull()
                 val capturedAt = parsed?.logTime?.let { runCatching { Instant.parse(it) }.getOrNull() }
                 if (parsed == null || capturedAt == null) {
                     invalid += 1
-                    return@forEach
+                    null
+                } else {
+                    RetainedCsv(file, capturedAt, parsed.members)
                 }
-
+            }
+            .sortedWith(compareBy(RetainedCsv::capturedAt, { it.file.name }))
+            .forEach { file ->
+                val historicalOnly = latestStructuredSnapshot?.let {
+                    file.capturedAt.isBefore(it.capturedAt) ||
+                        (file.capturedAt == it.capturedAt &&
+                            file.file.name <= it.sourceFile.orEmpty())
+                } ?: false
                 val result = database.ingestSnapshot(
                     PlatoonSnapshot(
                         id = 0,
-                        capturedAt = capturedAt,
-                        members = parsed.members.map(GuildMember::toSnapshotMember),
-                        sourceFile = file.name,
+                        capturedAt = file.capturedAt,
+                        members = file.members.map(GuildMember::toSnapshotMember),
+                        sourceFile = file.file.name,
                     ),
                     EvidenceSource.LEGACY_IMPORT,
+                    historicalOnly = historicalOnly,
                 )
-                if (result.duplicate) skipped += 1 else imported += 1
+                if (result.duplicate) {
+                    skipped += 1
+                } else if (historicalOnly) {
+                    historical += 1
+                } else {
+                    imported += 1
+                    latestStructuredSnapshot = SnapshotIdentity(file.capturedAt, file.file.name)
+                }
             }
 
-        check(
-            migrationPreferences.edit()
-                .putBoolean(LEGACY_IMPORT_COMPLETE, true)
-                .commit(),
-        ) { "Failed to persist legacy import completion" }
         ImportResult(
-            alreadyComplete = false,
             imported = imported,
+            historical = historical,
             skipped = skipped,
             invalid = invalid,
         )
@@ -138,6 +158,9 @@ class PlatoonRepository(context: Context) {
 
     fun listSnapshots(limit: Int = 100): List<PlatoonSnapshot> =
         access { it.listSnapshots(limit) }
+
+    fun hasSnapshotSource(sourceFile: String): Boolean =
+        access { sourceFile in it.snapshotSourceFiles() }
 
     fun listSnapshotsForPeriod(from: Instant, until: Instant): List<PlatoonSnapshot> =
         access { it.listSnapshotsForPeriod(from, until) }
@@ -157,6 +180,35 @@ class PlatoonRepository(context: Context) {
 
     fun updateMember(uid: Long, name: String, note: String): Boolean =
         access { it.updateMember(uid, name, note) }
+
+    fun deleteMember(uid: Long): Boolean {
+        return withExclusiveDatabase {
+            val order = MemberOrderPreferences(appContext)
+            val previousOrder = order.read()
+            val updatedOrder = previousOrder.filterNot { it == uid }
+            if (updatedOrder != previousOrder) {
+                check(order.write(updatedOrder)) { "Unable to update saved member order" }
+            }
+            try {
+                PlatoonDatabase(appContext).use { database ->
+                    val deleted = database.deleteMember(uid)
+                    if (!deleted && updatedOrder != previousOrder) {
+                        check(order.write(previousOrder)) {
+                            "Unable to restore saved member order"
+                        }
+                    }
+                    deleted
+                }
+            } catch (error: Exception) {
+                if (updatedOrder != previousOrder && !order.write(previousOrder)) {
+                    error.addSuppressed(
+                        IllegalStateException("Unable to restore saved member order"),
+                    )
+                }
+                throw error
+            }
+        }
+    }
 
     fun updateTenure(
         tenureId: Long,
@@ -191,6 +243,42 @@ class PlatoonRepository(context: Context) {
     fun listWeeklyOverrides(periodStartEpochDay: Long): List<WeeklyCellOverride> =
         access { it.listWeeklyOverrides(periodStartEpochDay) }
 
+    fun buildWeeklyReport(
+        referenceDay: LocalDate,
+        zoneId: ZoneId,
+        asOf: Instant = Instant.now(),
+    ): WeeklyReportBuilder.Report {
+        val periodStart = PlatoonPeriods.weekStart(referenceDay)
+        val from = PlatoonPeriods.periodStartInstant(periodStart, zoneId)
+        val until = PlatoonPeriods.periodStartInstant(periodStart.plusDays(7), zoneId)
+        val snapshots = listSnapshotsForPeriod(from, until)
+        val membershipEventFrom = minOf(
+            from,
+            snapshots.minOfOrNull(PlatoonSnapshot::capturedAt) ?: Instant.EPOCH,
+        )
+        return WeeklyReportBuilder.build(
+            referenceDay = referenceDay,
+            zoneId = zoneId,
+            snapshots = snapshots,
+            membershipEvents = listEvents(
+                membershipEventFrom,
+                minOf(until, asOf.plusMillis(1)),
+                PlatoonPeriods.gameDay(membershipEventFrom, zoneId),
+                periodStart.plusDays(7),
+            ),
+            overrides = listWeeklyOverrides(periodStart.toEpochDay()),
+            dailyPatrolFacts = listDailyPatrolFacts(from, until),
+            asOf = asOf,
+        )
+    }
+
+    fun listAllWeeklyReports(
+        zoneId: ZoneId,
+        asOf: Instant = Instant.now(),
+    ): List<WeeklyReportBuilder.Report> = WeeklyReportRange
+        .periodStarts(access { it.listWeeklyEvidenceDays(zoneId) })
+        .map { buildWeeklyReport(it, zoneId, asOf) }
+
     fun replaceWeeklyOverrides(
         periodStartEpochDay: Long,
         overrides: List<WeeklyCellOverride>,
@@ -200,15 +288,25 @@ class PlatoonRepository(context: Context) {
         withDatabase(appContext, block)
 
     data class ImportResult(
-        val alreadyComplete: Boolean,
         val imported: Int,
+        val historical: Int,
         val skipped: Int,
         val invalid: Int,
     )
 
+    private data class RetainedCsv(
+        val file: File,
+        val capturedAt: Instant,
+        val members: List<GuildMember>,
+    )
+
+    private data class SnapshotIdentity(
+        val capturedAt: Instant,
+        val sourceFile: String?,
+    )
+
     companion object {
-        private const val MIGRATION_PREFERENCES = "platoon_migrations"
-        private const val LEGACY_IMPORT_COMPLETE = "legacy_csv_v1"
+        const val RETAINED_CSV_DIRECTORY = "guild-members"
         private val databaseLock = Any()
         private val maintenanceLock = ReentrantReadWriteLock(true)
 
@@ -236,14 +334,6 @@ class PlatoonRepository(context: Context) {
                 block()
             }
 
-        internal fun markLegacyImportComplete(context: Context) {
-            check(
-                context.applicationContext.getSharedPreferences(
-                    MIGRATION_PREFERENCES,
-                    Context.MODE_PRIVATE,
-                ).edit().putBoolean(LEGACY_IMPORT_COMPLETE, true).commit(),
-            ) { "Failed to persist legacy import completion" }
-        }
     }
 }
 

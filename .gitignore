@@ -18,6 +18,7 @@ local.properties
 *.keystore
 *.gf2backup
 keystore.properties
+keystore.properties.*
 .tmp-*/
 .tmp-*
 

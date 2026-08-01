@@ -61,4 +61,44 @@ class GuildMembersCsvTest {
 
         assertNull(GuildMembersCsv.parse(content))
     }
+
+    @Test
+    fun trimsSpreadsheetWhitespaceFromScalarFieldsWithoutChangingTheName() {
+        val content = listOf(
+            GuildMembersCsv.HEADER,
+            " 42 , Member Name , 60 , 90 , 120 , 300 , 400 , 500 , " +
+                "2026-01-01T00:00:00Z ",
+        ).joinToString("\n")
+
+        val snapshot = GuildMembersCsv.parse(content)
+
+        assertEquals("2026-01-01T00:00:00Z", snapshot?.logTime)
+        assertEquals(" Member Name ", snapshot?.members?.single()?.name)
+        assertEquals(42u, snapshot?.members?.single()?.uid)
+    }
+
+    @Test
+    fun blankOptionalCountersMatchMissingProtobufScalarDefaults() {
+        val content = """
+            ${GuildMembersCsv.HEADER}
+            42,New Member,60,,,,,500,2026-01-01T00:00:00Z
+        """.trimIndent()
+
+        val member = GuildMembersCsv.parse(content)?.members?.single()
+
+        assertEquals(0u, member?.weeklyMerit)
+        assertEquals(0u, member?.totalMerit)
+        assertEquals(0u, member?.highScore)
+        assertEquals(0u, member?.totalScore)
+    }
+
+    @Test
+    fun malformedOptionalCounterIsRejected() {
+        val content = """
+            ${GuildMembersCsv.HEADER}
+            42,Member,60,not-a-number,1,2,3,500,2026-01-01T00:00:00Z
+        """.trimIndent()
+
+        assertNull(GuildMembersCsv.parse(content))
+    }
 }

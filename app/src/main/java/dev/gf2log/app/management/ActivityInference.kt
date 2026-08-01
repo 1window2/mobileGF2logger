@@ -9,7 +9,7 @@ object ActivityInference {
 
     fun infer(meritDelta: Long, scoreDelta: Long, gunsmokeActive: Boolean): Result {
         if (meritDelta < 0 || scoreDelta < 0) return Result.invalid()
-        if (!gunsmokeActive || scoreDelta == 0L) {
+        if (!gunsmokeActive) {
             val baseline = dailyBaselines.singleOrNull { it.merit == meritDelta }
                 ?: return Result(
                     precision = EvidencePrecision.AMBIGUOUS,
@@ -35,7 +35,12 @@ object ActivityInference {
                 val roundingLoss = (attempts - 1).coerceAtLeast(0)
                 val minimumScoreMerit = (aggregateFloor - roundingLoss).coerceAtLeast(0)
                 for (scoreMerit in minimumScoreMerit..aggregateFloor) {
+                    val loss = aggregateFloor - scoreMerit
+                    if (scoreDelta % SCORE_POINTS_PER_MERIT + loss * SCORE_POINTS_PER_MERIT > 9L * attempts) {
+                        continue
+                    }
                     for (baseline in dailyBaselines) {
+                        if ((attempts > 0 || scoreDelta > 0L) && !baseline.attended) continue
                         val expected = baseline.merit +
                             attempts * MERIT_PER_ATTEMPT +
                             scoreMerit
@@ -43,7 +48,7 @@ object ActivityInference {
                             add(
                                 Candidate(
                                     attempts = attempts,
-                                    attended = baseline.attended,
+                                    attended = baseline.attended || attempts > 0 || scoreDelta > 0,
                                     dailyPatrol = baseline.dailyPatrol,
                                     scoreMerit = scoreMerit,
                                 ),
@@ -73,6 +78,18 @@ object ActivityInference {
         val selected: Candidate?
             get() = candidates.singleOrNull()
 
+        val attemptsLowerBound: Int?
+            get() = candidates.minOfOrNull(Candidate::attempts)
+
+        val exactAttempts: Int?
+            get() = candidates.map(Candidate::attempts).distinct().singleOrNull()
+
+        val attended: Boolean?
+            get() = candidates.map(Candidate::attended).distinct().singleOrNull()
+
+        val dailyPatrol: Boolean?
+            get() = candidates.map(Candidate::dailyPatrol).distinct().singleOrNull()
+
         companion object {
             fun invalid(): Result = Result(EvidencePrecision.AMBIGUOUS, emptyList())
         }
@@ -92,6 +109,7 @@ object ActivityInference {
     )
 
     const val MAX_DAILY_ATTEMPTS = 3
+    const val MAX_WEEKLY_ATTEMPTS = MAX_DAILY_ATTEMPTS * 7
     const val MERIT_PER_ATTEMPT = 30L
     const val SCORE_POINTS_PER_MERIT = 10L
 }

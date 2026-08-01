@@ -3,19 +3,11 @@ package dev.gf2log.app.settings
 import android.content.Context
 
 class CapturePreferences(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences(
-        PREFERENCES,
-        Context.MODE_PRIVATE,
-    )
+    private val appContext = context.applicationContext
 
     var detailedNotifications: Boolean
-        get() = preferences.getBoolean(KEY_DETAILED_NOTIFICATIONS, true)
+        get() = UserSettingsPreferences.detailedNotifications(appContext)
         set(value) {
-            preferences.edit().putBoolean(KEY_DETAILED_NOTIFICATIONS, value).apply()
+            UserSettingsPreferences.setDetailedNotifications(appContext, value)
         }
-
-    companion object {
-        private const val PREFERENCES = "capture_preferences"
-        private const val KEY_DETAILED_NOTIFICATIONS = "detailed_notifications"
-    }
 }

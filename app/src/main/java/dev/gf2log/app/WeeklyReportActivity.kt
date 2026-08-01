@@ -34,10 +34,12 @@ import dev.gf2log.app.management.MemberEventType
 import dev.gf2log.app.management.EvidenceSource
 import dev.gf2log.app.management.MembershipEventPresentation
 import dev.gf2log.app.management.DailyEvidence
+import dev.gf2log.app.management.MetricCertainty
 import dev.gf2log.app.management.WeeklyCellOverride
 import dev.gf2log.app.management.WeeklyNote
 import dev.gf2log.app.management.WeeklyReportBuilder
 import dev.gf2log.app.management.WeeklyReportCsv
+import dev.gf2log.app.management.WeeklyMetricPresentation
 import dev.gf2log.app.settings.MemberOrderPreferences
 import dev.gf2log.app.settings.WeeklyCutlinePreferences
 import dev.gf2log.app.settings.WeeklyCutlines
@@ -45,6 +47,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.Executors
 
 class WeeklyReportActivity : LocalizedActivity() {
     private lateinit var repository: PlatoonRepository
@@ -52,8 +55,13 @@ class WeeklyReportActivity : LocalizedActivity() {
     private var referenceDay: LocalDate =
         PlatoonPeriods.gameDay(Instant.now(), ZoneId.systemDefault())
     private var pendingCsv: String? = null
+    private val workerExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "GF2WeeklyWorker")
+    }
     private var editingPeriodStart: LocalDate? = null
     private val editDraft = mutableMapOf<CellKey, EditableCell>()
+    private var renderGeneration = 0
+    private var screenResumed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,42 +75,121 @@ class WeeklyReportActivity : LocalizedActivity() {
 
     override fun onResume() {
         super.onResume()
-        render()
+        screenResumed = true
+        requestRender(reconcileRetainedCsv = true)
     }
 
-    private fun render() {
-        body.removeAllViews()
+    override fun onPause() {
+        screenResumed = false
+        renderGeneration += 1
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        workerExecutor.shutdownNow()
+        super.onDestroy()
+    }
+
+    // Function Name: requestRender
+    // Description:
+    // - Loads the weekly projection and all supporting database state away from the main thread.
+    // - Uses a generation token so late results cannot replace a newer week or a paused screen.
+    // Parameters:
+    // - reconcileRetainedCsv: Whether retained CSV files must be reconciled before loading.
+    // Returns:
+    // - Returns immediately after scheduling the load.
+    private fun requestRender(reconcileRetainedCsv: Boolean = false) {
+        val targetDay = referenceDay
+        val generation = ++renderGeneration
+        showLoading()
+        workerExecutor.execute {
+            val result = runCatching {
+                if (reconcileRetainedCsv) repository.reconcileRetainedCsvFiles()
+                loadRenderModel(targetDay)
+            }
+            runOnUiThread {
+                if (!canApplyRender(generation)) return@runOnUiThread
+                result.fold(
+                    onSuccess = { render(it, generation) },
+                    onFailure = { showLoadFailure() },
+                )
+            }
+        }
+    }
+
+    // Function Name: loadRenderModel
+    // Description:
+    // - Reads every repository and preference value needed by one weekly screen render.
+    // - Keeps later view construction free of database access and N+1 member tenure queries.
+    // Parameters:
+    // - targetDay: A date inside the requested reporting week.
+    // Returns:
+    // - An immutable render model for the requested week.
+    private fun loadRenderModel(targetDay: LocalDate): RenderModel {
         val zone = ZoneId.systemDefault()
-        val periodStart = PlatoonPeriods.weekStart(referenceDay)
-        val periodStartInstant = PlatoonPeriods.periodStartInstant(periodStart, zone)
-        val periodEndInstant = PlatoonPeriods.periodStartInstant(periodStart.plusDays(7), zone)
+        val periodStart = PlatoonPeriods.weekStart(targetDay)
         val membershipStartInstant = periodStart.atStartOfDay(zone).toInstant()
         val membershipEndInstant = periodStart.plusDays(7).atStartOfDay(zone).toInstant()
-        val report = WeeklyReportBuilder.build(
-            referenceDay = referenceDay,
-            zoneId = zone,
-            snapshots = repository.listSnapshotsForPeriod(
-                periodStartInstant,
-                periodEndInstant,
-            ),
-            overrides = repository.listWeeklyOverrides(periodStart.toEpochDay()),
-            dailyPatrolFacts = repository.listDailyPatrolFacts(
-                periodStartInstant,
-                periodEndInstant,
-            ),
+        val report = repository.buildWeeklyReport(targetDay, zone)
+        return RenderModel(
+            zone = zone,
+            report = report,
+            notes = repository.listWeeklyNotes(report.periodStart.toEpochDay())
+                .filterNot(WeeklyNote::isAutomatic),
+            events = repository.listEvents(
+                membershipStartInstant,
+                membershipEndInstant,
+                periodStart,
+                periodStart.plusDays(7),
+            ).filter {
+                it.type in MembershipEventPresentation.displayedTypes &&
+                    it.source in MembershipEventPresentation.displayedSources
+            },
+            namesByUid = repository.listMemberStatuses().associate { it.uid to it.name },
+            cutlines = WeeklyCutlinePreferences(this).read(),
+            displayedMembers = MemberOrderPreferences(this).apply(report.members) { it.uid },
+            scoreRanks = report.members.withIndex().associate { it.value.uid to it.index + 1 },
         )
-        val notes = repository.listWeeklyNotes(report.periodStart.toEpochDay())
-            .filterNot(WeeklyNote::isAutomatic)
-        val events = repository.listEvents(
-            membershipStartInstant,
-            membershipEndInstant,
-            periodStart,
-            periodStart.plusDays(7),
-        ).filter {
-            it.type in MembershipEventPresentation.displayedTypes &&
-                it.source in MembershipEventPresentation.displayedSources
-        }
-        val cutlines = WeeklyCutlinePreferences(this).read()
+    }
+
+    private fun canApplyRender(generation: Int): Boolean =
+        generation == renderGeneration && screenResumed && !isFinishing && !isDestroyed
+
+    private fun showLoading() {
+        body.removeAllViews()
+        body.addView(TextView(this).apply {
+            text = getString(R.string.weekly_report_loading)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(32), 0, dp(32))
+        }, matchWidth())
+    }
+
+    private fun showLoadFailure() {
+        body.removeAllViews()
+        body.addView(TextView(this).apply {
+            text = getString(R.string.weekly_report_load_failed)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(32), 0, dp(12))
+        }, matchWidth())
+        body.addView(Button(this).apply {
+            text = getString(R.string.retry)
+            setOnClickListener { requestRender() }
+        }, matchWidth())
+    }
+
+    // Function Name: render
+    // Description:
+    // - Builds the weekly screen from an already-loaded immutable model.
+    // - Delegates table rows to frame-sized batches so input remains responsive.
+    // Parameters:
+    // - model: Repository and preference state for one reporting week.
+    // - generation: Token used to cancel stale row batches.
+    // Returns:
+    // - Returns after building the screen shell and scheduling table rows.
+    private fun render(model: RenderModel, generation: Int) {
+        body.removeAllViews()
+        val zone = model.zone
+        val report = model.report
         val isEditing = editingPeriodStart == report.periodStart
 
         body.addView(LinearLayout(this).apply {
@@ -174,7 +261,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                 contentDescription = getString(R.string.previous_week)
                 setOnClickListener {
                     referenceDay = report.periodStart.minusDays(1)
-                    render()
+                    requestRender()
                 }
             }, LinearLayout.LayoutParams(0, wrap(), 1f))
             addView(Button(context).apply {
@@ -188,7 +275,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                 contentDescription = getString(R.string.next_week)
                 setOnClickListener {
                     referenceDay = report.periodEnd.plusDays(1)
-                    render()
+                    requestRender()
                 }
             }, LinearLayout.LayoutParams(0, wrap(), 1f))
         }, matchWidth())
@@ -206,6 +293,11 @@ class WeeklyReportActivity : LocalizedActivity() {
             }, LinearLayout.LayoutParams(0, wrap(), 1f))
         }, matchWidth())
         body.addView(Button(this).apply {
+            text = getString(R.string.export_all_weekly_tables)
+            isEnabled = !isEditing
+            setOnClickListener { exportAllWeeklyTables() }
+        }, matchWidth())
+        body.addView(Button(this).apply {
             text = getString(R.string.edit_member_order)
             isEnabled = !isEditing
             setOnClickListener {
@@ -219,12 +311,12 @@ class WeeklyReportActivity : LocalizedActivity() {
                 setPadding(0, dp(16), 0, dp(16))
             }, matchWidth())
         } else {
-            body.addView(buildTable(report, cutlines, isEditing), matchWidth())
+            body.addView(buildTable(model, isEditing, generation), matchWidth())
         }
 
         if (isEditing) return
 
-        addMembershipEvents(report, events, zone)
+        addMembershipEvents(report, model.events, model.namesByUid, zone)
         body.addView(TextView(this).apply {
             text = getString(R.string.notes)
             textSize = 21f
@@ -232,7 +324,7 @@ class WeeklyReportActivity : LocalizedActivity() {
             setPadding(0, dp(16), 0, dp(4))
         }, matchWidth())
         report.days.forEach { day ->
-            val dayNotes = notes.filter { it.gameDay == day }
+            val dayNotes = model.notes.filter { it.gameDay == day }
             if (dayNotes.isNotEmpty()) {
                 body.addView(TextView(this).apply {
                     text = day.format(DATE)
@@ -245,29 +337,59 @@ class WeeklyReportActivity : LocalizedActivity() {
     }
 
     private fun buildTable(
-        report: WeeklyReportBuilder.Report,
-        cutlines: WeeklyCutlines,
+        model: RenderModel,
         isEditing: Boolean,
+        generation: Int,
     ) = HorizontalScrollView(this).apply {
         isFillViewport = false
-        addView(LinearLayout(context).apply {
+        val rows = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            addView(headerRow(report), wrapWidth())
-            val scoreRanks = report.members.withIndex().associate { it.value.uid to it.index + 1 }
-            val displayed = MemberOrderPreferences(context).apply(report.members) { it.uid }
-            displayed.forEach { member ->
-                addView(
-                    memberRow(
-                        member = member,
-                        rank = scoreRanks[member.uid],
-                        gunsmokeWeek = report.isGunsmokeWeek,
-                        cutlines = cutlines,
-                        isEditing = isEditing,
-                    ),
-                    wrapWidth(),
-                )
+            addView(headerRow(model.report), wrapWidth())
+        }
+        addView(rows)
+        appendMemberRows(rows, model, isEditing, generation)
+    }
+
+    // Function Name: appendMemberRows
+    // Description:
+    // - Creates only a small number of expensive nested table rows per display frame.
+    // - Stops immediately when navigation or lifecycle changes invalidate this render.
+    // Parameters:
+    // - rows: Vertical table container receiving rendered member rows.
+    // - model: Immutable data and display ordering for the selected week.
+    // - isEditing: Whether rows contain editable fields.
+    // - generation: Token identifying the active render request.
+    // Returns:
+    // - Returns after scheduling the first batch.
+    private fun appendMemberRows(
+        rows: LinearLayout,
+        model: RenderModel,
+        isEditing: Boolean,
+        generation: Int,
+    ) {
+        var nextIndex = 0
+        val appendBatch = object : Runnable {
+            override fun run() {
+                if (!canApplyRender(generation)) return
+                val until = minOf(nextIndex + TABLE_ROW_BATCH_SIZE, model.displayedMembers.size)
+                while (nextIndex < until) {
+                    val member = model.displayedMembers[nextIndex++]
+                    rows.addView(
+                        memberRow(
+                            member = member,
+                            rank = model.scoreRanks[member.uid],
+                            gunsmokeWeek = model.report.isGunsmokeWeek,
+                            cutlines = model.cutlines,
+                            isEditing = isEditing,
+                            zoneId = model.zone,
+                        ),
+                        wrapWidth(),
+                    )
+                }
+                if (nextIndex < model.displayedMembers.size) rows.postOnAnimation(this)
             }
-        })
+        }
+        rows.postOnAnimation(appendBatch)
     }
 
     private fun headerRow(report: WeeklyReportBuilder.Report) = LinearLayout(this).apply {
@@ -289,6 +411,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         gunsmokeWeek: Boolean,
         cutlines: WeeklyCutlines,
         isEditing: Boolean,
+        zoneId: ZoneId,
     ) = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         isBaselineAligned = false
@@ -296,9 +419,8 @@ class WeeklyReportActivity : LocalizedActivity() {
         if (gunsmokeWeek) {
             addView(gridCell(rank?.toString().orEmpty(), RANK_WIDTH, rowHeight))
         }
-        addView(gridCell("${member.name}\n#${member.uid}", MEMBER_WIDTH, rowHeight))
-        val latestObserved = member.days.indexOfLast { it.observed }
-        member.days.forEachIndexed { index, cell ->
+        addView(gridCell("${member.name}\n#${member.uid}", MEMBER_WIDTH, rowHeight, textSize = 15f))
+        member.days.forEach { cell ->
             addView(
                 if (isEditing) {
                     editableDailyMetricGroup(member.uid, cell, gunsmokeWeek)
@@ -306,7 +428,10 @@ class WeeklyReportActivity : LocalizedActivity() {
                     dailyMetricGroup(
                         cell = cell,
                         gunsmokeWeek = gunsmokeWeek,
-                        dayClosed = index in 0 until latestObserved,
+                        dayClosed = !PlatoonPeriods.periodStartInstant(
+                            cell.gameDay.plusDays(1),
+                            zoneId,
+                        ).isAfter(Instant.now()),
                         cutlines = cutlines,
                     )
                 },
@@ -333,7 +458,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                     width = DAILY_WIDTH,
                 ) {
                     draft.merit = it
-                    draft.dirty = true
+                    draft.meritDirty = true
                 },
                 LinearLayout.LayoutParams(dp(DAILY_WIDTH), dp(METRIC_HEIGHT)),
             )
@@ -348,7 +473,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                             width = DAILY_WIDTH / 2,
                         ) {
                             draft.score = it
-                            draft.dirty = true
+                            draft.scoreDirty = true
                         },
                         LinearLayout.LayoutParams(0, dp(METRIC_HEIGHT), 1f),
                     )
@@ -359,7 +484,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                             width = DAILY_WIDTH / 2,
                         ) {
                             draft.attempts = it
-                            draft.dirty = true
+                            draft.attemptsDirty = true
                         },
                         LinearLayout.LayoutParams(0, dp(METRIC_HEIGHT), 1f),
                     )
@@ -375,7 +500,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                         DAILY_WIDTH / 2,
                     ) { value ->
                         draft.attended = value
-                        draft.dirty = true
+                        draft.attendedDirty = true
                     },
                     LinearLayout.LayoutParams(0, dp(METRIC_HEIGHT), 1f),
                 )
@@ -386,7 +511,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                         DAILY_WIDTH / 2,
                     ) { value ->
                         draft.dailyPatrol = value
-                        draft.dirty = true
+                        draft.dailyPatrolDirty = true
                     },
                     LinearLayout.LayoutParams(0, dp(METRIC_HEIGHT), 1f),
                 )
@@ -475,53 +600,41 @@ class WeeklyReportActivity : LocalizedActivity() {
         dayClosed: Boolean,
         cutlines: WeeklyCutlines,
     ): LinearLayout {
-        val incomplete = cell.evidence == DailyEvidence.INCOMPLETE_BOUNDARY
-        val partial = cell.evidence == DailyEvidence.PARTIAL_DAY
-        val sparse = cell.evidence == DailyEvidence.SPARSE_INFERRED
         return metricGroup(
         showGunsmokeMetrics = gunsmokeWeek,
         merit = metricText(
             getString(R.string.merit_short),
-            when {
-                incomplete -> "?"
-                partial && cell.meritDelta != null -> "≥${cell.meritDelta}"
-                sparse && cell.meritDelta != null -> "≈${cell.meritDelta}"
-                else -> cell.meritDelta?.toString() ?: "-"
-            },
-            !partial && !sparse &&
+            WeeklyMetricPresentation.format(cell.meritDelta, cell.meritCertainty),
+            cell.meritCertainty == MetricCertainty.EXACT &&
                 cell.meritDelta?.let(cutlines::belowDailyMerit) == true,
         ),
         score = metricText(
             getString(R.string.point_short),
             if (gunsmokeWeek) {
-                when {
-                    incomplete -> "?"
-                    partial && cell.scoreDelta != null -> "≥${cell.scoreDelta}"
-                    else -> cell.scoreDelta?.toString() ?: "-"
-                }
+                WeeklyMetricPresentation.format(cell.scoreDelta, cell.scoreCertainty)
             } else {
                 "-"
             },
-            gunsmokeWeek && !partial &&
+            gunsmokeWeek && cell.scoreCertainty == MetricCertainty.EXACT &&
                 cell.scoreDelta?.let(cutlines::belowDailyScore) == true,
         ),
         attempts = metricText(
             getString(R.string.attempt_short),
             if (gunsmokeWeek) {
-                when {
-                    partial && cell.attempts != null -> "≥${cell.attempts}"
-                    else -> cell.attempts?.toString()
-                        ?: if (cell.manualOverride != null) "-" else "?"
-                }
+                WeeklyMetricPresentation.format(
+                    cell.attempts,
+                    cell.attemptsCertainty,
+                    missing = if (cell.manualOverride != null) "-" else "?",
+                )
             } else {
                 "-"
             },
-            gunsmokeWeek && !partial &&
+            gunsmokeWeek && cell.attemptsCertainty == MetricCertainty.EXACT &&
                 cell.attempts?.let(cutlines::belowDailyAttempts) == true,
         ),
         login = statusText(
             getString(R.string.login_short),
-            if (incomplete || sparse || (partial && cell.attended != true)) {
+            if (cell.attended == null && cell.evidence != DailyEvidence.MANUAL) {
                 unknownActivityMark()
             } else {
                 activityMark(cell.attended, cell.observed, dayClosed)
@@ -529,7 +642,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         ),
         patrol = statusText(
             getString(R.string.patrol_short),
-            if (incomplete || sparse || (partial && cell.dailyPatrol != true)) {
+            if (cell.dailyPatrol == null && cell.evidence != DailyEvidence.MANUAL) {
                 unknownActivityMark()
             } else {
                 activityMark(cell.dailyPatrol, cell.observed, dayClosed)
@@ -543,35 +656,48 @@ class WeeklyReportActivity : LocalizedActivity() {
         gunsmokeWeek: Boolean,
         cutlines: WeeklyCutlines,
     ): LinearLayout {
-        val incomplete = member.hasIncompleteEvidence
-        fun lowerBound(value: Any): String = if (incomplete) "≥$value" else value.toString()
         return metricGroup(
         showGunsmokeMetrics = gunsmokeWeek,
         merit = metricText(
             getString(R.string.merit_short),
-            lowerBound(member.totalMerit),
-            !incomplete && cutlines.belowWeeklyMerit(member.totalMerit),
+            WeeklyMetricPresentation.format(member.totalMerit, member.totalMeritCertainty),
+            member.totalMeritCertainty == MetricCertainty.EXACT &&
+                cutlines.belowWeeklyMerit(member.totalMerit),
         ),
         score = metricText(
             getString(R.string.point_short),
-            if (gunsmokeWeek) lowerBound(member.totalScore) else "-",
-            gunsmokeWeek && !incomplete && cutlines.belowWeeklyScore(member.totalScore),
+            if (gunsmokeWeek) {
+                WeeklyMetricPresentation.format(member.totalScore, member.totalScoreCertainty)
+            } else {
+                "-"
+            },
+            gunsmokeWeek && member.totalScoreCertainty == MetricCertainty.EXACT &&
+                cutlines.belowWeeklyScore(member.totalScore),
         ),
         attempts = metricText(
             getString(R.string.attempt_short),
-            if (gunsmokeWeek) member.totalAttempts?.let(::lowerBound) ?: "?" else "-",
-            gunsmokeWeek && !incomplete &&
+            if (gunsmokeWeek) {
+                WeeklyMetricPresentation.format(
+                    member.totalAttempts,
+                    member.totalAttemptsCertainty,
+                )
+            } else {
+                "-"
+            },
+            gunsmokeWeek && member.totalAttemptsCertainty == MetricCertainty.EXACT &&
                 member.totalAttempts?.let(cutlines::belowWeeklyAttempts) == true,
         ),
         login = metricText(
             getString(R.string.login_short),
-            member.loginDays?.let(::lowerBound) ?: "?",
-            !incomplete && member.loginDays?.let(cutlines::belowWeeklyLoginDays) == true,
+            WeeklyMetricPresentation.format(member.loginDays, member.loginDaysCertainty),
+            member.loginDaysCertainty == MetricCertainty.EXACT &&
+                member.loginDays?.let(cutlines::belowWeeklyLoginDays) == true,
         ),
         patrol = metricText(
             getString(R.string.patrol_short),
-            member.patrolDays?.let(::lowerBound) ?: "?",
-            !incomplete && member.patrolDays?.let(cutlines::belowWeeklyPatrolDays) == true,
+            WeeklyMetricPresentation.format(member.patrolDays, member.patrolDaysCertainty),
+            member.patrolDaysCertainty == MetricCertainty.EXACT &&
+                member.patrolDays?.let(cutlines::belowWeeklyPatrolDays) == true,
         ),
     )
     }
@@ -672,8 +798,8 @@ class WeeklyReportActivity : LocalizedActivity() {
 
     private fun activityMark(value: Boolean?, observed: Boolean, dayClosed: Boolean): ActivityMark =
         when {
-            !observed -> ActivityMark("-", null)
             value == true -> ActivityMark("\u2713", SUCCESS_GREEN)
+            !observed -> ActivityMark("-", null)
             value == false && dayClosed -> ActivityMark("\u00d7", FAILURE_RED)
             value == false -> ActivityMark("-", null)
             else -> ActivityMark("?", null)
@@ -709,11 +835,11 @@ class WeeklyReportActivity : LocalizedActivity() {
                     attempts = cell.attempts?.toString().orEmpty(),
                     attended = cell.attended,
                     dailyPatrol = cell.dailyPatrol,
-                    hadOverride = cell.manualOverride != null,
+                    existingOverride = cell.manualOverride,
                 )
             }
         }
-        render()
+        requestRender()
     }
 
     private fun saveWeeklyEdits(report: WeeklyReportBuilder.Report) {
@@ -722,28 +848,43 @@ class WeeklyReportActivity : LocalizedActivity() {
             return
         }
         val overrides = runCatching {
-            editDraft.values
-                .filter { it.hadOverride || it.dirty }
-                .map { draft ->
-                    WeeklyCellOverride(
-                        uid = draft.uid,
-                        periodStart = report.periodStart,
-                        gameDay = draft.gameDay,
-                        meritDelta = parseNonNegativeLong(draft.merit),
-                        scoreDelta = if (report.isGunsmokeWeek) {
-                            parseNonNegativeLong(draft.score)
-                        } else {
-                            null
-                        },
-                        attempts = if (report.isGunsmokeWeek) {
-                            parseAttempts(draft.attempts)
-                        } else {
-                            null
-                        },
-                        attended = draft.attended,
-                        dailyPatrol = draft.dailyPatrol,
-                    )
-                }
+            editDraft.values.mapNotNull { draft ->
+                if (draft.existingOverride == null && !draft.isDirty) return@mapNotNull null
+                WeeklyCellOverride(
+                    uid = draft.uid,
+                    periodStart = report.periodStart,
+                    gameDay = draft.gameDay,
+                    meritDelta = if (draft.meritDirty) {
+                        parseNonNegativeLong(draft.merit)
+                    } else {
+                        draft.existingOverride?.meritDelta
+                    },
+                    scoreDelta = if (!report.isGunsmokeWeek) {
+                        null
+                    } else if (draft.scoreDirty) {
+                        parseNonNegativeLong(draft.score)
+                    } else {
+                        draft.existingOverride?.scoreDelta
+                    },
+                    attempts = if (!report.isGunsmokeWeek) {
+                        null
+                    } else if (draft.attemptsDirty) {
+                        parseAttempts(draft.attempts)
+                    } else {
+                        draft.existingOverride?.attempts
+                    },
+                    attended = if (draft.attendedDirty) {
+                        draft.attended
+                    } else {
+                        draft.existingOverride?.attended
+                    },
+                    dailyPatrol = if (draft.dailyPatrolDirty) {
+                        draft.dailyPatrol
+                    } else {
+                        draft.existingOverride?.dailyPatrol
+                    },
+                ).takeIf { it.hasAnyValue() }
+            }
         }.getOrElse {
             Toast.makeText(this, R.string.invalid_weekly_edit, Toast.LENGTH_LONG).show()
             return
@@ -751,7 +892,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         repository.replaceWeeklyOverrides(report.periodStart.toEpochDay(), overrides)
         cancelWeeklyEditing()
         Toast.makeText(this, R.string.weekly_edits_saved, Toast.LENGTH_SHORT).show()
-        render()
+        requestRender()
     }
 
     private fun cancelWeeklyEditing() {
@@ -774,7 +915,7 @@ class WeeklyReportActivity : LocalizedActivity() {
             this,
             { _, year, month, day ->
                 referenceDay = LocalDate.of(year, month + 1, day)
-                render()
+                requestRender()
             },
             referenceDay.year,
             referenceDay.monthValue - 1,
@@ -795,6 +936,7 @@ class WeeklyReportActivity : LocalizedActivity() {
     private fun addMembershipEvents(
         report: WeeklyReportBuilder.Report,
         events: List<MemberEvent>,
+        namesByUid: Map<Long, String>,
         zoneId: ZoneId,
     ) {
         body.addView(TextView(this).apply {
@@ -803,7 +945,6 @@ class WeeklyReportActivity : LocalizedActivity() {
             setTypeface(typeface, Typeface.BOLD)
             setPadding(0, dp(16), 0, dp(4))
         }, matchWidth())
-        val namesByUid = repository.listMemberStatuses().associate { it.uid to it.name }
         val membershipEvents = MembershipEventPresentation.deduplicate(events)
         body.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -901,7 +1042,7 @@ class WeeklyReportActivity : LocalizedActivity() {
             .setPositiveButton(R.string.delete) { _, _ ->
                 if (repository.deleteWeeklyNote(note.id)) {
                     Toast.makeText(this, R.string.note_deleted, Toast.LENGTH_SHORT).show()
-                    render()
+                    requestRender()
                 }
             }
             .show()
@@ -940,6 +1081,31 @@ class WeeklyReportActivity : LocalizedActivity() {
         startActivityForResult(intent, REQUEST_EXPORT_WEEKLY)
     }
 
+    private fun exportAllWeeklyTables() {
+        workerExecutor.execute {
+            val content = runCatching {
+                repository.listAllWeeklyReports(ZoneId.systemDefault())
+                    .takeIf(List<*>::isNotEmpty)
+                    ?.let(WeeklyReportCsv::formatAll)
+            }.getOrNull()
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (content == null) {
+                    Toast.makeText(this, R.string.no_weekly_tables_to_export, Toast.LENGTH_SHORT)
+                        .show()
+                    return@runOnUiThread
+                }
+                pendingCsv = content
+                val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("text/csv")
+                    .putExtra(Intent.EXTRA_TITLE, "mobileGF2logger-all-weekly-tables.csv")
+                @Suppress("DEPRECATION")
+                startActivityForResult(intent, REQUEST_EXPORT_WEEKLY)
+            }
+        }
+    }
+
     private fun addNoteEditor(report: WeeklyReportBuilder.Report) {
         val day = Spinner(this).apply {
             adapter = ArrayAdapter(
@@ -970,7 +1136,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                     getString(R.string.saved),
                     Toast.LENGTH_SHORT,
                 ).show()
-                render()
+                requestRender()
             }
         }, matchWidth())
     }
@@ -987,6 +1153,17 @@ class WeeklyReportActivity : LocalizedActivity() {
         ViewGroup.LayoutParams.WRAP_CONTENT,
     )
 
+    private data class RenderModel(
+        val zone: ZoneId,
+        val report: WeeklyReportBuilder.Report,
+        val notes: List<WeeklyNote>,
+        val events: List<MemberEvent>,
+        val namesByUid: Map<Long, String>,
+        val cutlines: WeeklyCutlines,
+        val displayedMembers: List<WeeklyReportBuilder.MemberRow>,
+        val scoreRanks: Map<Long, Int>,
+    )
+
     private data class ActivityMark(val symbol: String, val color: Int?)
 
     private data class CellKey(val uid: Long, val gameDay: LocalDate)
@@ -999,9 +1176,20 @@ class WeeklyReportActivity : LocalizedActivity() {
         var attempts: String,
         var attended: Boolean?,
         var dailyPatrol: Boolean?,
-        val hadOverride: Boolean,
-        var dirty: Boolean = false,
-    )
+        val existingOverride: WeeklyCellOverride?,
+        var meritDirty: Boolean = false,
+        var scoreDirty: Boolean = false,
+        var attemptsDirty: Boolean = false,
+        var attendedDirty: Boolean = false,
+        var dailyPatrolDirty: Boolean = false,
+    ) {
+        val isDirty: Boolean
+            get() = meritDirty || scoreDirty || attemptsDirty || attendedDirty || dailyPatrolDirty
+    }
+
+    private fun WeeklyCellOverride.hasAnyValue(): Boolean =
+        meritDelta != null || scoreDelta != null || attempts != null ||
+            attended != null || dailyPatrol != null
 
     private fun gridBackground() = GradientDrawable().apply {
         setColor(Color.TRANSPARENT)
@@ -1024,6 +1212,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         private const val RANK_WIDTH = 42
         private const val MEMBER_WIDTH = 120
         private const val DAILY_WIDTH = 128
+        private const val TABLE_ROW_BATCH_SIZE = 2
         private val GRID_COLOR = Color.rgb(112, 118, 128)
         private val EDITABLE_FIELD_COLOR = Color.rgb(47, 58, 72)
         private val EDITABLE_FIELD_BORDER_COLOR = Color.rgb(126, 164, 218)

@@ -21,6 +21,11 @@ rules below take precedence over stale copied dates in archived templates.
 - A merit week begins Monday at 05:00 and ends the next Monday at 05:00.
 - A Gunsmoke week begins Sunday at 05:00 and contains seven game days through
   the following Sunday at 05:00.
+- Gunsmoke scoring closes at 02:00 on the final Sunday. A Saturday snapshot at
+  or after 02:00 therefore confirms the final cumulative Gunsmoke score, while
+  merit, login, Daily Patrol, and the Saturday game day remain open until
+  05:00. A daily Saturday score delta still requires a trustworthy opening
+  boundary; the app does not invent one from the final total alone.
 - Gunsmoke runs for one week followed by two off weeks. The verified cycle
   anchor is Sunday, 2026-07-19 at 05:00. Other verified starts are 2026-02-22,
   2026-03-15, 2026-04-05, 2026-04-26, 2026-05-17, 2026-06-07, and 2026-06-28.
@@ -50,10 +55,12 @@ possible score-merit range is:
 floor(s / 10) - max(n - 1, 0) .. floor(s / 10)
 ```
 
-The calculation is accepted when the remaining merit is one of `0`, `40`,
-`50`, or `90`. A unique match is reported as inferred. Multiple matches remain
+The calculation is accepted when the remaining merit is one of `0`, `50`, or
+`90`. A unique match is reported as inferred. Multiple matches remain
 ambiguous and are shown for manual confirmation; the app does not fabricate an
-exact count.
+exact count. Three attempts are the daily cap, so they finalize the attempt
+count and the paired captured score. Twenty-one attempts are the weekly cap and
+finalize the weekly attempt count.
 
 Counter resets are handled by treating a negative delta as the current counter
 value. Daily activity is derived from Total Merit because Merit This Week
@@ -73,19 +80,32 @@ resets on Monday while a Gunsmoke week begins on Sunday.
   member logged in on its 05:00-based game day and narrows that day to 50 or
   90; an exact Daily Patrol event fixes it at 90.
 - Values shared by every compatible allocation are exact. Ambiguous completed
-  days use a marked Monday-first estimate, while an unfinished day displays
-  only its confirmed lower bound until it reaches the 90-point cap.
+  days remain unknown instead of displaying an arbitrary allocation, while an
+  unfinished day displays only its confirmed positive lower bound until it
+  reaches the 90-point cap.
 - Gunsmoke weeks additionally show daily score changes, inferred participation
   counts, cumulative Gunsmoke score, participation totals, and rankings.
+- A positive Gunsmoke score or attempt proves attendance, but Gunsmoke
+  Daily Patrol is inferred from counters only when the exact merit, score,
+  attempt, and attendance combination has a single positive solution. A
+  negative result remains unknown until a closing boundary, UID-safe Updates
+  kind `8` / action `802001`, or a manual correction establishes it.
+- Each contiguous run of Gunsmoke checkpoints is solved independently. A
+  missing earlier day therefore cannot suppress exact facts in a later usable
+  run, while the unobserved gap remains unknown.
+- On the final Saturday, a capture at or after 02:00 finalizes the captured
+  weekly Gunsmoke score. The 05:00 game-day boundary still controls merit,
+  attendance, Daily Patrol, and the week transition.
 - The separate Join/Withdraw section combines UID-safe 21917 roster changes,
   exact 21960 Updates timestamps, and manually entered membership history.
   Snapshot-only boundaries are labelled with their observation time instead of
   being presented as exact event times.
 - Calculated values retain an evidence state: exact, inferred, ambiguous, or
   manually confirmed.
-- Missing daily Gunsmoke score and attempt values stay unknown. Captured weekly
-  totals remain visible and the user can apply a manual correction when they
-  have independent evidence.
+- Missing daily Gunsmoke score and attempt values stay unknown. Confirmed
+  subtotals remain visible as lower bounds, while exact daily/weekly caps are
+  displayed without `≥`, `?`, or `-`. The user can apply a manual correction
+  when they have independent evidence.
 - If a Gunsmoke day is completely unobserved, weekly Login and Daily Patrol
   totals also stay unknown unless a timestamped activity fact or manual edit
   independently proves them.

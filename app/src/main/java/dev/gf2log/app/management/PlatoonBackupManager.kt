@@ -8,9 +8,11 @@ import dev.gf2log.app.settings.AppBackupSettings
 import dev.gf2log.app.settings.AppBackupSettingsCodec
 import dev.gf2log.app.settings.AppSettingsStore
 import dev.gf2log.app.settings.BackupSettingsStore
+import java.io.EOFException
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.zip.ZipException
 
 class PlatoonBackupManager internal constructor(
     context: Context,
@@ -102,6 +104,10 @@ class PlatoonBackupManager internal constructor(
         throw InvalidBackupException(error)
     } catch (error: SQLiteException) {
         throw InvalidBackupException(error)
+    } catch (error: ZipException) {
+        throw InvalidBackupException(error)
+    } catch (error: EOFException) {
+        throw InvalidBackupException(error)
     }
 
     // Function Name: replaceRestoredState
@@ -128,8 +134,12 @@ class PlatoonBackupManager internal constructor(
         )
         try {
             PlatoonRepository.withExclusiveDatabase {
-                beginFullRestore(
-                    previousSettings = settingsStore.read(),
+                beginRestoreTransaction(
+                    previousSettings = if (restoredSettings == null) {
+                        null
+                    } else {
+                        settingsStore.read()
+                    },
                     databaseExisted = databaseFile.isFile,
                 )
                 replaceDatabase(stagedDatabase, preservePrevious = true)
@@ -145,7 +155,7 @@ class PlatoonBackupManager internal constructor(
                 restoreObserver(RestoreCheckpoint.RETAINED_CSV_RETIRED)
                 writeRestoreState(RestoreState.COMMITTED)
                 restoreObserver(RestoreCheckpoint.COMMITTED)
-                cleanupCommittedFullRestore(
+                cleanupCommittedRestore(
                     previousRetainedCsvDirectory,
                     previousDatabaseFile(),
                 )
@@ -293,17 +303,29 @@ class PlatoonBackupManager internal constructor(
         }
     }
 
-    private fun beginFullRestore(
-        previousSettings: AppBackupSettings,
+    // Function Name: beginRestoreTransaction
+    // Description:
+    // - Journals only the resources that the selected backup format can replace.
+    // - Keeps v1 database-only restore independent from app settings validation.
+    // Parameters:
+    // - previousSettings: Settings rollback value for complete restore, or null for v1 restore.
+    // - databaseExisted: Whether rollback must restore a previous database or remove a new one.
+    // Returns:
+    // - Returns normally after the durable PREPARED transaction state is written.
+    private fun beginRestoreTransaction(
+        previousSettings: AppBackupSettings?,
         databaseExisted: Boolean,
     ) {
         val transactionDirectory = restoreTransactionDirectory(appContext)
-        require(!transactionDirectory.exists()) { "A previous full restore is still pending" }
-        check(transactionDirectory.mkdirs()) { "Unable to create the full-restore transaction" }
-        writeAtomic(
-            restoreSettingsFile(appContext),
-            AppBackupSettingsCodec.encode(previousSettings),
-        )
+        require(!transactionDirectory.exists()) { "A previous backup restore is still pending" }
+        check(transactionDirectory.mkdirs()) { "Unable to create the backup-restore transaction" }
+        if (previousSettings != null) {
+            writeAtomic(
+                restoreSettingsFile(appContext),
+                AppBackupSettingsCodec.encode(previousSettings),
+            )
+            writeAtomic(restoreSettingsRollbackFile(appContext), ByteArray(0))
+        }
         if (!databaseExisted) {
             writeAtomic(restoreDatabaseWasMissingFile(appContext), ByteArray(0))
         }
@@ -314,7 +336,7 @@ class PlatoonBackupManager internal constructor(
         writeAtomic(restoreStateFile(appContext), state.name.toByteArray(Charsets.US_ASCII))
     }
 
-    private fun cleanupCommittedFullRestore(previousCsv: File, previousDatabase: File) {
+    private fun cleanupCommittedRestore(previousCsv: File, previousDatabase: File) {
         if (previousCsv.exists() && !previousCsv.deleteRecursively()) {
             return
         }
@@ -329,6 +351,7 @@ class PlatoonBackupManager internal constructor(
         private const val RESTORE_TRANSACTION_DIRECTORY = "platoon-full-restore"
         private const val RESTORE_STATE_FILE = "state"
         private const val RESTORE_SETTINGS_FILE = "settings.pre_restore"
+        private const val RESTORE_SETTINGS_ROLLBACK_FILE = "settings.rollback_required"
         private const val RESTORE_DATABASE_WAS_MISSING_FILE = "database.was_missing"
         private val SQLITE_HEADER = "SQLite format 3\u0000".toByteArray(Charsets.US_ASCII)
 
@@ -347,7 +370,7 @@ class PlatoonBackupManager internal constructor(
                 }
                 val state = runCatching {
                     RestoreState.valueOf(stateFile.readText(Charsets.US_ASCII))
-                }.getOrElse { throw IllegalStateException("Invalid full-restore transaction", it) }
+                }.getOrElse { throw IllegalStateException("Invalid backup-restore transaction", it) }
                 val database = appContext.getDatabasePath(PlatoonSchema.DATABASE_NAME)
                 val previousDatabase = File(
                     database.parentFile,
@@ -362,7 +385,7 @@ class PlatoonBackupManager internal constructor(
                     "${PlatoonRepository.RETAINED_CSV_DIRECTORY}.pre_restore",
                 )
                 when (state) {
-                    RestoreState.PREPARED -> rollbackPreparedFullRestore(
+                    RestoreState.PREPARED -> rollbackPreparedRestore(
                         appContext,
                         settingsStore,
                         database,
@@ -379,7 +402,7 @@ class PlatoonBackupManager internal constructor(
             }
         }
 
-        private fun rollbackPreparedFullRestore(
+        private fun rollbackPreparedRestore(
             context: Context,
             settingsStore: BackupSettingsStore,
             database: File,
@@ -403,8 +426,11 @@ class PlatoonBackupManager internal constructor(
                 }
             }
             val settingsFile = restoreSettingsFile(context)
-            require(settingsFile.isFile) { "Previous app settings are missing" }
-            settingsStore.replace(AppBackupSettingsCodec.decode(settingsFile.readBytes()))
+            val settingsRollback = restoreSettingsRollbackFile(context)
+            if (settingsRollback.isFile || settingsFile.isFile) {
+                require(settingsFile.isFile) { "Previous app settings are missing" }
+                settingsStore.replace(AppBackupSettingsCodec.decode(settingsFile.readBytes()))
+            }
             if (previousCsv.exists()) {
                 if (retainedCsv.exists() && !retainedCsv.deleteRecursively()) {
                     error("Unable to clear retained CSV files during recovery")
@@ -471,9 +497,11 @@ class PlatoonBackupManager internal constructor(
             val directory = restoreTransactionDirectory(context)
             if (!directory.exists()) return
             val settings = restoreSettingsFile(context)
+            val settingsRollback = restoreSettingsRollbackFile(context)
             val state = restoreStateFile(context)
             val databaseWasMissing = restoreDatabaseWasMissingFile(context)
             settings.delete()
+            settingsRollback.delete()
             state.delete()
             databaseWasMissing.delete()
             directory.delete()
@@ -487,6 +515,9 @@ class PlatoonBackupManager internal constructor(
 
         private fun restoreSettingsFile(context: Context) =
             File(restoreTransactionDirectory(context), RESTORE_SETTINGS_FILE)
+
+        private fun restoreSettingsRollbackFile(context: Context) =
+            File(restoreTransactionDirectory(context), RESTORE_SETTINGS_ROLLBACK_FILE)
 
         private fun restoreDatabaseWasMissingFile(context: Context) =
             File(restoreTransactionDirectory(context), RESTORE_DATABASE_WAS_MISSING_FILE)

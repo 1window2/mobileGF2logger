@@ -406,7 +406,7 @@ class MainActivity : LocalizedActivity() {
                 var retained = 0
                 var duplicates = 0
                 val createdFiles = mutableListOf<File>()
-                try {
+                val imported = try {
                     sources.forEach { source ->
                         val input = TrustedImportSource.openInputStream(contentResolver, source)
                             ?: error("Document provider did not open an input stream")
@@ -419,11 +419,11 @@ class MainActivity : LocalizedActivity() {
                             }
                         }
                     }
+                    PlatoonRepository(this).reconcileRetainedCsvFiles(directory)
                 } catch (error: Exception) {
                     createdFiles.forEach(File::delete)
                     throw error
                 }
-                val imported = PlatoonRepository(this).reconcileRetainedCsvFiles(directory)
                 CsvImportSummary(retained, duplicates, imported)
             }
             statusHandler.post {
@@ -469,10 +469,7 @@ class MainActivity : LocalizedActivity() {
     @Suppress("DEPRECATION")
     private fun exportLatestPlatoonCsv() {
         val directory = File(filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY)
-        val latest = directory.listFiles()
-            .orEmpty()
-            .filter { it.isFile && it.extension.equals("csv", ignoreCase = true) }
-            .maxByOrNull(File::lastModified)
+        val latest = PlatoonCsvImportStore.latestRetainedFile(directory)
         if (latest == null) {
             statusText.text = getString(R.string.status_no_platoon_csv)
             return

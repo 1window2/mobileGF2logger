@@ -25,6 +25,9 @@ class PlatoonRepository(context: Context) {
         members: List<GuildMember>,
         sourceFile: String?,
     ): SnapshotIngestResult = access { database ->
+        require(GuildMembersCsv.isValidRoster(members)) {
+            "A Platoon roster must stay within the member and name limits with unique UIDs"
+        }
         database.ingestSnapshot(
             snapshot = PlatoonSnapshot(
                 id = 0,
@@ -41,8 +44,13 @@ class PlatoonRepository(context: Context) {
         capturedAt: Instant = Instant.now(),
     ): ActivityIngestResult = access { database ->
         database.ingestPlatoonActivity(
-            observations = data.entries.mapNotNull {
-                if (it.occurredAt == 0u || it.actionId == 0u || it.memberName.isBlank()) {
+            observations = data.entries.asSequence().mapNotNull {
+                if (
+                    it.occurredAt == 0u ||
+                    it.actionId == 0u ||
+                    it.memberName.isBlank() ||
+                    it.memberName.length > PlatoonObservationPolicy.MAX_ACTIVITY_MEMBER_NAME_LENGTH
+                ) {
                     null
                 } else {
                     PlatoonActivityObservation(
@@ -52,7 +60,10 @@ class PlatoonRepository(context: Context) {
                         memberName = it.memberName,
                     )
                 }
-            },
+            }
+                .distinct()
+                .take(PlatoonObservationPolicy.MAX_ACTIVITY_OBSERVATIONS)
+                .toList(),
             capturedAt = capturedAt,
         )
     }
@@ -90,73 +101,77 @@ class PlatoonRepository(context: Context) {
     fun reconcileRetainedCsvFiles(
         directory: File = File(appContext.filesDir, RETAINED_CSV_DIRECTORY),
     ): ImportResult = access { database ->
-        var imported = 0
-        var historical = 0
-        var skipped = 0
-        var invalid = 0
-        val representedFiles = database.snapshotSourceFiles()
-        var latestStructuredSnapshot = database.latestSnapshotIdentity()?.let {
-            SnapshotIdentity(it.first, it.second)
+        database.runInTransaction {
+            var imported = 0
+            var historical = 0
+            var skipped = 0
+            var invalid = 0
+            val representedFiles = database.snapshotSourceFiles()
+            var latestStructuredSnapshot = database.latestSnapshotIdentity()?.let {
+                SnapshotIdentity(it.first, it.second)
+            }
+            directory.listFiles()
+                .orEmpty()
+                .filter { it.isFile && it.extension.equals("csv", ignoreCase = true) }
+                .filter { file ->
+                    if (file.name in representedFiles) {
+                        skipped += 1
+                        false
+                    } else {
+                        true
+                    }
+                }
+                .mapNotNull { file ->
+                    val parsed = runCatching {
+                        GuildMembersCsv.parse(file.readText(Charsets.UTF_8))
+                    }.getOrNull()
+                    val capturedAt = parsed?.logTime?.let {
+                        runCatching { Instant.parse(it) }.getOrNull()
+                    }
+                    if (parsed == null || capturedAt == null) {
+                        invalid += 1
+                        null
+                    } else {
+                        RetainedCsv(file, capturedAt, parsed.members)
+                    }
+                }
+                .sortedWith(compareBy(RetainedCsv::capturedAt, { it.file.name }))
+                .forEach { file ->
+                    val historicalOnly = latestStructuredSnapshot?.let {
+                        file.capturedAt.isBefore(it.capturedAt) ||
+                            (file.capturedAt == it.capturedAt &&
+                                file.file.name <= it.sourceFile.orEmpty())
+                    } ?: false
+                    val result = database.ingestSnapshot(
+                        PlatoonSnapshot(
+                            id = 0,
+                            capturedAt = file.capturedAt,
+                            members = file.members.map(GuildMember::toSnapshotMember),
+                            sourceFile = file.file.name,
+                        ),
+                        EvidenceSource.LEGACY_IMPORT,
+                        historicalOnly = historicalOnly,
+                        deferHistoricalMembershipReconciliation = historicalOnly,
+                    )
+                    if (result.duplicate) {
+                        skipped += 1
+                    } else if (historicalOnly) {
+                        historical += 1
+                    } else {
+                        imported += 1
+                        latestStructuredSnapshot = SnapshotIdentity(file.capturedAt, file.file.name)
+                    }
+                }
+
+            if (historical > 0) database.reconcileSnapshotMembershipHistory()
+
+            ImportResult(
+                imported = imported,
+                historical = historical,
+                skipped = skipped,
+                invalid = invalid,
+            )
         }
-        directory.listFiles()
-            .orEmpty()
-            .filter { it.isFile && it.extension.equals("csv", ignoreCase = true) }
-            .filter { file ->
-                if (file.name in representedFiles) {
-                    skipped += 1
-                    false
-                } else {
-                    true
-                }
-            }
-            .mapNotNull { file ->
-                val parsed = runCatching {
-                    GuildMembersCsv.parse(file.readText(Charsets.UTF_8))
-                }.getOrNull()
-                val capturedAt = parsed?.logTime?.let { runCatching { Instant.parse(it) }.getOrNull() }
-                if (parsed == null || capturedAt == null) {
-                    invalid += 1
-                    null
-                } else {
-                    RetainedCsv(file, capturedAt, parsed.members)
-                }
-            }
-            .sortedWith(compareBy(RetainedCsv::capturedAt, { it.file.name }))
-            .forEach { file ->
-                val historicalOnly = latestStructuredSnapshot?.let {
-                    file.capturedAt.isBefore(it.capturedAt) ||
-                        (file.capturedAt == it.capturedAt &&
-                            file.file.name <= it.sourceFile.orEmpty())
-                } ?: false
-                val result = database.ingestSnapshot(
-                    PlatoonSnapshot(
-                        id = 0,
-                        capturedAt = file.capturedAt,
-                        members = file.members.map(GuildMember::toSnapshotMember),
-                        sourceFile = file.file.name,
-                    ),
-                    EvidenceSource.LEGACY_IMPORT,
-                    historicalOnly = historicalOnly,
-                    deferHistoricalMembershipReconciliation = historicalOnly,
-                )
-                if (result.duplicate) {
-                    skipped += 1
-                } else if (historicalOnly) {
-                    historical += 1
-                } else {
-                    imported += 1
-                    latestStructuredSnapshot = SnapshotIdentity(file.capturedAt, file.file.name)
-                }
-            }
-
-        if (historical > 0) database.reconcileSnapshotMembershipHistory()
-
-        ImportResult(
-            imported = imported,
-            historical = historical,
-            skipped = skipped,
-            invalid = invalid,
-        )
     }
 
     fun listSnapshots(limit: Int = 100): List<PlatoonSnapshot> =

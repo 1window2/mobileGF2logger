@@ -195,6 +195,118 @@ class Gfl2StreamParserTest {
     }
 
     @Test
+    fun continuationCountOverflowQuarantinesTheTailAndParserRecovers() {
+        val parser = Gfl2StreamParser(maximumPendingContinuations = 2)
+        val continuation = outerMessage(
+            0,
+            payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, guildMembersPayload("Part", 8uL)),
+        )
+
+        assertTrue(parser.accept(continuation).isEmpty())
+        assertTrue(parser.accept(continuation).isEmpty())
+        val overflow = parser.accept(continuation)
+
+        assertEquals(1, overflow.filterIsInstance<ParseEvent.Warning>().size)
+        assertTrue(parser.accept(continuation).isEmpty())
+        assertTrue(
+            parser.accept(
+                outerMessage(
+                    42,
+                    payload(
+                        Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
+                        guildMembersPayload("Truncated tail", 10uL),
+                    ),
+                ),
+            ).isEmpty(),
+        )
+        val recovered = parser.accept(
+            outerMessage(
+                7,
+                payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, guildMembersPayload("Fresh", 9uL)),
+            ),
+        ).singlePayload()
+        assertEquals("Fresh", (recovered.value.data as GuildMembersData).members.single().name)
+    }
+
+    @Test
+    fun continuationByteOverflowQuarantinesTheTail() {
+        val body = guildMembersPayload("Part", 8uL)
+        val parser = Gfl2StreamParser(maximumPendingPayloadBytes = body.size * 2 - 1)
+        val continuation = outerMessage(
+            0,
+            payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, body),
+        )
+
+        assertTrue(parser.accept(continuation).isEmpty())
+        assertEquals(1, parser.accept(continuation).filterIsInstance<ParseEvent.Warning>().size)
+        assertTrue(parser.accept(continuation).isEmpty())
+        assertTrue(
+            parser.accept(
+                outerMessage(
+                    42,
+                    payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, body),
+                ),
+            ).isEmpty(),
+        )
+        assertTrue(parser.finish().isEmpty())
+    }
+
+    @Test
+    fun oversizedFirstContinuationIsQuarantinedBeforePendingStateIsCreated() {
+        val body = guildMembersPayload("Oversized first", 8uL)
+        val parser = Gfl2StreamParser(maximumPendingPayloadBytes = body.size - 1)
+
+        val warning = parser.accept(
+            outerMessage(
+                0,
+                payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, body),
+            ),
+        )
+
+        assertEquals(1, warning.filterIsInstance<ParseEvent.Warning>().size)
+        assertTrue(
+            parser.accept(
+                outerMessage(
+                    42,
+                    payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, body),
+                ),
+            ).isEmpty(),
+        )
+        assertTrue(parser.finish().isEmpty())
+    }
+
+    @Test
+    fun malformedTerminalFrameClearsQuarantineBeforeDecoding() {
+        val parser = Gfl2StreamParser(maximumPendingContinuations = 1)
+        val continuation = outerMessage(
+            0,
+            payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, guildMembersPayload("Part", 8uL)),
+        )
+
+        assertTrue(parser.accept(continuation).isEmpty())
+        assertEquals(1, parser.accept(continuation).filterIsInstance<ParseEvent.Warning>().size)
+        assertTrue(
+            parser.accept(
+                outerMessage(
+                    42,
+                    payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, byteArrayOf(0x0A, 0x7F)),
+                ),
+            ).isEmpty(),
+        )
+
+        val recovered = parser.accept(
+            outerMessage(
+                43,
+                payload(
+                    Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
+                    guildMembersPayload("Recovered", 9uL),
+                ),
+            ),
+        ).singlePayload()
+        assertEquals("Recovered", (recovered.value.data as GuildMembersData).members.single().name)
+    }
+
+    @Test
     fun unknownPayloadsRemainObservableWithoutRetainingTheirBytes() {
         val parser = Gfl2StreamParser()
         val events = parser.accept(outerMessage(51, payload(24567, byteArrayOf(1, 2, 3))))

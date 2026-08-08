@@ -12,6 +12,95 @@ class GunsmokeWeekSolverTest {
     private val start = LocalDate.of(2026, 7, 19)
 
     @Test
+    fun cappedOpeningAnchorMustBelongToTheImmediatelyPrecedingCounterPeriod() {
+        val periodStart = start.atTime(5, 0).atZone(zone).toInstant()
+
+        assertEquals(
+            true,
+            GunsmokeWeekSolver.isClosedOpeningAnchor(
+                capturedAt = periodStart.minusSeconds(5 * 86_400),
+                weeklyMerit = 540,
+                zoneId = zone,
+                periodStart = periodStart,
+            ),
+        )
+        assertEquals(
+            false,
+            GunsmokeWeekSolver.isClosedOpeningAnchor(
+                capturedAt = periodStart.minusSeconds(7 * 86_400),
+                weeklyMerit = 540,
+                zoneId = zone,
+                periodStart = periodStart,
+            ),
+        )
+        assertEquals(
+            true,
+            GunsmokeWeekSolver.isClosedOpeningAnchor(
+                capturedAt = periodStart.minusSeconds(10 * 60),
+                weeklyMerit = 90,
+                zoneId = zone,
+                periodStart = periodStart,
+            ),
+        )
+    }
+
+    @Test
+    fun cappedOpeningAnchorUsesCalendarBoundariesAcrossDaylightSavingChanges() {
+        val daylightZone = ZoneId.of("America/New_York")
+        val springStart = LocalDate.of(2026, 3, 8).atTime(5, 0).atZone(daylightZone).toInstant()
+        val fallStart = LocalDate.of(2026, 11, 1).atTime(5, 0).atZone(daylightZone).toInstant()
+
+        assertEquals(
+            false,
+            GunsmokeWeekSolver.isClosedOpeningAnchor(
+                capturedAt = LocalDate.of(2026, 3, 2)
+                    .atTime(4, 30)
+                    .atZone(daylightZone)
+                    .toInstant(),
+                weeklyMerit = 540,
+                zoneId = daylightZone,
+                periodStart = springStart,
+            ),
+        )
+        assertEquals(
+            true,
+            GunsmokeWeekSolver.isClosedOpeningAnchor(
+                capturedAt = LocalDate.of(2026, 3, 2)
+                    .atTime(5, 0)
+                    .atZone(daylightZone)
+                    .toInstant(),
+                weeklyMerit = 540,
+                zoneId = daylightZone,
+                periodStart = springStart,
+            ),
+        )
+        assertEquals(
+            true,
+            GunsmokeWeekSolver.isClosedOpeningAnchor(
+                capturedAt = LocalDate.of(2026, 10, 26)
+                    .atTime(5, 30)
+                    .atZone(daylightZone)
+                    .toInstant(),
+                weeklyMerit = 540,
+                zoneId = daylightZone,
+                periodStart = fallStart,
+            ),
+        )
+        assertEquals(
+            false,
+            GunsmokeWeekSolver.isClosedOpeningAnchor(
+                capturedAt = LocalDate.of(2026, 10, 26)
+                    .atTime(4, 30)
+                    .atZone(daylightZone)
+                    .toInstant(),
+                weeklyMerit = 540,
+                zoneId = daylightZone,
+                periodStart = fallStart,
+            ),
+        )
+    }
+
+    @Test
     fun residualFiftyProvesPatrolAbsence() {
         val cells = solveTransition(patrolCredits = 0)
 

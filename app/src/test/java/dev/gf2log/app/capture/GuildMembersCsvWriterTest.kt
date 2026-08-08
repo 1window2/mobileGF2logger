@@ -231,24 +231,72 @@ class GuildMembersCsvWriterTest {
         assertTrue(output.listFiles().orEmpty().isEmpty())
     }
 
+    @Test
+    fun oversizedLiveRosterIsRejectedBeforePublishingEvidence() {
+        val output = temporaryFolder.newFolder("oversized-live-roster")
+        val writer = GuildMembersCsvWriter(output)
+        val members = (1..(GuildMembersCsv.MAX_ROSTER_MEMBERS + 1)).map { index ->
+            member(index.toUInt(), "Member $index")
+        }
+
+        val failure = runCatching {
+            writer.accept(
+                ParsedPayload(
+                    messageId = 42,
+                    payloadType = Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
+                    isEndOfMessage = true,
+                    data = GuildMembersData(members),
+                ),
+            )
+        }
+
+        assertTrue(failure.exceptionOrNull() is IllegalStateException)
+        assertTrue(output.listFiles().orEmpty().isEmpty())
+    }
+
+    @Test
+    fun oversizedLiveMemberNameIsRejectedBeforePublishingEvidence() {
+        val output = temporaryFolder.newFolder("oversized-live-name")
+        val writer = GuildMembersCsvWriter(output)
+
+        val failure = runCatching {
+            writer.accept(
+                ParsedPayload(
+                    messageId = 42,
+                    payloadType = Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
+                    isEndOfMessage = true,
+                    data = GuildMembersData(
+                        listOf(
+                            member(
+                                1u,
+                                "x".repeat(GuildMembersCsv.MAX_MEMBER_NAME_CHARS + 1),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        }
+
+        assertTrue(failure.exceptionOrNull() is IllegalStateException)
+        assertTrue(output.listFiles().orEmpty().isEmpty())
+    }
+
     private fun payload(messageId: Int, uid: UInt, name: String, end: Boolean): ParsedPayload =
         ParsedPayload(
             messageId = messageId,
             payloadType = Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
             isEndOfMessage = end,
-            data = GuildMembersData(
-                listOf(
-                    GuildMember(
-                        uid = uid,
-                        name = name,
-                        level = 60u,
-                        weeklyMerit = 120u,
-                        totalMerit = 4560u,
-                        highScore = 789u,
-                        totalScore = 1234u,
-                        lastLogin = 1700000000u,
-                    ),
-                ),
-            ),
+            data = GuildMembersData(listOf(member(uid, name))),
         )
+
+    private fun member(uid: UInt, name: String) = GuildMember(
+        uid = uid,
+        name = name,
+        level = 60u,
+        weeklyMerit = 120u,
+        totalMerit = 4560u,
+        highScore = 789u,
+        totalScore = 1234u,
+        lastLogin = 1700000000u,
+    )
 }

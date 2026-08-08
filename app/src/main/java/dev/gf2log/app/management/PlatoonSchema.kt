@@ -5,7 +5,7 @@ package dev.gf2log.app.management
  */
 internal object PlatoonSchema {
     const val DATABASE_NAME = "platoon.db"
-    const val CURRENT_VERSION = 10
+    const val CURRENT_VERSION = 11
     const val MIN_BACKUP_VERSION = 1
 
     private val baseTables = setOf(
@@ -21,6 +21,7 @@ internal object PlatoonSchema {
         add(if (version >= 10) "membership_periods" else "tenures")
         if (version >= 3) add("weekly_overrides")
         if (version >= 6) add("platoon_activity")
+        if (version >= 11) add("platoon_maintenance_state")
     }
 
     fun requiredColumns(version: Int): Map<String, Set<String>> = buildMap {
@@ -92,6 +93,9 @@ internal object PlatoonSchema {
                 "platoon_activity",
                 setOf("occurred_at", "action_id", "member_name", "resolved_uid"),
             )
+        }
+        if (version >= 11) {
+            put("platoon_maintenance_state", setOf("key", "value"))
         }
     }
 }

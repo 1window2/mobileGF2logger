@@ -14,9 +14,17 @@ import dev.gf2log.protocol.model.WeaponsData
 
 class Gfl2StreamParser(
     maximumBufferedBytes: Int = DEFAULT_MAXIMUM_BUFFERED_BYTES,
+    private val maximumPendingPayloadBytes: Int = DEFAULT_MAXIMUM_PENDING_PAYLOAD_BYTES,
+    private val maximumPendingContinuations: Int = DEFAULT_MAXIMUM_PENDING_CONTINUATIONS,
 ) {
+    init {
+        require(maximumPendingPayloadBytes > 0) { "Pending payload byte limit must be positive" }
+        require(maximumPendingContinuations > 0) { "Pending continuation limit must be positive" }
+    }
+
     private val buffer = ByteAccumulator(maximumBufferedBytes)
     private var pendingPayload: PendingPayload? = null
+    private var quarantinedPayload: QuarantinedPayload? = null
 
     fun accept(bytes: ByteArray): List<ParseEvent> {
         val events = mutableListOf<ParseEvent>()
@@ -48,6 +56,7 @@ class Gfl2StreamParser(
     fun finish(): List<ParseEvent> {
         val events = mutableListOf<ParseEvent>()
         emitPending(events)
+        quarantinedPayload = null
         buffer.clear()
         return events
     }
@@ -55,6 +64,7 @@ class Gfl2StreamParser(
     fun reset() {
         buffer.clear()
         pendingPayload = null
+        quarantinedPayload = null
     }
 
     private fun parseMessage(
@@ -82,6 +92,10 @@ class Gfl2StreamParser(
 
             val isEndOfMessage = offset + payloadSize >= message.size
             if (type in Gfl2PayloadDecoder.supportedTypes) {
+                if (consumeQuarantinedPayload(type, messageId, isEndOfMessage)) {
+                    offset += payloadSize
+                    continue
+                }
                 val payload = message.copyOfRange(
                     offset + PAYLOAD_HEADER_SIZE,
                     offset + payloadSize,
@@ -89,7 +103,14 @@ class Gfl2StreamParser(
                 try {
                     val decoded = Gfl2PayloadDecoder.decode(type, payload)
                     if (decoded != null) {
-                        acceptDecodedPayload(messageId, type, isEndOfMessage, decoded, events)
+                        acceptDecodedPayload(
+                            messageId,
+                            type,
+                            isEndOfMessage,
+                            payload.size,
+                            decoded,
+                            events,
+                        )
                     }
                 } catch (error: ProtocolException) {
                     events += ParseEvent.Warning(
@@ -98,6 +119,7 @@ class Gfl2StreamParser(
                 }
             } else {
                 emitPending(events)
+                quarantinedPayload = null
                 events += ParseEvent.UnknownPayload(
                     messageId = messageId,
                     payloadType = type,
@@ -114,6 +136,7 @@ class Gfl2StreamParser(
         messageId: Int,
         type: Int,
         isEndOfMessage: Boolean,
+        payloadBytes: Int,
         data: GameData,
         events: MutableList<ParseEvent>,
     ) {
@@ -122,9 +145,28 @@ class Gfl2StreamParser(
             if (pending.type == type &&
                 (pending.previousMessageId == 0 || pending.previousMessageId == messageId)
             ) {
+                val accumulatedBytes = pending.accumulatedPayloadBytes + payloadBytes.toLong()
+                val continuationCount = pending.continuationCount + 1
+                if (
+                    accumulatedBytes > maximumPendingPayloadBytes ||
+                    continuationCount > maximumPendingContinuations
+                ) {
+                    pendingPayload = null
+                    quarantinedPayload = if (messageId != 0 && isEndOfMessage) {
+                        null
+                    } else {
+                        QuarantinedPayload(type, messageId)
+                    }
+                    events += ParseEvent.Warning(
+                        "Discarded payload $type continuation sequence exceeding parser limits",
+                    )
+                    return
+                }
                 pending.data = merge(pending.data, data)
                 pending.previousMessageId = messageId
                 pending.isEndOfMessage = isEndOfMessage
+                pending.accumulatedPayloadBytes = accumulatedBytes
+                pending.continuationCount = continuationCount
                 if (messageId != 0 && isEndOfMessage) emitPending(events)
                 return
             }
@@ -134,8 +176,44 @@ class Gfl2StreamParser(
         if (messageId != 0 && isEndOfMessage) {
             events += ParseEvent.Payload(ParsedPayload(messageId, type, true, data))
         } else {
-            pendingPayload = PendingPayload(type, messageId, isEndOfMessage, data)
+            if (payloadBytes > maximumPendingPayloadBytes) {
+                quarantinedPayload = if (messageId != 0 && isEndOfMessage) {
+                    null
+                } else {
+                    QuarantinedPayload(type, messageId)
+                }
+                events += ParseEvent.Warning(
+                    "Discarded payload $type continuation sequence exceeding parser limits",
+                )
+                return
+            }
+            pendingPayload = PendingPayload(
+                type = type,
+                previousMessageId = messageId,
+                isEndOfMessage = isEndOfMessage,
+                data = data,
+                accumulatedPayloadBytes = payloadBytes.toLong(),
+                continuationCount = 1,
+            )
         }
+    }
+
+    private fun consumeQuarantinedPayload(
+        type: Int,
+        messageId: Int,
+        isEndOfMessage: Boolean,
+    ): Boolean {
+        val quarantined = quarantinedPayload ?: return false
+        if (
+            quarantined.type == type &&
+            (quarantined.previousMessageId == 0 || quarantined.previousMessageId == messageId)
+        ) {
+            quarantined.previousMessageId = messageId
+            if (messageId != 0 && isEndOfMessage) quarantinedPayload = null
+            return true
+        }
+        quarantinedPayload = null
+        return false
     }
 
     private fun emitPending(events: MutableList<ParseEvent>) {
@@ -179,6 +257,8 @@ class Gfl2StreamParser(
         const val PAYLOAD_HEADER_SIZE = 4
         const val MAXIMUM_MESSAGE_SIZE = 65_540
         const val DEFAULT_MAXIMUM_BUFFERED_BYTES = 2 * 1024 * 1024
+        const val DEFAULT_MAXIMUM_PENDING_PAYLOAD_BYTES = 2 * 1024 * 1024
+        const val DEFAULT_MAXIMUM_PENDING_CONTINUATIONS = 64
     }
 
     private data class PendingPayload(
@@ -186,5 +266,12 @@ class Gfl2StreamParser(
         var previousMessageId: Int,
         var isEndOfMessage: Boolean,
         var data: GameData,
+        var accumulatedPayloadBytes: Long,
+        var continuationCount: Int,
+    )
+
+    private data class QuarantinedPayload(
+        val type: Int,
+        var previousMessageId: Int,
     )
 }

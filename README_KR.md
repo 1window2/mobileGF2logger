@@ -1,10 +1,10 @@
-# mobileGF2logger
+# mobileGF2logger — 소녀전선 2(GF2) 서클 관리 도구
 
 [![Android](https://github.com/1window2/mobileGF2logger/actions/workflows/android.yml/badge.svg)](https://github.com/1window2/mobileGF2logger/actions/workflows/android.yml)
 [![CodeQL](https://github.com/1window2/mobileGF2logger/actions/workflows/codeql.yml/badge.svg)](https://github.com/1window2/mobileGF2logger/actions/workflows/codeql.yml)
 [![Dependabot](https://img.shields.io/github/issues-pr/1window2/mobileGF2logger/dependencies?label=Dependabot&logo=dependabot)](https://github.com/1window2/mobileGF2logger/pulls?q=is%3Apr+is%3Aopen+author%3Aapp%2Fdependabot)
 
-이 프로젝트는 [GIRLS' FRONTLINE 2: EXILIUM](https://gf2exilium.sunborngame.com/) Android 클라이언트용 **서클(Platoon)** 관리 도구입니다. Android만 지원하며 iOS 버전은 출시할 계획이 없습니다.
+이 프로젝트는 [GIRLS' FRONTLINE 2: EXILIUM](https://gf2exilium.sunborngame.com/) (소녀전선 2, GF2) Android 클라이언트용 **서클(Platoon) 관리 및 기록 도구**입니다. Android만 지원하며 iOS 버전은 출시할 계획이 없습니다.
 
 mobileGF2logger는 서클장을 위한 가벼운 비루팅 앱입니다. Android의 앱별 VPN 권한을 사용하여 지원되는 평문 서버 응답을 휴대전화 안에서 파싱하며, 원본 트래픽은 저장하지 않습니다.
 

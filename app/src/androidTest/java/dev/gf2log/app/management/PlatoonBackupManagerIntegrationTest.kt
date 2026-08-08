@@ -2,6 +2,7 @@ package dev.gf2log.app.management
 
 import android.content.ContentValues
 import android.content.Context
+import android.database.sqlite.SQLiteDatabase
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.gf2log.app.TargetPackagePreferences
@@ -77,6 +78,48 @@ class PlatoonBackupManagerIntegrationTest {
             assertEquals(1L, count(db, "weekly_notes", "text = ?", ARCHIVED_NOTE))
             assertEquals(0L, count(db, "members", "uid = ?", CURRENT_UID))
             assertFalse(db.rawQuery("PRAGMA foreign_key_check", null).use { it.moveToFirst() })
+        }
+    }
+
+    @Test
+    fun schemaTenCompleteBackupMigratesBeforeCurrentContractValidation() {
+        seedDatabase(ARCHIVED_UID, "Archived member", "archived-source.csv")
+        settingsStore.replace(archivedSettings())
+        val databaseFile = context.getDatabasePath(PlatoonSchema.DATABASE_NAME)
+        SQLiteDatabase.openDatabase(databaseFile.path, null, SQLiteDatabase.OPEN_READWRITE).use { legacy ->
+            legacy.execSQL("DROP INDEX platoon_activity_resolution_retention")
+            legacy.execSQL("DROP INDEX platoon_activity_retention_order")
+            legacy.execSQL("DROP TABLE platoon_maintenance_state")
+            legacy.version = 10
+        }
+        val archive = ByteArrayOutputStream().also { output ->
+            BackupArchive.write(
+                output,
+                databaseFile,
+                AppBackupSettingsCodec.encode(archivedSettings()),
+            )
+        }.toByteArray()
+
+        replaceDatabaseWithCurrentState()
+        settingsStore.replace(currentSettings())
+        PlatoonBackupManager(context).restoreFull(ByteArrayInputStream(archive))
+
+        assertEquals(archivedSettings(), settingsStore.read())
+        PlatoonDatabase(context).use { database ->
+            val restored = database.readableDatabase
+            assertEquals(PlatoonSchema.CURRENT_VERSION, restored.version)
+            assertEquals(1L, count(restored, "members", "uid = ?", ARCHIVED_UID))
+            assertEquals(
+                1L,
+                restored.rawQuery(
+                    "SELECT COUNT(*) FROM sqlite_master " +
+                        "WHERE type = 'table' AND name = 'platoon_maintenance_state'",
+                    null,
+                ).use { cursor ->
+                    assertTrue(cursor.moveToFirst())
+                    cursor.getLong(0)
+                },
+            )
         }
     }
 

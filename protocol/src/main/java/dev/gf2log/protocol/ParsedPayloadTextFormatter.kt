@@ -19,7 +19,9 @@ object ParsedPayloadTextFormatter {
         when (val data = payload.data) {
             is GuildMembersData -> {
                 appendLine(GuildMembersCsv.HEADER)
-                data.members.forEach { appendLine(GuildMembersCsv.row(it, capturedAt)) }
+                data.members.forEach {
+                    appendLine(GuildMembersCsv.rowForSpreadsheet(it, capturedAt))
+                }
             }
             is PlatoonActivityData -> {
                 appendLine("recordType,id,kind,occurredAt,actionId,count,memberName")
@@ -29,7 +31,7 @@ object ParsedPayloadTextFormatter {
                 data.entries.forEach {
                     appendLine(
                         "entry,,${it.kind},${it.occurredAt},${it.actionId},," +
-                            csvEscape(it.memberName),
+                            CsvCell.escape(it.memberName),
                     )
                 }
             }
@@ -39,7 +41,7 @@ object ParsedPayloadTextFormatter {
                     entry.members.forEachIndexed { index, member ->
                         appendLine(
                             "${entry.kind},${entry.occurredAt},$index,${member.role}," +
-                                "${member.uid},${csvEscape(member.name)}",
+                                "${member.uid},${CsvCell.escape(member.name)}",
                         )
                     }
                 }
@@ -74,7 +76,7 @@ object ParsedPayloadTextFormatter {
                     formation.dolls.forEach { doll ->
                         appendLine(
                             listOf(
-                                csvEscape(formation.name),
+                                CsvCell.escape(formation.name),
                                 doll.dollId,
                                 doll.weaponUid,
                                 doll.attachmentUids.joinToString("|"),
@@ -89,8 +91,4 @@ object ParsedPayloadTextFormatter {
         }
     }.trimEnd()
 
-    private fun csvEscape(value: String): String {
-        if (value.none { it == ',' || it == '"' || it == '\n' || it == '\r' }) return value
-        return "\"${value.replace("\"", "\"\"")}\""
-    }
 }

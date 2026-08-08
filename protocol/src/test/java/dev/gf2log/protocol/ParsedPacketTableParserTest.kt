@@ -29,4 +29,39 @@ class ParsedPacketTableParserTest {
     fun rejectsContentWithoutTheMetadataSeparator() {
         assertNull(ParsedPacketTableParser.parse("uid,name\n1,Commander"))
     }
+
+    @Test
+    fun rejectsTablesWhoseRowCountWouldCreateUnboundedViews() {
+        val rows = List(ParsedPacketTableParser.MAX_ROWS + 1) { "$it,Member" }
+        val content = metadata() + (listOf("uid,name") + rows).joinToString("\n")
+
+        assertNull(ParsedPacketTableParser.parse(content))
+    }
+
+    @Test
+    fun rejectsTablesWhoseColumnOrCellBudgetsWouldCreateUnboundedViews() {
+        val tooManyColumns = List(ParsedPacketTableParser.MAX_COLUMNS + 1) { "column$it" }
+            .joinToString(",")
+        val wideContent = metadata() + "$tooManyColumns\n"
+        val header = List(16) { "c$it" }.joinToString(",")
+        val rows = List(128) { index -> List(16) { "$index" }.joinToString(",") }
+        val tooManyCells = metadata() + (listOf(header) + rows).joinToString("\n")
+
+        assertNull(ParsedPacketTableParser.parse(wideContent))
+        assertNull(ParsedPacketTableParser.parse(tooManyCells))
+    }
+
+    @Test
+    fun rejectsOversizedHistoryAndIndividualCells() {
+        val largeHistory = metadata() + "a\n" +
+            "x".repeat(ParsedPacketTableParser.MAX_CONTENT_CHARS)
+        val largeCell = metadata() + "a\n" +
+            "x".repeat(ParsedPacketTableParser.MAX_CELL_CHARS + 1)
+
+        assertNull(ParsedPacketTableParser.parse(largeHistory))
+        assertNull(ParsedPacketTableParser.parse(largeCell))
+    }
+
+    private fun metadata(): String =
+        "capturedAt=2026-08-08T00:00:00Z\nmessageId=1\npayloadType=21917\n\n"
 }

@@ -82,6 +82,17 @@ class GuildMembersCsvTest {
     }
 
     @Test
+    fun rejectsDuplicateUidsBeforeASelectedRosterCanBeRetained() {
+        val content = """
+            ${GuildMembersCsv.HEADER}
+            42,First,60,1,2,3,4,5,2026-07-21T19:11:09Z
+            42,Duplicate,59,6,7,8,9,10,2026-07-21T19:11:09Z
+        """.trimIndent()
+
+        assertNull(GuildMembersCsv.parse(content))
+    }
+
+    @Test
     fun trimsSpreadsheetWhitespaceFromScalarFieldsWithoutChangingTheName() {
         val content = listOf(
             GuildMembersCsv.HEADER,

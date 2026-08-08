@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import dev.gf2log.protocol.GuildMembersCsv
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -24,6 +25,15 @@ class PlatoonDatabase(
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
         db.setForeignKeyConstraintsEnabled(true)
+    }
+
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        if (!db.isReadOnly) {
+            createPlatoonMaintenanceStateTable(db)
+            createPlatoonActivityRetentionIndex(db)
+            trimPlatoonActivity(db)
+        }
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -120,6 +130,7 @@ class PlatoonDatabase(
             """.trimIndent(),
         )
         createWeeklyOverridesTable(db)
+        createPlatoonMaintenanceStateTable(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -216,11 +227,12 @@ class PlatoonDatabase(
         if (oldVersion < 7) {
             backfillSnapshotMembershipPeriodEvents(db)
         }
-        if (oldVersion in 6 until 8) {
-            migratePlatoonActivityIdentity(db)
-        }
         if (needsManualCalendarDateBackfill) {
             backfillManualCalendarDates(db, ZoneId.systemDefault())
+        }
+        if (oldVersion < 11) {
+            createPlatoonMaintenanceStateTable(db)
+            createPlatoonActivityRetentionIndex(db)
         }
     }
 
@@ -304,18 +316,32 @@ class PlatoonDatabase(
         createPlatoonActivityTable(db)
         db.execSQL(
             """
-            INSERT INTO platoon_activity(
+            INSERT OR IGNORE INTO platoon_activity(
                 id, occurred_at, action_id, kind, member_name, captured_at,
                 resolved_uid, resolution, member_event_id
             )
             SELECT id, occurred_at, action_id, kind, member_name, captured_at,
                    resolved_uid, resolution, member_event_id
             FROM platoon_activity_legacy_v10
+            ORDER BY CASE WHEN member_event_id IS NULL THEN 1 ELSE 0 END, id
             """.trimIndent(),
         )
         db.execSQL("DROP TABLE weekly_notes_legacy_v10")
         db.execSQL("DROP TABLE platoon_activity_legacy_v10")
         db.execSQL("DROP TABLE member_events_legacy_v10")
+    }
+
+    @Synchronized
+    internal fun <T> runInTransaction(block: () -> T): T {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val result = block()
+            db.setTransactionSuccessful()
+            return result
+        } finally {
+            db.endTransaction()
+        }
     }
 
     @Synchronized
@@ -326,6 +352,12 @@ class PlatoonDatabase(
         deferHistoricalMembershipReconciliation: Boolean = false,
     ): SnapshotIngestResult {
         require(snapshot.members.isNotEmpty()) { "A Platoon snapshot cannot be empty" }
+        require(snapshot.members.size <= GuildMembersCsv.MAX_ROSTER_MEMBERS) {
+            "A Platoon snapshot exceeds the member limit"
+        }
+        require(snapshot.members.all { it.name.length <= GuildMembersCsv.MAX_MEMBER_NAME_CHARS }) {
+            "A Platoon snapshot contains an oversized member name"
+        }
         require(snapshot.members.map(SnapshotMember::uid).distinct().size == snapshot.members.size) {
             "A Platoon snapshot cannot contain duplicate UIDs"
         }
@@ -467,6 +499,7 @@ class PlatoonDatabase(
                 ensureRosterActiveMembershipPeriod(db, member.uid, source)
             }
 
+            trimPlatoonActivity(db)
             resolveUnresolvedActivityUids(db)
             db.setTransactionSuccessful()
             return SnapshotIngestResult(
@@ -515,7 +548,7 @@ class PlatoonDatabase(
         allUids.forEach { uid ->
             val runs = buildRosterPresenceRuns(snapshots, uid)
             runs.forEach { run ->
-                if (!hasStrongMembershipPeriodOverlapping(db, uid, run)) {
+                if (!reconcilePreservedMembershipPeriodOverlap(db, uid, run)) {
                     insertRosterPresenceRun(db, uid, run)
                 }
             }
@@ -586,6 +619,7 @@ class PlatoonDatabase(
               AND (left_source IS NULL OR left_source IN (?, ?))
               AND joined_precision IN (?, ?)
               AND (left_precision IS NULL OR left_precision = ?)
+              AND note = ''
             """.trimIndent(),
             arrayOf(
                 sourceNames[0],
@@ -653,21 +687,246 @@ class PlatoonDatabase(
         return runs
     }
 
-    private fun hasStrongMembershipPeriodOverlapping(
+    // Function Name: reconcilePreservedMembershipPeriodOverlap
+    // Description:
+    // - Preserves exact, manual, or user-annotated membership periods during roster replay.
+    // - Closes every overlapping open preserved period at an observed roster absence.
+    // - Allows a later roster-presence run to become a separate inferred rejoin period.
+    // Parameters:
+    // - db: Writable database participating in the replay transaction.
+    // - uid: Stable member identity whose roster run is being reconciled.
+    // - run: One contiguous roster-presence run bounded by observed absence when known.
+    // Returns:
+    // - True when a preserved period covers this run; false when a new weak run is required.
+    private fun reconcilePreservedMembershipPeriodOverlap(
         db: SQLiteDatabase,
         uid: Long,
         run: RosterPresenceRun,
-    ): Boolean = db.rawQuery(
-        """
-        SELECT 1
-        FROM membership_periods
-        WHERE uid = ?
-          AND (joined_at IS NULL OR joined_at <= ?)
-          AND (left_at IS NULL OR left_at > ?)
-        LIMIT 1
-        """.trimIndent(),
-        arrayOf(uid.toString(), run.lastSeenAt.toEpochMilli().toString(), run.firstSeenAt.toEpochMilli().toString()),
-    ).use(Cursor::moveToFirst)
+    ): Boolean {
+        val overlaps = db.rawQuery(
+            """
+            SELECT id, joined_at, joined_precision, joined_source,
+                   left_at, left_precision, left_source
+            FROM membership_periods
+            WHERE uid = ?
+              AND (joined_at IS NULL OR joined_at <= ?)
+              AND (left_at IS NULL OR left_at > ?)
+            ORDER BY COALESCE(joined_at, -9223372036854775808), id
+            """.trimIndent(),
+            arrayOf(
+                uid.toString(),
+                run.lastSeenAt.toEpochMilli().toString(),
+                run.firstSeenAt.toEpochMilli().toString(),
+            ),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        PreservedMembershipPeriodOverlap(
+                            id = cursor.getLong(0),
+                            joinedAt = cursor.getNullableLong(1)?.let(Instant::ofEpochMilli),
+                            joinedPrecision = EvidencePrecision.valueOf(cursor.getString(2)),
+                            joinedSource = EvidenceSource.valueOf(cursor.getString(3)),
+                            leftAt = cursor.getNullableLong(4)?.let(Instant::ofEpochMilli),
+                            leftPrecision = cursor.getNullableString(5)
+                                ?.let(EvidencePrecision::valueOf),
+                            leftSource = cursor.getNullableString(6)
+                                ?.let(EvidenceSource::valueOf),
+                        ),
+                    )
+                }
+            }
+        }
+        overlaps.forEach { membershipPeriod ->
+            val joinedAt = membershipPeriod.joinedAt
+            if (
+                joinedAt != null &&
+                run.firstSeenAt.isBefore(joinedAt) &&
+                isWeakSnapshotBoundary(
+                    membershipPeriod.joinedPrecision,
+                    membershipPeriod.joinedSource,
+                )
+            ) {
+                val updated = db.update(
+                    "membership_periods",
+                    ContentValues().apply {
+                        put("joined_at", run.firstSeenAt.toEpochMilli())
+                        putNull("joined_date")
+                        put("joined_time_known", 1)
+                        put("joined_precision", EvidencePrecision.INFERRED.name)
+                        put("joined_source", EvidenceSource.LEGACY_IMPORT.name)
+                    },
+                    "id = ?",
+                    arrayOf(membershipPeriod.id.toString()),
+                )
+                if (updated == 1) {
+                    updateSnapshotBoundaryEvent(
+                        db = db,
+                        membershipPeriodId = membershipPeriod.id,
+                        uid = uid,
+                        memberName = run.name,
+                        type = if (hasEarlierMembershipPeriod(db, uid, membershipPeriod.id)) {
+                            MemberEventType.REJOINED
+                        } else {
+                            MemberEventType.JOINED
+                        },
+                        observedAt = run.firstSeenAt,
+                    )
+                }
+            }
+
+            val observedLeftAt = run.leftAt
+            val weakLeftBoundary = membershipPeriod.leftPrecision != null &&
+                membershipPeriod.leftSource != null &&
+                isWeakSnapshotBoundary(
+                    membershipPeriod.leftPrecision,
+                    membershipPeriod.leftSource,
+                )
+            if (
+                observedLeftAt != null &&
+                (
+                    membershipPeriod.leftAt == null ||
+                        (weakLeftBoundary && membershipPeriod.leftAt != observedLeftAt)
+                    )
+            ) {
+                val updated = db.update(
+                    "membership_periods",
+                    ContentValues().apply {
+                        put("left_at", observedLeftAt.toEpochMilli())
+                        putNull("left_date")
+                        put("left_time_known", 1)
+                        put("left_precision", EvidencePrecision.INFERRED.name)
+                        put("left_source", EvidenceSource.LEGACY_IMPORT.name)
+                    },
+                    "id = ?",
+                    arrayOf(membershipPeriod.id.toString()),
+                )
+                if (updated == 1) {
+                    updateSnapshotBoundaryEvent(
+                        db = db,
+                        membershipPeriodId = membershipPeriod.id,
+                        uid = uid,
+                        memberName = run.name,
+                        type = MemberEventType.LEFT,
+                        observedAt = observedLeftAt,
+                    )
+                }
+            } else if (
+                observedLeftAt == null &&
+                membershipPeriod.leftAt != null &&
+                weakLeftBoundary &&
+                !run.lastSeenAt.isBefore(membershipPeriod.leftAt)
+            ) {
+                db.update(
+                    "membership_periods",
+                    ContentValues().apply {
+                        putNull("left_at")
+                        putNull("left_date")
+                        putNull("left_time_known")
+                        putNull("left_precision")
+                        putNull("left_source")
+                    },
+                    "id = ?",
+                    arrayOf(membershipPeriod.id.toString()),
+                )
+                deleteSnapshotBoundaryEvents(
+                    db = db,
+                    membershipPeriodId = membershipPeriod.id,
+                    type = MemberEventType.LEFT,
+                )
+            }
+        }
+        return overlaps.isNotEmpty()
+    }
+
+    private fun isWeakSnapshotBoundary(
+        precision: EvidencePrecision,
+        source: EvidenceSource,
+    ): Boolean = precision in setOf(EvidencePrecision.UNKNOWN, EvidencePrecision.INFERRED) &&
+        source in SNAPSHOT_EVENT_SOURCES
+
+    private fun updateSnapshotBoundaryEvent(
+        db: SQLiteDatabase,
+        membershipPeriodId: Long,
+        uid: Long,
+        memberName: String,
+        type: MemberEventType,
+        observedAt: Instant,
+    ) {
+        val compatibleTypes = when (type) {
+            MemberEventType.JOINED,
+            MemberEventType.REJOINED,
+            -> arrayOf(MemberEventType.JOINED.name, MemberEventType.REJOINED.name)
+            else -> arrayOf(type.name, type.name)
+        }
+        val updated = db.update(
+            "member_events",
+            ContentValues().apply {
+                put("event_type", type.name)
+                putNull("occurred_at")
+                putNull("event_date")
+                put("time_known", 1)
+                put("observed_at", observedAt.toEpochMilli())
+                put("precision", EvidencePrecision.INFERRED.name)
+                put("source", EvidenceSource.LEGACY_IMPORT.name)
+                put("note", memberName)
+            },
+            "membership_period_id = ? AND event_type IN (?, ?) " +
+                "AND source IN (?, ?)",
+            arrayOf(
+                membershipPeriodId.toString(),
+                compatibleTypes[0],
+                compatibleTypes[1],
+                EvidenceSource.SNAPSHOT.name,
+                EvidenceSource.LEGACY_IMPORT.name,
+            ),
+        )
+        if (updated == 0) {
+            insertSnapshotBoundaryEvent(
+                db = db,
+                membershipPeriodId = membershipPeriodId,
+                uid = uid,
+                memberName = memberName,
+                type = type,
+                observedAt = observedAt,
+                source = EvidenceSource.LEGACY_IMPORT,
+            )
+        }
+    }
+
+    private fun deleteSnapshotBoundaryEvents(
+        db: SQLiteDatabase,
+        membershipPeriodId: Long,
+        type: MemberEventType,
+    ) {
+        val eventSelection =
+            "membership_period_id = ? AND event_type = ? AND source IN (?, ?)"
+        val eventArguments = arrayOf(
+            membershipPeriodId.toString(),
+            type.name,
+            EvidenceSource.SNAPSHOT.name,
+            EvidenceSource.LEGACY_IMPORT.name,
+        )
+        db.delete(
+            "weekly_notes",
+            "is_automatic = 1 AND event_id IN " +
+                "(SELECT id FROM member_events WHERE $eventSelection)",
+            eventArguments,
+        )
+        db.update(
+            "weekly_notes",
+            ContentValues().apply { putNull("event_id") },
+            "event_id IN (SELECT id FROM member_events WHERE $eventSelection)",
+            eventArguments,
+        )
+        db.update(
+            "platoon_activity",
+            ContentValues().apply { putNull("member_event_id") },
+            "member_event_id IN (SELECT id FROM member_events WHERE $eventSelection)",
+            eventArguments,
+        )
+        db.delete("member_events", eventSelection, eventArguments)
+    }
 
     private fun insertRosterPresenceRun(
         db: SQLiteDatabase,
@@ -804,6 +1063,7 @@ class PlatoonDatabase(
                     if (resolvedUid != null) resolved += 1
                 }
             }
+            trimPlatoonActivity(db)
             resolveUnresolvedActivityUids(db)
             reconcileInferredMembershipBoundaries(db)
             db.setTransactionSuccessful()
@@ -905,6 +1165,7 @@ class PlatoonDatabase(
                     PlatoonUpdateEffect.IGNORE -> Unit
                 }
             }
+            trimPlatoonActivity(db)
             db.setTransactionSuccessful()
             return UpdatesIngestResult(acceptedObservations.size, membershipEvents, patrolFacts)
         } finally {
@@ -2196,53 +2457,29 @@ class PlatoonDatabase(
             WHERE resolved_uid IS NULL
             """.trimIndent(),
         )
+        createPlatoonActivityRetentionIndex(db)
     }
 
-    private fun migratePlatoonActivityIdentity(db: SQLiteDatabase) {
-        db.execSQL("ALTER TABLE platoon_activity RENAME TO platoon_activity_legacy")
+    private fun createPlatoonActivityRetentionIndex(db: SQLiteDatabase) {
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS platoon_activity_resolution_retention " +
+                "ON platoon_activity(resolved_uid, captured_at DESC, id DESC)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS platoon_activity_retention_order " +
+                "ON platoon_activity(captured_at DESC, id DESC)",
+        )
+    }
+
+    private fun createPlatoonMaintenanceStateTable(db: SQLiteDatabase) {
         db.execSQL(
             """
-            CREATE TABLE platoon_activity (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                occurred_at INTEGER NOT NULL,
-                action_id INTEGER NOT NULL,
-                kind INTEGER NOT NULL,
-                member_name TEXT NOT NULL,
-                captured_at INTEGER NOT NULL,
-                resolved_uid INTEGER REFERENCES members(uid),
-                resolution TEXT NOT NULL DEFAULT 'UNRESOLVED',
-                member_event_id INTEGER REFERENCES member_events(id)
+            CREATE TABLE IF NOT EXISTS platoon_maintenance_state (
+                key TEXT PRIMARY KEY,
+                value INTEGER NOT NULL
             )
             """.trimIndent(),
         )
-        db.execSQL(
-            """
-            CREATE UNIQUE INDEX platoon_activity_exact_identity
-            ON platoon_activity(occurred_at, action_id, kind, resolved_uid)
-            WHERE resolved_uid IS NOT NULL
-            """.trimIndent(),
-        )
-        db.execSQL(
-            """
-            CREATE UNIQUE INDEX platoon_activity_unresolved_identity
-            ON platoon_activity(occurred_at, action_id, kind, member_name)
-            WHERE resolved_uid IS NULL
-            """.trimIndent(),
-        )
-        db.execSQL(
-            """
-            INSERT OR IGNORE INTO platoon_activity(
-                id, occurred_at, action_id, kind, member_name, captured_at,
-                resolved_uid, resolution, member_event_id
-            )
-            SELECT id, occurred_at, action_id, kind, member_name, captured_at,
-                   resolved_uid, resolution, member_event_id
-            FROM platoon_activity_legacy
-            ORDER BY CASE WHEN member_event_id IS NULL THEN 1 ELSE 0 END, id
-            """.trimIndent(),
-        )
-        db.execSQL("DROP TABLE platoon_activity_legacy")
-        createPlatoonActivityIndexes(db)
     }
 
     private fun latestSnapshotCapturedAt(db: SQLiteDatabase): Instant? =
@@ -2292,28 +2529,26 @@ class PlatoonDatabase(
     }
 
     private fun resolveUnresolvedActivityUids(db: SQLiteDatabase) {
-        val unresolved = db.query(
-            "platoon_activity",
-            arrayOf("id", "occurred_at", "member_name", "action_id", "kind"),
-            "resolved_uid IS NULL",
-            null,
-            null,
-            null,
-            "occurred_at, id",
+        createPlatoonMaintenanceStateTable(db)
+        val cursorId = db.rawQuery(
+            "SELECT value FROM platoon_maintenance_state WHERE key = ?",
+            arrayOf(ACTIVITY_RESOLUTION_CURSOR_KEY),
         ).use { cursor ->
-            buildList {
-                while (cursor.moveToNext()) {
-                    add(
-                        UnresolvedActivity(
-                            id = cursor.getLong(0),
-                            occurredAt = Instant.ofEpochMilli(cursor.getLong(1)),
-                            memberName = cursor.getString(2),
-                            actionId = cursor.getLong(3),
-                            kind = cursor.getLong(4),
-                        ),
-                    )
-                }
-            }
+            if (cursor.moveToFirst()) cursor.getLong(0) else 0L
+        }
+        val unresolved = readUnresolvedActivityBatch(
+            db = db,
+            selection = "resolved_uid IS NULL AND id > ?",
+            selectionArgs = arrayOf(cursorId.toString()),
+            limit = MAX_UNRESOLVED_ACTIVITY_RESOLUTIONS,
+        ).toMutableList()
+        if (unresolved.size < MAX_UNRESOLVED_ACTIVITY_RESOLUTIONS) {
+            unresolved += readUnresolvedActivityBatch(
+                db = db,
+                selection = "resolved_uid IS NULL AND id <= ?",
+                selectionArgs = arrayOf(cursorId.toString()),
+                limit = MAX_UNRESOLVED_ACTIVITY_RESOLUTIONS - unresolved.size,
+            )
         }
         unresolved.forEach { activity ->
             val uid = resolveUidForName(db, activity.memberName, activity.occurredAt)
@@ -2353,6 +2588,72 @@ class PlatoonDatabase(
                 )
             }
         }
+        unresolved.lastOrNull()?.let { activity ->
+            db.insertWithOnConflict(
+                "platoon_maintenance_state",
+                null,
+                ContentValues().apply {
+                    put("key", ACTIVITY_RESOLUTION_CURSOR_KEY)
+                    put("value", activity.id)
+                },
+                SQLiteDatabase.CONFLICT_REPLACE,
+            )
+        }
+    }
+
+    private fun readUnresolvedActivityBatch(
+        db: SQLiteDatabase,
+        selection: String,
+        selectionArgs: Array<String>,
+        limit: Int,
+    ): List<UnresolvedActivity> {
+        if (limit <= 0) return emptyList()
+        return db.query(
+            "platoon_activity",
+            arrayOf("id", "occurred_at", "member_name", "action_id", "kind"),
+            selection,
+            selectionArgs,
+            null,
+            null,
+            "id",
+            limit.toString(),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        UnresolvedActivity(
+                            id = cursor.getLong(0),
+                            occurredAt = Instant.ofEpochMilli(cursor.getLong(1)),
+                            memberName = cursor.getString(2),
+                            actionId = cursor.getLong(3),
+                            kind = cursor.getLong(4),
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    // Function Name: trimPlatoonActivity
+    // Description:
+    // - Caps cumulative network-derived activity evidence to a bounded newest-first history.
+    // - Runs on database open and after each ingest so an older oversized database self-heals.
+    // Parameters:
+    // - db: Writable database participating in the caller's transaction when applicable.
+    // Returns:
+    // - Unit after deleting only rows beyond the retained observation limit.
+    private fun trimPlatoonActivity(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            DELETE FROM platoon_activity
+            WHERE id IN (
+                SELECT id
+                FROM platoon_activity
+                ORDER BY captured_at DESC, id DESC
+                LIMIT -1 OFFSET $MAX_STORED_ACTIVITY_OBSERVATIONS
+            )
+            """.trimIndent(),
+        )
     }
 
     private fun ensureRosterActiveMembershipPeriod(
@@ -3431,6 +3732,16 @@ class PlatoonDatabase(
         val members: Map<Long, RosterIdentity>,
     )
 
+    private data class PreservedMembershipPeriodOverlap(
+        val id: Long,
+        val joinedAt: Instant?,
+        val joinedPrecision: EvidencePrecision,
+        val joinedSource: EvidenceSource,
+        val leftAt: Instant?,
+        val leftPrecision: EvidencePrecision?,
+        val leftSource: EvidenceSource?,
+    )
+
     private data class RosterPresenceRun(
         val firstSeenAt: Instant,
         val lastSeenAt: Instant,
@@ -3446,6 +3757,9 @@ class PlatoonDatabase(
          * must never be interpreted as a missed Daily Patrol.
          */
         const val DAILY_PATROL_REWARD_ACTION_ID = 802001L
+        internal const val MAX_STORED_ACTIVITY_OBSERVATIONS = 10_000
+        private const val MAX_UNRESOLVED_ACTIVITY_RESOLUTIONS = 250
+        private const val ACTIVITY_RESOLUTION_CURSOR_KEY = "activity_resolution_cursor"
         private const val DAILY_PATROL_RELATED_ACTION_ID = 801005L
         private const val NAME_RESOLUTION_WINDOW_MILLIS = 30L * 24L * 60L * 60L * 1000L
         private const val MEMBERSHIP_CORRELATION_WINDOW_MILLIS = 12L * 60L * 60L * 1000L

@@ -6,7 +6,15 @@ import org.junit.Test
 class CsvCellTest {
     @Test
     fun neutralizesEverySpreadsheetFormulaPrefixIncludingLeadingWhitespace() {
-        listOf("=1+1", "+cmd", "-2+3", "@SUM(A1)", "  =HYPERLINK(\"x\")").forEach { value ->
+        listOf(
+            "=1+1",
+            "+cmd",
+            "-2+3",
+            "@SUM(A1)",
+            "  =HYPERLINK(\"x\")",
+            "\t=WEBSERVICE(\"x\")",
+            "\r@SUM(A1)",
+        ).forEach { value ->
             val escaped = CsvCell.escape(value)
             val decoded = escaped.removeSurrounding("\"").replace("\"\"", "\"")
 

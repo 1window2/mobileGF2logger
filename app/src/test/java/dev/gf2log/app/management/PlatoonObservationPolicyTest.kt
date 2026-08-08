@@ -18,6 +18,21 @@ class PlatoonObservationPolicyTest {
     }
 
     @Test
+    fun `activity bounds untrusted names and observation count`() {
+        val observations = (1..(PlatoonObservationPolicy.MAX_ACTIVITY_OBSERVATIONS + 1)).map {
+            activity(name = "Member $it").copy(actionId = it.toLong())
+        }
+        val oversizedName = activity(
+            name = "x".repeat(PlatoonObservationPolicy.MAX_ACTIVITY_MEMBER_NAME_LENGTH + 1),
+        )
+
+        val accepted = PlatoonObservationPolicy.activity(listOf(oversizedName) + observations)
+
+        assertEquals(PlatoonObservationPolicy.MAX_ACTIVITY_OBSERVATIONS, accepted.size)
+        assertEquals(observations.take(PlatoonObservationPolicy.MAX_ACTIVITY_OBSERVATIONS), accepted)
+    }
+
+    @Test
     fun `updates reject empty member lists and deduplicate accepted observations`() {
         val valid = update(
             occurredAt = Instant.parse("2026-07-31T00:00:02Z"),

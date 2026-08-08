@@ -747,6 +747,59 @@ class PlatoonDatabaseIntegrationTest {
     }
 
     @Test
+    fun updatesIngestionTrimsDailyPatrolFactsWithoutWaitingForReopen() {
+        val capturedAt = Instant.parse("2026-07-31T00:00:00Z")
+        val writable = database.writableDatabase
+        writable.beginTransaction()
+        try {
+            repeat(PlatoonDatabase.MAX_STORED_ACTIVITY_OBSERVATIONS) { index ->
+                writable.insertOrThrow(
+                    "platoon_activity",
+                    null,
+                    ContentValues().apply {
+                        put("occurred_at", index.toLong())
+                        put("action_id", index.toLong() + 1)
+                        put("kind", 1L)
+                        put("member_name", "Unresolved $index")
+                        put("captured_at", index.toLong())
+                        put("resolution", ActivityResolution.UNRESOLVED.name)
+                    },
+                )
+            }
+            writable.setTransactionSuccessful()
+        } finally {
+            writable.endTransaction()
+        }
+
+        val result = database.ingestPlatoonUpdates(
+            listOf(
+                update(
+                    PlatoonUpdateSemantics.KIND_DAILY_PATROL,
+                    capturedAt,
+                    TARGET_UID,
+                    "Target",
+                ),
+            ),
+            capturedAt,
+        )
+
+        assertEquals(1, result.patrolFacts)
+        assertEquals(
+            PlatoonDatabase.MAX_STORED_ACTIVITY_OBSERVATIONS.toLong(),
+            count("platoon_activity", "id > ?", 0),
+        )
+        assertEquals(0L, count("platoon_activity", "action_id = ?", 1))
+        assertEquals(
+            1L,
+            count(
+                "platoon_activity",
+                "action_id = ?",
+                PlatoonDatabase.DAILY_PATROL_REWARD_ACTION_ID,
+            ),
+        )
+    }
+
+    @Test
     fun unresolvedActivityResolutionRotatesPastAnUnmatchableBatch() {
         val capturedAt = Instant.parse("2026-07-31T00:00:00Z")
         val writable = database.writableDatabase

@@ -27,6 +27,8 @@ All notable changes to mobileGF2logger are documented here.
 - Bound roster imports, per-payload activity observations, retained activity
   history, and unresolved-name reconciliation. Failed or duplicate roster
   imports now roll back their newly retained evidence as one operation.
+- Apply the retained-activity cap after both activity packets and Updates-
+  derived Daily Patrol facts, without waiting for a database reopen.
 - Neutralize spreadsheet formulas in every captured roster, activity, Updates,
   and formation packet table as well as all spreadsheet-facing CSV exports,
   while preserving internal roster evidence losslessly.

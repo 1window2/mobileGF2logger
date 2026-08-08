@@ -1165,6 +1165,7 @@ class PlatoonDatabase(
                     PlatoonUpdateEffect.IGNORE -> Unit
                 }
             }
+            trimPlatoonActivity(db)
             db.setTransactionSuccessful()
             return UpdatesIngestResult(acceptedObservations.size, membershipEvents, patrolFacts)
         } finally {

@@ -41,8 +41,13 @@ class PlatoonRepository(context: Context) {
         capturedAt: Instant = Instant.now(),
     ): ActivityIngestResult = access { database ->
         database.ingestPlatoonActivity(
-            observations = data.entries.mapNotNull {
-                if (it.occurredAt == 0u || it.actionId == 0u || it.memberName.isBlank()) {
+            observations = data.entries.asSequence().mapNotNull {
+                if (
+                    it.occurredAt == 0u ||
+                    it.actionId == 0u ||
+                    it.memberName.isBlank() ||
+                    it.memberName.length > PlatoonObservationPolicy.MAX_ACTIVITY_MEMBER_NAME_LENGTH
+                ) {
                     null
                 } else {
                     PlatoonActivityObservation(
@@ -52,7 +57,10 @@ class PlatoonRepository(context: Context) {
                         memberName = it.memberName,
                     )
                 }
-            },
+            }
+                .distinct()
+                .take(PlatoonObservationPolicy.MAX_ACTIVITY_OBSERVATIONS)
+                .toList(),
             capturedAt = capturedAt,
         )
     }

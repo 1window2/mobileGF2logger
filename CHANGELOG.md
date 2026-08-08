@@ -4,6 +4,39 @@ All notable changes to mobileGF2logger are documented here.
 
 ## Unreleased
 
+## 2.1.2 - 2026-08-08
+
+### Changed
+
+- Re-center the launcher emblem against the real source canvas, reduce it by
+  10%, and brighten the matte silver and gold-orange finish without redrawing
+  its silhouette or introducing resampling artifacts.
+- Make the English project summary more descriptive for people searching for a
+  GIRLS' FRONTLINE 2 or GF2 Platoon management companion.
+
+### Fixed
+
+- Bound parsed-packet storage and table rendering by input size, row count,
+  column count, cell count, and cell length so hostile or corrupt payloads
+  cannot create unbounded Android view trees.
+- Bound multi-part protocol continuations by byte and fragment counts, discard
+  an oversized pending dataset, and recover cleanly for later valid frames.
+- Bound roster imports, per-payload activity observations, retained activity
+  history, and unresolved-name reconciliation. Failed or duplicate roster
+  imports now roll back their newly retained evidence as one operation.
+- Neutralize spreadsheet formulas in every captured roster, activity, Updates,
+  and formation packet table as well as all spreadsheet-facing CSV exports,
+  while preserving internal roster evidence losslessly.
+- Upgrade schema-v6/v7 databases directly through the v10 activity-table
+  rebuild without attempting to recreate already-installed identity indexes.
+- Reconcile an observed roster absence against an exact or annotated open
+  membership period, preserving its strong boundary and note while creating a
+  later rejoin period instead of suppressing the gap.
+- Preserve an imported roster's parsed capture time so exporting the latest
+  Platoon CSV cannot accidentally select a newly imported historical file.
+- Accept a capped pre-Gunsmoke opening anchor only when it belongs to the
+  immediately preceding Monday-through-Saturday counter period.
+
 ## 2.1.1 - 2026-08-08
 
 ### Added

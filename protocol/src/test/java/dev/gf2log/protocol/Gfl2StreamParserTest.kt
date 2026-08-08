@@ -195,6 +195,43 @@ class Gfl2StreamParserTest {
     }
 
     @Test
+    fun continuationCountOverflowDropsPendingStateAndParserRecovers() {
+        val parser = Gfl2StreamParser(maximumPendingContinuations = 2)
+        val continuation = outerMessage(
+            0,
+            payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, guildMembersPayload("Part", 8uL)),
+        )
+
+        assertTrue(parser.accept(continuation).isEmpty())
+        assertTrue(parser.accept(continuation).isEmpty())
+        val overflow = parser.accept(continuation)
+
+        assertEquals(1, overflow.filterIsInstance<ParseEvent.Warning>().size)
+        assertTrue(parser.finish().isEmpty())
+        val recovered = parser.accept(
+            outerMessage(
+                7,
+                payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, guildMembersPayload("Fresh", 9uL)),
+            ),
+        ).singlePayload()
+        assertEquals("Fresh", (recovered.value.data as GuildMembersData).members.single().name)
+    }
+
+    @Test
+    fun continuationByteOverflowDropsPendingState() {
+        val body = guildMembersPayload("Part", 8uL)
+        val parser = Gfl2StreamParser(maximumPendingPayloadBytes = body.size * 2 - 1)
+        val continuation = outerMessage(
+            0,
+            payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, body),
+        )
+
+        assertTrue(parser.accept(continuation).isEmpty())
+        assertEquals(1, parser.accept(continuation).filterIsInstance<ParseEvent.Warning>().size)
+        assertTrue(parser.finish().isEmpty())
+    }
+
+    @Test
     fun unknownPayloadsRemainObservableWithoutRetainingTheirBytes() {
         val parser = Gfl2StreamParser()
         val events = parser.accept(outerMessage(51, payload(24567, byteArrayOf(1, 2, 3))))

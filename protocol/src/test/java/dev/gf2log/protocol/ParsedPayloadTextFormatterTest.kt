@@ -34,6 +34,22 @@ class ParsedPayloadTextFormatterTest {
     }
 
     @Test
+    fun guildPacketHistoryNeutralizesFormulaLikeNamesWithoutChangingRetainedRows() {
+        val formulaMember = member(1u, "=HYPERLINK(\"https://invalid\")")
+        val payload = ParsedPayload(
+            messageId = 7,
+            payloadType = Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
+            isEndOfMessage = true,
+            data = GuildMembersData(listOf(formulaMember)),
+        )
+
+        val history = ParsedPayloadTextFormatter.format(payload, "2026-08-08T00:00:00Z")
+
+        assertTrue(history.contains("1,\"'=HYPERLINK(\"\"https://invalid\"\")\""))
+        assertTrue(GuildMembersCsv.row(formulaMember, "2026-08-08T00:00:00Z").contains(",\"=HYPERLINK"))
+    }
+
+    @Test
     fun platoonActivityPacketFormatsRawActionEvidence() {
         val payload = ParsedPayload(
             messageId = 8,
@@ -72,6 +88,42 @@ class ParsedPayloadTextFormatterTest {
 
         assertTrue(text.contains("kind,occurredAt,memberIndex,role,uid,memberName"))
         assertTrue(text.contains("3,1700300000,0,1,3333333,\"Name,WithComma\""))
+    }
+
+    @Test
+    fun packetHistoryNeutralizesFormulaLikeActivityAndUpdateNames() {
+        val activity = ParsedPayload(
+            messageId = 10,
+            payloadType = Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY,
+            isEndOfMessage = true,
+            data = PlatoonActivityData(
+                summaries = emptyList(),
+                entries = listOf(PlatoonActivityEntry(1u, 123u, 802001u, "=1+1")),
+            ),
+        )
+        val updates = ParsedPayload(
+            messageId = 11,
+            payloadType = Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES,
+            isEndOfMessage = true,
+            data = PlatoonUpdatesData(
+                listOf(
+                    PlatoonUpdateEntry(
+                        kind = 3u,
+                        members = listOf(PlatoonUpdateMember(1u, 42u, "\t@SUM(A1)")),
+                        occurredAt = 123u,
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(
+            ParsedPayloadTextFormatter.format(activity, "2026-08-08T00:00:00Z")
+                .contains("entry,,1,123,802001,,'=1+1"),
+        )
+        assertTrue(
+            ParsedPayloadTextFormatter.format(updates, "2026-08-08T00:00:00Z")
+                .contains("3,123,0,1,42,'\t@SUM(A1)"),
+        )
     }
 
     private fun member(uid: UInt, name: String) = GuildMember(

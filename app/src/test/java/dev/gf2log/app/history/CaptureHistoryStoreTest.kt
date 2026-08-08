@@ -60,6 +60,21 @@ class CaptureHistoryStoreTest {
         }
     }
 
+    @Test
+    fun refusesToReadAnOversizedLegacyHistoryEntry() {
+        val directory = Files.createTempDirectory("gf2log-history-bound-test").toFile()
+        try {
+            val file = directory.resolve("1_21917_1.txt")
+            file.writeBytes(ByteArray(CaptureHistoryStore.MAX_ENTRY_BYTES + 1))
+            val store = CaptureHistoryStore(directory)
+
+            assertEquals(1, store.list().size)
+            assertTrue(store.read(file.name) == null)
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
     private fun payload(index: Int): ParsedPayload = ParsedPayload(
         messageId = index,
         payloadType = 11138,

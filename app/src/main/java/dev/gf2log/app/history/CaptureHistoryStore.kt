@@ -27,7 +27,12 @@ class CaptureHistoryStore(
         val destination = File(directory, id)
         val temporary = File.createTempFile("packet_", ".tmp", directory)
         try {
-            temporary.writeText(ParsedPayloadTextFormatter.format(payload, capturedAt), Charsets.UTF_8)
+            val content = ParsedPayloadTextFormatter.format(payload, capturedAt)
+                .toByteArray(Charsets.UTF_8)
+            require(content.size <= MAX_ENTRY_BYTES) {
+                "Parsed-packet history entry exceeds the storage limit"
+            }
+            temporary.writeBytes(content)
             try {
                 Files.move(
                     temporary.toPath(),
@@ -59,6 +64,7 @@ class CaptureHistoryStore(
         if (id.isBlank() || File(id).name != id) return null
         val file = File(directory, id)
         if (!file.isFile || file.parentFile?.canonicalFile != directory.canonicalFile) return null
+        if (file.length() > MAX_ENTRY_BYTES) return null
         return file.readText(Charsets.UTF_8)
     }
 
@@ -96,6 +102,7 @@ class CaptureHistoryStore(
 
     companion object {
         const val MAX_ENTRIES = 100
+        const val MAX_ENTRY_BYTES = 2 * 1024 * 1024
         const val HISTORY_DIRECTORY = "capture-history"
         private val sequence = AtomicLong()
         private val LOG_TIME_FORMAT = DateTimeFormatter

@@ -406,7 +406,7 @@ class MainActivity : LocalizedActivity() {
                 var retained = 0
                 var duplicates = 0
                 val createdFiles = mutableListOf<File>()
-                try {
+                val imported = try {
                     sources.forEach { source ->
                         val input = TrustedImportSource.openInputStream(contentResolver, source)
                             ?: error("Document provider did not open an input stream")
@@ -419,11 +419,11 @@ class MainActivity : LocalizedActivity() {
                             }
                         }
                     }
+                    PlatoonRepository(this).reconcileRetainedCsvFiles(directory)
                 } catch (error: Exception) {
                     createdFiles.forEach(File::delete)
                     throw error
                 }
-                val imported = PlatoonRepository(this).reconcileRetainedCsvFiles(directory)
                 CsvImportSummary(retained, duplicates, imported)
             }
             statusHandler.post {

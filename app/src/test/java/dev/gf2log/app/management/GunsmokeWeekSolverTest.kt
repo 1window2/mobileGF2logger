@@ -12,6 +12,36 @@ class GunsmokeWeekSolverTest {
     private val start = LocalDate.of(2026, 7, 19)
 
     @Test
+    fun cappedOpeningAnchorMustBelongToTheImmediatelyPrecedingCounterPeriod() {
+        val periodStart = start.atTime(5, 0).atZone(zone).toInstant()
+
+        assertEquals(
+            true,
+            GunsmokeWeekSolver.isClosedOpeningAnchor(
+                capturedAt = periodStart.minusSeconds(5 * 86_400),
+                weeklyMerit = 540,
+                periodStart = periodStart,
+            ),
+        )
+        assertEquals(
+            false,
+            GunsmokeWeekSolver.isClosedOpeningAnchor(
+                capturedAt = periodStart.minusSeconds(7 * 86_400),
+                weeklyMerit = 540,
+                periodStart = periodStart,
+            ),
+        )
+        assertEquals(
+            true,
+            GunsmokeWeekSolver.isClosedOpeningAnchor(
+                capturedAt = periodStart.minusSeconds(10 * 60),
+                weeklyMerit = 90,
+                periodStart = periodStart,
+            ),
+        )
+    }
+
+    @Test
     fun residualFiftyProvesPatrolAbsence() {
         val cells = solveTransition(patrolCredits = 0)
 

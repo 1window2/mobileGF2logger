@@ -605,7 +605,11 @@ internal object GunsmokeWeekSolver {
         if (
             anchor != null &&
             !anchor.capturedAt.isAfter(periodStart) &&
-            isClosedOpeningAnchor(anchor, periodStart) &&
+            isClosedOpeningAnchor(
+                capturedAt = anchor.capturedAt,
+                weeklyMerit = anchor.member.weeklyMerit,
+                periodStart = periodStart,
+            ) &&
             checkpoint.member.totalMerit >= anchor.member.totalMerit
         ) {
             val merit = checkpoint.member.totalMerit - anchor.member.totalMerit
@@ -631,16 +635,27 @@ internal object GunsmokeWeekSolver {
 
     // Function Name: isClosedOpeningAnchor
     // Description:
-    // - Accepts a near-reset capture or a standard-week counter that has already reached its cap.
+    // - Accepts a near-reset capture or a preceding-week counter that has already reached its cap.
     // - A capped Monday-through-Saturday counter cannot gain more merit before the Gunsmoke Sunday.
     // Parameters:
     // - anchor: Latest counter observation before the Gunsmoke report boundary.
     // - periodStart: Sunday 05:00 Gunsmoke report boundary.
     // Returns:
     // - True when no unobserved pre-boundary merit can contaminate the opening interval.
-    private fun isClosedOpeningAnchor(anchor: Checkpoint, periodStart: Instant): Boolean =
-        Duration.between(anchor.capturedAt, periodStart) <= MAX_BOUNDARY_DISTANCE ||
-            anchor.member.weeklyMerit == MAX_PRE_GUNSMOKE_WEEKLY_MERIT
+    internal fun isClosedOpeningAnchor(
+        capturedAt: Instant,
+        weeklyMerit: Long,
+        periodStart: Instant,
+    ): Boolean = !capturedAt.isAfter(periodStart) &&
+        (
+            Duration.between(capturedAt, periodStart) <= MAX_BOUNDARY_DISTANCE ||
+            (
+                weeklyMerit == MAX_PRE_GUNSMOKE_WEEKLY_MERIT &&
+                    !capturedAt.isBefore(
+                        periodStart.minus(PRE_GUNSMOKE_COUNTER_PERIOD),
+                    )
+                )
+            )
 
     private fun statesForMetrics(
         merit: Long,
@@ -1267,6 +1282,7 @@ internal object GunsmokeWeekSolver {
     }
 
     private val MAX_BOUNDARY_DISTANCE: Duration = Duration.ofMinutes(15)
+    private val PRE_GUNSMOKE_COUNTER_PERIOD: Duration = Duration.ofDays(6)
     private const val MAX_SCORE_MERIT_VALUES = 250_000L
     private const val MAX_EXTENSION_STATES = 100_000
     private const val MAX_PARTIAL_SOLUTIONS = 2_000

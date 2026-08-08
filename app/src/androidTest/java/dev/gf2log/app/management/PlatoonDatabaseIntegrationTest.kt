@@ -277,6 +277,135 @@ class PlatoonDatabaseIntegrationTest {
     }
 
     @Test
+    fun historicalRosterReplayClosesAnExactOpenPeriodAndKeepsTheLaterRejoin() {
+        val currentTime = Instant.parse("2026-07-31T00:00:00Z")
+        val exactJoin = currentTime.minusSeconds(5 * 86_400)
+        database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = currentTime,
+                sourceFile = "current-gap.csv",
+                members = listOf(member(OTHER_UID, "Current")),
+            ),
+            EvidenceSource.SNAPSHOT,
+        )
+        database.ingestPlatoonUpdates(
+            listOf(update(PlatoonUpdateSemantics.KIND_JOIN, exactJoin, TARGET_UID, "Historical")),
+            exactJoin.plusSeconds(60),
+        )
+
+        listOf(
+            currentTime.minusSeconds(4 * 86_400) to
+                listOf(member(TARGET_UID, "Historical"), member(OTHER_UID, "Current")),
+            currentTime.minusSeconds(3 * 86_400) to listOf(member(OTHER_UID, "Current")),
+            currentTime.minusSeconds(2 * 86_400) to
+                listOf(member(TARGET_UID, "Historical"), member(OTHER_UID, "Current")),
+        ).forEachIndexed { index, (capturedAt, members) ->
+            database.ingestSnapshot(
+                PlatoonSnapshot(
+                    id = 0,
+                    capturedAt = capturedAt,
+                    sourceFile = "open-gap-$index.csv",
+                    members = members,
+                ),
+                EvidenceSource.LEGACY_IMPORT,
+                historicalOnly = true,
+            )
+        }
+
+        val periods = database.listMemberStatuses()
+            .single { it.uid == TARGET_UID }
+            .membershipPeriods
+            .sortedBy { it.joinedAt ?: Instant.MIN }
+        assertEquals(2, periods.size)
+        assertEquals(exactJoin, periods[0].joinedAt)
+        assertEquals(currentTime.minusSeconds(3 * 86_400), periods[0].leftAt)
+        assertEquals(EvidenceSource.GAME_UPDATES, periods[0].joinedSource)
+        assertEquals(EvidenceSource.LEGACY_IMPORT, periods[0].leftSource)
+        assertEquals(currentTime.minusSeconds(2 * 86_400), periods[1].joinedAt)
+        assertEquals(currentTime, periods[1].leftAt)
+        assertForeignKeysValid()
+    }
+
+    @Test
+    fun historicalRosterReplayPreservesAUserNoteOnAWeakMembershipPeriod() {
+        val currentTime = Instant.parse("2026-07-31T00:00:00Z")
+        database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = currentTime,
+                sourceFile = "current-note.csv",
+                members = listOf(member(TARGET_UID, "Annotated"), member(OTHER_UID, "Current")),
+            ),
+            EvidenceSource.SNAPSHOT,
+        )
+        database.writableDatabase.execSQL(
+            "UPDATE membership_periods SET note = ? WHERE uid = ?",
+            arrayOf<Any>("Preserve this note", TARGET_UID),
+        )
+
+        database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = currentTime.minusSeconds(86_400),
+                sourceFile = "historical-note.csv",
+                members = listOf(member(OTHER_UID, "Current")),
+            ),
+            EvidenceSource.LEGACY_IMPORT,
+            historicalOnly = true,
+        )
+
+        val periods = database.listMemberStatuses()
+            .single { it.uid == TARGET_UID }
+            .membershipPeriods
+        assertEquals(1, periods.size)
+        assertEquals("Preserve this note", periods.single().note)
+        assertEquals(null, periods.single().joinedAt)
+        assertForeignKeysValid()
+    }
+
+    @Test
+    fun schemaSixAndSevenUpgradeDirectlyWithoutRecreatingActivityIndexes() {
+        listOf(6, 7).forEach { legacyVersion ->
+            val databaseName = "platoon-v$legacyVersion-upgrade-test.db"
+            context.deleteDatabase(databaseName)
+            try {
+                createLegacyActivityDatabase(databaseName, legacyVersion)
+                PlatoonDatabase(context, databaseName).use { upgraded ->
+                    val writable = upgraded.writableDatabase
+                    assertEquals(PlatoonSchema.CURRENT_VERSION, writable.version)
+                    assertEquals(
+                        1L,
+                        writable.rawQuery(
+                            "SELECT COUNT(*) FROM sqlite_master " +
+                                "WHERE type = 'index' AND name = 'platoon_activity_exact_identity'",
+                            null,
+                        ).use { cursor ->
+                            assertTrue(cursor.moveToFirst())
+                            cursor.getLong(0)
+                        },
+                    )
+                    assertEquals(
+                        1L,
+                        writable.rawQuery(
+                            "SELECT COUNT(*) FROM platoon_activity",
+                            null,
+                        ).use { cursor ->
+                            assertTrue(cursor.moveToFirst())
+                            cursor.getLong(0)
+                        },
+                    )
+                    writable.rawQuery("PRAGMA foreign_key_check", null).use { cursor ->
+                        assertFalse(cursor.moveToFirst())
+                    }
+                }
+            } finally {
+                context.deleteDatabase(databaseName)
+            }
+        }
+    }
+
+    @Test
     fun exactUpdatesSynchronizeCurrentStateWithoutOverridingNewerRoster() {
         val rosterAt = Instant.parse("2026-07-31T00:00:00Z")
         database.ingestSnapshot(
@@ -420,6 +549,42 @@ class PlatoonDatabaseIntegrationTest {
     }
 
     @Test
+    fun openingDatabaseTrimsAnOversizedActivityBacklogToTheNewestBound() {
+        val writable = database.writableDatabase
+        writable.beginTransaction()
+        try {
+            repeat(PlatoonDatabase.MAX_STORED_ACTIVITY_OBSERVATIONS + 3) { index ->
+                writable.insertOrThrow(
+                    "platoon_activity",
+                    null,
+                    ContentValues().apply {
+                        put("occurred_at", index.toLong())
+                        put("action_id", index.toLong() + 1)
+                        put("kind", 1L)
+                        put("member_name", "Unresolved $index")
+                        put("captured_at", index.toLong())
+                        put("resolution", ActivityResolution.UNRESOLVED.name)
+                    },
+                )
+            }
+            writable.setTransactionSuccessful()
+        } finally {
+            writable.endTransaction()
+        }
+        database.close()
+
+        database = PlatoonDatabase(context, TEST_DATABASE)
+        database.writableDatabase
+
+        assertEquals(
+            PlatoonDatabase.MAX_STORED_ACTIVITY_OBSERVATIONS.toLong(),
+            count("platoon_activity", "id > ?", 0),
+        )
+        assertEquals(0L, count("platoon_activity", "action_id = ?", 1))
+        assertEquals(1L, count("platoon_activity", "action_id = ?", 10_003))
+    }
+
+    @Test
     fun membershipPeriodDeletionRequiresAReplacementAndRemovesLinkedEvents() {
         val capturedAt = Instant.parse("2026-07-31T00:00:00Z")
         database.ingestSnapshot(
@@ -469,6 +634,124 @@ class PlatoonDatabaseIntegrationTest {
         assertEquals(1, status.membershipPeriods.size)
         assertEquals(0L, count("member_events", "membership_period_id = ?", historicalId))
         assertForeignKeysValid()
+    }
+
+    private fun createLegacyActivityDatabase(databaseName: String, version: Int) {
+        context.openOrCreateDatabase(databaseName, Context.MODE_PRIVATE, null).use { legacy ->
+            listOf(
+                """
+                CREATE TABLE snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    captured_at INTEGER NOT NULL,
+                    source_file TEXT UNIQUE,
+                    game_version TEXT
+                )
+                """,
+                """
+                CREATE TABLE snapshot_members (
+                    snapshot_id INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+                    uid INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    level INTEGER NOT NULL,
+                    weekly_merit INTEGER NOT NULL,
+                    total_merit INTEGER NOT NULL,
+                    high_score INTEGER NOT NULL,
+                    total_score INTEGER NOT NULL,
+                    last_login INTEGER NOT NULL,
+                    PRIMARY KEY(snapshot_id, uid)
+                )
+                """,
+                """
+                CREATE TABLE members (
+                    uid INTEGER PRIMARY KEY,
+                    current_name TEXT NOT NULL,
+                    custom_name TEXT,
+                    current_level INTEGER NOT NULL,
+                    is_active INTEGER NOT NULL,
+                    first_seen_at INTEGER NOT NULL,
+                    last_seen_at INTEGER NOT NULL,
+                    note TEXT NOT NULL DEFAULT ''
+                )
+                """,
+                """
+                CREATE TABLE tenures (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    uid INTEGER NOT NULL REFERENCES members(uid),
+                    joined_at INTEGER,
+                    left_at INTEGER,
+                    joined_precision TEXT NOT NULL,
+                    left_precision TEXT,
+                    joined_source TEXT NOT NULL,
+                    left_source TEXT,
+                    note TEXT NOT NULL DEFAULT ''
+                )
+                """,
+                "CREATE INDEX tenures_uid ON tenures(uid, id DESC)",
+                """
+                CREATE TABLE member_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    uid INTEGER NOT NULL REFERENCES members(uid),
+                    tenure_id INTEGER REFERENCES tenures(id),
+                    event_type TEXT NOT NULL,
+                    occurred_at INTEGER,
+                    observed_at INTEGER NOT NULL,
+                    precision TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    note TEXT NOT NULL DEFAULT ''
+                )
+                """,
+                "CREATE INDEX member_events_time ON member_events(observed_at DESC)",
+                """
+                CREATE TABLE weekly_notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    period_start INTEGER NOT NULL,
+                    game_day INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    event_id INTEGER REFERENCES member_events(id) ON DELETE SET NULL,
+                    is_automatic INTEGER NOT NULL DEFAULT 0
+                )
+                """,
+                """
+                CREATE TABLE weekly_overrides (
+                    uid INTEGER NOT NULL,
+                    period_start INTEGER NOT NULL,
+                    game_day INTEGER NOT NULL,
+                    merit_delta INTEGER,
+                    score_delta INTEGER,
+                    attempts INTEGER,
+                    attended INTEGER,
+                    daily_patrol INTEGER,
+                    PRIMARY KEY(uid, game_day)
+                )
+                """,
+                """
+                CREATE TABLE platoon_activity (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    occurred_at INTEGER NOT NULL,
+                    action_id INTEGER NOT NULL,
+                    kind INTEGER NOT NULL,
+                    member_name TEXT NOT NULL,
+                    captured_at INTEGER NOT NULL,
+                    resolved_uid INTEGER REFERENCES members(uid),
+                    resolution TEXT NOT NULL DEFAULT 'UNRESOLVED',
+                    member_event_id INTEGER REFERENCES member_events(id)
+                )
+                """,
+                "CREATE INDEX platoon_activity_member_time " +
+                    "ON platoon_activity(member_name, occurred_at)",
+                "CREATE INDEX platoon_activity_action_time " +
+                    "ON platoon_activity(action_id, occurred_at)",
+            ).forEach { statement -> legacy.execSQL(statement.trimIndent()) }
+            repeat(2) { index ->
+                legacy.execSQL(
+                    "INSERT INTO platoon_activity(" +
+                        "occurred_at, action_id, kind, member_name, captured_at" +
+                        ") VALUES(?, ?, ?, ?, ?)",
+                    arrayOf<Any>(1_000L, 801_005L, 2L, "Duplicate", index.toLong()),
+                )
+            }
+            legacy.version = version
+        }
     }
 
     private fun update(kind: Long, at: Instant, uid: Long, name: String) =

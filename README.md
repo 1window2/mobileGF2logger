@@ -1,4 +1,4 @@
-# mobileGF2logger
+# mobileGF2logger — GIRLS' FRONTLINE 2 (GF2) Platoon Manager
 
 [![Android](https://github.com/1window2/mobileGF2logger/actions/workflows/android.yml/badge.svg)](https://github.com/1window2/mobileGF2logger/actions/workflows/android.yml)
 [![CodeQL](https://github.com/1window2/mobileGF2logger/actions/workflows/codeql.yml/badge.svg)](https://github.com/1window2/mobileGF2logger/actions/workflows/codeql.yml)
@@ -6,9 +6,12 @@
 
 한국어로 된 설명은 [여기](README_KR.md)에서 보실 수 있습니다.
 
-This is a **Platoon(서클)** management tool for the Android client of [GIRLS' FRONTLINE 2: EXILIUM](https://gf2exilium.sunborngame.com/). It is Android-only; an iOS release is not planned.
+This is a **GIRLS' FRONTLINE 2: EXILIUM (GF2) Platoon/서클 management and logging companion** for the [Android game client](https://gf2exilium.sunborngame.com/). It is Android-only; an iOS release is not planned.
 
-mobileGF2logger is a lightweight, non-root app for Platoon masters. It uses Android's per-app VPN permission to parse supported plaintext server responses entirely on the phone without storing raw traffic.
+mobileGF2logger is a lightweight, non-root GF2 logger for Platoon masters. It
+turns supported roster and activity responses into member history and weekly
+task tables entirely on the phone. Android's per-app VPN permission limits
+capture to the selected game package, and raw traffic is never stored.
 
 ## Features
 

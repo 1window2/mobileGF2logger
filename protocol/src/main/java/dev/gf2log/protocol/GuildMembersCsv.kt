@@ -17,6 +17,18 @@ object GuildMembersCsv {
         logTime,
     ).joinToString(",") { CsvCell.escape(it, spreadsheetSafe = false) }
 
+    internal fun rowForSpreadsheet(member: GuildMember, logTime: String): String = listOf(
+        member.uid,
+        member.name,
+        member.level,
+        member.weeklyMerit,
+        member.totalMerit,
+        member.highScore,
+        member.totalScore,
+        member.lastLogin,
+        logTime,
+    ).joinToString(",") { CsvCell.escape(it) }
+
     // Function Name: formatForSpreadsheet
     // Description:
     // - Formats a parsed roster for explicit export without allowing names to execute formulas.
@@ -28,19 +40,7 @@ object GuildMembersCsv {
     fun formatForSpreadsheet(snapshot: Snapshot): String = buildString {
         appendLine(HEADER)
         snapshot.members.forEach { member ->
-            appendLine(
-                listOf(
-                    member.uid,
-                    member.name,
-                    member.level,
-                    member.weeklyMerit,
-                    member.totalMerit,
-                    member.highScore,
-                    member.totalScore,
-                    member.lastLogin,
-                    snapshot.logTime,
-                ).joinToString(",") { CsvCell.escape(it) },
-            )
+            appendLine(rowForSpreadsheet(member, snapshot.logTime))
         }
     }.trimEnd() + "\n"
 
@@ -54,11 +54,13 @@ object GuildMembersCsv {
     // - Returns the parsed snapshot when the schema and rows are valid.
     // - Returns null when any required field is malformed or capture times disagree.
     fun parse(content: String): Snapshot? {
+        if (content.length > MAX_CONTENT_CHARS) return null
         val records = parseRecords(content) ?: return null
         val header = records.firstOrNull() ?: return null
         if (header != HEADER.split(',')) return null
 
         var logTime: String? = null
+        val seenUids = mutableSetOf<UInt>()
         val members = records.drop(1)
             .filterNot { row -> row.all(String::isBlank) }
             .map { row ->
@@ -66,8 +68,11 @@ object GuildMembersCsv {
                 val rowLogTime = row[8].trim().takeIf(String::isNotBlank) ?: return null
                 if (logTime == null) logTime = rowLogTime
                 if (rowLogTime != logTime) return null
+                val uid = row[0].trim().toUIntOrNull() ?: return null
+                if (!seenUids.add(uid)) return null
+                if (row[1].length > MAX_MEMBER_NAME_CHARS) return null
                 GuildMember(
-                    uid = row[0].trim().toUIntOrNull() ?: return null,
+                    uid = uid,
                     name = row[1],
                     level = row[2].trim().toUIntOrNull() ?: return null,
                     weeklyMerit = parseOptionalCounter(row[3]) ?: return null,
@@ -77,7 +82,7 @@ object GuildMembersCsv {
                     lastLogin = row[7].trim().toUIntOrNull() ?: return null,
                 )
             }
-        if (members.isEmpty() || logTime == null) return null
+        if (members.isEmpty() || members.size > MAX_ROSTER_MEMBERS || logTime == null) return null
         return Snapshot(logTime = logTime!!, members = members)
     }
 
@@ -102,25 +107,33 @@ object GuildMembersCsv {
                 ',' -> if (quoted) {
                     field.append(character)
                 } else {
+                    if (row.size >= MAX_COLUMNS || field.length > MAX_FIELD_CHARS) return null
                     row += field.toString()
                     field.clear()
                 }
                 '\n' -> if (quoted) {
                     field.append(character)
                 } else {
+                    if (row.size >= MAX_COLUMNS || field.length > MAX_FIELD_CHARS) return null
                     row += field.toString()
                     field.clear()
+                    if (records.size >= MAX_RECORDS) return null
                     records += row.toList()
                     row.clear()
                 }
-                else -> field.append(character)
+                else -> {
+                    if (field.length >= MAX_FIELD_CHARS) return null
+                    field.append(character)
+                }
             }
             index += 1
         }
 
         if (quoted) return null
         if (field.isNotEmpty() || row.isNotEmpty()) {
+            if (row.size >= MAX_COLUMNS || field.length > MAX_FIELD_CHARS) return null
             row += field.toString()
+            if (records.size >= MAX_RECORDS) return null
             records += row.toList()
         }
         return records
@@ -143,4 +156,11 @@ object GuildMembersCsv {
         val logTime: String,
         val members: List<GuildMember>,
     )
+
+    private const val MAX_CONTENT_CHARS = 2 * 1024 * 1024
+    private const val MAX_ROSTER_MEMBERS = 256
+    private const val MAX_MEMBER_NAME_CHARS = 256
+    private const val MAX_COLUMNS = 9
+    private const val MAX_RECORDS = MAX_ROSTER_MEMBERS + 2
+    private const val MAX_FIELD_CHARS = 512
 }

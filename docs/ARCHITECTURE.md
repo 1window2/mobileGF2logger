@@ -66,13 +66,20 @@ Unknown payload types are skipped without allocation. A recognized but malformed
 
 ## Memory and concurrency limits
 
-- Each active flow parser is capped at 2 MiB of buffered stream data.
+- Each active flow parser is capped at 2 MiB of buffered stream data. A pending
+  logical payload is independently capped at 2 MiB and 64 continuation
+  fragments; exceeding either limit discards that pending payload before later
+  frames are parsed.
 - The parser service has one worker and a queue capped at 256 payload chunks.
 - TLS, HTTP, and UDP payloads remain native and are excluded from the parser.
 - Outgoing plaintext chunks are used only for native flow classification.
 - Flow-close callbacks finalize any pending recognized payload before removing parser state.
 - Queue saturation is counted and surfaced in the capture status instead of being silently discarded.
 - Raw IP packets and application payloads are not persisted.
+- One parsed history entry is capped at 2 MiB. The packet-table projection
+  accepts at most 512 KiB, 250 rows, 16 columns, 2,048 cells, and 8 KiB per
+  cell; rejected content remains available only through the already bounded raw
+  history view rather than constructing an unbounded Android view hierarchy.
 
 CSV retained as internal roster evidence preserves protocol text exactly.
 Explicit spreadsheet-facing roster, member, comparison, and weekly exports pass
@@ -120,6 +127,14 @@ chronological order. When a file predates the current structured snapshot, the
 repository batches a conservative roster replay after ingestion: it derives
 only snapshot-supported presence spans, creates inactive historical identities,
 and preserves manual or exact Updates boundaries.
+
+Roster CSV input is capped at 2 MiB, 256 members, 258 records, 9 columns, and
+512 characters per field; UIDs must be unique and names are capped at 256
+characters. Activity ingestion accepts at most 250 distinct observations per
+payload with 128-character names. SQLite retains the newest 10,000 activity
+facts, and one ingestion resolves at most the newest 250 unresolved facts.
+These limits are enforced again at repository and persistence boundaries so a
+future caller cannot bypass the protocol-layer checks.
 
 ## HTTPS and application-layer encryption
 

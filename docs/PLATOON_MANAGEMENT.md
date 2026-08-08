@@ -140,6 +140,9 @@ resets on Monday while a Gunsmoke week begins on Sunday.
 - A roster CSV imported after newer captures still contributes historical
   presence spans. The replay creates missing inactive members and inferred
   withdrawal/rejoin periods without replacing manual or exact Updates evidence.
+  An observed absence can add or refine the missing inferred withdrawal side of
+  an exact open period, after which a later presence becomes a separate rejoin.
+  Notes on snapshot-derived periods survive this replay.
 - An individual membership period can be deleted from its editor after a
   destructive-action confirmation. The only remaining period is protected;
   delete the member instead when the complete record should be removed.
@@ -166,3 +169,13 @@ CSV files created for spreadsheet use neutralize string cells beginning with
 `=`, `+`, `-`, or `@` (including after leading whitespace), preventing a member
 name or note from executing as a spreadsheet formula. Internal retained roster
 evidence remains lossless and is not rewritten with that export-only prefix.
+The same neutralization is applied to captured roster, activity, Updates, and
+formation packet tables before they can be copied or opened in spreadsheet
+software.
+
+Untrusted evidence is bounded at every persistence boundary. A roster import
+must contain no more than 256 unique UIDs, an activity payload contributes at
+most 250 distinct observations, and the database keeps the newest 10,000
+activity facts. If a newly selected roster CSV fails parsing, duplicate-UID
+validation, ingestion, or chronological reconciliation, its newly retained file
+is deleted so a failed import cannot poison every later reconciliation.

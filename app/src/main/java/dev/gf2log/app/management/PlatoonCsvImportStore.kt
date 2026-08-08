@@ -47,6 +47,9 @@ class PlatoonCsvImportStore(private val directory: File) {
         require(directory.isDirectory) { "Unable to create the Platoon CSV directory" }
         if (file.isFile) {
             require(file.readBytes().contentEquals(bytes)) { "CSV identity collision" }
+            require(file.setLastModified(capturedAt.toEpochMilli())) {
+                "Unable to preserve the imported Platoon CSV capture time"
+            }
             return RetainResult(file, duplicate = true)
         }
 
@@ -64,6 +67,10 @@ class PlatoonCsvImportStore(private val directory: File) {
                 )
             } catch (_: AtomicMoveNotSupportedException) {
                 Files.move(temporary.toPath(), file.toPath())
+            }
+            if (!file.setLastModified(capturedAt.toEpochMilli())) {
+                file.delete()
+                error("Unable to preserve the imported Platoon CSV capture time")
             }
         } finally {
             temporary.delete()

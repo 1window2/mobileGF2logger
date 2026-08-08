@@ -446,6 +446,40 @@ class PlatoonDatabaseIntegrationTest {
     }
 
     @Test
+    fun databaseRejectsRosterBoundsForEveryIngestionCaller() {
+        val oversizedRoster = (1..257).map { index -> member(index.toLong(), "Member $index") }
+        val oversizedName = member(TARGET_UID, "x".repeat(257))
+
+        assertTrue(
+            runCatching {
+                database.ingestSnapshot(
+                    PlatoonSnapshot(
+                        id = 0,
+                        capturedAt = Instant.parse("2026-07-31T00:00:00Z"),
+                        sourceFile = "oversized-roster.csv",
+                        members = oversizedRoster,
+                    ),
+                    EvidenceSource.SNAPSHOT,
+                )
+            }.exceptionOrNull() is IllegalArgumentException,
+        )
+        assertTrue(
+            runCatching {
+                database.ingestSnapshot(
+                    PlatoonSnapshot(
+                        id = 0,
+                        capturedAt = Instant.parse("2026-07-31T00:00:00Z"),
+                        sourceFile = "oversized-name.csv",
+                        members = listOf(oversizedName),
+                    ),
+                    EvidenceSource.SNAPSHOT,
+                )
+            }.exceptionOrNull() is IllegalArgumentException,
+        )
+        assertEquals(0L, count("snapshots", "id > ?", 0))
+    }
+
+    @Test
     fun schemaSixAndSevenUpgradeDirectlyWithoutRecreatingActivityIndexes() {
         listOf(6, 7).forEach { legacyVersion ->
             val databaseName = "platoon-v$legacyVersion-upgrade-test.db"
@@ -483,6 +517,53 @@ class PlatoonDatabaseIntegrationTest {
             } finally {
                 context.deleteDatabase(databaseName)
             }
+        }
+    }
+
+    @Test
+    fun schemaTenUpgradeAddsVersionedMaintenanceObjects() {
+        val databaseName = "platoon-v10-upgrade-test.db"
+        context.deleteDatabase(databaseName)
+        try {
+            PlatoonDatabase(context, databaseName).use { helper -> helper.writableDatabase }
+            context.openOrCreateDatabase(databaseName, Context.MODE_PRIVATE, null).use { legacy ->
+                legacy.execSQL("DROP INDEX platoon_activity_resolution_retention")
+                legacy.execSQL("DROP INDEX platoon_activity_retention_order")
+                legacy.execSQL("DROP TABLE platoon_maintenance_state")
+                legacy.version = 10
+            }
+
+            PlatoonDatabase(context, databaseName).use { upgraded ->
+                val writable = upgraded.writableDatabase
+                assertEquals(PlatoonSchema.CURRENT_VERSION, writable.version)
+                assertEquals(
+                    1L,
+                    writable.rawQuery(
+                        "SELECT COUNT(*) FROM sqlite_master " +
+                            "WHERE type = 'table' AND name = 'platoon_maintenance_state'",
+                        null,
+                    ).use { cursor ->
+                        assertTrue(cursor.moveToFirst())
+                        cursor.getLong(0)
+                    },
+                )
+                assertEquals(
+                    1L,
+                    writable.rawQuery(
+                        "SELECT COUNT(*) FROM sqlite_master " +
+                            "WHERE type = 'index' AND name = 'platoon_activity_retention_order'",
+                        null,
+                    ).use { cursor ->
+                        assertTrue(cursor.moveToFirst())
+                        cursor.getLong(0)
+                    },
+                )
+                writable.rawQuery("PRAGMA foreign_key_check", null).use { cursor ->
+                    assertFalse(cursor.moveToFirst())
+                }
+            }
+        } finally {
+            context.deleteDatabase(databaseName)
         }
     }
 

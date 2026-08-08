@@ -25,6 +25,9 @@ class PlatoonRepository(context: Context) {
         members: List<GuildMember>,
         sourceFile: String?,
     ): SnapshotIngestResult = access { database ->
+        require(GuildMembersCsv.isValidRoster(members)) {
+            "A Platoon roster must stay within the member and name limits with unique UIDs"
+        }
         database.ingestSnapshot(
             snapshot = PlatoonSnapshot(
                 id = 0,

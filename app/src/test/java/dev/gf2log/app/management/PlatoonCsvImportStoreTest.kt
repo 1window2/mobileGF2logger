@@ -67,6 +67,18 @@ class PlatoonCsvImportStoreTest {
         )
     }
 
+    @Test
+    fun latestRetainedFileBreaksEqualCaptureTimesBySourceFilename() {
+        val directory = temporary.newFolder("capture-time-tie")
+        val lower = java.io.File(directory, "import-same-a.csv").apply { writeText("lower") }
+        val higher = java.io.File(directory, "import-same-b.csv").apply { writeText("higher") }
+        val capturedAt = Instant.parse("2026-07-19T19:29:33Z").toEpochMilli()
+        assertTrue(lower.setLastModified(capturedAt))
+        assertTrue(higher.setLastModified(capturedAt))
+
+        assertEquals(higher, PlatoonCsvImportStore.latestRetainedFile(directory))
+    }
+
     private companion object {
         val VALID_CSV = """
             uid,name,level,weeklyMerit,totalMerit,highScore,totalScore,lastLogin,logTime

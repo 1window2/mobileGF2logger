@@ -276,6 +276,37 @@ class Gfl2StreamParserTest {
     }
 
     @Test
+    fun malformedTerminalFrameClearsQuarantineBeforeDecoding() {
+        val parser = Gfl2StreamParser(maximumPendingContinuations = 1)
+        val continuation = outerMessage(
+            0,
+            payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, guildMembersPayload("Part", 8uL)),
+        )
+
+        assertTrue(parser.accept(continuation).isEmpty())
+        assertEquals(1, parser.accept(continuation).filterIsInstance<ParseEvent.Warning>().size)
+        assertTrue(
+            parser.accept(
+                outerMessage(
+                    42,
+                    payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, byteArrayOf(0x0A, 0x7F)),
+                ),
+            ).isEmpty(),
+        )
+
+        val recovered = parser.accept(
+            outerMessage(
+                43,
+                payload(
+                    Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
+                    guildMembersPayload("Recovered", 9uL),
+                ),
+            ),
+        ).singlePayload()
+        assertEquals("Recovered", (recovered.value.data as GuildMembersData).members.single().name)
+    }
+
+    @Test
     fun unknownPayloadsRemainObservableWithoutRetainingTheirBytes() {
         val parser = Gfl2StreamParser()
         val events = parser.accept(outerMessage(51, payload(24567, byteArrayOf(1, 2, 3))))

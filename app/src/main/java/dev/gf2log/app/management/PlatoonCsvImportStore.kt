@@ -94,11 +94,16 @@ class PlatoonCsvImportStore(private val directory: File) {
 
     data class RetainResult(val file: File, val duplicate: Boolean)
 
-    private companion object {
-        const val MAX_BYTES = 2 * 1024 * 1024
-        const val READ_BUFFER_BYTES = 8 * 1024
-        const val HASH_BYTES = 10
-        val FILE_TIME: DateTimeFormatter = DateTimeFormatter
+    companion object {
+        internal fun latestRetainedFile(directory: File): File? = directory.listFiles()
+            .orEmpty()
+            .filter { it.isFile && it.extension.equals("csv", ignoreCase = true) }
+            .maxWithOrNull(compareBy<File>(File::lastModified).thenBy(File::getName))
+
+        private const val MAX_BYTES = 2 * 1024 * 1024
+        private const val READ_BUFFER_BYTES = 8 * 1024
+        private const val HASH_BYTES = 10
+        private val FILE_TIME: DateTimeFormatter = DateTimeFormatter
             .ofPattern("yyyyMMdd'T'HHmmss'Z'")
             .withZone(ZoneOffset.UTC)
     }

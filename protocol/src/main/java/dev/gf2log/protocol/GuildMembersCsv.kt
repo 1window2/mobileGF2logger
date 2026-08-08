@@ -44,6 +44,15 @@ object GuildMembersCsv {
         }
     }.trimEnd() + "\n"
 
+    fun hasValidMemberBounds(members: List<GuildMember>): Boolean =
+        members.size <= MAX_ROSTER_MEMBERS &&
+            members.all { it.name.length <= MAX_MEMBER_NAME_CHARS }
+
+    fun isValidRoster(members: List<GuildMember>): Boolean =
+        members.isNotEmpty() &&
+            hasValidMemberBounds(members) &&
+            members.map(GuildMember::uid).distinct().size == members.size
+
     // Function Name: parse
     // Description:
     // - Parses a complete roster snapshot while preserving member names exactly.
@@ -82,7 +91,7 @@ object GuildMembersCsv {
                     lastLogin = row[7].trim().toUIntOrNull() ?: return null,
                 )
             }
-        if (members.isEmpty() || members.size > MAX_ROSTER_MEMBERS || logTime == null) return null
+        if (!isValidRoster(members) || logTime == null) return null
         return Snapshot(logTime = logTime!!, members = members)
     }
 
@@ -158,8 +167,8 @@ object GuildMembersCsv {
     )
 
     private const val MAX_CONTENT_CHARS = 2 * 1024 * 1024
-    private const val MAX_ROSTER_MEMBERS = 256
-    private const val MAX_MEMBER_NAME_CHARS = 256
+    const val MAX_ROSTER_MEMBERS = 256
+    const val MAX_MEMBER_NAME_CHARS = 256
     private const val MAX_COLUMNS = 9
     private const val MAX_RECORDS = MAX_ROSTER_MEMBERS + 2
     private const val MAX_FIELD_CHARS = 512

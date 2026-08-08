@@ -33,11 +33,21 @@ class GuildMembersCsvWriter(
         }
 
         val data = payload.data as? GuildMembersData ?: return null
+        if (!GuildMembersCsv.hasValidMemberBounds(data.members)) {
+            closeActiveBatch(completed = false)
+            error("Platoon roster exceeds the member or name limit")
+        }
         var batch = activeBatch
         if (batch == null || (batch.previousMessageId != 0 && batch.previousMessageId != payload.messageId)) {
             closeActiveBatch(completed = false)
             batch = openBatch()
             activeBatch = batch
+        }
+        if ((batch.members.keys + data.members.map(GuildMember::uid)).distinct().size >
+            GuildMembersCsv.MAX_ROSTER_MEMBERS
+        ) {
+            closeActiveBatch(completed = false)
+            error("Platoon roster exceeds the member limit")
         }
 
         data.members.forEach { member ->

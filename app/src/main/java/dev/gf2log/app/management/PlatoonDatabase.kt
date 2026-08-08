@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import dev.gf2log.protocol.GuildMembersCsv
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -229,6 +230,10 @@ class PlatoonDatabase(
         if (needsManualCalendarDateBackfill) {
             backfillManualCalendarDates(db, ZoneId.systemDefault())
         }
+        if (oldVersion < 11) {
+            createPlatoonMaintenanceStateTable(db)
+            createPlatoonActivityRetentionIndex(db)
+        }
     }
 
     // Function Name: migrateMembershipPeriodEventReference
@@ -347,6 +352,12 @@ class PlatoonDatabase(
         deferHistoricalMembershipReconciliation: Boolean = false,
     ): SnapshotIngestResult {
         require(snapshot.members.isNotEmpty()) { "A Platoon snapshot cannot be empty" }
+        require(snapshot.members.size <= GuildMembersCsv.MAX_ROSTER_MEMBERS) {
+            "A Platoon snapshot exceeds the member limit"
+        }
+        require(snapshot.members.all { it.name.length <= GuildMembersCsv.MAX_MEMBER_NAME_CHARS }) {
+            "A Platoon snapshot contains an oversized member name"
+        }
         require(snapshot.members.map(SnapshotMember::uid).distinct().size == snapshot.members.size) {
             "A Platoon snapshot cannot contain duplicate UIDs"
         }
@@ -2452,6 +2463,10 @@ class PlatoonDatabase(
         db.execSQL(
             "CREATE INDEX IF NOT EXISTS platoon_activity_resolution_retention " +
                 "ON platoon_activity(resolved_uid, captured_at DESC, id DESC)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS platoon_activity_retention_order " +
+                "ON platoon_activity(captured_at DESC, id DESC)",
         )
     }
 

@@ -92,6 +92,10 @@ class Gfl2StreamParser(
 
             val isEndOfMessage = offset + payloadSize >= message.size
             if (type in Gfl2PayloadDecoder.supportedTypes) {
+                if (consumeQuarantinedPayload(type, messageId, isEndOfMessage)) {
+                    offset += payloadSize
+                    continue
+                }
                 val payload = message.copyOfRange(
                     offset + PAYLOAD_HEADER_SIZE,
                     offset + payloadSize,
@@ -136,19 +140,6 @@ class Gfl2StreamParser(
         data: GameData,
         events: MutableList<ParseEvent>,
     ) {
-        val quarantined = quarantinedPayload
-        if (quarantined != null) {
-            if (
-                quarantined.type == type &&
-                (quarantined.previousMessageId == 0 || quarantined.previousMessageId == messageId)
-            ) {
-                quarantined.previousMessageId = messageId
-                if (messageId != 0 && isEndOfMessage) quarantinedPayload = null
-                return
-            }
-            quarantinedPayload = null
-        }
-
         val pending = pendingPayload
         if (pending != null) {
             if (pending.type == type &&
@@ -205,6 +196,24 @@ class Gfl2StreamParser(
                 continuationCount = 1,
             )
         }
+    }
+
+    private fun consumeQuarantinedPayload(
+        type: Int,
+        messageId: Int,
+        isEndOfMessage: Boolean,
+    ): Boolean {
+        val quarantined = quarantinedPayload ?: return false
+        if (
+            quarantined.type == type &&
+            (quarantined.previousMessageId == 0 || quarantined.previousMessageId == messageId)
+        ) {
+            quarantined.previousMessageId = messageId
+            if (messageId != 0 && isEndOfMessage) quarantinedPayload = null
+            return true
+        }
+        quarantinedPayload = null
+        return false
     }
 
     private fun emitPending(events: MutableList<ParseEvent>) {

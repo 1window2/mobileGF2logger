@@ -469,10 +469,7 @@ class MainActivity : LocalizedActivity() {
     @Suppress("DEPRECATION")
     private fun exportLatestPlatoonCsv() {
         val directory = File(filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY)
-        val latest = directory.listFiles()
-            .orEmpty()
-            .filter { it.isFile && it.extension.equals("csv", ignoreCase = true) }
-            .maxByOrNull(File::lastModified)
+        val latest = PlatoonCsvImportStore.latestRetainedFile(directory)
         if (latest == null) {
             statusText.text = getString(R.string.status_no_platoon_csv)
             return

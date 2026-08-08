@@ -71,6 +71,8 @@ Unknown payload types are skipped without allocation. A recognized but malformed
   fragments. The first continuation is checked before retention; exceeding
   either limit discards the pending payload and quarantines its remaining
   fragments through the logical terminal frame before later datasets are parsed.
+  Quarantine is advanced from frame metadata before protobuf decoding, so even
+  a malformed terminal fragment clears the discarded dataset deterministically.
 - The parser service has one worker and a queue capped at 256 payload chunks.
 - TLS, HTTP, and UDP payloads remain native and are excluded from the parser.
 - Outgoing plaintext chunks are used only for native flow classification.
@@ -135,6 +137,9 @@ characters. Activity ingestion accepts at most 250 distinct observations per
 payload with 128-character names. SQLite retains the newest 10,000 activity
 facts, and one ingestion resolves at most 250 unresolved facts. A database-local
 cursor rotates those bounded batches through the complete retained backlog.
+Schema v11 owns the rotation cursor and a global `(captured_at, id)` retention
+index; supported v1-v10 backups are upgraded before strict current-schema
+validation.
 These limits are enforced again at repository and persistence boundaries so a
 future caller cannot bypass the protocol-layer checks.
 

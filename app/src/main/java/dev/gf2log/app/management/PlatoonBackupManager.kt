@@ -81,7 +81,7 @@ class PlatoonBackupManager internal constructor(
             val restoredSettings = validateSelectedBackup {
                 BackupFormatPolicy.requireComplete(staged.formatVersion, staged.settings != null)
                 AppBackupSettingsCodec.decode(requireNotNull(staged.settings)).also {
-                    validateDatabase(stagedDatabase, requireCurrentSchema = true)
+                    validateDatabase(stagedDatabase, requireCurrentSchema = false)
                 }
             }
             replaceRestoredState(stagedDatabase, restoredSettings)

@@ -100,7 +100,7 @@ class PlatoonDatabaseIntegrationTest {
         assertFalse(database.deleteMember(TARGET_UID))
 
         assertEquals(0L, count("members", "uid = ?", TARGET_UID))
-        assertEquals(0L, count("tenures", "uid = ?", TARGET_UID))
+        assertEquals(0L, count("membership_periods", "uid = ?", TARGET_UID))
         assertEquals(0L, count("member_events", "uid = ?", TARGET_UID))
         assertEquals(0L, count("snapshot_members", "uid = ?", TARGET_UID))
         assertEquals(0L, count("weekly_overrides", "uid = ?", TARGET_UID))
@@ -141,7 +141,7 @@ class PlatoonDatabaseIntegrationTest {
     }
 
     @Test
-    fun historicalSnapshotAddsWeeklyEvidenceWithoutReplacingCurrentMembers() {
+    fun historicalSnapshotAddsWeeklyEvidenceAndAnInactiveMembershipHistory() {
         val currentTime = Instant.parse("2026-07-31T00:00:00Z")
         database.ingestSnapshot(
             PlatoonSnapshot(
@@ -167,8 +167,112 @@ class PlatoonDatabaseIntegrationTest {
         assertFalse(historical.duplicate)
         assertEquals(1L, count("snapshots", "source_file = ?", "historical.csv"))
         assertEquals(1L, count("snapshot_members", "uid = ?", TARGET_UID))
-        assertEquals(0L, count("members", "uid = ?", TARGET_UID))
+        assertEquals(1L, count("members", "uid = ?", TARGET_UID))
         assertEquals(1L, count("members", "uid = ?", OTHER_UID))
+        val historicalStatus = database.listMemberStatuses().single { it.uid == TARGET_UID }
+        assertFalse(historicalStatus.isActive)
+        assertEquals(currentTime.minusSeconds(86_400), historicalStatus.firstSeenAt)
+        assertEquals(1, historicalStatus.membershipPeriods.size)
+        assertEquals(null, historicalStatus.membershipPeriods.single().joinedAt)
+        assertEquals(currentTime, historicalStatus.membershipPeriods.single().leftAt)
+        assertEquals(EvidencePrecision.UNKNOWN, historicalStatus.membershipPeriods.single().joinedPrecision)
+        assertEquals(EvidencePrecision.INFERRED, historicalStatus.membershipPeriods.single().leftPrecision)
+        assertForeignKeysValid()
+    }
+
+    @Test
+    fun lateHistoricalSnapshotsReconstructWithdrawalAndRejoinWithoutChangingCurrentRoster() {
+        val currentTime = Instant.parse("2026-07-31T00:00:00Z")
+        database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = currentTime,
+                sourceFile = "current.csv",
+                members = listOf(member(OTHER_UID, "Current")),
+            ),
+            EvidenceSource.SNAPSHOT,
+        )
+
+        listOf(
+            currentTime.minusSeconds(4 * 86_400) to listOf(member(TARGET_UID, "Historical"), member(OTHER_UID, "Current")),
+            currentTime.minusSeconds(3 * 86_400) to listOf(member(OTHER_UID, "Current")),
+            currentTime.minusSeconds(2 * 86_400) to listOf(member(TARGET_UID, "Historical"), member(OTHER_UID, "Current")),
+        ).forEachIndexed { index, (capturedAt, members) ->
+            database.ingestSnapshot(
+                PlatoonSnapshot(
+                    id = 0,
+                    capturedAt = capturedAt,
+                    sourceFile = "historical-$index.csv",
+                    members = members,
+                ),
+                EvidenceSource.LEGACY_IMPORT,
+                historicalOnly = true,
+            )
+        }
+
+        val target = database.listMemberStatuses().single { it.uid == TARGET_UID }
+        assertFalse(target.isActive)
+        assertEquals(2, target.membershipPeriods.size)
+        val ordered = target.membershipPeriods.sortedBy { it.leftAt }
+        assertEquals(null, ordered[0].joinedAt)
+        assertEquals(currentTime.minusSeconds(3 * 86_400), ordered[0].leftAt)
+        assertEquals(currentTime.minusSeconds(2 * 86_400), ordered[1].joinedAt)
+        assertEquals(currentTime, ordered[1].leftAt)
+        assertTrue(database.listMemberStatuses().single { it.uid == OTHER_UID }.isActive)
+        assertForeignKeysValid()
+    }
+
+    @Test
+    fun historicalRosterReplayPreservesExactBoundariesAndAddsOnlyTheLaterRun() {
+        val currentTime = Instant.parse("2026-07-31T00:00:00Z")
+        val exactJoin = currentTime.minusSeconds(5 * 86_400)
+        val exactWithdraw = currentTime.minusSeconds(4 * 86_400)
+        database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = currentTime,
+                sourceFile = "current.csv",
+                members = listOf(member(OTHER_UID, "Current")),
+            ),
+            EvidenceSource.SNAPSHOT,
+        )
+        database.ingestPlatoonUpdates(
+            listOf(update(PlatoonUpdateSemantics.KIND_JOIN, exactJoin, TARGET_UID, "Historical")),
+            exactJoin.plusSeconds(60),
+        )
+        database.ingestPlatoonUpdates(
+            listOf(update(PlatoonUpdateSemantics.KIND_WITHDRAW, exactWithdraw, TARGET_UID, "Historical")),
+            exactWithdraw.plusSeconds(60),
+        )
+
+        listOf(
+            exactJoin.plusSeconds(3_600) to listOf(member(TARGET_UID, "Historical"), member(OTHER_UID, "Current")),
+            exactWithdraw.plusSeconds(3_600) to listOf(member(OTHER_UID, "Current")),
+            currentTime.minusSeconds(86_400) to listOf(member(TARGET_UID, "Historical"), member(OTHER_UID, "Current")),
+        ).forEachIndexed { index, (capturedAt, members) ->
+            database.ingestSnapshot(
+                PlatoonSnapshot(
+                    id = 0,
+                    capturedAt = capturedAt,
+                    sourceFile = "exact-history-$index.csv",
+                    members = members,
+                ),
+                EvidenceSource.LEGACY_IMPORT,
+                historicalOnly = true,
+            )
+        }
+
+        val periods = database.listMemberStatuses()
+            .single { it.uid == TARGET_UID }
+            .membershipPeriods
+            .sortedBy { it.joinedAt ?: Instant.MIN }
+        assertEquals(2, periods.size)
+        assertEquals(exactJoin, periods[0].joinedAt)
+        assertEquals(exactWithdraw, periods[0].leftAt)
+        assertEquals(EvidenceSource.GAME_UPDATES, periods[0].joinedSource)
+        assertEquals(EvidenceSource.GAME_UPDATES, periods[0].leftSource)
+        assertEquals(currentTime.minusSeconds(86_400), periods[1].joinedAt)
+        assertEquals(currentTime, periods[1].leftAt)
         assertForeignKeysValid()
     }
 
@@ -313,6 +417,58 @@ class PlatoonDatabaseIntegrationTest {
             listOf(LocalDate.of(2026, 5, 3)),
             WeeklyReportRange.periodStarts(database.listWeeklyEvidenceDays(zone)),
         )
+    }
+
+    @Test
+    fun membershipPeriodDeletionRequiresAReplacementAndRemovesLinkedEvents() {
+        val capturedAt = Instant.parse("2026-07-31T00:00:00Z")
+        database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = capturedAt,
+                sourceFile = "current.csv",
+                members = listOf(member(TARGET_UID, "Current")),
+            ),
+            EvidenceSource.SNAPSHOT,
+        )
+        val onlyPeriodId = queryLong(
+            "SELECT id FROM membership_periods WHERE uid = ?",
+            TARGET_UID,
+        )
+        assertFalse(database.deleteMembershipPeriod(onlyPeriodId))
+
+        assertTrue(
+            database.addMembershipPeriod(
+                uid = TARGET_UID,
+                joined = MembershipBoundaryValue(
+                    LocalDate.of(2026, 1, 1),
+                    Instant.parse("2026-01-01T00:00:00Z"),
+                    timeKnown = true,
+                ),
+                withdrew = MembershipBoundaryValue(
+                    LocalDate.of(2026, 2, 1),
+                    Instant.parse("2026-02-01T00:00:00Z"),
+                    timeKnown = true,
+                ),
+                note = "Historical period",
+            ),
+        )
+        val historicalId = database.listMemberStatuses()
+            .single { it.uid == TARGET_UID }
+            .membershipPeriods
+            .single { it.note == "Historical period" }
+            .id
+        assertEquals(
+            2L,
+            count("member_events", "membership_period_id = ?", historicalId),
+        )
+
+        assertTrue(database.deleteMembershipPeriod(historicalId))
+        val status = database.listMemberStatuses().single { it.uid == TARGET_UID }
+        assertTrue(status.isActive)
+        assertEquals(1, status.membershipPeriods.size)
+        assertEquals(0L, count("member_events", "membership_period_id = ?", historicalId))
+        assertForeignKeysValid()
     }
 
     private fun update(kind: Long, at: Instant, uid: Long, name: String) =

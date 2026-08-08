@@ -137,6 +137,7 @@ class PlatoonRepository(context: Context) {
                     ),
                     EvidenceSource.LEGACY_IMPORT,
                     historicalOnly = historicalOnly,
+                    deferHistoricalMembershipReconciliation = historicalOnly,
                 )
                 if (result.duplicate) {
                     skipped += 1
@@ -147,6 +148,8 @@ class PlatoonRepository(context: Context) {
                     latestStructuredSnapshot = SnapshotIdentity(file.capturedAt, file.file.name)
                 }
             }
+
+        if (historical > 0) database.reconcileSnapshotMembershipHistory()
 
         ImportResult(
             imported = imported,
@@ -210,12 +213,15 @@ class PlatoonRepository(context: Context) {
         }
     }
 
-    fun updateTenure(
-        tenureId: Long,
+    fun updateMembershipPeriod(
+        membershipPeriodId: Long,
         joined: MembershipBoundaryValue,
         left: MembershipBoundaryValue?,
         note: String,
-    ): Boolean = access { it.updateTenure(tenureId, joined, left, note) }
+    ): Boolean = access { it.updateMembershipPeriod(membershipPeriodId, joined, left, note) }
+
+    fun deleteMembershipPeriod(membershipPeriodId: Long): Boolean =
+        access { it.deleteMembershipPeriod(membershipPeriodId) }
 
     fun addWithdrawnMember(
         uid: Long,
@@ -225,12 +231,12 @@ class PlatoonRepository(context: Context) {
         note: String,
     ): Boolean = access { it.addWithdrawnMember(uid, name, joined, withdrew, note) }
 
-    fun addTenure(
+    fun addMembershipPeriod(
         uid: Long,
         joined: MembershipBoundaryValue,
         withdrew: MembershipBoundaryValue?,
         note: String,
-    ): Boolean = access { it.addTenure(uid, joined, withdrew, note) }
+    ): Boolean = access { it.addMembershipPeriod(uid, joined, withdrew, note) }
 
     fun addWeeklyNote(periodStartEpochDay: Long, gameDayEpochDay: Long, text: String): Long =
         access { it.addWeeklyNote(periodStartEpochDay, gameDayEpochDay, text) }

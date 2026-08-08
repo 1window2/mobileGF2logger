@@ -69,7 +69,7 @@ class PlatoonBackupManagerIntegrationTest {
         PlatoonDatabase(context).use { database ->
             val db = database.readableDatabase
             assertEquals(1L, count(db, "members", "uid = ?", ARCHIVED_UID))
-            assertEquals(1L, count(db, "tenures", "uid = ?", ARCHIVED_UID))
+            assertEquals(1L, count(db, "membership_periods", "uid = ?", ARCHIVED_UID))
             assertEquals(1L, count(db, "member_events", "uid = ?", ARCHIVED_UID))
             assertEquals(1L, count(db, "snapshot_members", "uid = ?", ARCHIVED_UID))
             assertEquals(1L, count(db, "weekly_overrides", "uid = ?", ARCHIVED_UID))
@@ -422,9 +422,9 @@ class PlatoonBackupManagerIntegrationTest {
                 EvidenceSource.SNAPSHOT,
             )
             val db = database.writableDatabase
-            val tenureId = queryLong(
+            val membershipPeriodId = queryLong(
                 db,
-                "SELECT id FROM tenures WHERE uid = ? LIMIT 1",
+                "SELECT id FROM membership_periods WHERE uid = ? LIMIT 1",
                 uid,
             )
             val eventId = db.insertOrThrow(
@@ -432,7 +432,7 @@ class PlatoonBackupManagerIntegrationTest {
                 null,
                 ContentValues().apply {
                     put("uid", uid)
-                    put("tenure_id", tenureId)
+                    put("membership_period_id", membershipPeriodId)
                     put("event_type", MemberEventType.JOINED.name)
                     put("occurred_at", capturedAt.toEpochMilli())
                     put("event_date", PERIOD_START.toEpochDay())

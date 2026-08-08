@@ -4,12 +4,45 @@ All notable changes to mobileGF2logger are documented here.
 
 ## Unreleased
 
+## 2.1.1 - 2026-08-08
+
+### Added
+
+- Import one or more user-selected Platoon roster CSV files through Android's
+  document picker with strict UTF-8/schema validation, bounded reads, stable
+  content identities, durable retention, and duplicate detection.
+- Delete an individual membership period from member details after explicit
+  confirmation. The database keeps at least one period per member and cleans
+  linked inferred events atomically.
+
+### Changed
+
+- Replace the ambiguous user-facing term `tenure` with `membership period` for
+  one interval and `membership history` for the collection. Legacy v1-v9 table
+  and column names remain recognized only for backup and database migration.
+- Refine the launcher emblem with a subtle matte-silver finish and a warmer
+  gold-orange star while preserving its silhouette, scale, and placement.
+
+### Fixed
+
+- Accept a pre-Gunsmoke boundary capture outside the narrow reset window when
+  its previous standard-week merit counter is already at the absolute 540-point
+  cap. This makes the July 18 anchor conclusively resolve July 19 merit, score,
+  attempts, Login, and Daily Patrol without guessing.
+- Reconstruct inactive members, withdrawals, and repeat membership periods when
+  older roster CSVs are imported after newer structured data. Manual and exact
+  game-update boundaries remain authoritative during replay.
+- Show a clear failure state when automatic retained-CSV reconciliation fails
+  instead of silently leaving the Platoon screen empty.
+- Neutralize formula-like member names and notes in every spreadsheet-facing
+  CSV export while keeping retained roster evidence lossless for re-import.
+
 ## 2.1.0 - 2026-08-01
 
 ### Added
 
 - Add complete `.gf2backup` export and atomic restore for app settings,
-  structured Platoon/member/tenure history, and all weekly-table evidence.
+  structured Platoon/member/membership history, and all weekly-table evidence.
 - Validate complete-backup extension, archive identity, manifest, checksums,
   settings schema, SQLite integrity, current schema, and foreign-key references
   before replacing user data.
@@ -115,9 +148,9 @@ All notable changes to mobileGF2logger are documented here.
 
 - Reconcile exact Updates events with nearby manual and snapshot boundaries so
   the same Join or Withdraw event is shown only once.
-- Reuse an exact Updates tenure when the following roster snapshot confirms it,
-  avoiding duplicate open tenures and withdrawal-ingestion rollback.
-- Preserve the current open tenure when a captured Updates feed contains an
+- Reuse an exact Updates membership period when the following roster snapshot confirms it,
+  avoiding duplicate open membership periods and withdrawal-ingestion rollback.
+- Preserve the current open membership period when a captured Updates feed contains an
   older withdrawal, and reject roster confirmation from a withdrawal
   superseded by a later rejoin.
 - Backfill device-local calendar dates for pre-2.0.1 manual membership
@@ -125,7 +158,7 @@ All notable changes to mobileGF2logger are documented here.
 - Retry transient non-blocking TUN backpressure before treating the affected
   connection as failed.
 - Preserve rapid rejoin/withdraw histories when an opposite boundary separates
-  otherwise nearby same-side events, and merge safe inferred shadow tenures
+  otherwise nearby same-side events, and merge safe inferred shadow membership periods
   without discarding their independent boundary.
 - Present Join/Withdraw history as a compact borderless two-column table,
   including exact device-local times and an unknown-date group for inferred
@@ -133,13 +166,13 @@ All notable changes to mobileGF2logger are documented here.
 - Use locale-independent identity keys when correlating roster names.
 - Localize Activity and Updates packet-history badges in Korean.
 - Require dates but allow unknown times for manually entered membership
-  boundaries, displaying date-only tenure summaries and `??:??` in weekly
+  boundaries, displaying date-only membership-period summaries and `??:??` in weekly
   Join/Withdraw rows.
 - Reconcile standard-week merit against every captured counter and recent-login
   timestamp instead of finalizing unsupported daily estimates.
 - Treat only UID-safe Updates kind `8` records as exact Daily Patrol evidence.
 - Keep packet-derived membership boundaries immutable without locking the
-  editable manual boundary or private note on the same tenure.
+  editable manual boundary or private note on the same membership period.
 - Hide internal evidence-precision labels from membership-history buttons.
 - Place Join/Withdraw events by their device-local calendar date while merit
   calculations continue to use the 05:00 game-day boundary.
@@ -172,7 +205,7 @@ All notable changes to mobileGF2logger are documented here.
 - One-shot Platoon roster capture with automatic VPN shutdown after a complete
   payload type `21917` response.
 - A private structured Platoon database for snapshots, member status, repeat
-  tenures, roster events, manual corrections, and weekly notes.
+  membership periods, roster events, manual corrections, and weekly notes.
 - Platoon-management screens for active and withdrawn members, snapshot
   comparison, selected-member CSV export, and explicit backup export/import.
 - Weekly activity tables for Login, Daily Patrol, merit, Gunsmoke Frontline

@@ -23,7 +23,7 @@ class PlatoonSchemaTest {
 
         assertTrue("weekly_overrides" in tables)
         assertTrue("platoon_activity" in tables)
-        assertTrue("joined_date" in columns.getValue("tenures"))
+        assertTrue("joined_date" in columns.getValue("membership_periods"))
         assertTrue("time_known" in columns.getValue("member_events"))
     }
 }

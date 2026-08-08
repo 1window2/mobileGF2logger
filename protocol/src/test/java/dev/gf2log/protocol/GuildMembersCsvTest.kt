@@ -36,6 +36,25 @@ class GuildMembersCsvTest {
     }
 
     @Test
+    fun explicitSpreadsheetExportNeutralizesAFormulaNameWithoutChangingRetainedRows() {
+        val member = GuildMember(1u, "=HYPERLINK(\"https://invalid\")", 2u, 3u, 4u, 5u, 6u, 7u)
+        val retained = GuildMembersCsv.row(member, "2026-01-01T00:00:00Z")
+        val snapshot = GuildMembersCsv.Snapshot(
+            logTime = "2026-01-01T00:00:00Z",
+            members = listOf(member),
+        )
+
+        assertEquals(
+            "1,\"=HYPERLINK(\"\"https://invalid\"\")\",2,3,4,5,6,7,2026-01-01T00:00:00Z",
+            retained,
+        )
+        assertEquals(
+            "1,\"'=HYPERLINK(\"\"https://invalid\"\")\",2,3,4,5,6,7,2026-01-01T00:00:00Z",
+            GuildMembersCsv.formatForSpreadsheet(snapshot).lineSequence().drop(1).first(),
+        )
+    }
+
+    @Test
     fun parsesACompleteSnapshot() {
         val content = listOf(
             GuildMembersCsv.HEADER,

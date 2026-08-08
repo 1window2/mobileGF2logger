@@ -70,7 +70,7 @@ class PlatoonDatabase(
         )
         db.execSQL(
             """
-            CREATE TABLE tenures (
+            CREATE TABLE membership_periods (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 uid INTEGER NOT NULL REFERENCES members(uid),
                 joined_at INTEGER,
@@ -87,13 +87,13 @@ class PlatoonDatabase(
             )
             """.trimIndent(),
         )
-        db.execSQL("CREATE INDEX tenures_uid ON tenures(uid, id DESC)")
+        db.execSQL("CREATE INDEX membership_periods_uid ON membership_periods(uid, id DESC)")
         db.execSQL(
             """
             CREATE TABLE member_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 uid INTEGER NOT NULL REFERENCES members(uid),
-                tenure_id INTEGER REFERENCES tenures(id),
+                membership_period_id INTEGER REFERENCES membership_periods(id),
                 event_type TEXT NOT NULL,
                 occurred_at INTEGER,
                 event_date INTEGER,
@@ -123,14 +123,27 @@ class PlatoonDatabase(
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 10) {
+            db.execSQL("ALTER TABLE tenures RENAME TO membership_periods")
+            db.execSQL("DROP INDEX IF EXISTS tenures_uid")
+            db.execSQL(
+                "CREATE INDEX membership_periods_uid ON membership_periods(uid, id DESC)",
+            )
+            if (oldVersion >= 6) {
+                migrateMembershipPeriodEventReference(
+                    db = db,
+                    hasCalendarColumns = oldVersion >= 9,
+                )
+            }
+        }
         val needsManualCalendarDateBackfill = oldVersion < 9
         if (oldVersion < 9) {
-            db.execSQL("ALTER TABLE tenures ADD COLUMN joined_date INTEGER")
-            db.execSQL("ALTER TABLE tenures ADD COLUMN left_date INTEGER")
+            db.execSQL("ALTER TABLE membership_periods ADD COLUMN joined_date INTEGER")
+            db.execSQL("ALTER TABLE membership_periods ADD COLUMN left_date INTEGER")
             db.execSQL(
-                "ALTER TABLE tenures ADD COLUMN joined_time_known INTEGER NOT NULL DEFAULT 1",
+                "ALTER TABLE membership_periods ADD COLUMN joined_time_known INTEGER NOT NULL DEFAULT 1",
             )
-            db.execSQL("ALTER TABLE tenures ADD COLUMN left_time_known INTEGER")
+            db.execSQL("ALTER TABLE membership_periods ADD COLUMN left_time_known INTEGER")
             db.execSQL("ALTER TABLE member_events ADD COLUMN event_date INTEGER")
             db.execSQL(
                 "ALTER TABLE member_events ADD COLUMN time_known INTEGER NOT NULL DEFAULT 1",
@@ -195,13 +208,13 @@ class PlatoonDatabase(
             }
         }
         if (oldVersion < 6) {
-            db.execSQL("ALTER TABLE member_events ADD COLUMN tenure_id INTEGER REFERENCES tenures(id)")
+            db.execSQL("ALTER TABLE member_events ADD COLUMN membership_period_id INTEGER REFERENCES membership_periods(id)")
             createPlatoonActivityTable(db)
             db.delete("weekly_notes", "is_automatic = 1", null)
-            linkLegacyTenureEvents(db)
+            linkLegacyMembershipPeriodEvents(db)
         }
         if (oldVersion < 7) {
-            backfillSnapshotTenureEvents(db)
+            backfillSnapshotMembershipPeriodEvents(db)
         }
         if (oldVersion in 6 until 8) {
             migratePlatoonActivityIdentity(db)
@@ -211,11 +224,106 @@ class PlatoonDatabase(
         }
     }
 
+    // Function Name: migrateMembershipPeriodEventReference
+    // Description:
+    // - Rebuilds the membership-event table with the clearer membership-period identifier.
+    // - Rebuilds dependent tables so every foreign key targets the replacement event table.
+    // Parameters:
+    // - db: Database being upgraded inside SQLiteOpenHelper's transaction.
+    // - hasCalendarColumns: Whether the source event table already contains schema-v9 dates.
+    // Returns:
+    // - Returns after all rows, IDs, and foreign-key relationships have been preserved.
+    private fun migrateMembershipPeriodEventReference(
+        db: SQLiteDatabase,
+        hasCalendarColumns: Boolean,
+    ) {
+        db.execSQL("ALTER TABLE member_events RENAME TO member_events_legacy_v10")
+        db.execSQL("ALTER TABLE weekly_notes RENAME TO weekly_notes_legacy_v10")
+        db.execSQL("ALTER TABLE platoon_activity RENAME TO platoon_activity_legacy_v10")
+        db.execSQL("DROP INDEX IF EXISTS member_events_time")
+        db.execSQL("DROP INDEX IF EXISTS platoon_activity_member_time")
+        db.execSQL("DROP INDEX IF EXISTS platoon_activity_action_time")
+        db.execSQL("DROP INDEX IF EXISTS platoon_activity_exact_identity")
+        db.execSQL("DROP INDEX IF EXISTS platoon_activity_unresolved_identity")
+
+        val calendarColumns = if (hasCalendarColumns) {
+            "event_date INTEGER, time_known INTEGER NOT NULL DEFAULT 1,"
+        } else {
+            ""
+        }
+        db.execSQL(
+            """
+            CREATE TABLE member_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uid INTEGER NOT NULL REFERENCES members(uid),
+                membership_period_id INTEGER REFERENCES membership_periods(id),
+                event_type TEXT NOT NULL,
+                occurred_at INTEGER,
+                $calendarColumns
+                observed_at INTEGER NOT NULL,
+                precision TEXT NOT NULL,
+                source TEXT NOT NULL,
+                note TEXT NOT NULL DEFAULT ''
+            )
+            """.trimIndent(),
+        )
+        val calendarNames = if (hasCalendarColumns) ", event_date, time_known" else ""
+        db.execSQL(
+            """
+            INSERT INTO member_events(
+                id, uid, membership_period_id, event_type, occurred_at$calendarNames,
+                observed_at, precision, source, note
+            )
+            SELECT id, uid, tenure_id, event_type, occurred_at$calendarNames,
+                   observed_at, precision, source, note
+            FROM member_events_legacy_v10
+            """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX member_events_time ON member_events(observed_at DESC)")
+
+        db.execSQL(
+            """
+            CREATE TABLE weekly_notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                period_start INTEGER NOT NULL,
+                game_day INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                event_id INTEGER REFERENCES member_events(id) ON DELETE SET NULL,
+                is_automatic INTEGER NOT NULL DEFAULT 0
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            INSERT INTO weekly_notes(id, period_start, game_day, text, event_id, is_automatic)
+            SELECT id, period_start, game_day, text, event_id, is_automatic
+            FROM weekly_notes_legacy_v10
+            """.trimIndent(),
+        )
+
+        createPlatoonActivityTable(db)
+        db.execSQL(
+            """
+            INSERT INTO platoon_activity(
+                id, occurred_at, action_id, kind, member_name, captured_at,
+                resolved_uid, resolution, member_event_id
+            )
+            SELECT id, occurred_at, action_id, kind, member_name, captured_at,
+                   resolved_uid, resolution, member_event_id
+            FROM platoon_activity_legacy_v10
+            """.trimIndent(),
+        )
+        db.execSQL("DROP TABLE weekly_notes_legacy_v10")
+        db.execSQL("DROP TABLE platoon_activity_legacy_v10")
+        db.execSQL("DROP TABLE member_events_legacy_v10")
+    }
+
     @Synchronized
     fun ingestSnapshot(
         snapshot: PlatoonSnapshot,
         source: EvidenceSource,
         historicalOnly: Boolean = false,
+        deferHistoricalMembershipReconciliation: Boolean = false,
     ): SnapshotIngestResult {
         require(snapshot.members.isNotEmpty()) { "A Platoon snapshot cannot be empty" }
         require(snapshot.members.map(SnapshotMember::uid).distinct().size == snapshot.members.size) {
@@ -236,6 +344,9 @@ class PlatoonDatabase(
                     "Historical snapshots must not be newer than current structured data"
                 }
                 val snapshotId = insertSnapshotRows(db, snapshot)
+                if (!deferHistoricalMembershipReconciliation) {
+                    reconcileSnapshotMembershipHistory(db)
+                }
                 db.setTransactionSuccessful()
                 return SnapshotIngestResult.historical(snapshotId)
             }
@@ -296,14 +407,14 @@ class PlatoonDatabase(
                     )
                 }
                 changes.left.forEach { member ->
-                    val exactTenureId = findRosterConfirmedExactTenure(
+                    val exactMembershipPeriodId = findRosterConfirmedExactMembershipPeriod(
                         db = db,
                         uid = member.uid,
                         boundary = MembershipBoundary.WITHDRAW,
                         from = priorCapturedAt,
                         observedAt = snapshot.capturedAt,
                     )
-                    val tenureId = exactTenureId ?: closeLatestTenure(
+                    val membershipPeriodId = exactMembershipPeriodId ?: closeLatestMembershipPeriod(
                         db = db,
                         uid = member.uid,
                         leftAt = snapshot.capturedAt,
@@ -311,10 +422,10 @@ class PlatoonDatabase(
                         source = source,
                     )
                     markInactive(db, member.uid, snapshot.capturedAt)
-                    if (exactTenureId == null) {
+                    if (exactMembershipPeriodId == null) {
                         insertSnapshotBoundaryEvent(
                             db,
-                            tenureId,
+                            membershipPeriodId,
                             member.uid,
                             member.name,
                             MemberEventType.LEFT,
@@ -323,7 +434,7 @@ class PlatoonDatabase(
                         )
                         correlateMembershipBoundary(
                             db = db,
-                            tenureId = tenureId,
+                            membershipPeriodId = membershipPeriodId,
                             member = SnapshotMember(member.uid, member.name, 0, 0, 0, 0, 0, 0),
                             type = MemberEventType.LEFT,
                             boundary = MembershipBoundary.WITHDRAW,
@@ -351,9 +462,9 @@ class PlatoonDatabase(
                 }
             }
             // A roster is authoritative for current presence. Repair any missing open
-            // tenure left by an incomplete historical Updates feed.
+            // membershipPeriod left by an incomplete historical Updates feed.
             snapshot.members.forEach { member ->
-                ensureRosterActiveTenure(db, member.uid, source)
+                ensureRosterActiveMembershipPeriod(db, member.uid, source)
             }
 
             resolveUnresolvedActivityUids(db)
@@ -369,6 +480,246 @@ class PlatoonDatabase(
             )
         } finally {
             db.endTransaction()
+        }
+    }
+
+    // Function Name: reconcileSnapshotMembershipHistory
+    // Description:
+    // - Replays every retained roster in chronological order after late historical imports.
+    // - Rebuilds only weak snapshot-derived membership periods and preserves manual or exact evidence.
+    // - Creates inactive member records for people found only in historical rosters.
+    // Parameters:
+    // - None.
+    // Returns:
+    // - Unit after atomically reconciling member identities and membership periods.
+    @Synchronized
+    fun reconcileSnapshotMembershipHistory() {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            reconcileSnapshotMembershipHistory(db)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    private fun reconcileSnapshotMembershipHistory(db: SQLiteDatabase) {
+        val snapshots = readRosterFrames(db)
+        if (snapshots.isEmpty()) return
+
+        ensureHistoricalMembers(db, snapshots)
+        removeWeakSnapshotMembershipPeriods(db)
+
+        val allUids = snapshots.flatMap { frame -> frame.members.keys }.toSortedSet()
+        allUids.forEach { uid ->
+            val runs = buildRosterPresenceRuns(snapshots, uid)
+            runs.forEach { run ->
+                if (!hasStrongMembershipPeriodOverlapping(db, uid, run)) {
+                    insertRosterPresenceRun(db, uid, run)
+                }
+            }
+        }
+        resolveUnresolvedActivityUids(db)
+    }
+
+    private fun readRosterFrames(db: SQLiteDatabase): List<RosterFrame> {
+        val frames = linkedMapOf<Long, MutableMap<Long, RosterIdentity>>()
+        db.rawQuery(
+            """
+            SELECT s.id, s.captured_at, sm.uid, sm.name, sm.level
+            FROM snapshots s
+            JOIN snapshot_members sm ON sm.snapshot_id = s.id
+            ORDER BY s.captured_at, s.id, sm.uid
+            """.trimIndent(),
+            null,
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val snapshotId = cursor.getLong(0)
+                val capturedAt = Instant.ofEpochMilli(cursor.getLong(1))
+                frames.getOrPut(snapshotId) { linkedMapOf() }[cursor.getLong(2)] =
+                    RosterIdentity(cursor.getString(3), cursor.getInt(4), capturedAt)
+            }
+        }
+        return frames.map { (_, members) ->
+            RosterFrame(members.values.first().capturedAt, members)
+        }
+    }
+
+    private fun ensureHistoricalMembers(db: SQLiteDatabase, snapshots: List<RosterFrame>) {
+        val latestFrame = snapshots.last()
+        snapshots.flatMap { frame ->
+            frame.members.map { (uid, identity) -> Triple(uid, identity, frame.capturedAt) }
+        }.groupBy { it.first }.forEach { (uid, observations) ->
+            val firstSeenAt = observations.minOf { it.third }
+            val latest = observations.maxBy { it.third }
+            if (!memberExists(db, uid)) {
+                db.insertOrThrow(
+                    "members",
+                    null,
+                    ContentValues().apply {
+                        put("uid", uid)
+                        put("current_name", latest.second.name)
+                        put("current_level", latest.second.level)
+                        put("is_active", if (uid in latestFrame.members) 1 else 0)
+                        put("first_seen_at", firstSeenAt.toEpochMilli())
+                        put("last_seen_at", latest.third.toEpochMilli())
+                        put("note", "")
+                    },
+                )
+            } else {
+                db.execSQL(
+                    "UPDATE members SET first_seen_at = MIN(first_seen_at, ?) WHERE uid = ?",
+                    arrayOf(firstSeenAt.toEpochMilli(), uid),
+                )
+            }
+        }
+    }
+
+    private fun removeWeakSnapshotMembershipPeriods(db: SQLiteDatabase) {
+        val sourceNames = SNAPSHOT_EVENT_SOURCES.map(EvidenceSource::name)
+        val weakIds = db.rawQuery(
+            """
+            SELECT id
+            FROM membership_periods
+            WHERE joined_source IN (?, ?)
+              AND (left_source IS NULL OR left_source IN (?, ?))
+              AND joined_precision IN (?, ?)
+              AND (left_precision IS NULL OR left_precision = ?)
+            """.trimIndent(),
+            arrayOf(
+                sourceNames[0],
+                sourceNames[1],
+                sourceNames[0],
+                sourceNames[1],
+                EvidencePrecision.UNKNOWN.name,
+                EvidencePrecision.INFERRED.name,
+                EvidencePrecision.INFERRED.name,
+            ),
+        ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getLong(0)) } }
+
+        weakIds.forEach { membershipPeriodId ->
+            db.delete(
+                "weekly_notes",
+                "is_automatic = 1 AND event_id IN (SELECT id FROM member_events WHERE membership_period_id = ?)",
+                arrayOf(membershipPeriodId.toString()),
+            )
+            db.update(
+                "weekly_notes",
+                ContentValues().apply { putNull("event_id") },
+                "is_automatic = 0 AND event_id IN (SELECT id FROM member_events WHERE membership_period_id = ?)",
+                arrayOf(membershipPeriodId.toString()),
+            )
+            db.update(
+                "platoon_activity",
+                ContentValues().apply { putNull("member_event_id") },
+                "member_event_id IN (SELECT id FROM member_events WHERE membership_period_id = ?)",
+                arrayOf(membershipPeriodId.toString()),
+            )
+            db.delete(
+                "member_events",
+                "membership_period_id = ?",
+                arrayOf(membershipPeriodId.toString()),
+            )
+            db.delete("membership_periods", "id = ?", arrayOf(membershipPeriodId.toString()))
+        }
+    }
+
+    private fun buildRosterPresenceRuns(
+        snapshots: List<RosterFrame>,
+        uid: Long,
+    ): List<RosterPresenceRun> {
+        val runs = mutableListOf<RosterPresenceRun>()
+        var index = 0
+        while (index < snapshots.size) {
+            if (uid !in snapshots[index].members) {
+                index += 1
+                continue
+            }
+            val firstIndex = index
+            while (index + 1 < snapshots.size && uid in snapshots[index + 1].members) index += 1
+            val lastIndex = index
+            val first = snapshots[firstIndex]
+            val last = snapshots[lastIndex]
+            runs += RosterPresenceRun(
+                firstSeenAt = first.capturedAt,
+                lastSeenAt = last.capturedAt,
+                joinedAt = first.capturedAt.takeIf { firstIndex > 0 },
+                leftAt = snapshots.getOrNull(lastIndex + 1)?.capturedAt,
+                name = first.members.getValue(uid).name,
+            )
+            index += 1
+        }
+        return runs
+    }
+
+    private fun hasStrongMembershipPeriodOverlapping(
+        db: SQLiteDatabase,
+        uid: Long,
+        run: RosterPresenceRun,
+    ): Boolean = db.rawQuery(
+        """
+        SELECT 1
+        FROM membership_periods
+        WHERE uid = ?
+          AND (joined_at IS NULL OR joined_at <= ?)
+          AND (left_at IS NULL OR left_at > ?)
+        LIMIT 1
+        """.trimIndent(),
+        arrayOf(uid.toString(), run.lastSeenAt.toEpochMilli().toString(), run.firstSeenAt.toEpochMilli().toString()),
+    ).use(Cursor::moveToFirst)
+
+    private fun insertRosterPresenceRun(
+        db: SQLiteDatabase,
+        uid: Long,
+        run: RosterPresenceRun,
+    ) {
+        val membershipPeriodId = db.insertOrThrow(
+            "membership_periods",
+            null,
+            ContentValues().apply {
+                put("uid", uid)
+                putNullableLong("joined_at", run.joinedAt?.toEpochMilli())
+                putNullableLong("left_at", run.leftAt?.toEpochMilli())
+                put("joined_time_known", 1)
+                putNullableInt("left_time_known", run.leftAt?.let { 1 })
+                put(
+                    "joined_precision",
+                    if (run.joinedAt == null) EvidencePrecision.UNKNOWN.name else EvidencePrecision.INFERRED.name,
+                )
+                put(
+                    "left_precision",
+                    run.leftAt?.let { EvidencePrecision.INFERRED.name },
+                )
+                put("joined_source", EvidenceSource.LEGACY_IMPORT.name)
+                put("left_source", run.leftAt?.let { EvidenceSource.LEGACY_IMPORT.name })
+            },
+        )
+        if (run.joinedAt != null) {
+            insertSnapshotBoundaryEvent(
+                db,
+                membershipPeriodId,
+                uid,
+                run.name,
+                if (hasEarlierMembershipPeriod(db, uid, membershipPeriodId)) {
+                    MemberEventType.REJOINED
+                } else {
+                    MemberEventType.JOINED
+                },
+                run.joinedAt,
+                EvidenceSource.LEGACY_IMPORT,
+            )
+        }
+        if (run.leftAt != null) {
+            insertSnapshotBoundaryEvent(
+                db,
+                membershipPeriodId,
+                uid,
+                run.name,
+                MemberEventType.LEFT,
+                run.leftAt,
+                EvidenceSource.LEGACY_IMPORT,
+            )
         }
     }
 
@@ -666,16 +1017,16 @@ class PlatoonDatabase(
         source: EvidenceSource,
         nameIsUnique: Boolean,
     ) {
-        val exactTenureId = findRosterConfirmedExactTenure(
+        val exactMembershipPeriodId = findRosterConfirmedExactMembershipPeriod(
             db = db,
             uid = member.uid,
             boundary = MembershipBoundary.JOIN,
             from = priorCapturedAt,
             observedAt = observedAt,
         )
-        if (exactTenureId != null) return
+        if (exactMembershipPeriodId != null) return
 
-        val tenureId = insertTenure(
+        val membershipPeriodId = insertMembershipPeriod(
             db = db,
             uid = member.uid,
             joinedAt = observedAt,
@@ -684,7 +1035,7 @@ class PlatoonDatabase(
         )
         insertSnapshotBoundaryEvent(
             db = db,
-            tenureId = tenureId,
+            membershipPeriodId = membershipPeriodId,
             uid = member.uid,
             memberName = member.name,
             type = type,
@@ -693,7 +1044,7 @@ class PlatoonDatabase(
         )
         correlateMembershipBoundary(
             db = db,
-            tenureId = tenureId,
+            membershipPeriodId = membershipPeriodId,
             member = member,
             type = type,
             boundary = MembershipBoundary.JOIN,
@@ -703,7 +1054,7 @@ class PlatoonDatabase(
         )
     }
 
-    private fun findRosterConfirmedExactTenure(
+    private fun findRosterConfirmedExactMembershipPeriod(
         db: SQLiteDatabase,
         uid: Long,
         boundary: MembershipBoundary,
@@ -738,7 +1089,7 @@ class PlatoonDatabase(
         val candidates = db.rawQuery(
             """
             SELECT id, $boundaryColumn
-            FROM tenures
+            FROM membership_periods
             WHERE uid = ?
               AND $sourceColumn = ?
               AND $precisionColumn = ?
@@ -800,7 +1151,7 @@ class PlatoonDatabase(
 
         val candidates = db.rawQuery(
             """
-            SELECT id, tenure_id, COALESCE(occurred_at, observed_at),
+            SELECT id, membership_period_id, COALESCE(occurred_at, observed_at),
                    ABS(COALESCE(occurred_at, observed_at) - ?) AS distance
             FROM member_events
             WHERE uid = ?
@@ -830,7 +1181,7 @@ class PlatoonDatabase(
                     add(
                         BoundaryEventCandidate(
                             id = cursor.getLong(0),
-                            tenureId = cursor.getNullableLong(1),
+                            membershipPeriodId = cursor.getNullableLong(1),
                             boundaryAt = Instant.ofEpochMilli(cursor.getLong(2)),
                         ),
                     )
@@ -846,21 +1197,21 @@ class PlatoonDatabase(
                 second = occurredAt,
             )
         }
-        val tenureId = correlatableCandidates
-            .firstNotNullOfOrNull(BoundaryEventCandidate::tenureId)
-            ?: findOrCreateUpdateTenure(db, member.uid, boundary, occurredAt)
+        val membershipPeriodId = correlatableCandidates
+            .firstNotNullOfOrNull(BoundaryEventCandidate::membershipPeriodId)
+            ?: findOrCreateUpdateMembershipPeriod(db, member.uid, boundary, occurredAt)
 
         correlatableCandidates.forEach { candidate ->
             db.delete("member_events", "id = ?", arrayOf(candidate.id.toString()))
         }
-        correlatableCandidates.mapNotNull(BoundaryEventCandidate::tenureId)
-            .filter { it != tenureId }
+        correlatableCandidates.mapNotNull(BoundaryEventCandidate::membershipPeriodId)
+            .filter { it != membershipPeriodId }
             .distinct()
-            .forEach { candidateTenureId ->
-                mergeShadowInferredTenure(
+            .forEach { candidateMembershipPeriodId ->
+                mergeShadowInferredMembershipPeriod(
                     db = db,
-                    selectedTenureId = tenureId,
-                    shadowTenureId = candidateTenureId,
+                    selectedMembershipPeriodId = membershipPeriodId,
+                    shadowMembershipPeriodId = candidateMembershipPeriodId,
                     boundary = boundary,
                     occurredAt = occurredAt,
                 )
@@ -868,11 +1219,11 @@ class PlatoonDatabase(
 
         applyExactMembershipBoundary(
             db = db,
-            tenureId = tenureId,
+            membershipPeriodId = membershipPeriodId,
             uid = member.uid,
             memberName = member.name,
             type = if (boundary == MembershipBoundary.JOIN &&
-                hasEarlierTenure(db, member.uid, tenureId)
+                hasEarlierMembershipPeriod(db, member.uid, membershipPeriodId)
             ) {
                 MemberEventType.REJOINED
             } else {
@@ -884,18 +1235,18 @@ class PlatoonDatabase(
             activityIds = emptyList(),
         )
         if (boundary == MembershipBoundary.WITHDRAW &&
-            MembershipChronology.shouldRestoreRosterActiveTenure(
+            MembershipChronology.shouldRestoreRosterActiveMembershipPeriod(
                 memberIsActive = isActiveMember(db, member.uid),
                 withdrawalPredatesRoster = hasRosterPresenceAfter(db, member.uid, occurredAt),
             )
         ) {
             /*
              * The historical boundary and a later authoritative roster are
-             * both true. Close the compatible historical tenure above, then
-             * preserve exactly one unknown current tenure for the later roster.
-             * A subsequent exact rejoin in the replay will refine this tenure.
+             * both true. Close the compatible historical membershipPeriod above, then
+             * preserve exactly one unknown current membershipPeriod for the later roster.
+             * A subsequent exact rejoin in the replay will refine this membershipPeriod.
              */
-            ensureRosterActiveTenure(db, member.uid, EvidenceSource.SNAPSHOT)
+            ensureRosterActiveMembershipPeriod(db, member.uid, EvidenceSource.SNAPSHOT)
         }
         return true
     }
@@ -978,7 +1329,7 @@ class PlatoonDatabase(
         )
     }
 
-    private fun findOrCreateUpdateTenure(
+    private fun findOrCreateUpdateMembershipPeriod(
         db: SQLiteDatabase,
         uid: Long,
         boundary: MembershipBoundary,
@@ -989,7 +1340,7 @@ class PlatoonDatabase(
             MembershipBoundary.JOIN -> db.rawQuery(
                 """
                 SELECT id
-                FROM tenures
+                FROM membership_periods
                 WHERE uid = ?
                   AND (left_at IS NULL OR left_at >= ?)
                   AND (
@@ -1019,7 +1370,7 @@ class PlatoonDatabase(
             MembershipBoundary.WITHDRAW -> db.rawQuery(
                 """
                 SELECT id
-                FROM tenures
+                FROM membership_periods
                 WHERE uid = ?
                   AND (joined_at IS NULL OR joined_at <= ?)
                   AND (
@@ -1049,7 +1400,7 @@ class PlatoonDatabase(
             )
         }.use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
         if (nearby != null) return nearby
-        return insertTenure(
+        return insertMembershipPeriod(
             db = db,
             uid = uid,
             joinedAt = if (boundary == MembershipBoundary.JOIN) occurredAt else null,
@@ -1090,10 +1441,10 @@ class PlatoonDatabase(
         )
     }
 
-    private fun mergeShadowInferredTenure(
+    private fun mergeShadowInferredMembershipPeriod(
         db: SQLiteDatabase,
-        selectedTenureId: Long,
-        shadowTenureId: Long,
+        selectedMembershipPeriodId: Long,
+        shadowMembershipPeriodId: Long,
         boundary: MembershipBoundary,
         occurredAt: Instant,
     ) {
@@ -1110,7 +1461,7 @@ class PlatoonDatabase(
                    joined_time_known, left_time_known,
                    joined_precision, left_precision,
                    joined_source, left_source
-            FROM tenures
+            FROM membership_periods
             WHERE id = ?
               AND $precisionColumn IN (?, ?)
               AND (
@@ -1120,7 +1471,7 @@ class PlatoonDatabase(
             LIMIT 1
             """.trimIndent(),
             arrayOf(
-                shadowTenureId.toString(),
+                shadowMembershipPeriodId.toString(),
                 EvidencePrecision.INFERRED.name,
                 EvidencePrecision.UNKNOWN.name,
                 occurredAt.toEpochMilli().toString(),
@@ -1130,7 +1481,7 @@ class PlatoonDatabase(
             if (!cursor.moveToFirst()) {
                 null
             } else {
-                ShadowTenure(
+                ShadowMembershipPeriod(
                     joinedAt = cursor.getNullableLong(0),
                     leftAt = cursor.getNullableLong(1),
                     joinedDate = cursor.getNullableLong(2),
@@ -1149,8 +1500,8 @@ class PlatoonDatabase(
         val oppositeAt = if (boundary == MembershipBoundary.JOIN) shadow.leftAt else shadow.joinedAt
         if (oppositeAt != null) {
             val selectedHasOpposite = db.rawQuery(
-                "SELECT ${oppositePrefix}_at FROM tenures WHERE id = ?",
-                arrayOf(selectedTenureId.toString()),
+                "SELECT ${oppositePrefix}_at FROM membership_periods WHERE id = ?",
+                arrayOf(selectedMembershipPeriodId.toString()),
             ).use { cursor -> cursor.moveToFirst() && !cursor.isNull(0) }
             if (selectedHasOpposite) return
 
@@ -1169,10 +1520,10 @@ class PlatoonDatabase(
                 }
             }
             db.update(
-                "tenures",
+                "membership_periods",
                 values,
                 "id = ?",
-                arrayOf(selectedTenureId.toString()),
+                arrayOf(selectedMembershipPeriodId.toString()),
             )
             val oppositeTypes = if (boundary == MembershipBoundary.JOIN) {
                 listOf(MemberEventType.LEFT, MemberEventType.REMOVED)
@@ -1181,17 +1532,17 @@ class PlatoonDatabase(
             }
             db.update(
                 "member_events",
-                ContentValues().apply { put("tenure_id", selectedTenureId) },
-                "tenure_id = ? AND event_type IN (?, ?)",
+                ContentValues().apply { put("membership_period_id", selectedMembershipPeriodId) },
+                "membership_period_id = ? AND event_type IN (?, ?)",
                 arrayOf(
-                    shadowTenureId.toString(),
+                    shadowMembershipPeriodId.toString(),
                     oppositeTypes[0].name,
                     oppositeTypes[1].name,
                 ),
             )
         }
-        db.delete("member_events", "tenure_id = ?", arrayOf(shadowTenureId.toString()))
-        db.delete("tenures", "id = ?", arrayOf(shadowTenureId.toString()))
+        db.delete("member_events", "membership_period_id = ?", arrayOf(shadowMembershipPeriodId.toString()))
+        db.delete("membership_periods", "id = ?", arrayOf(shadowMembershipPeriodId.toString()))
     }
 
     @Synchronized
@@ -1258,8 +1609,8 @@ class PlatoonDatabase(
                     put("note", "")
                 },
             )
-            val tenureId = insertManualTenure(db, uid, joined, withdrew, note)
-            replaceManualTenureEvents(db, tenureId, uid, name.trim(), joined, withdrew)
+            val membershipPeriodId = insertManualMembershipPeriod(db, uid, joined, withdrew, note)
+            replaceManualMembershipPeriodEvents(db, membershipPeriodId, uid, name.trim(), joined, withdrew)
             db.setTransactionSuccessful()
             return true
         } finally {
@@ -1268,7 +1619,7 @@ class PlatoonDatabase(
     }
 
     @Synchronized
-    fun addTenure(
+    fun addMembershipPeriod(
         uid: Long,
         joined: MembershipBoundaryValue,
         withdrew: MembershipBoundaryValue?,
@@ -1279,8 +1630,8 @@ class PlatoonDatabase(
         db.beginTransaction()
         try {
             val memberName = memberName(db, uid) ?: return false
-            val tenureId = insertManualTenure(db, uid, joined, withdrew, note)
-            replaceManualTenureEvents(db, tenureId, uid, memberName, joined, withdrew)
+            val membershipPeriodId = insertManualMembershipPeriod(db, uid, joined, withdrew, note)
+            replaceManualMembershipPeriodEvents(db, membershipPeriodId, uid, memberName, joined, withdrew)
             db.setTransactionSuccessful()
             return true
         } finally {
@@ -1359,7 +1710,7 @@ class PlatoonDatabase(
                             firstSeenAt = Instant.ofEpochMilli(cursor.getLong(4)),
                             lastSeenAt = Instant.ofEpochMilli(cursor.getLong(5)),
                             note = cursor.getString(6),
-                            tenures = readTenures(db, uid),
+                            membershipPeriods = readMembershipPeriods(db, uid),
                         ),
                     )
                 }
@@ -1440,7 +1791,7 @@ class PlatoonDatabase(
                 uidArgument,
             )
             db.delete("member_events", "uid = ?", uidArgument)
-            db.delete("tenures", "uid = ?", uidArgument)
+            db.delete("membership_periods", "uid = ?", uidArgument)
             db.delete("snapshot_members", "uid = ?", uidArgument)
             val deleted = db.delete("members", "uid = ?", uidArgument) == 1
             check(deleted) { "Member disappeared during deletion" }
@@ -1451,9 +1802,88 @@ class PlatoonDatabase(
         }
     }
 
+    // Function Name: deleteMembershipPeriod
+    // Description:
+    // - Deletes one membership period and its derived boundary events atomically.
+    // - Refuses to remove the member's final period and recomputes current active state.
+    // Parameters:
+    // - membershipPeriodId: Persistent period identifier selected in member details.
+    // Returns:
+    // - True when the period was deleted; false when it was missing or was the only period.
     @Synchronized
-    fun updateTenure(
-        tenureId: Long,
+    fun deleteMembershipPeriod(membershipPeriodId: Long): Boolean {
+        require(membershipPeriodId > 0)
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val uid = db.rawQuery(
+                "SELECT uid FROM membership_periods WHERE id = ?",
+                arrayOf(membershipPeriodId.toString()),
+            ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
+                ?: return false
+            val periodCount = db.rawQuery(
+                "SELECT COUNT(*) FROM membership_periods WHERE uid = ?",
+                arrayOf(uid.toString()),
+            ).use { cursor ->
+                check(cursor.moveToFirst())
+                cursor.getLong(0)
+            }
+            if (periodCount <= 1L) return false
+
+            db.delete(
+                "weekly_notes",
+                "is_automatic = 1 AND event_id IN " +
+                    "(SELECT id FROM member_events WHERE membership_period_id = ?)",
+                arrayOf(membershipPeriodId.toString()),
+            )
+            db.update(
+                "weekly_notes",
+                ContentValues().apply { putNull("event_id") },
+                "event_id IN " +
+                    "(SELECT id FROM member_events WHERE membership_period_id = ?)",
+                arrayOf(membershipPeriodId.toString()),
+            )
+            db.update(
+                "platoon_activity",
+                ContentValues().apply { putNull("member_event_id") },
+                "member_event_id IN " +
+                    "(SELECT id FROM member_events WHERE membership_period_id = ?)",
+                arrayOf(membershipPeriodId.toString()),
+            )
+            db.delete(
+                "member_events",
+                "membership_period_id = ?",
+                arrayOf(membershipPeriodId.toString()),
+            )
+            if (
+                db.delete(
+                    "membership_periods",
+                    "id = ? AND uid = ?",
+                    arrayOf(membershipPeriodId.toString(), uid.toString()),
+                ) != 1
+            ) {
+                return false
+            }
+            val isActive = db.rawQuery(
+                "SELECT 1 FROM membership_periods WHERE uid = ? AND left_at IS NULL LIMIT 1",
+                arrayOf(uid.toString()),
+            ).use(Cursor::moveToFirst)
+            db.update(
+                "members",
+                ContentValues().apply { put("is_active", if (isActive) 1 else 0) },
+                "uid = ?",
+                arrayOf(uid.toString()),
+            )
+            db.setTransactionSuccessful()
+            return true
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    @Synchronized
+    fun updateMembershipPeriod(
+        membershipPeriodId: Long,
         joined: MembershipBoundaryValue,
         left: MembershipBoundaryValue?,
         note: String,
@@ -1461,40 +1891,40 @@ class PlatoonDatabase(
         val db = writableDatabase
         db.beginTransaction()
         try {
-            val tenure = readTenureForUpdate(db, tenureId) ?: return false
-            val effectiveJoined = if (tenure.joinedSource.isImmutableMembershipBoundary()) {
-                tenure.joined
+            val membershipPeriod = readMembershipPeriodForUpdate(db, membershipPeriodId) ?: return false
+            val effectiveJoined = if (membershipPeriod.joinedSource.isImmutableMembershipBoundary()) {
+                membershipPeriod.joined
             } else {
                 joined
             } ?: return false
-            val effectiveLeft = if (tenure.leftSource?.isImmutableMembershipBoundary() == true) {
-                tenure.left
+            val effectiveLeft = if (membershipPeriod.leftSource?.isImmutableMembershipBoundary() == true) {
+                membershipPeriod.left
             } else {
                 left
             }
             require(isValidMembershipRange(effectiveJoined, effectiveLeft))
             val joinedChanged = editableMembershipBoundaryChanged(
-                original = tenure.joined,
+                original = membershipPeriod.joined,
                 requested = joined,
-                source = tenure.joinedSource,
+                source = membershipPeriod.joinedSource,
             )
             val leftChanged = editableMembershipBoundaryChanged(
-                original = tenure.left,
+                original = membershipPeriod.left,
                 requested = left,
-                source = tenure.leftSource,
+                source = membershipPeriod.leftSource,
             )
             val resultingJoinedSource = if (joinedChanged) {
                 EvidenceSource.MANUAL
             } else {
-                tenure.joinedSource
+                membershipPeriod.joinedSource
             }
             val resultingLeftSource = if (leftChanged) {
                 left?.let { EvidenceSource.MANUAL }
             } else {
-                tenure.leftSource
+                membershipPeriod.leftSource
             }
             val updated = db.update(
-                "tenures",
+                "membership_periods",
                 ContentValues().apply {
                     if (joinedChanged) {
                         putMembershipBoundary("joined", joined)
@@ -1515,14 +1945,14 @@ class PlatoonDatabase(
                     put("note", note.trim())
                 },
                 "id = ?",
-                arrayOf(tenureId.toString()),
+                arrayOf(membershipPeriodId.toString()),
             ) == 1
             if (updated && (joinedChanged || leftChanged)) {
-                replaceManualTenureEvents(
+                replaceManualMembershipPeriodEvents(
                     db,
-                    tenureId,
-                    tenure.uid,
-                    memberName(db, tenure.uid).orEmpty(),
+                    membershipPeriodId,
+                    membershipPeriod.uid,
+                    memberName(db, membershipPeriod.uid).orEmpty(),
                     effectiveJoined.takeIf {
                         resultingJoinedSource == EvidenceSource.MANUAL
                     },
@@ -1925,17 +2355,17 @@ class PlatoonDatabase(
         }
     }
 
-    private fun ensureRosterActiveTenure(
+    private fun ensureRosterActiveMembershipPeriod(
         db: SQLiteDatabase,
         uid: Long,
         source: EvidenceSource,
     ) {
-        val hasOpenTenure = db.rawQuery(
-            "SELECT 1 FROM tenures WHERE uid = ? AND left_at IS NULL LIMIT 1",
+        val hasOpenMembershipPeriod = db.rawQuery(
+            "SELECT 1 FROM membership_periods WHERE uid = ? AND left_at IS NULL LIMIT 1",
             arrayOf(uid.toString()),
         ).use(Cursor::moveToFirst)
-        if (hasOpenTenure) return
-        insertTenure(
+        if (hasOpenMembershipPeriod) return
+        insertMembershipPeriod(
             db = db,
             uid = uid,
             joinedAt = null,
@@ -1946,7 +2376,7 @@ class PlatoonDatabase(
 
     private fun correlateMembershipBoundary(
         db: SQLiteDatabase,
-        tenureId: Long,
+        membershipPeriodId: Long,
         member: SnapshotMember,
         type: MemberEventType,
         boundary: MembershipBoundary,
@@ -1965,7 +2395,7 @@ class PlatoonDatabase(
             ?: return
         applyExactMembershipBoundary(
             db = db,
-            tenureId = tenureId,
+            membershipPeriodId = membershipPeriodId,
             uid = member.uid,
             memberName = member.name,
             type = type,
@@ -2041,7 +2471,7 @@ class PlatoonDatabase(
             val eventType = when (boundary.boundary) {
                 MembershipBoundary.WITHDRAW -> MemberEventType.LEFT
                 MembershipBoundary.JOIN -> {
-                    if (hasEarlierTenure(db, boundary.uid, boundary.tenureId)) {
+                    if (hasEarlierMembershipPeriod(db, boundary.uid, boundary.membershipPeriodId)) {
                         MemberEventType.REJOINED
                     } else {
                         MemberEventType.JOINED
@@ -2050,7 +2480,7 @@ class PlatoonDatabase(
             }
             applyExactMembershipBoundary(
                 db = db,
-                tenureId = boundary.tenureId,
+                membershipPeriodId = boundary.membershipPeriodId,
                 uid = boundary.uid,
                 memberName = activity.memberName,
                 type = eventType,
@@ -2068,7 +2498,7 @@ class PlatoonDatabase(
     ): List<InferredBoundary> = db.rawQuery(
         """
         SELECT id, uid, joined_at, left_at, joined_precision, left_precision
-        FROM tenures
+        FROM membership_periods
         WHERE uid = ?
           AND (
             (joined_at IS NOT NULL AND joined_precision = ? AND ABS(joined_at - ?) <= ?)
@@ -2088,7 +2518,7 @@ class PlatoonDatabase(
     ).use { cursor ->
         buildList {
             while (cursor.moveToNext()) {
-                val tenureId = cursor.getLong(0)
+                val membershipPeriodId = cursor.getLong(0)
                 val uid = cursor.getLong(1)
                 val joinedAt = cursor.getNullableLong(2)
                 val leftAt = cursor.getNullableLong(3)
@@ -2099,7 +2529,7 @@ class PlatoonDatabase(
                 ) {
                     add(
                         InferredBoundary(
-                            tenureId,
+                            membershipPeriodId,
                             uid,
                             MembershipBoundary.JOIN,
                             Instant.ofEpochMilli(joinedAt),
@@ -2113,7 +2543,7 @@ class PlatoonDatabase(
                 ) {
                     add(
                         InferredBoundary(
-                            tenureId,
+                            membershipPeriodId,
                             uid,
                             MembershipBoundary.WITHDRAW,
                             Instant.ofEpochMilli(leftAt),
@@ -2126,7 +2556,7 @@ class PlatoonDatabase(
 
     private fun applyExactMembershipBoundary(
         db: SQLiteDatabase,
-        tenureId: Long,
+        membershipPeriodId: Long,
         uid: Long,
         memberName: String,
         type: MemberEventType,
@@ -2153,7 +2583,7 @@ class PlatoonDatabase(
                 }
             }
         }
-        db.update("tenures", values, "id = ?", arrayOf(tenureId.toString()))
+        db.update("membership_periods", values, "id = ?", arrayOf(membershipPeriodId.toString()))
         val inferredTypes = when (boundary) {
             MembershipBoundary.JOIN -> arrayOf(
                 MemberEventType.JOINED.name,
@@ -2166,9 +2596,9 @@ class PlatoonDatabase(
         }
         db.delete(
             "member_events",
-            "tenure_id = ? AND source IN (?, ?) AND event_type IN (?, ?)",
+            "membership_period_id = ? AND source IN (?, ?) AND event_type IN (?, ?)",
             arrayOf(
-                tenureId.toString(),
+                membershipPeriodId.toString(),
                 EvidenceSource.SNAPSHOT.name,
                 EvidenceSource.LEGACY_IMPORT.name,
                 inferredTypes[0],
@@ -2184,7 +2614,7 @@ class PlatoonDatabase(
             precision = EvidencePrecision.EXACT,
             source = EvidenceSource.GAME_UPDATES,
             note = memberName,
-            tenureId = tenureId,
+            membershipPeriodId = membershipPeriodId,
         )
         activityIds.forEach { activityId ->
             db.update(
@@ -2200,14 +2630,14 @@ class PlatoonDatabase(
         }
     }
 
-    private fun insertManualTenure(
+    private fun insertManualMembershipPeriod(
         db: SQLiteDatabase,
         uid: Long,
         joined: MembershipBoundaryValue,
         withdrew: MembershipBoundaryValue?,
         note: String,
     ): Long = db.insertOrThrow(
-        "tenures",
+        "membership_periods",
         null,
         ContentValues().apply {
             put("uid", uid)
@@ -2227,9 +2657,9 @@ class PlatoonDatabase(
         },
     )
 
-    private fun replaceManualTenureEvents(
+    private fun replaceManualMembershipPeriodEvents(
         db: SQLiteDatabase,
-        tenureId: Long,
+        membershipPeriodId: Long,
         uid: Long,
         memberName: String,
         joined: MembershipBoundaryValue?,
@@ -2237,15 +2667,15 @@ class PlatoonDatabase(
     ) {
         db.delete(
             "member_events",
-            "tenure_id = ? AND source = ?",
-            arrayOf(tenureId.toString(), EvidenceSource.MANUAL.name),
+            "membership_period_id = ? AND source = ?",
+            arrayOf(membershipPeriodId.toString(), EvidenceSource.MANUAL.name),
         )
         val observedAt = Instant.now()
         if (joined != null) {
             insertEvent(
                 db = db,
                 uid = uid,
-                type = if (hasEarlierTenure(db, uid, tenureId)) {
+                type = if (hasEarlierMembershipPeriod(db, uid, membershipPeriodId)) {
                     MemberEventType.REJOINED
                 } else {
                     MemberEventType.JOINED
@@ -2257,7 +2687,7 @@ class PlatoonDatabase(
                 precision = EvidencePrecision.MANUAL,
                 source = EvidenceSource.MANUAL,
                 note = memberName,
-                tenureId = tenureId,
+                membershipPeriodId = membershipPeriodId,
             )
         }
         if (withdrew != null) {
@@ -2272,26 +2702,26 @@ class PlatoonDatabase(
                 precision = EvidencePrecision.MANUAL,
                 source = EvidenceSource.MANUAL,
                 note = memberName,
-                tenureId = tenureId,
+                membershipPeriodId = membershipPeriodId,
             )
         }
     }
 
-    private fun linkLegacyTenureEvents(db: SQLiteDatabase) {
+    private fun linkLegacyMembershipPeriodEvents(db: SQLiteDatabase) {
         db.rawQuery(
             """
             SELECT t.id, t.uid, t.joined_at, t.left_at,
                    t.joined_precision, t.left_precision,
                    t.joined_source, t.left_source,
                    COALESCE(m.custom_name, m.current_name)
-            FROM tenures t
+            FROM membership_periods t
             JOIN members m ON m.uid = t.uid
             ORDER BY t.uid, t.id
             """.trimIndent(),
             null,
         ).use { cursor ->
             while (cursor.moveToNext()) {
-                val tenureId = cursor.getLong(0)
+                val membershipPeriodId = cursor.getLong(0)
                 val uid = cursor.getLong(1)
                 val joinedAt = cursor.getNullableLong(2)
                 val leftAt = cursor.getNullableLong(3)
@@ -2301,14 +2731,14 @@ class PlatoonDatabase(
                 val leftSource = cursor.getNullableString(7)?.let(EvidenceSource::valueOf)
                 val memberName = cursor.getString(8)
                 if (joinedAt != null) {
-                    val expectedType = if (hasEarlierTenure(db, uid, tenureId)) {
+                    val expectedType = if (hasEarlierMembershipPeriod(db, uid, membershipPeriodId)) {
                         MemberEventType.REJOINED
                     } else {
                         MemberEventType.JOINED
                     }
                     val linked = linkLegacyBoundaryEvent(
                         db = db,
-                        tenureId = tenureId,
+                        membershipPeriodId = membershipPeriodId,
                         uid = uid,
                         occurredAt = joinedAt,
                         precision = joinedPrecision,
@@ -2318,7 +2748,7 @@ class PlatoonDatabase(
                     if (!linked && joinedSource == EvidenceSource.MANUAL) {
                         insertLegacyManualBoundaryEvent(
                             db,
-                            tenureId,
+                            membershipPeriodId,
                             uid,
                             memberName,
                             expectedType,
@@ -2330,7 +2760,7 @@ class PlatoonDatabase(
                 if (leftAt != null && leftPrecision != null && leftSource != null) {
                     val linked = linkLegacyBoundaryEvent(
                         db = db,
-                        tenureId = tenureId,
+                        membershipPeriodId = membershipPeriodId,
                         uid = uid,
                         occurredAt = leftAt,
                         precision = leftPrecision,
@@ -2340,7 +2770,7 @@ class PlatoonDatabase(
                     if (!linked && leftSource == EvidenceSource.MANUAL) {
                         insertLegacyManualBoundaryEvent(
                             db,
-                            tenureId,
+                            membershipPeriodId,
                             uid,
                             memberName,
                             MemberEventType.LEFT,
@@ -2355,7 +2785,7 @@ class PlatoonDatabase(
 
     private fun linkLegacyBoundaryEvent(
         db: SQLiteDatabase,
-        tenureId: Long,
+        membershipPeriodId: Long,
         uid: Long,
         occurredAt: Long,
         precision: EvidencePrecision,
@@ -2366,7 +2796,7 @@ class PlatoonDatabase(
             """
             SELECT id, event_type, occurred_at, observed_at, source
             FROM member_events
-            WHERE tenure_id IS NULL
+            WHERE membership_period_id IS NULL
               AND uid = ?
               AND source = ?
               AND precision = ?
@@ -2400,7 +2830,7 @@ class PlatoonDatabase(
             ?: return false
         db.update(
             "member_events",
-            ContentValues().apply { put("tenure_id", tenureId) },
+            ContentValues().apply { put("membership_period_id", membershipPeriodId) },
             "id = ?",
             arrayOf(eventId.toString()),
         )
@@ -2409,7 +2839,7 @@ class PlatoonDatabase(
 
     private fun insertLegacyManualBoundaryEvent(
         db: SQLiteDatabase,
-        tenureId: Long,
+        membershipPeriodId: Long,
         uid: Long,
         memberName: String,
         type: MemberEventType,
@@ -2426,15 +2856,15 @@ class PlatoonDatabase(
             precision = precision,
             source = EvidenceSource.MANUAL,
             note = memberName,
-            tenureId = tenureId,
+            membershipPeriodId = membershipPeriodId,
         )
     }
 
     private fun backfillManualCalendarDates(db: SQLiteDatabase, zoneId: ZoneId) {
-        val tenures = db.rawQuery(
+        val membershipPeriods = db.rawQuery(
             """
             SELECT id, joined_at, left_at, joined_source, left_source
-            FROM tenures
+            FROM membership_periods
             WHERE (joined_source = ? AND joined_at IS NOT NULL)
                OR (left_source = ? AND left_at IS NOT NULL)
             """.trimIndent(),
@@ -2455,27 +2885,27 @@ class PlatoonDatabase(
                 }
             }
         }
-        tenures.forEach { tenure ->
+        membershipPeriods.forEach { membershipPeriod ->
             db.update(
-                "tenures",
+                "membership_periods",
                 ContentValues().apply {
-                    if (tenure.joinedIsManual && tenure.joinedAtMillis != null) {
+                    if (membershipPeriod.joinedIsManual && membershipPeriod.joinedAtMillis != null) {
                         put(
                             "joined_date",
-                            migrationCalendarDate(tenure.joinedAtMillis, zoneId).toEpochDay(),
+                            migrationCalendarDate(membershipPeriod.joinedAtMillis, zoneId).toEpochDay(),
                         )
                         put("joined_time_known", 1)
                     }
-                    if (tenure.leftIsManual && tenure.leftAtMillis != null) {
+                    if (membershipPeriod.leftIsManual && membershipPeriod.leftAtMillis != null) {
                         put(
                             "left_date",
-                            migrationCalendarDate(tenure.leftAtMillis, zoneId).toEpochDay(),
+                            migrationCalendarDate(membershipPeriod.leftAtMillis, zoneId).toEpochDay(),
                         )
                         put("left_time_known", 1)
                     }
                 },
                 "id = ?",
-                arrayOf(tenure.id.toString()),
+                arrayOf(membershipPeriod.id.toString()),
             )
         }
 
@@ -2508,12 +2938,12 @@ class PlatoonDatabase(
         }
     }
 
-    private fun backfillSnapshotTenureEvents(db: SQLiteDatabase) {
+    private fun backfillSnapshotMembershipPeriodEvents(db: SQLiteDatabase) {
         db.rawQuery(
             """
             SELECT t.id, t.uid, t.joined_at, t.left_at, t.joined_source, t.left_source,
                    COALESCE(m.custom_name, m.current_name)
-            FROM tenures t
+            FROM membership_periods t
             JOIN members m ON m.uid = t.uid
             WHERE t.joined_source IN (?, ?)
                OR t.left_source IN (?, ?)
@@ -2527,7 +2957,7 @@ class PlatoonDatabase(
             ),
         ).use { cursor ->
             while (cursor.moveToNext()) {
-                val tenureId = cursor.getLong(0)
+                val membershipPeriodId = cursor.getLong(0)
                 val uid = cursor.getLong(1)
                 val joinedAt = cursor.getNullableLong(2)?.let(Instant::ofEpochMilli)
                 val leftAt = cursor.getNullableLong(3)?.let(Instant::ofEpochMilli)
@@ -2537,10 +2967,10 @@ class PlatoonDatabase(
                 if (joinedAt != null && joinedSource in SNAPSHOT_EVENT_SOURCES) {
                     insertSnapshotBoundaryEvent(
                         db,
-                        tenureId,
+                        membershipPeriodId,
                         uid,
                         name,
-                        if (hasEarlierTenure(db, uid, tenureId)) {
+                        if (hasEarlierMembershipPeriod(db, uid, membershipPeriodId)) {
                             MemberEventType.REJOINED
                         } else {
                             MemberEventType.JOINED
@@ -2552,7 +2982,7 @@ class PlatoonDatabase(
                 if (leftAt != null && leftSource in SNAPSHOT_EVENT_SOURCES) {
                     insertSnapshotBoundaryEvent(
                         db,
-                        tenureId,
+                        membershipPeriodId,
                         uid,
                         name,
                         MemberEventType.LEFT,
@@ -2566,7 +2996,7 @@ class PlatoonDatabase(
 
     private fun insertSnapshotBoundaryEvent(
         db: SQLiteDatabase,
-        tenureId: Long,
+        membershipPeriodId: Long,
         uid: Long,
         memberName: String,
         type: MemberEventType,
@@ -2581,8 +3011,8 @@ class PlatoonDatabase(
         }
         val exists = db.rawQuery(
             "SELECT 1 FROM member_events " +
-                "WHERE tenure_id = ? AND event_type IN (?, ?) LIMIT 1",
-            arrayOf(tenureId.toString(), compatibleTypes[0], compatibleTypes[1]),
+                "WHERE membership_period_id = ? AND event_type IN (?, ?) LIMIT 1",
+            arrayOf(membershipPeriodId.toString(), compatibleTypes[0], compatibleTypes[1]),
         ).use { cursor -> cursor.moveToFirst() }
         if (exists) return
         insertEvent(
@@ -2594,16 +3024,16 @@ class PlatoonDatabase(
             precision = EvidencePrecision.INFERRED,
             source = source,
             note = memberName,
-            tenureId = tenureId,
+            membershipPeriodId = membershipPeriodId,
         )
     }
 
-    private fun hasEarlierTenure(db: SQLiteDatabase, uid: Long, tenureId: Long): Boolean =
+    private fun hasEarlierMembershipPeriod(db: SQLiteDatabase, uid: Long, membershipPeriodId: Long): Boolean =
         db.rawQuery(
             """
             SELECT 1
-            FROM tenures current
-            JOIN tenures other ON other.uid = current.uid AND other.id != current.id
+            FROM membership_periods current
+            JOIN membership_periods other ON other.uid = current.uid AND other.id != current.id
             WHERE current.id = ?
               AND current.uid = ?
               AND (
@@ -2615,7 +3045,7 @@ class PlatoonDatabase(
               )
             LIMIT 1
             """.trimIndent(),
-            arrayOf(tenureId.toString(), uid.toString()),
+            arrayOf(membershipPeriodId.toString(), uid.toString()),
         ).use(Cursor::moveToFirst)
 
     private fun memberExists(db: SQLiteDatabase, uid: Long): Boolean =
@@ -2630,20 +3060,20 @@ class PlatoonDatabase(
             arrayOf(uid.toString()),
         ).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
 
-    private fun readTenureForUpdate(db: SQLiteDatabase, tenureId: Long): TenureForUpdate? =
+    private fun readMembershipPeriodForUpdate(db: SQLiteDatabase, membershipPeriodId: Long): MembershipPeriodForUpdate? =
         db.rawQuery(
             """
             SELECT uid, joined_at, left_at, joined_date, left_date,
                    joined_time_known, left_time_known, joined_source, left_source
-            FROM tenures
+            FROM membership_periods
             WHERE id = ?
             """.trimIndent(),
-            arrayOf(tenureId.toString()),
+            arrayOf(membershipPeriodId.toString()),
         ).use { cursor ->
             if (!cursor.moveToFirst()) {
                 null
             } else {
-                TenureForUpdate(
+                MembershipPeriodForUpdate(
                     uid = cursor.getLong(0),
                     joined = cursor.membershipBoundaryValue(
                         instantIndex = 1,
@@ -2709,14 +3139,14 @@ class PlatoonDatabase(
         )
     }
 
-    private fun insertTenure(
+    private fun insertMembershipPeriod(
         db: SQLiteDatabase,
         uid: Long,
         joinedAt: Instant?,
         precision: EvidencePrecision,
         source: EvidenceSource,
     ): Long = db.insertOrThrow(
-        "tenures",
+        "membership_periods",
         null,
         ContentValues().apply {
             put("uid", uid)
@@ -2726,20 +3156,20 @@ class PlatoonDatabase(
         },
     )
 
-    private fun closeLatestTenure(
+    private fun closeLatestMembershipPeriod(
         db: SQLiteDatabase,
         uid: Long,
         leftAt: Instant,
         precision: EvidencePrecision,
         source: EvidenceSource,
     ): Long {
-        val tenureId = db.rawQuery(
-            "SELECT id FROM tenures WHERE uid = ? AND left_at IS NULL ORDER BY id DESC LIMIT 1",
+        val membershipPeriodId = db.rawQuery(
+            "SELECT id FROM membership_periods WHERE uid = ? AND left_at IS NULL ORDER BY id DESC LIMIT 1",
             arrayOf(uid.toString()),
         ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
-            ?: error("Active member $uid has no open tenure")
+            ?: error("Active member $uid has no open membershipPeriod")
         db.update(
-            "tenures",
+            "membership_periods",
             ContentValues().apply {
                 put("left_at", leftAt.toEpochMilli())
                 putNull("left_date")
@@ -2748,9 +3178,9 @@ class PlatoonDatabase(
                 put("left_source", source.name)
             },
             "id = ?",
-            arrayOf(tenureId.toString()),
+            arrayOf(membershipPeriodId.toString()),
         )
-        return tenureId
+        return membershipPeriodId
     }
 
     private fun insertEvent(
@@ -2764,13 +3194,13 @@ class PlatoonDatabase(
         precision: EvidencePrecision,
         source: EvidenceSource,
         note: String,
-        tenureId: Long? = null,
+        membershipPeriodId: Long? = null,
     ): Long = db.insertOrThrow(
         "member_events",
         null,
         ContentValues().apply {
             put("uid", uid)
-            putNullableLong("tenure_id", tenureId)
+            putNullableLong("membership_period_id", membershipPeriodId)
             put("event_type", type.name)
             putNullableLong("occurred_at", occurredAt?.toEpochMilli())
             putNullableLong("event_date", eventDate?.toEpochDay())
@@ -2786,7 +3216,7 @@ class PlatoonDatabase(
         db.rawQuery(
             """
             SELECT m.uid, m.current_name, m.is_active,
-                   EXISTS(SELECT 1 FROM tenures t WHERE t.uid = m.uid)
+                   EXISTS(SELECT 1 FROM membership_periods t WHERE t.uid = m.uid)
             FROM members m
             """.trimIndent(),
             null,
@@ -2798,7 +3228,7 @@ class PlatoonDatabase(
                             uid = cursor.getLong(0),
                             name = cursor.getString(1),
                             isActive = cursor.getInt(2) != 0,
-                            hasPriorTenure = cursor.getInt(3) != 0,
+                            hasPriorMembershipPeriod = cursor.getInt(3) != 0,
                         ),
                     )
                 }
@@ -2847,10 +3277,10 @@ class PlatoonDatabase(
         snapshots.values.map(SnapshotAccumulator::toSnapshot)
     }
 
-    private fun readTenures(db: SQLiteDatabase, uid: Long): List<MembershipTenure> =
+    private fun readMembershipPeriods(db: SQLiteDatabase, uid: Long): List<MembershipPeriod> =
         db.query(
-            "tenures",
-            TENURE_COLUMNS,
+            "membership_periods",
+            MEMBERSHIP_PERIOD_COLUMNS,
             "uid = ?",
             arrayOf(uid.toString()),
             null,
@@ -2860,7 +3290,7 @@ class PlatoonDatabase(
             buildList {
                 while (cursor.moveToNext()) {
                     add(
-                        MembershipTenure(
+                        MembershipPeriod(
                             id = cursor.getLong(0),
                             uid = uid,
                             joinedAt = cursor.getNullableLong(1)?.let(Instant::ofEpochMilli),
@@ -2933,7 +3363,7 @@ class PlatoonDatabase(
     )
 
     private data class InferredBoundary(
-        val tenureId: Long,
+        val membershipPeriodId: Long,
         val uid: Long,
         val boundary: MembershipBoundary,
         val inferredAt: Instant,
@@ -2941,11 +3371,11 @@ class PlatoonDatabase(
 
     private data class BoundaryEventCandidate(
         val id: Long,
-        val tenureId: Long?,
+        val membershipPeriodId: Long?,
         val boundaryAt: Instant,
     )
 
-    private data class TenureForUpdate(
+    private data class MembershipPeriodForUpdate(
         val uid: Long,
         val joined: MembershipBoundaryValue?,
         val left: MembershipBoundaryValue?,
@@ -2969,7 +3399,7 @@ class PlatoonDatabase(
         )
     }
 
-    private data class ShadowTenure(
+    private data class ShadowMembershipPeriod(
         val joinedAt: Long?,
         val leftAt: Long?,
         val joinedDate: Long?,
@@ -2988,6 +3418,25 @@ class PlatoonDatabase(
         val leftAtMillis: Long?,
         val joinedIsManual: Boolean,
         val leftIsManual: Boolean,
+    )
+
+    private data class RosterIdentity(
+        val name: String,
+        val level: Int,
+        val capturedAt: Instant,
+    )
+
+    private data class RosterFrame(
+        val capturedAt: Instant,
+        val members: Map<Long, RosterIdentity>,
+    )
+
+    private data class RosterPresenceRun(
+        val firstSeenAt: Instant,
+        val lastSeenAt: Instant,
+        val joinedAt: Instant?,
+        val leftAt: Instant?,
+        val name: String,
     )
 
     companion object {
@@ -3038,7 +3487,7 @@ class PlatoonDatabase(
             "total_score",
             "last_login",
         )
-        private val TENURE_COLUMNS = arrayOf(
+        private val MEMBERSHIP_PERIOD_COLUMNS = arrayOf(
             "id",
             "joined_at",
             "left_at",

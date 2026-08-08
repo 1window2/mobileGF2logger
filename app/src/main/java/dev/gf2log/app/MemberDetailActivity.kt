@@ -11,7 +11,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import dev.gf2log.app.management.MemberStatus
-import dev.gf2log.app.management.MembershipTenure
+import dev.gf2log.app.management.MembershipPeriod
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.isImmutableMembershipBoundary
 import dev.gf2log.app.management.isValidMembershipRange
@@ -103,8 +103,8 @@ class MemberDetailActivity : LocalizedActivity() {
                     setTypeface(typeface, Typeface.BOLD)
                     setPadding(0, dp(16), 0, dp(4))
                 }, matchWidth())
-                status.tenures.forEachIndexed { index, tenure ->
-                    addView(tenureButton(status, tenure, index), matchWidth())
+                status.membershipPeriods.forEachIndexed { index, membershipPeriod ->
+                    addView(membershipPeriodButton(status, membershipPeriod, index), matchWidth())
                 }
             }, matchWidth())
         })
@@ -145,50 +145,50 @@ class MemberDetailActivity : LocalizedActivity() {
         dialog.show()
     }
 
-    private fun tenureButton(
+    private fun membershipPeriodButton(
         status: MemberStatus,
-        tenure: MembershipTenure,
+        membershipPeriod: MembershipPeriod,
         index: Int,
     ) = Button(this).apply {
         isAllCaps = false
         text = getString(
-            R.string.tenure_summary,
+            R.string.membership_period_summary,
             index + 1,
             format(
-                tenure.joinedDate,
-                tenure.joinedAt,
-                tenure.joinedTimeKnown,
+                membershipPeriod.joinedDate,
+                membershipPeriod.joinedAt,
+                membershipPeriod.joinedTimeKnown,
             ),
             format(
-                tenure.leftDate,
-                tenure.leftAt,
-                tenure.leftTimeKnown ?: (tenure.leftAt != null),
+                membershipPeriod.leftDate,
+                membershipPeriod.leftAt,
+                membershipPeriod.leftTimeKnown ?: (membershipPeriod.leftAt != null),
             ),
         )
-        setOnClickListener { editTenure(tenure) }
+        setOnClickListener { editMembershipPeriod(status, membershipPeriod) }
     }
 
-    private fun editTenure(tenure: MembershipTenure) {
+    private fun editMembershipPeriod(status: MemberStatus, membershipPeriod: MembershipPeriod) {
         val joined = DateTimePickerInput(
             context = this,
             label = getString(R.string.join_field),
-            initialValue = tenure.joinedAt,
-            initialDate = tenure.joinedDate,
-            initialTimeKnown = tenure.joinedTimeKnown,
+            initialValue = membershipPeriod.joinedAt,
+            initialDate = membershipPeriod.joinedDate,
+            initialTimeKnown = membershipPeriod.joinedTimeKnown,
             dateRequired = true,
-            editable = !tenure.joinedSource.isImmutableMembershipBoundary(),
+            editable = !membershipPeriod.joinedSource.isImmutableMembershipBoundary(),
         )
         val left = DateTimePickerInput(
             context = this,
             label = getString(R.string.withdraw_field),
-            initialValue = tenure.leftAt,
-            initialDate = tenure.leftDate,
-            initialTimeKnown = tenure.leftTimeKnown ?: (tenure.leftAt != null),
-            editable = tenure.leftSource?.isImmutableMembershipBoundary() != true,
+            initialValue = membershipPeriod.leftAt,
+            initialDate = membershipPeriod.leftDate,
+            initialTimeKnown = membershipPeriod.leftTimeKnown ?: (membershipPeriod.leftAt != null),
+            editable = membershipPeriod.leftSource?.isImmutableMembershipBoundary() != true,
         )
         val note = EditText(this).apply {
             hint = getString(R.string.membership_note_hint)
-            setText(tenure.note)
+            setText(membershipPeriod.note)
         }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -196,19 +196,37 @@ class MemberDetailActivity : LocalizedActivity() {
             addView(joined, matchWidth())
             addView(left, matchWidth())
             addView(note, matchWidth())
+            if (status.membershipPeriods.size == 1) {
+                addView(TextView(context).apply {
+                    setText(R.string.membership_period_delete_last_hint)
+                    setTextColor(getColor(android.R.color.darker_gray))
+                    setPadding(0, dp(8), 0, 0)
+                }, matchWidth())
+            }
         }
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle(R.string.edit_membership)
             .setView(content)
             .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(R.string.save_member) { _, _ ->
+            .setNeutralButton(R.string.delete, null)
+            .setPositiveButton(R.string.save_member, null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).apply {
+                setTextColor(getColor(R.color.destructive_action))
+                isEnabled = status.membershipPeriods.size > 1
+                setOnClickListener {
+                    if (isEnabled) confirmMembershipPeriodDeletion(dialog, membershipPeriod)
+                }
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val joinedBoundary = joined.boundary
                 val leftBoundary = left.boundary
                 val saved = joinedBoundary != null &&
                     isValidMembershipRange(joinedBoundary, leftBoundary) &&
                     runCatching {
-                    repository.updateTenure(
-                        tenure.id,
+                    repository.updateMembershipPeriod(
+                        membershipPeriod.id,
                         joinedBoundary,
                         leftBoundary,
                         note.text.toString(),
@@ -219,9 +237,52 @@ class MemberDetailActivity : LocalizedActivity() {
                     getString(if (saved) R.string.saved else R.string.invalid_date),
                     Toast.LENGTH_SHORT,
                 ).show()
-                if (saved) render()
+                if (saved) {
+                    dialog.dismiss()
+                    render()
+                }
             }
-            .show()
+        }
+        dialog.show()
+    }
+
+    private fun confirmMembershipPeriodDeletion(
+        editor: AlertDialog,
+        membershipPeriod: MembershipPeriod,
+    ) {
+        val confirmation = AlertDialog.Builder(this)
+            .setTitle(R.string.delete_membership_period)
+            .setMessage(R.string.delete_membership_period_warning)
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.delete, null)
+            .create()
+        confirmation.setOnShowListener {
+            confirmation.getButton(AlertDialog.BUTTON_POSITIVE).apply {
+                setTextColor(getColor(R.color.destructive_action))
+                setOnClickListener {
+                    val deleted = runCatching {
+                        repository.deleteMembershipPeriod(membershipPeriod.id)
+                    }.getOrDefault(false)
+                    if (deleted) {
+                        confirmation.dismiss()
+                        editor.dismiss()
+                        Toast.makeText(
+                            this@MemberDetailActivity,
+                            R.string.membership_period_deleted,
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                        render()
+                    } else {
+                        Toast.makeText(
+                            this@MemberDetailActivity,
+                            R.string.membership_period_delete_failed,
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }
+            }
+        }
+        confirmation.show()
     }
 
     private fun addMembershipHistory(status: MemberStatus) {
@@ -255,7 +316,7 @@ class MemberDetailActivity : LocalizedActivity() {
                 val saved = joinedBoundary != null &&
                     isValidMembershipRange(joinedBoundary, withdrewBoundary) &&
                     runCatching {
-                    repository.addTenure(
+                    repository.addMembershipPeriod(
                         status.uid,
                         joinedBoundary,
                         withdrewBoundary,

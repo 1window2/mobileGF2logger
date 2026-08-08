@@ -21,10 +21,10 @@
     <string name="language_korean">Korean</string>
     <string name="backup">Backup</string>
     <string name="restore_full_backup">Restore backup</string>
-    <string name="restore_full_backup_description">Restore all app settings, Platoon management and member details including tenure history, and every weekly table from a complete backup.</string>
+    <string name="restore_full_backup_description">Restore all app settings, Platoon management and member details including membership history, and every weekly table from a complete backup.</string>
     <string name="back_up_all_information">Back up all information</string>
-    <string name="back_up_all_information_description">Save all app settings, Platoon management and member details including tenure history, and every weekly table in one complete backup.</string>
-    <string name="restore_full_backup_warning">This replaces all current app settings, Platoon management data, member and tenure history, and weekly-table history. Keep capture stopped while restoring.</string>
+    <string name="back_up_all_information_description">Save all app settings, Platoon management and member details including membership history, and every weekly table in one complete backup.</string>
+    <string name="restore_full_backup_warning">This replaces all current app settings, Platoon management data, member and membership history, and weekly-table history. Keep capture stopped while restoring.</string>
     <string name="invalid_full_backup">This is not a valid complete backup file.</string>
     <string name="full_backup_exported">Complete backup saved</string>
     <string name="full_backup_restored">Complete backup restored</string>
@@ -89,7 +89,12 @@
     <string name="add">Add</string>
     <string name="clear">Clear</string>
     <string name="invalid_withdrawn_member">Enter a unique positive UID and nickname, select both dates, and keep withdrawal after join.</string>
-    <string name="tenure_summary">Tenure %1$d\nJoin: %2$s\nWithdrawal: %3$s</string>
+    <string name="membership_period_summary">Membership period %1$d\nJoin: %2$s\nWithdrawal: %3$s</string>
+    <string name="delete_membership_period">Delete membership period</string>
+    <string name="delete_membership_period_warning">Delete this join and withdrawal record? This cannot be undone. Continue?</string>
+    <string name="membership_period_deleted">Membership period deleted</string>
+    <string name="membership_period_delete_failed">The membership period could not be deleted. Keep at least one period, or delete the member instead.</string>
+    <string name="membership_period_delete_last_hint">The only membership period cannot be deleted. Use Delete member to remove this record.</string>
     <string name="unknown">Unknown</string>
     <string name="edit_membership">Edit membership dates</string>
     <string name="joined_at_hint">Join (yyyy-MM-dd HH:mm), blank if unknown</string>
@@ -163,6 +168,9 @@
     <string name="saved_packets">Saved packets (up to %1$d)</string>
     <string name="delete_selected_saved_history">Delete selected saved history</string>
     <string name="export_latest_platoon_csv">Export latest Platoon CSV</string>
+    <string name="import_platoon_csv">Import Platoon CSV files</string>
+    <string name="status_platoon_csv_imported">CSV import complete: %1$d retained, %2$d current, %3$d historical, %4$d skipped</string>
+    <string name="status_platoon_csv_import_failed">The selected Platoon CSV files could not be imported</string>
     <string name="no_parsed_packets">No parsed packets captured yet</string>
     <string name="no_saved_packets">No packets saved yet</string>
     <string name="select_history_entry">Select %1$s</string>

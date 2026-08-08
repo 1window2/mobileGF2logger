@@ -51,7 +51,7 @@ class SnapshotReconcilerTest {
                     uid = 4,
                     name = "Joining",
                     isActive = false,
-                    hasPriorTenure = false,
+                    hasPriorMembershipPeriod = false,
                 ),
             ),
             incoming = listOf(member(4, "Joining")),
@@ -66,5 +66,5 @@ class SnapshotReconcilerTest {
         SnapshotMember(uid, name, 60, 0, 0, 0, 0, 0)
 
     private fun known(uid: Long, name: String, active: Boolean) =
-        SnapshotReconciler.KnownMember(uid, name, active, hasPriorTenure = true)
+        SnapshotReconciler.KnownMember(uid, name, active, hasPriorMembershipPeriod = true)
 }

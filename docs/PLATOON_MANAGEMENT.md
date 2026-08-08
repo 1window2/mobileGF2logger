@@ -125,32 +125,44 @@ resets on Monday while a Gunsmoke week begins on Sunday.
   totals also stay unknown unless a timestamped activity fact or manual edit
   independently proves them.
 
-## Member status and tenure
+## Member status and membership periods
 
 - UID is the stable member identity; a display name can change over time.
 - A custom nickname is editable and immediately becomes the display name in
   Platoon management; the personal note remains private to member details.
-- The first observed roster creates an active tenure with an unknown historical
+- The first observed roster creates an active membership period with an unknown historical
   join time unless the user supplies one.
-- A UID added between consecutive snapshots opens a join or rejoin tenure.
-- A UID removed between consecutive snapshots closes the active tenure but
+- A UID added between consecutive snapshots opens a join or rejoin membership period.
+- A UID removed between consecutive snapshots closes the active membership period but
   never deletes the member or prior snapshots.
-- A returning UID opens a new tenure. All previous join/withdraw periods remain
+- A returning UID opens a new membership period. All previous join/withdraw periods remain
   available.
-- The current member list displays the latest open tenure. A withdrawn member
+- A roster CSV imported after newer captures still contributes historical
+  presence spans. The replay creates missing inactive members and inferred
+  withdrawal/rejoin periods without replacing manual or exact Updates evidence.
+- An individual membership period can be deleted from its editor after a
+  destructive-action confirmation. The only remaining period is protected;
+  delete the member instead when the complete record should be removed.
+- The current member list displays the latest open membership period. A withdrawn member
   displays the latest join and withdrawal times.
 - Snapshot differences provide an observed time window. Exact in-game Updates
   events can replace an inferred boundary only when a unique 21917 UID can be
   correlated safely; 21935 contains names but no UID.
-- Exact packet-linked boundaries are non-deletable. Users can add or edit
-  manual tenures, including historical withdrawn members not present in the
-  incremental activity response.
-- Tenure numbers are assigned by join date from oldest to newest and are
+- Exact packet-linked boundary fields are immutable while editing. Users can
+  add or edit manual membership periods, including historical withdrawn members
+  not present in the incremental activity response; deleting an entire period
+  requires the separate confirmation flow described below.
+- Membership-period numbers are assigned by join date from oldest to newest and are
   recalculated after manual additions or edits.
 
 ## Persistence and privacy
 
-Structured snapshots, timestamped activity facts, members, tenures, events,
+Structured snapshots, timestamped activity facts, members, membership periods, events,
 weekly notes, and manual corrections are stored in the app's private on-device
 database. Raw network traffic is never stored. Export and backup contain only
 parsed management data and must be explicitly initiated by the user.
+
+CSV files created for spreadsheet use neutralize string cells beginning with
+`=`, `+`, `-`, or `@` (including after leading whitespace), preventing a member
+name or note from executing as a spreadsheet formula. Internal retained roster
+evidence remains lossless and is not rewritten with that export-only prefix.

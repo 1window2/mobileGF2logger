@@ -1,5 +1,7 @@
 package dev.gf2log.app.management
 
+import dev.gf2log.protocol.CsvCell
+
 object WeeklyReportCsv {
     const val HEADER =
         "periodStart,periodEnd,gunsmokeWeek,gameDay,uid,name,meritDelta,scoreDelta," +
@@ -43,16 +45,10 @@ object WeeklyReportCsv {
                             member.loginDaysCertainty,
                             member.patrolDays,
                             member.patrolDaysCertainty,
-                        ).joinToString(",", transform = ::escape),
+                        ).joinToString(",") { CsvCell.escape(it) },
                     )
                 }
             }
         }
     }.trimEnd() + "\n"
-
-    private fun escape(value: Any?): String {
-        val text = value?.toString().orEmpty()
-        if (text.none { it == ',' || it == '"' || it == '\n' || it == '\r' }) return text
-        return "\"${text.replace("\"", "\"\"")}\""
-    }
 }

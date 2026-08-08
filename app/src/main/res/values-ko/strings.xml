@@ -89,7 +89,12 @@
     <string name="add">추가</string>
     <string name="clear">지우기</string>
     <string name="invalid_withdrawn_member">중복되지 않는 양의 UID와 닉네임을 입력하고 가입·탈퇴 날짜를 선택한 뒤 탈퇴를 가입 이후로 설정하세요.</string>
-    <string name="tenure_summary">가입 이력 %1$d\n가입: %2$s\n탈퇴: %3$s</string>
+    <string name="membership_period_summary">가입 이력 %1$d\n가입: %2$s\n탈퇴: %3$s</string>
+    <string name="delete_membership_period">가입 이력 삭제</string>
+    <string name="delete_membership_period_warning">가입/탈퇴 이력을 삭제합니다. 한 번 삭제하면 되돌릴 수 없습니다. 계속하시겠습니까?</string>
+    <string name="membership_period_deleted">가입 이력을 삭제했습니다</string>
+    <string name="membership_period_delete_failed">가입 이력을 삭제하지 못했습니다. 이력을 하나 이상 유지하거나 멤버 삭제를 이용해 주세요.</string>
+    <string name="membership_period_delete_last_hint">유일한 가입 이력은 삭제할 수 없습니다. 이 기록을 없애려면 멤버 삭제를 이용해 주세요.</string>
     <string name="unknown">알 수 없음</string>
     <string name="edit_membership">가입·탈퇴 시각 편집</string>
     <string name="joined_at_hint">가입 (yyyy-MM-dd HH:mm), 모르면 비워 두기</string>
@@ -163,6 +168,9 @@
     <string name="saved_packets">보관 패킷 (최대 %1$d개)</string>
     <string name="delete_selected_saved_history">선택 보관 기록 삭제</string>
     <string name="export_latest_platoon_csv">최근 서클 CSV 내보내기</string>
+    <string name="import_platoon_csv">서클 CSV 파일 가져오기</string>
+    <string name="status_platoon_csv_imported">CSV 가져오기 완료: 보관 %1$d, 현재 %2$d, 과거 %3$d, 건너뜀 %4$d</string>
+    <string name="status_platoon_csv_import_failed">선택한 서클 CSV 파일을 가져오지 못했습니다</string>
     <string name="no_parsed_packets">아직 캡처한 패킷이 없습니다</string>
     <string name="no_saved_packets">아직 보관한 패킷이 없습니다</string>
     <string name="select_history_entry">%1$s 선택</string>

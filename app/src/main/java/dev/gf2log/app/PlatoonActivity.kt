@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
+import android.util.Log
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -54,12 +55,19 @@ class PlatoonActivity : LocalizedActivity() {
         screenResumed = true
         val generation = ++reconciliationGeneration
         reconciliationExecutor.execute {
-            runCatching { repository.reconcileRetainedCsvFiles() }
+            val reconciliation = runCatching { repository.reconcileRetainedCsvFiles() }
+            reconciliation.exceptionOrNull()?.let { error ->
+                Log.e(TAG, "Retained Platoon CSV reconciliation failed", error)
+            }
             runOnUiThread {
                 if (generation == reconciliationGeneration && screenResumed &&
                     !isFinishing && !isDestroyed
                 ) {
-                    refresh()
+                    if (reconciliation.isSuccess) {
+                        refresh()
+                    } else {
+                        summary.setText(R.string.status_platoon_csv_import_failed)
+                    }
                 }
             }
         }
@@ -378,6 +386,7 @@ class PlatoonActivity : LocalizedActivity() {
     )
 
     companion object {
+        private const val TAG = "GF2Platoon"
         private val DISPLAY_TIME = DateTimeFormatter.ofPattern("yy/MM/dd HH:mm:ss")
         private const val REQUEST_EXPORT_MEMBERS = 301
     }

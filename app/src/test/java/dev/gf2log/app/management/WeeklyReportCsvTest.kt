@@ -151,6 +151,16 @@ class WeeklyReportCsvTest {
         assertTrue(lines[2].startsWith("2026-07-26,2026-08-01"))
     }
 
+    @Test
+    fun neutralizesFormulaLikeMemberNames() {
+        val original = reportFor(LocalDate.of(2026, 7, 19), uid = 1)
+        val report = original.copy(
+            members = listOf(original.members.single().copy(name = "-2+3")),
+        )
+
+        assertTrue(WeeklyReportCsv.format(report).contains(",1,'-2+3,"))
+    }
+
     private fun reportFor(day: LocalDate, uid: Long) = WeeklyReportBuilder.Report(
         periodStart = day,
         periodEnd = day.plusDays(6),

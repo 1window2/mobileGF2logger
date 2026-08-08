@@ -22,7 +22,7 @@ data class SnapshotMember(
     val lastLogin: Long,
 )
 
-data class MembershipTenure(
+data class MembershipPeriod(
     val id: Long,
     val uid: Long,
     val joinedAt: Instant?,
@@ -46,7 +46,7 @@ data class MemberStatus(
     val firstSeenAt: Instant,
     val lastSeenAt: Instant,
     val note: String,
-    val tenures: List<MembershipTenure>,
+    val membershipPeriods: List<MembershipPeriod>,
 )
 
 data class MemberEvent(

@@ -1,5 +1,7 @@
 package dev.gf2log.app.management
 
+import dev.gf2log.protocol.CsvCell
+
 object SnapshotComparisonCsv {
     const val HEADER =
         "olderCapturedAt,newerCapturedAt,changeType,uid,name,weeklyMeritDelta," +
@@ -48,13 +50,7 @@ object SnapshotComparisonCsv {
                 totalMerit,
                 totalScore,
                 lastLoginChanged,
-            ).joinToString(",", transform = ::escape),
+            ).joinToString(",") { CsvCell.escape(it) },
         )
-    }
-
-    private fun escape(value: Any?): String {
-        val text = value?.toString().orEmpty()
-        if (text.none { it == ',' || it == '"' || it == '\n' || it == '\r' }) return text
-        return "\"${text.replace("\"", "\"\"")}\""
     }
 }

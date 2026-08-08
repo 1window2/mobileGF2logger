@@ -74,6 +74,12 @@ Unknown payload types are skipped without allocation. A recognized but malformed
 - Queue saturation is counted and surfaced in the capture status instead of being silently discarded.
 - Raw IP packets and application payloads are not persisted.
 
+CSV retained as internal roster evidence preserves protocol text exactly.
+Explicit spreadsheet-facing roster, member, comparison, and weekly exports pass
+string cells through a shared encoder that quotes delimiters and prefixes
+formula-like values with an apostrophe. Numeric counters remain numeric, and
+the protection is never fed back into retained member identity.
+
 The single worker is deliberate: these seven responses are sparse, and avoiding
 a worker pool reduces scheduling, memory, and ordering complexity. If
 benchmarking later proves this insufficient, partition work by flow while
@@ -106,7 +112,14 @@ matching 05:00-based game day. Membership boundaries remain available as
 UID-safe 21917 observation facts. Payload 21960 supplies exact UID and event
 timestamps for Join, Withdraw, and Remove boundaries; those individual
 boundaries are immutable. Manual boundaries remain editable and can coexist
-with an exact boundary in the same tenure.
+with an exact boundary in the same membership period.
+
+User-selected roster CSV files pass through the same strict parser and retained
+evidence directory as completed capture files. Newer files are reconciled in
+chronological order. When a file predates the current structured snapshot, the
+repository batches a conservative roster replay after ingestion: it derives
+only snapshot-supported presence spans, creates inactive historical identities,
+and preserves manual or exact Updates boundaries.
 
 ## HTTPS and application-layer encryption
 

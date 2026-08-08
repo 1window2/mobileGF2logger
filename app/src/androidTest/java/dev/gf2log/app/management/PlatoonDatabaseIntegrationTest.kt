@@ -365,6 +365,87 @@ class PlatoonDatabaseIntegrationTest {
     }
 
     @Test
+    fun historicalRosterReplayExpandsAnAnnotatedWeakJoinWithoutLosingItsNote() {
+        val initialTime = Instant.parse("2026-07-20T00:00:00Z")
+        val inferredJoin = initialTime.plusSeconds(2 * 86_400)
+        val historicalPresence = initialTime.plusSeconds(86_400)
+        database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = initialTime,
+                sourceFile = "annotated-initial.csv",
+                members = listOf(member(OTHER_UID, "Current")),
+            ),
+            EvidenceSource.SNAPSHOT,
+        )
+        database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = inferredJoin,
+                sourceFile = "annotated-join.csv",
+                members = listOf(member(TARGET_UID, "Annotated"), member(OTHER_UID, "Current")),
+            ),
+            EvidenceSource.SNAPSHOT,
+        )
+        database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = inferredJoin.plusSeconds(86_400),
+                sourceFile = "annotated-current.csv",
+                members = listOf(member(TARGET_UID, "Annotated"), member(OTHER_UID, "Current")),
+            ),
+            EvidenceSource.SNAPSHOT,
+        )
+        database.writableDatabase.execSQL(
+            "UPDATE membership_periods SET note = ? WHERE uid = ?",
+            arrayOf<Any>("Preserve this note", TARGET_UID),
+        )
+
+        database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = historicalPresence,
+                sourceFile = "annotated-historical.csv",
+                members = listOf(member(TARGET_UID, "Annotated"), member(OTHER_UID, "Current")),
+            ),
+            EvidenceSource.LEGACY_IMPORT,
+            historicalOnly = true,
+        )
+
+        val period = database.listMemberStatuses()
+            .single { it.uid == TARGET_UID }
+            .membershipPeriods
+            .single()
+        assertEquals("Preserve this note", period.note)
+        assertEquals(historicalPresence, period.joinedAt)
+        assertEquals(EvidenceSource.LEGACY_IMPORT, period.joinedSource)
+        assertForeignKeysValid()
+    }
+
+    @Test
+    fun outerTransactionRollsBackNestedSnapshotIngest() {
+        val failure = runCatching {
+            database.runInTransaction {
+                database.ingestSnapshot(
+                    PlatoonSnapshot(
+                        id = 0,
+                        capturedAt = Instant.parse("2026-07-31T00:00:00Z"),
+                        sourceFile = "rolled-back.csv",
+                        members = listOf(member(TARGET_UID, "Rolled back")),
+                    ),
+                    EvidenceSource.LEGACY_IMPORT,
+                )
+                error("Force the outer import transaction to fail")
+            }
+        }
+
+        assertEquals("Force the outer import transaction to fail", failure.exceptionOrNull()?.message)
+        assertEquals(0L, count("snapshots", "id > ?", 0))
+        assertEquals(0L, count("members", "uid = ?", TARGET_UID))
+        assertForeignKeysValid()
+    }
+
+    @Test
     fun schemaSixAndSevenUpgradeDirectlyWithoutRecreatingActivityIndexes() {
         listOf(6, 7).forEach { legacyVersion ->
             val databaseName = "platoon-v$legacyVersion-upgrade-test.db"
@@ -582,6 +663,59 @@ class PlatoonDatabaseIntegrationTest {
         )
         assertEquals(0L, count("platoon_activity", "action_id = ?", 1))
         assertEquals(1L, count("platoon_activity", "action_id = ?", 10_003))
+    }
+
+    @Test
+    fun unresolvedActivityResolutionRotatesPastAnUnmatchableBatch() {
+        val capturedAt = Instant.parse("2026-07-31T00:00:00Z")
+        val writable = database.writableDatabase
+        writable.beginTransaction()
+        try {
+            repeat(251) { index ->
+                writable.insertOrThrow(
+                    "platoon_activity",
+                    null,
+                    ContentValues().apply {
+                        put("occurred_at", capturedAt.toEpochMilli() + index)
+                        put("action_id", index.toLong() + 1)
+                        put("kind", 1L)
+                        put("member_name", if (index == 250) "Target" else "Blocked $index")
+                        put("captured_at", capturedAt.toEpochMilli() + index)
+                        put("resolution", ActivityResolution.UNRESOLVED.name)
+                    },
+                )
+            }
+            writable.setTransactionSuccessful()
+        } finally {
+            writable.endTransaction()
+        }
+
+        database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = capturedAt,
+                sourceFile = "resolution-first.csv",
+                members = listOf(member(TARGET_UID, "Target")),
+            ),
+            EvidenceSource.SNAPSHOT,
+        )
+        assertEquals(
+            1L,
+            count("platoon_activity", "action_id = ? AND resolved_uid IS NULL", 251),
+        )
+
+        database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = capturedAt.plusSeconds(86_400),
+                sourceFile = "resolution-second.csv",
+                members = listOf(member(TARGET_UID, "Target")),
+            ),
+            EvidenceSource.SNAPSHOT,
+        )
+
+        assertEquals(1L, count("platoon_activity", "action_id = 251 AND resolved_uid = ?", TARGET_UID))
+        assertForeignKeysValid()
     }
 
     @Test

@@ -167,6 +167,7 @@ internal object GunsmokeWeekSolver {
             runStart = 0,
             anchor = anchor,
             checkpoint = sunday,
+            zoneId = zoneId,
             periodStart = periodStart,
             cell = cells[0],
         ).filter { state ->
@@ -303,6 +304,7 @@ internal object GunsmokeWeekSolver {
             runStart = runStart,
             anchor = anchor,
             checkpoint = firstCheckpoint,
+            zoneId = zoneId,
             periodStart = periodStart,
             cell = cells[runStart],
         )
@@ -584,6 +586,7 @@ internal object GunsmokeWeekSolver {
     // - runStart: First observed day index in the contiguous run.
     // - anchor: Latest snapshot before the report period, if one exists.
     // - checkpoint: First member observation in the run.
+    // - zoneId: Game-day timezone used to derive the preceding counter boundary.
     // - periodStart: Sunday 05:00 report boundary.
     // - cell: Conservatively derived first-day cell.
     // Returns:
@@ -592,6 +595,7 @@ internal object GunsmokeWeekSolver {
         runStart: Int,
         anchor: Checkpoint?,
         checkpoint: Checkpoint,
+        zoneId: ZoneId,
         periodStart: Instant,
         cell: WeeklyReportBuilder.DayCell,
     ): List<ActivityState> {
@@ -608,6 +612,7 @@ internal object GunsmokeWeekSolver {
             isClosedOpeningAnchor(
                 capturedAt = anchor.capturedAt,
                 weeklyMerit = anchor.member.weeklyMerit,
+                zoneId = zoneId,
                 periodStart = periodStart,
             ) &&
             checkpoint.member.totalMerit >= anchor.member.totalMerit
@@ -638,24 +643,28 @@ internal object GunsmokeWeekSolver {
     // - Accepts a near-reset capture or a preceding-week counter that has already reached its cap.
     // - A capped Monday-through-Saturday counter cannot gain more merit before the Gunsmoke Sunday.
     // Parameters:
-    // - anchor: Latest counter observation before the Gunsmoke report boundary.
+    // - capturedAt: Latest counter observation before the Gunsmoke report boundary.
+    // - weeklyMerit: Weekly counter observed at capturedAt.
+    // - zoneId: Game-day timezone used for the calendar reset boundary.
     // - periodStart: Sunday 05:00 Gunsmoke report boundary.
     // Returns:
     // - True when no unobserved pre-boundary merit can contaminate the opening interval.
     internal fun isClosedOpeningAnchor(
         capturedAt: Instant,
         weeklyMerit: Long,
+        zoneId: ZoneId,
         periodStart: Instant,
-    ): Boolean = !capturedAt.isAfter(periodStart) &&
-        (
-            Duration.between(capturedAt, periodStart) <= MAX_BOUNDARY_DISTANCE ||
+    ): Boolean {
+        val precedingCounterStart = periodStart.atZone(zoneId).minusDays(6).toInstant()
+        return !capturedAt.isAfter(periodStart) &&
             (
-                weeklyMerit == MAX_PRE_GUNSMOKE_WEEKLY_MERIT &&
-                    !capturedAt.isBefore(
-                        periodStart.minus(PRE_GUNSMOKE_COUNTER_PERIOD),
+                Duration.between(capturedAt, periodStart) <= MAX_BOUNDARY_DISTANCE ||
+                    (
+                        weeklyMerit == MAX_PRE_GUNSMOKE_WEEKLY_MERIT &&
+                            !capturedAt.isBefore(precedingCounterStart)
+                        )
                     )
-                )
-            )
+    }
 
     private fun statesForMetrics(
         merit: Long,
@@ -1282,7 +1291,6 @@ internal object GunsmokeWeekSolver {
     }
 
     private val MAX_BOUNDARY_DISTANCE: Duration = Duration.ofMinutes(15)
-    private val PRE_GUNSMOKE_COUNTER_PERIOD: Duration = Duration.ofDays(6)
     private const val MAX_SCORE_MERIT_VALUES = 250_000L
     private const val MAX_EXTENSION_STATES = 100_000
     private const val MAX_PARTIAL_SOLUTIONS = 2_000

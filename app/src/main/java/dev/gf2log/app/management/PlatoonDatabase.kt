@@ -29,6 +29,7 @@ class PlatoonDatabase(
     override fun onOpen(db: SQLiteDatabase) {
         super.onOpen(db)
         if (!db.isReadOnly) {
+            createPlatoonMaintenanceStateTable(db)
             createPlatoonActivityRetentionIndex(db)
             trimPlatoonActivity(db)
         }
@@ -128,6 +129,7 @@ class PlatoonDatabase(
             """.trimIndent(),
         )
         createWeeklyOverridesTable(db)
+        createPlatoonMaintenanceStateTable(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -322,6 +324,19 @@ class PlatoonDatabase(
         db.execSQL("DROP TABLE weekly_notes_legacy_v10")
         db.execSQL("DROP TABLE platoon_activity_legacy_v10")
         db.execSQL("DROP TABLE member_events_legacy_v10")
+    }
+
+    @Synchronized
+    internal fun <T> runInTransaction(block: () -> T): T {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val result = block()
+            db.setTransactionSuccessful()
+            return result
+        } finally {
+            db.endTransaction()
+        }
     }
 
     @Synchronized
@@ -679,7 +694,8 @@ class PlatoonDatabase(
     ): Boolean {
         val overlaps = db.rawQuery(
             """
-            SELECT id, left_at, left_precision, left_source
+            SELECT id, joined_at, joined_precision, joined_source,
+                   left_at, left_precision, left_source
             FROM membership_periods
             WHERE uid = ?
               AND (joined_at IS NULL OR joined_at <= ?)
@@ -697,26 +713,71 @@ class PlatoonDatabase(
                     add(
                         PreservedMembershipPeriodOverlap(
                             id = cursor.getLong(0),
-                            leftAt = cursor.getNullableLong(1)?.let(Instant::ofEpochMilli),
-                            leftPrecision = cursor.getNullableString(2)
+                            joinedAt = cursor.getNullableLong(1)?.let(Instant::ofEpochMilli),
+                            joinedPrecision = EvidencePrecision.valueOf(cursor.getString(2)),
+                            joinedSource = EvidenceSource.valueOf(cursor.getString(3)),
+                            leftAt = cursor.getNullableLong(4)?.let(Instant::ofEpochMilli),
+                            leftPrecision = cursor.getNullableString(5)
                                 ?.let(EvidencePrecision::valueOf),
-                            leftSource = cursor.getNullableString(3)
+                            leftSource = cursor.getNullableString(6)
                                 ?.let(EvidenceSource::valueOf),
                         ),
                     )
                 }
             }
         }
-        val observedLeftAt = run.leftAt
-        if (observedLeftAt != null) {
-            overlaps.filter { membershipPeriod ->
-                membershipPeriod.leftAt == null ||
-                    (
-                        membershipPeriod.leftPrecision == EvidencePrecision.INFERRED &&
-                            membershipPeriod.leftSource in SNAPSHOT_EVENT_SOURCES &&
-                            observedLeftAt.isBefore(requireNotNull(membershipPeriod.leftAt))
-                        )
-            }.forEach { membershipPeriod ->
+        overlaps.forEach { membershipPeriod ->
+            val joinedAt = membershipPeriod.joinedAt
+            if (
+                joinedAt != null &&
+                run.firstSeenAt.isBefore(joinedAt) &&
+                isWeakSnapshotBoundary(
+                    membershipPeriod.joinedPrecision,
+                    membershipPeriod.joinedSource,
+                )
+            ) {
+                val updated = db.update(
+                    "membership_periods",
+                    ContentValues().apply {
+                        put("joined_at", run.firstSeenAt.toEpochMilli())
+                        putNull("joined_date")
+                        put("joined_time_known", 1)
+                        put("joined_precision", EvidencePrecision.INFERRED.name)
+                        put("joined_source", EvidenceSource.LEGACY_IMPORT.name)
+                    },
+                    "id = ?",
+                    arrayOf(membershipPeriod.id.toString()),
+                )
+                if (updated == 1) {
+                    updateSnapshotBoundaryEvent(
+                        db = db,
+                        membershipPeriodId = membershipPeriod.id,
+                        uid = uid,
+                        memberName = run.name,
+                        type = if (hasEarlierMembershipPeriod(db, uid, membershipPeriod.id)) {
+                            MemberEventType.REJOINED
+                        } else {
+                            MemberEventType.JOINED
+                        },
+                        observedAt = run.firstSeenAt,
+                    )
+                }
+            }
+
+            val observedLeftAt = run.leftAt
+            val weakLeftBoundary = membershipPeriod.leftPrecision != null &&
+                membershipPeriod.leftSource != null &&
+                isWeakSnapshotBoundary(
+                    membershipPeriod.leftPrecision,
+                    membershipPeriod.leftSource,
+                )
+            if (
+                observedLeftAt != null &&
+                (
+                    membershipPeriod.leftAt == null ||
+                        (weakLeftBoundary && membershipPeriod.leftAt != observedLeftAt)
+                    )
+            ) {
                 val updated = db.update(
                     "membership_periods",
                     ContentValues().apply {
@@ -730,41 +791,130 @@ class PlatoonDatabase(
                     arrayOf(membershipPeriod.id.toString()),
                 )
                 if (updated == 1) {
-                    val eventUpdated = db.update(
-                        "member_events",
-                        ContentValues().apply {
-                            putNull("occurred_at")
-                            putNull("event_date")
-                            put("time_known", 1)
-                            put("observed_at", observedLeftAt.toEpochMilli())
-                            put("precision", EvidencePrecision.INFERRED.name)
-                            put("source", EvidenceSource.LEGACY_IMPORT.name)
-                            put("note", run.name)
-                        },
-                        "membership_period_id = ? AND event_type = ? " +
-                            "AND source IN (?, ?)",
-                        arrayOf(
-                            membershipPeriod.id.toString(),
-                            MemberEventType.LEFT.name,
-                            EvidenceSource.SNAPSHOT.name,
-                            EvidenceSource.LEGACY_IMPORT.name,
-                        ),
+                    updateSnapshotBoundaryEvent(
+                        db = db,
+                        membershipPeriodId = membershipPeriod.id,
+                        uid = uid,
+                        memberName = run.name,
+                        type = MemberEventType.LEFT,
+                        observedAt = observedLeftAt,
                     )
-                    if (eventUpdated == 0) {
-                        insertSnapshotBoundaryEvent(
-                            db = db,
-                            membershipPeriodId = membershipPeriod.id,
-                            uid = uid,
-                            memberName = run.name,
-                            type = MemberEventType.LEFT,
-                            observedAt = observedLeftAt,
-                            source = EvidenceSource.LEGACY_IMPORT,
-                        )
-                    }
                 }
+            } else if (
+                observedLeftAt == null &&
+                membershipPeriod.leftAt != null &&
+                weakLeftBoundary &&
+                !run.lastSeenAt.isBefore(membershipPeriod.leftAt)
+            ) {
+                db.update(
+                    "membership_periods",
+                    ContentValues().apply {
+                        putNull("left_at")
+                        putNull("left_date")
+                        putNull("left_time_known")
+                        putNull("left_precision")
+                        putNull("left_source")
+                    },
+                    "id = ?",
+                    arrayOf(membershipPeriod.id.toString()),
+                )
+                deleteSnapshotBoundaryEvents(
+                    db = db,
+                    membershipPeriodId = membershipPeriod.id,
+                    type = MemberEventType.LEFT,
+                )
             }
         }
         return overlaps.isNotEmpty()
+    }
+
+    private fun isWeakSnapshotBoundary(
+        precision: EvidencePrecision,
+        source: EvidenceSource,
+    ): Boolean = precision in setOf(EvidencePrecision.UNKNOWN, EvidencePrecision.INFERRED) &&
+        source in SNAPSHOT_EVENT_SOURCES
+
+    private fun updateSnapshotBoundaryEvent(
+        db: SQLiteDatabase,
+        membershipPeriodId: Long,
+        uid: Long,
+        memberName: String,
+        type: MemberEventType,
+        observedAt: Instant,
+    ) {
+        val compatibleTypes = when (type) {
+            MemberEventType.JOINED,
+            MemberEventType.REJOINED,
+            -> arrayOf(MemberEventType.JOINED.name, MemberEventType.REJOINED.name)
+            else -> arrayOf(type.name, type.name)
+        }
+        val updated = db.update(
+            "member_events",
+            ContentValues().apply {
+                put("event_type", type.name)
+                putNull("occurred_at")
+                putNull("event_date")
+                put("time_known", 1)
+                put("observed_at", observedAt.toEpochMilli())
+                put("precision", EvidencePrecision.INFERRED.name)
+                put("source", EvidenceSource.LEGACY_IMPORT.name)
+                put("note", memberName)
+            },
+            "membership_period_id = ? AND event_type IN (?, ?) " +
+                "AND source IN (?, ?)",
+            arrayOf(
+                membershipPeriodId.toString(),
+                compatibleTypes[0],
+                compatibleTypes[1],
+                EvidenceSource.SNAPSHOT.name,
+                EvidenceSource.LEGACY_IMPORT.name,
+            ),
+        )
+        if (updated == 0) {
+            insertSnapshotBoundaryEvent(
+                db = db,
+                membershipPeriodId = membershipPeriodId,
+                uid = uid,
+                memberName = memberName,
+                type = type,
+                observedAt = observedAt,
+                source = EvidenceSource.LEGACY_IMPORT,
+            )
+        }
+    }
+
+    private fun deleteSnapshotBoundaryEvents(
+        db: SQLiteDatabase,
+        membershipPeriodId: Long,
+        type: MemberEventType,
+    ) {
+        val eventSelection =
+            "membership_period_id = ? AND event_type = ? AND source IN (?, ?)"
+        val eventArguments = arrayOf(
+            membershipPeriodId.toString(),
+            type.name,
+            EvidenceSource.SNAPSHOT.name,
+            EvidenceSource.LEGACY_IMPORT.name,
+        )
+        db.delete(
+            "weekly_notes",
+            "is_automatic = 1 AND event_id IN " +
+                "(SELECT id FROM member_events WHERE $eventSelection)",
+            eventArguments,
+        )
+        db.update(
+            "weekly_notes",
+            ContentValues().apply { putNull("event_id") },
+            "event_id IN (SELECT id FROM member_events WHERE $eventSelection)",
+            eventArguments,
+        )
+        db.update(
+            "platoon_activity",
+            ContentValues().apply { putNull("member_event_id") },
+            "member_event_id IN (SELECT id FROM member_events WHERE $eventSelection)",
+            eventArguments,
+        )
+        db.delete("member_events", eventSelection, eventArguments)
     }
 
     private fun insertRosterPresenceRun(
@@ -2305,6 +2455,17 @@ class PlatoonDatabase(
         )
     }
 
+    private fun createPlatoonMaintenanceStateTable(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS platoon_maintenance_state (
+                key TEXT PRIMARY KEY,
+                value INTEGER NOT NULL
+            )
+            """.trimIndent(),
+        )
+    }
+
     private fun latestSnapshotCapturedAt(db: SQLiteDatabase): Instant? =
         db.rawQuery("SELECT MAX(captured_at) FROM snapshots", null).use { cursor ->
             if (cursor.moveToFirst() && !cursor.isNull(0)) {
@@ -2352,29 +2513,26 @@ class PlatoonDatabase(
     }
 
     private fun resolveUnresolvedActivityUids(db: SQLiteDatabase) {
-        val unresolved = db.query(
-            "platoon_activity",
-            arrayOf("id", "occurred_at", "member_name", "action_id", "kind"),
-            "resolved_uid IS NULL",
-            null,
-            null,
-            null,
-            "captured_at DESC, id DESC",
-            MAX_UNRESOLVED_ACTIVITY_RESOLUTIONS.toString(),
+        createPlatoonMaintenanceStateTable(db)
+        val cursorId = db.rawQuery(
+            "SELECT value FROM platoon_maintenance_state WHERE key = ?",
+            arrayOf(ACTIVITY_RESOLUTION_CURSOR_KEY),
         ).use { cursor ->
-            buildList {
-                while (cursor.moveToNext()) {
-                    add(
-                        UnresolvedActivity(
-                            id = cursor.getLong(0),
-                            occurredAt = Instant.ofEpochMilli(cursor.getLong(1)),
-                            memberName = cursor.getString(2),
-                            actionId = cursor.getLong(3),
-                            kind = cursor.getLong(4),
-                        ),
-                    )
-                }
-            }
+            if (cursor.moveToFirst()) cursor.getLong(0) else 0L
+        }
+        val unresolved = readUnresolvedActivityBatch(
+            db = db,
+            selection = "resolved_uid IS NULL AND id > ?",
+            selectionArgs = arrayOf(cursorId.toString()),
+            limit = MAX_UNRESOLVED_ACTIVITY_RESOLUTIONS,
+        ).toMutableList()
+        if (unresolved.size < MAX_UNRESOLVED_ACTIVITY_RESOLUTIONS) {
+            unresolved += readUnresolvedActivityBatch(
+                db = db,
+                selection = "resolved_uid IS NULL AND id <= ?",
+                selectionArgs = arrayOf(cursorId.toString()),
+                limit = MAX_UNRESOLVED_ACTIVITY_RESOLUTIONS - unresolved.size,
+            )
         }
         unresolved.forEach { activity ->
             val uid = resolveUidForName(db, activity.memberName, activity.occurredAt)
@@ -2412,6 +2570,50 @@ class PlatoonDatabase(
                         uid.toString(),
                     ),
                 )
+            }
+        }
+        unresolved.lastOrNull()?.let { activity ->
+            db.insertWithOnConflict(
+                "platoon_maintenance_state",
+                null,
+                ContentValues().apply {
+                    put("key", ACTIVITY_RESOLUTION_CURSOR_KEY)
+                    put("value", activity.id)
+                },
+                SQLiteDatabase.CONFLICT_REPLACE,
+            )
+        }
+    }
+
+    private fun readUnresolvedActivityBatch(
+        db: SQLiteDatabase,
+        selection: String,
+        selectionArgs: Array<String>,
+        limit: Int,
+    ): List<UnresolvedActivity> {
+        if (limit <= 0) return emptyList()
+        return db.query(
+            "platoon_activity",
+            arrayOf("id", "occurred_at", "member_name", "action_id", "kind"),
+            selection,
+            selectionArgs,
+            null,
+            null,
+            "id",
+            limit.toString(),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        UnresolvedActivity(
+                            id = cursor.getLong(0),
+                            occurredAt = Instant.ofEpochMilli(cursor.getLong(1)),
+                            memberName = cursor.getString(2),
+                            actionId = cursor.getLong(3),
+                            kind = cursor.getLong(4),
+                        ),
+                    )
+                }
             }
         }
     }
@@ -3516,6 +3718,9 @@ class PlatoonDatabase(
 
     private data class PreservedMembershipPeriodOverlap(
         val id: Long,
+        val joinedAt: Instant?,
+        val joinedPrecision: EvidencePrecision,
+        val joinedSource: EvidenceSource,
         val leftAt: Instant?,
         val leftPrecision: EvidencePrecision?,
         val leftSource: EvidenceSource?,
@@ -3538,6 +3743,7 @@ class PlatoonDatabase(
         const val DAILY_PATROL_REWARD_ACTION_ID = 802001L
         internal const val MAX_STORED_ACTIVITY_OBSERVATIONS = 10_000
         private const val MAX_UNRESOLVED_ACTIVITY_RESOLUTIONS = 250
+        private const val ACTIVITY_RESOLUTION_CURSOR_KEY = "activity_resolution_cursor"
         private const val DAILY_PATROL_RELATED_ACTION_ID = 801005L
         private const val NAME_RESOLUTION_WINDOW_MILLIS = 30L * 24L * 60L * 60L * 1000L
         private const val MEMBERSHIP_CORRELATION_WINDOW_MILLIS = 12L * 60L * 60L * 1000L

@@ -20,7 +20,8 @@ All notable changes to mobileGF2logger are documented here.
   column count, cell count, and cell length so hostile or corrupt payloads
   cannot create unbounded Android view trees.
 - Bound multi-part protocol continuations by byte and fragment counts, discard
-  an oversized pending dataset, and recover cleanly for later valid frames.
+  an oversized pending dataset, quarantine every remaining fragment through its
+  terminal frame, and enforce the byte cap from the first continuation.
 - Bound roster imports, per-payload activity observations, retained activity
   history, and unresolved-name reconciliation. Failed or duplicate roster
   imports now roll back their newly retained evidence as one operation.
@@ -31,11 +32,17 @@ All notable changes to mobileGF2logger are documented here.
   rebuild without attempting to recreate already-installed identity indexes.
 - Reconcile an observed roster absence against an exact or annotated open
   membership period, preserving its strong boundary and note while creating a
-  later rejoin period instead of suppressing the gap.
+  later rejoin period instead of suppressing the gap. Annotated weak boundaries
+  can still expand when late roster evidence proves a wider presence interval.
 - Preserve an imported roster's parsed capture time so exporting the latest
   Platoon CSV cannot accidentally select a newly imported historical file.
+- Roll back all nested SQLite reconciliation writes together with newly
+  retained roster files when a multi-file import fails.
+- Rotate bounded unresolved-activity reconciliation through the complete
+  retained backlog so an unmatchable recent batch cannot starve older evidence.
 - Accept a capped pre-Gunsmoke opening anchor only when it belongs to the
-  immediately preceding Monday-through-Saturday counter period.
+  immediately preceding Monday-through-Saturday counter period, using the
+  configured game-day timezone across daylight-saving transitions.
 
 ## 2.1.1 - 2026-08-08
 

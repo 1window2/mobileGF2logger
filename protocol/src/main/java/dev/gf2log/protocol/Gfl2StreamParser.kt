@@ -24,6 +24,7 @@ class Gfl2StreamParser(
 
     private val buffer = ByteAccumulator(maximumBufferedBytes)
     private var pendingPayload: PendingPayload? = null
+    private var quarantinedPayload: QuarantinedPayload? = null
 
     fun accept(bytes: ByteArray): List<ParseEvent> {
         val events = mutableListOf<ParseEvent>()
@@ -55,6 +56,7 @@ class Gfl2StreamParser(
     fun finish(): List<ParseEvent> {
         val events = mutableListOf<ParseEvent>()
         emitPending(events)
+        quarantinedPayload = null
         buffer.clear()
         return events
     }
@@ -62,6 +64,7 @@ class Gfl2StreamParser(
     fun reset() {
         buffer.clear()
         pendingPayload = null
+        quarantinedPayload = null
     }
 
     private fun parseMessage(
@@ -112,6 +115,7 @@ class Gfl2StreamParser(
                 }
             } else {
                 emitPending(events)
+                quarantinedPayload = null
                 events += ParseEvent.UnknownPayload(
                     messageId = messageId,
                     payloadType = type,
@@ -132,6 +136,19 @@ class Gfl2StreamParser(
         data: GameData,
         events: MutableList<ParseEvent>,
     ) {
+        val quarantined = quarantinedPayload
+        if (quarantined != null) {
+            if (
+                quarantined.type == type &&
+                (quarantined.previousMessageId == 0 || quarantined.previousMessageId == messageId)
+            ) {
+                quarantined.previousMessageId = messageId
+                if (messageId != 0 && isEndOfMessage) quarantinedPayload = null
+                return
+            }
+            quarantinedPayload = null
+        }
+
         val pending = pendingPayload
         if (pending != null) {
             if (pending.type == type &&
@@ -144,6 +161,11 @@ class Gfl2StreamParser(
                     continuationCount > maximumPendingContinuations
                 ) {
                     pendingPayload = null
+                    quarantinedPayload = if (messageId != 0 && isEndOfMessage) {
+                        null
+                    } else {
+                        QuarantinedPayload(type, messageId)
+                    }
                     events += ParseEvent.Warning(
                         "Discarded payload $type continuation sequence exceeding parser limits",
                     )
@@ -163,6 +185,17 @@ class Gfl2StreamParser(
         if (messageId != 0 && isEndOfMessage) {
             events += ParseEvent.Payload(ParsedPayload(messageId, type, true, data))
         } else {
+            if (payloadBytes > maximumPendingPayloadBytes) {
+                quarantinedPayload = if (messageId != 0 && isEndOfMessage) {
+                    null
+                } else {
+                    QuarantinedPayload(type, messageId)
+                }
+                events += ParseEvent.Warning(
+                    "Discarded payload $type continuation sequence exceeding parser limits",
+                )
+                return
+            }
             pendingPayload = PendingPayload(
                 type = type,
                 previousMessageId = messageId,
@@ -226,5 +259,10 @@ class Gfl2StreamParser(
         var data: GameData,
         var accumulatedPayloadBytes: Long,
         var continuationCount: Int,
+    )
+
+    private data class QuarantinedPayload(
+        val type: Int,
+        var previousMessageId: Int,
     )
 }

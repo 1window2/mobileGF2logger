@@ -68,8 +68,9 @@ Unknown payload types are skipped without allocation. A recognized but malformed
 
 - Each active flow parser is capped at 2 MiB of buffered stream data. A pending
   logical payload is independently capped at 2 MiB and 64 continuation
-  fragments; exceeding either limit discards that pending payload before later
-  frames are parsed.
+  fragments. The first continuation is checked before retention; exceeding
+  either limit discards the pending payload and quarantines its remaining
+  fragments through the logical terminal frame before later datasets are parsed.
 - The parser service has one worker and a queue capped at 256 payload chunks.
 - TLS, HTTP, and UDP payloads remain native and are excluded from the parser.
 - Outgoing plaintext chunks are used only for native flow classification.
@@ -132,7 +133,8 @@ Roster CSV input is capped at 2 MiB, 256 members, 258 records, 9 columns, and
 512 characters per field; UIDs must be unique and names are capped at 256
 characters. Activity ingestion accepts at most 250 distinct observations per
 payload with 128-character names. SQLite retains the newest 10,000 activity
-facts, and one ingestion resolves at most the newest 250 unresolved facts.
+facts, and one ingestion resolves at most 250 unresolved facts. A database-local
+cursor rotates those bounded batches through the complete retained backlog.
 These limits are enforced again at repository and persistence boundaries so a
 future caller cannot bypass the protocol-layer checks.
 

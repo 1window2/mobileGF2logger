@@ -195,7 +195,7 @@ class Gfl2StreamParserTest {
     }
 
     @Test
-    fun continuationCountOverflowDropsPendingStateAndParserRecovers() {
+    fun continuationCountOverflowQuarantinesTheTailAndParserRecovers() {
         val parser = Gfl2StreamParser(maximumPendingContinuations = 2)
         val continuation = outerMessage(
             0,
@@ -207,7 +207,18 @@ class Gfl2StreamParserTest {
         val overflow = parser.accept(continuation)
 
         assertEquals(1, overflow.filterIsInstance<ParseEvent.Warning>().size)
-        assertTrue(parser.finish().isEmpty())
+        assertTrue(parser.accept(continuation).isEmpty())
+        assertTrue(
+            parser.accept(
+                outerMessage(
+                    42,
+                    payload(
+                        Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
+                        guildMembersPayload("Truncated tail", 10uL),
+                    ),
+                ),
+            ).isEmpty(),
+        )
         val recovered = parser.accept(
             outerMessage(
                 7,
@@ -218,7 +229,7 @@ class Gfl2StreamParserTest {
     }
 
     @Test
-    fun continuationByteOverflowDropsPendingState() {
+    fun continuationByteOverflowQuarantinesTheTail() {
         val body = guildMembersPayload("Part", 8uL)
         val parser = Gfl2StreamParser(maximumPendingPayloadBytes = body.size * 2 - 1)
         val continuation = outerMessage(
@@ -228,6 +239,39 @@ class Gfl2StreamParserTest {
 
         assertTrue(parser.accept(continuation).isEmpty())
         assertEquals(1, parser.accept(continuation).filterIsInstance<ParseEvent.Warning>().size)
+        assertTrue(parser.accept(continuation).isEmpty())
+        assertTrue(
+            parser.accept(
+                outerMessage(
+                    42,
+                    payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, body),
+                ),
+            ).isEmpty(),
+        )
+        assertTrue(parser.finish().isEmpty())
+    }
+
+    @Test
+    fun oversizedFirstContinuationIsQuarantinedBeforePendingStateIsCreated() {
+        val body = guildMembersPayload("Oversized first", 8uL)
+        val parser = Gfl2StreamParser(maximumPendingPayloadBytes = body.size - 1)
+
+        val warning = parser.accept(
+            outerMessage(
+                0,
+                payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, body),
+            ),
+        )
+
+        assertEquals(1, warning.filterIsInstance<ParseEvent.Warning>().size)
+        assertTrue(
+            parser.accept(
+                outerMessage(
+                    42,
+                    payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, body),
+                ),
+            ).isEmpty(),
+        )
         assertTrue(parser.finish().isEmpty())
     }
 

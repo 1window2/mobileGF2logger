@@ -70,6 +70,10 @@ the attempt count and the otherwise ambiguous per-attempt rounding merit.
 Counter resets are handled by treating a negative delta as the current counter
 value. Daily activity is derived from Total Merit because Merit This Week
 resets on Monday while a Gunsmoke week begins on Sunday.
+A capped pre-Gunsmoke counter is a valid opening anchor only inside the
+immediately preceding Monday 05:00-to-Sunday 05:00 calendar interval in the
+configured game-day timezone; this remains correct across daylight-saving
+transitions.
 
 ## Snapshots and weekly tables
 
@@ -142,7 +146,8 @@ resets on Monday while a Gunsmoke week begins on Sunday.
   withdrawal/rejoin periods without replacing manual or exact Updates evidence.
   An observed absence can add or refine the missing inferred withdrawal side of
   an exact open period, after which a later presence becomes a separate rejoin.
-  Notes on snapshot-derived periods survive this replay.
+  Notes on snapshot-derived periods survive this replay, while their weak
+  inferred boundaries can still expand to roster evidence discovered later.
 - An individual membership period can be deleted from its editor after a
   destructive-action confirmation. The only remaining period is protected;
   delete the member instead when the complete record should be removed.
@@ -178,4 +183,7 @@ must contain no more than 256 unique UIDs, an activity payload contributes at
 most 250 distinct observations, and the database keeps the newest 10,000
 activity facts. If a newly selected roster CSV fails parsing, duplicate-UID
 validation, ingestion, or chronological reconciliation, its newly retained file
-is deleted so a failed import cannot poison every later reconciliation.
+is deleted so a failed import cannot poison every later reconciliation. The
+entire selected-file reconciliation runs under one outer SQLite transaction, so
+deleting newly retained files after failure also rolls back nested snapshot and
+membership writes.

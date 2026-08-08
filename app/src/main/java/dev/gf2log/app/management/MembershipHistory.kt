@@ -53,7 +53,7 @@ internal object MembershipChronology {
         oppositeAt.isAfter(boundaryAt) && !oppositeAt.isAfter(observedAt)
     }
 
-    fun shouldRestoreRosterActiveTenure(
+    fun shouldRestoreRosterActiveMembershipPeriod(
         memberIsActive: Boolean,
         withdrawalPredatesRoster: Boolean,
     ): Boolean = memberIsActive && withdrawalPredatesRoster

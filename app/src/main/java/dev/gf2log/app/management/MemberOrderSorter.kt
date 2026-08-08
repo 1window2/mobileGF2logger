@@ -44,7 +44,7 @@ object MemberOrderSorter {
     }
 
     private fun MemberStatus.currentJoinDate() =
-        tenures.lastOrNull { it.leftAt == null }?.joinedAt ?: firstSeenAt
+        membershipPeriods.lastOrNull { it.leftAt == null }?.joinedAt ?: firstSeenAt
 
     private fun <T : Comparable<T>> compareKnown(
         first: T,

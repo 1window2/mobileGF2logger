@@ -671,6 +671,73 @@ class WeeklyReportBuilderTest {
     }
 
     @Test
+    fun julyNineteenthNeedsThePreResetAnchorToProvePatrol() {
+        val julyEighteenth = SnapshotMember(
+            uid = 1,
+            name = "Boundary member",
+            level = 60,
+            weeklyMerit = 540,
+            totalMerit = 430_307,
+            highScore = 10_425,
+            totalScore = 218_925,
+            lastLogin = Instant.parse("2026-07-18T19:11:22Z").epochSecond,
+        )
+        val julyNineteenth = julyEighteenth.copy(
+            weeklyMerit = 3_631,
+            totalMerit = 433_398,
+            highScore = 10_545,
+            totalScore = 29_127,
+            lastLogin = Instant.parse("2026-07-19T19:29:33Z").epochSecond,
+        )
+
+        val withoutAnchor = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 19),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-19T19:29:33Z", julyNineteenth),
+            ),
+            asOf = Instant.parse("2026-07-19T19:30:00Z"),
+        ).members.single().days.first()
+        val withAnchor = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 19),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-18T19:11:22Z", julyEighteenth),
+                snapshotWithMembers("2026-07-19T19:29:33Z", julyNineteenth),
+            ),
+            asOf = Instant.parse("2026-07-19T19:30:00Z"),
+        ).members.single().days.first()
+        val withSubCapAnchor = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 19),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers(
+                    "2026-07-18T19:11:22Z",
+                    julyEighteenth.copy(weeklyMerit = 450),
+                ),
+                snapshotWithMembers(
+                    "2026-07-19T19:29:33Z",
+                    julyNineteenth.copy(weeklyMerit = 3_541),
+                ),
+            ),
+            asOf = Instant.parse("2026-07-19T19:30:00Z"),
+        ).members.single().days.first()
+
+        assertNull(withoutAnchor.dailyPatrol)
+        assertEquals(MetricCertainty.LOWER_BOUND, withoutAnchor.meritCertainty)
+        assertNull(withSubCapAnchor.dailyPatrol)
+        assertEquals(MetricCertainty.LOWER_BOUND, withSubCapAnchor.meritCertainty)
+        assertEquals(3_091L, withAnchor.meritDelta)
+        assertEquals(29_127L, withAnchor.scoreDelta)
+        assertEquals(3, withAnchor.attempts)
+        assertEquals(true, withAnchor.attended)
+        assertEquals(true, withAnchor.dailyPatrol)
+        assertEquals(MetricCertainty.EXACT, withAnchor.meritCertainty)
+        assertEquals(MetricCertainty.EXACT, withAnchor.scoreCertainty)
+        assertEquals(MetricCertainty.EXACT, withAnchor.attemptsCertainty)
+    }
+
+    @Test
     fun completeSevenDaySequencesResolveEverySharedActivityState() {
         fun sheetMember(
             uid: Long,

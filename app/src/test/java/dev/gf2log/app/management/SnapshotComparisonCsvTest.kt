@@ -27,6 +27,16 @@ class SnapshotComparisonCsvTest {
         assertTrue(csv.contains(",CHANGED,2,\"Member, Two\",90,90,0,false"))
     }
 
+    @Test
+    fun neutralizesFormulaLikeMemberNames() {
+        val older = snapshot("2026-07-20T00:00:00Z")
+        val newer = snapshot("2026-07-21T00:00:00Z", member(3, "@SUM(A1)", 50))
+
+        val csv = SnapshotComparisonCsv.format(SnapshotComparison.compare(older, newer))
+
+        assertTrue(csv.contains(",JOINED,3,'@SUM(A1),"))
+    }
+
     private fun snapshot(time: String, vararg members: SnapshotMember) =
         PlatoonSnapshot(0, Instant.parse(time), members.toList())
 

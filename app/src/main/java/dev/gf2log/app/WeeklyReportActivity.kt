@@ -120,7 +120,7 @@ class WeeklyReportActivity : LocalizedActivity() {
     // Function Name: loadRenderModel
     // Description:
     // - Reads every repository and preference value needed by one weekly screen render.
-    // - Keeps later view construction free of database access and N+1 member tenure queries.
+    // - Keeps later view construction free of database access and N+1 member membershipPeriod queries.
     // Parameters:
     // - targetDay: A date inside the requested reporting week.
     // Returns:

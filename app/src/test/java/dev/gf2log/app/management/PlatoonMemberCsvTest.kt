@@ -8,7 +8,7 @@ import org.junit.Test
 
 class PlatoonMemberCsvTest {
     @Test
-    fun exportsSelectedMemberStatusAndLatestTenure() {
+    fun exportsSelectedMemberStatusAndLatestMembershipPeriod() {
         val status = MemberStatus(
             uid = 7,
             name = "Leader, One",
@@ -17,8 +17,8 @@ class PlatoonMemberCsvTest {
             firstSeenAt = Instant.parse("2026-01-01T00:00:00Z"),
             lastSeenAt = Instant.parse("2026-07-21T00:00:00Z"),
             note = "former leader",
-            tenures = listOf(
-                MembershipTenure(
+            membershipPeriods = listOf(
+                MembershipPeriod(
                     id = 1,
                     uid = 7,
                     joinedAt = Instant.parse("2026-01-01T00:00:00Z"),
@@ -56,8 +56,8 @@ class PlatoonMemberCsvTest {
             firstSeenAt = Instant.parse("2026-01-01T00:00:00Z"),
             lastSeenAt = Instant.parse("2026-07-21T00:00:00Z"),
             note = "",
-            tenures = listOf(
-                MembershipTenure(
+            membershipPeriods = listOf(
+                MembershipPeriod(
                     id = 2,
                     uid = 8,
                     joinedAt = Instant.parse("2026-01-01T00:00:00Z"),
@@ -83,5 +83,28 @@ class PlatoonMemberCsvTest {
 
         assertTrue(csv.contains("2026-01-01,2026-07-21"))
         assertTrue(!csv.contains("2026-01-01 09:00:00"))
+    }
+
+    @Test
+    fun neutralizesFormulaLikeNamesAndNotesForSpreadsheetExport() {
+        val status = MemberStatus(
+            uid = 9,
+            name = "=HYPERLINK(\"https://invalid\")",
+            level = 60,
+            isActive = true,
+            firstSeenAt = Instant.parse("2026-01-01T00:00:00Z"),
+            lastSeenAt = Instant.parse("2026-01-01T00:00:00Z"),
+            note = "+cmd",
+            membershipPeriods = emptyList(),
+        )
+
+        val csv = PlatoonMemberCsv.format(
+            listOf(status),
+            latestMembers = emptyMap(),
+            zoneId = ZoneId.of("Asia/Seoul"),
+        )
+
+        assertTrue(csv.contains("\"'=HYPERLINK(\"\"https://invalid\"\")\""))
+        assertTrue(csv.contains(",'+cmd"))
     }
 }

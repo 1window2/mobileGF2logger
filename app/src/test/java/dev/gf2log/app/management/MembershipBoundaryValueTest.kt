@@ -89,7 +89,7 @@ class MembershipBoundaryValueTest {
     }
 
     @Test
-    fun historicalWithdrawalDoesNotReplaceALaterRosterConfirmedTenure() {
+    fun historicalWithdrawalDoesNotReplaceALaterRosterConfirmedMembershipPeriod() {
         assertTrue(
             MembershipChronology.withdrawalPredatesRosterPresence(
                 withdrewAt = Instant.parse("2026-07-26T03:00:00Z"),
@@ -126,21 +126,21 @@ class MembershipBoundaryValueTest {
     }
 
     @Test
-    fun historicalWithdrawalRestoresOnlyAnAuthoritativeActiveRosterTenure() {
+    fun historicalWithdrawalRestoresOnlyAnAuthoritativeActiveRosterMembershipPeriod() {
         assertTrue(
-            MembershipChronology.shouldRestoreRosterActiveTenure(
+            MembershipChronology.shouldRestoreRosterActiveMembershipPeriod(
                 memberIsActive = true,
                 withdrawalPredatesRoster = true,
             ),
         )
         assertFalse(
-            MembershipChronology.shouldRestoreRosterActiveTenure(
+            MembershipChronology.shouldRestoreRosterActiveMembershipPeriod(
                 memberIsActive = false,
                 withdrawalPredatesRoster = true,
             ),
         )
         assertFalse(
-            MembershipChronology.shouldRestoreRosterActiveTenure(
+            MembershipChronology.shouldRestoreRosterActiveMembershipPeriod(
                 memberIsActive = true,
                 withdrawalPredatesRoster = false,
             ),

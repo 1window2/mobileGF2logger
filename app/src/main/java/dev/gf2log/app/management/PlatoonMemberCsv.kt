@@ -1,5 +1,6 @@
 package dev.gf2log.app.management
 
+import dev.gf2log.protocol.CsvCell
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -16,7 +17,7 @@ object PlatoonMemberCsv {
         appendLine(HEADER)
         statuses.forEach { status ->
             val latest = latestMembers[status.uid]
-            val tenure = status.tenures.firstOrNull()
+            val membershipPeriod = status.membershipPeriods.firstOrNull()
             appendLine(
                 listOf(
                     status.uid,
@@ -28,7 +29,7 @@ object PlatoonMemberCsv {
                     latest?.highScore,
                     latest?.totalScore,
                     latest?.lastLogin,
-                    tenure?.let {
+                    membershipPeriod?.let {
                         formatBoundary(
                             date = it.joinedDate,
                             instant = it.joinedAt,
@@ -36,7 +37,7 @@ object PlatoonMemberCsv {
                             zoneId = zoneId,
                         )
                     },
-                    tenure?.let {
+                    membershipPeriod?.let {
                         formatBoundary(
                             date = it.leftDate,
                             instant = it.leftAt,
@@ -45,16 +46,10 @@ object PlatoonMemberCsv {
                         )
                     },
                     status.note,
-                ).joinToString(",", transform = ::escape),
+                ).joinToString(",") { CsvCell.escape(it) },
             )
         }
     }.trimEnd() + "\n"
-
-    private fun escape(value: Any?): String {
-        val text = value?.toString().orEmpty()
-        if (text.none { it == ',' || it == '"' || it == '\n' || it == '\r' }) return text
-        return "\"${text.replace("\"", "\"\"")}\""
-    }
 
     private fun formatBoundary(
         date: java.time.LocalDate?,

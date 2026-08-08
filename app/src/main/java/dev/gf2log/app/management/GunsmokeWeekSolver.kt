@@ -605,7 +605,7 @@ internal object GunsmokeWeekSolver {
         if (
             anchor != null &&
             !anchor.capturedAt.isAfter(periodStart) &&
-            Duration.between(anchor.capturedAt, periodStart) <= MAX_BOUNDARY_DISTANCE &&
+            isClosedOpeningAnchor(anchor, periodStart) &&
             checkpoint.member.totalMerit >= anchor.member.totalMerit
         ) {
             val merit = checkpoint.member.totalMerit - anchor.member.totalMerit
@@ -628,6 +628,19 @@ internal object GunsmokeWeekSolver {
             )
         }.distinct()
     }
+
+    // Function Name: isClosedOpeningAnchor
+    // Description:
+    // - Accepts a near-reset capture or a standard-week counter that has already reached its cap.
+    // - A capped Monday-through-Saturday counter cannot gain more merit before the Gunsmoke Sunday.
+    // Parameters:
+    // - anchor: Latest counter observation before the Gunsmoke report boundary.
+    // - periodStart: Sunday 05:00 Gunsmoke report boundary.
+    // Returns:
+    // - True when no unobserved pre-boundary merit can contaminate the opening interval.
+    private fun isClosedOpeningAnchor(anchor: Checkpoint, periodStart: Instant): Boolean =
+        Duration.between(anchor.capturedAt, periodStart) <= MAX_BOUNDARY_DISTANCE ||
+            anchor.member.weeklyMerit == MAX_PRE_GUNSMOKE_WEEKLY_MERIT
 
     private fun statesForMetrics(
         merit: Long,
@@ -1261,6 +1274,7 @@ internal object GunsmokeWeekSolver {
     private const val MAX_AGGREGATE_SEARCH_OPERATIONS = 100_000
     private const val LOGIN_MERIT = 50L
     private const val PATROL_MERIT = 40L
+    private const val MAX_PRE_GUNSMOKE_WEEKLY_MERIT = 6L * (LOGIN_MERIT + PATROL_MERIT)
     private const val DAILY_BASELINE_AND_ATTEMPT_MERIT =
         LOGIN_MERIT + PATROL_MERIT +
             ActivityInference.MAX_DAILY_ATTEMPTS * ActivityInference.MERIT_PER_ATTEMPT

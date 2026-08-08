@@ -220,7 +220,7 @@ class BackupArchiveTest {
         append("SQLite format 3\u0000")
         append("members:21001,Alpha Lead,active,notes=rotation owner\n")
         append("members:21002,Beta Two,withdrawn,notes=returning member\n")
-        append("tenures:21001,2026-05-11,open;21002,2026-02-02,2026-07-25\n")
+        append("membershipPeriods:21001,2026-05-11,open;21002,2026-02-02,2026-07-25\n")
         append("weekly_notes:2026-07-12,operation review;2026-07-19,leave approved\n")
         append("weekly_overrides:21002,2026-07-20,merit=90,attended=true\n")
     }.toByteArray()

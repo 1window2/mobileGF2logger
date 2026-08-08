@@ -30,8 +30,10 @@ import dev.gf2log.app.capture.CaptureVpnService
 import dev.gf2log.app.history.CaptureHistoryStore
 import dev.gf2log.app.history.SavedHistoryStore
 import dev.gf2log.app.management.PlatoonBackupManager
+import dev.gf2log.app.management.PlatoonCsvImportStore
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.BackupFileName
+import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.Gfl2PayloadDecoder
 import dev.gf2log.protocol.PayloadCatalog
 import java.io.File
@@ -109,8 +111,11 @@ class MainActivity : LocalizedActivity() {
                         destination,
                     )
                         ?: error("Document provider did not open an output stream")
-                    output.use { stream ->
-                        source.inputStream().use { input -> input.copyTo(stream) }
+                    output.writer(Charsets.UTF_8).use { writer ->
+                        val snapshot = requireNotNull(
+                            GuildMembersCsv.parse(source.readText(Charsets.UTF_8)),
+                        ) { "Stored Platoon CSV is invalid" }
+                        writer.write(GuildMembersCsv.formatForSpreadsheet(snapshot))
                     }
                 }
             }
@@ -143,6 +148,16 @@ class MainActivity : LocalizedActivity() {
                         ?: error("Document provider did not open an input stream")
                     input.use { PlatoonBackupManager(this).restore(it) }
                 }
+            }
+            requestCode == REQUEST_CSV_IMPORT -> {
+                if (resultCode != RESULT_OK) return
+                val sources = buildList {
+                    data?.clipData?.let { clip ->
+                        repeat(clip.itemCount) { index -> add(clip.getItemAt(index).uri) }
+                    }
+                    data?.data?.let(::add)
+                }.distinct()
+                if (sources.isNotEmpty()) importPlatoonCsvSources(sources)
             }
         }
     }
@@ -232,6 +247,10 @@ class MainActivity : LocalizedActivity() {
                 setOnClickListener {
                     startActivity(Intent(this@MainActivity, WeeklyReportActivity::class.java))
                 }
+            }, matchWidth())
+            addView(Button(context).apply {
+                text = getString(R.string.import_platoon_csv)
+                setOnClickListener { selectPlatoonCsvFiles() }
             }, matchWidth())
             addView(Button(context).apply {
                 text = getString(R.string.export_platoon_backup)
@@ -348,6 +367,81 @@ class MainActivity : LocalizedActivity() {
             .setNegativeButton(android.R.string.cancel, null)
             .setPositiveButton(R.string.import_platoon_backup) { _, _ -> importPlatoonBackup() }
             .show()
+    }
+
+    @Suppress("DEPRECATION")
+    // Function Name: selectPlatoonCsvFiles
+    // Description:
+    // - Opens Android's trusted document picker for one or more roster CSV files.
+    // Parameters:
+    // - None.
+    // Returns:
+    // - Unit after dispatching the picker activity.
+    private fun selectPlatoonCsvFiles() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("text/csv")
+            .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("text/csv", "text/comma-separated-values"))
+            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        startActivityForResult(intent, REQUEST_CSV_IMPORT)
+    }
+
+    // Function Name: importPlatoonCsvSources
+    // Description:
+    // - Validates and retains a bounded user selection away from the UI thread.
+    // - Reconciles every accepted roster into weekly and membership projections.
+    // - Rolls back newly retained files when any selected source is invalid.
+    // Parameters:
+    // - sources: Distinct document-provider URIs returned by the picker.
+    // Returns:
+    // - Unit after scheduling the import and status update.
+    private fun importPlatoonCsvSources(sources: List<Uri>) {
+        fileIoExecutor.execute {
+            val result = runCatching {
+                require(sources.size <= MAX_CSV_IMPORT_FILES) {
+                    "Too many Platoon CSV files were selected"
+                }
+                val directory = File(filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY)
+                val store = PlatoonCsvImportStore(directory)
+                var retained = 0
+                var duplicates = 0
+                val createdFiles = mutableListOf<File>()
+                try {
+                    sources.forEach { source ->
+                        val input = TrustedImportSource.openInputStream(contentResolver, source)
+                            ?: error("Document provider did not open an input stream")
+                        input.use(store::retain).also {
+                            if (it.duplicate) {
+                                duplicates += 1
+                            } else {
+                                retained += 1
+                                createdFiles += it.file
+                            }
+                        }
+                    }
+                } catch (error: Exception) {
+                    createdFiles.forEach(File::delete)
+                    throw error
+                }
+                val imported = PlatoonRepository(this).reconcileRetainedCsvFiles(directory)
+                CsvImportSummary(retained, duplicates, imported)
+            }
+            statusHandler.post {
+                if (isFinishing || isDestroyed) return@post
+                statusText.text = result.fold(
+                    onSuccess = { summary ->
+                        getString(
+                            R.string.status_platoon_csv_imported,
+                            summary.retained,
+                            summary.imported.imported,
+                            summary.imported.historical,
+                            summary.duplicates + summary.imported.skipped,
+                        )
+                    },
+                    onFailure = { getString(R.string.status_platoon_csv_import_failed) },
+                )
+            }
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -564,6 +658,8 @@ class MainActivity : LocalizedActivity() {
         const val REQUEST_EXPORT = 102
         const val REQUEST_BACKUP_EXPORT = 103
         const val REQUEST_BACKUP_IMPORT = 104
+        const val REQUEST_CSV_IMPORT = 105
+        const val MAX_CSV_IMPORT_FILES = 512
         const val STATUS_REFRESH_MILLIS = 1_000L
         val BACKUP_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
         val BACKUP_MIME_TYPES = arrayOf(
@@ -572,4 +668,10 @@ class MainActivity : LocalizedActivity() {
             "application/octet-stream",
         )
     }
+
+    private data class CsvImportSummary(
+        val retained: Int,
+        val duplicates: Int,
+        val imported: PlatoonRepository.ImportResult,
+    )
 }

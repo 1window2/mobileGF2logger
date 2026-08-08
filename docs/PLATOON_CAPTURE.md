@@ -90,7 +90,7 @@ after reconnection, and on Platoon pages. The 21935 and 21960 responses are
 incremental: the app stores every supplied fact, but cannot reconstruct entries
 the server does not send. Durable membership history therefore combines
 UID-based 21917 roster differences, exact 21960 Updates, and manual history for
-older missing tenures.
+older missing membership periods.
 
 ## Output
 

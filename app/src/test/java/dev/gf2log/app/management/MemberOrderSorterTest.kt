@@ -77,7 +77,7 @@ class MemberOrderSorterTest {
         firstSeenAt = Instant.parse(joinedAt),
         lastSeenAt = Instant.parse(joinedAt),
         note = "",
-        tenures = emptyList(),
+        membershipPeriods = emptyList(),
     )
 
     private fun snapshot(uid: Long, weekly: Long, total: Long) = SnapshotMember(

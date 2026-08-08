@@ -13,7 +13,7 @@ mobileGF2logger is a lightweight, non-root app for Platoon masters. It uses Andr
 ## Features
 
 - Captures the mandatory Members (`21917`), Activity (`21935`), and Updates (`21960`) responses without a computer or root access.
-- Tracks active and withdrawn members, repeat tenures, exact Updates timestamps, editable nicknames, and private notes.
+- Tracks active and withdrawn members, repeat membership periods, exact Updates timestamps, editable nicknames, and private notes.
 - Builds Sunday-to-Saturday Standard or Gunsmoke Frontline weekly tables around the 05:00 game reset, with cut-off points and manual correction for missing data.
 - Stores the latest 100 parsed packets and up to 50 saved packets, with table and raw views, copy, export, selection, and deletion.
 - Supports member sorting, persistent drag ordering, snapshot comparison, single-week and all-week CSV export, and complete `.gf2backup` export/restore.

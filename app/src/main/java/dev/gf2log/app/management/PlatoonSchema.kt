@@ -5,20 +5,20 @@ package dev.gf2log.app.management
  */
 internal object PlatoonSchema {
     const val DATABASE_NAME = "platoon.db"
-    const val CURRENT_VERSION = 9
+    const val CURRENT_VERSION = 10
     const val MIN_BACKUP_VERSION = 1
 
     private val baseTables = setOf(
         "snapshots",
         "snapshot_members",
         "members",
-        "tenures",
         "member_events",
         "weekly_notes",
     )
 
     fun requiredTables(version: Int): Set<String> = buildSet {
         addAll(baseTables)
+        add(if (version >= 10) "membership_periods" else "tenures")
         if (version >= 3) add("weekly_overrides")
         if (version >= 6) add("platoon_activity")
     }
@@ -33,8 +33,9 @@ internal object PlatoonSchema {
                 if (version >= 4) add("custom_name")
             },
         )
+        val membershipPeriodTable = if (version >= 10) "membership_periods" else "tenures"
         put(
-            "tenures",
+            membershipPeriodTable,
             buildSet {
                 addAll(
                     setOf(
@@ -74,7 +75,11 @@ internal object PlatoonSchema {
                         "source",
                     ),
                 )
-                if (version >= 6) add("tenure_id")
+                if (version >= 10) {
+                    add("membership_period_id")
+                } else if (version >= 6) {
+                    add("tenure_id")
+                }
                 if (version >= 9) addAll(setOf("event_date", "time_known"))
             },
         )

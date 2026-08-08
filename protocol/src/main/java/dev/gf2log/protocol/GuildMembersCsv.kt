@@ -15,12 +15,34 @@ object GuildMembersCsv {
         member.totalScore.toString(),
         member.lastLogin.toString(),
         logTime,
-    ).joinToString(",", transform = ::escape)
+    ).joinToString(",") { CsvCell.escape(it, spreadsheetSafe = false) }
 
-    private fun escape(value: String): String {
-        if (value.none { it == ',' || it == '"' || it == '\n' || it == '\r' }) return value
-        return "\"${value.replace("\"", "\"\"")}\""
-    }
+    // Function Name: formatForSpreadsheet
+    // Description:
+    // - Formats a parsed roster for explicit export without allowing names to execute formulas.
+    // - Leaves the retained/importable capture representation unchanged.
+    // Parameters:
+    // - snapshot: Validated roster snapshot selected for user export.
+    // Returns:
+    // - A complete spreadsheet-safe CSV document.
+    fun formatForSpreadsheet(snapshot: Snapshot): String = buildString {
+        appendLine(HEADER)
+        snapshot.members.forEach { member ->
+            appendLine(
+                listOf(
+                    member.uid,
+                    member.name,
+                    member.level,
+                    member.weeklyMerit,
+                    member.totalMerit,
+                    member.highScore,
+                    member.totalScore,
+                    member.lastLogin,
+                    snapshot.logTime,
+                ).joinToString(",") { CsvCell.escape(it) },
+            )
+        }
+    }.trimEnd() + "\n"
 
     // Function Name: parse
     // Description:

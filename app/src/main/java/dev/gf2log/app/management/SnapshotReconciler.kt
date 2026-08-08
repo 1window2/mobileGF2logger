@@ -5,7 +5,7 @@ object SnapshotReconciler {
         val uid: Long,
         val name: String,
         val isActive: Boolean,
-        val hasPriorTenure: Boolean,
+        val hasPriorMembershipPeriod: Boolean,
     )
 
     data class Result(
@@ -38,7 +38,7 @@ object SnapshotReconciler {
                 val previous = knownByUid[member.uid]
                 when {
                     previous == null -> joined += member
-                    !previous.isActive && previous.hasPriorTenure -> rejoined += member
+                    !previous.isActive && previous.hasPriorMembershipPeriod -> rejoined += member
                     !previous.isActive -> joined += member
                 }
                 if (previous != null && previous.name != member.name) {

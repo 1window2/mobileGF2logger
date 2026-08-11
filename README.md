@@ -20,7 +20,7 @@ capture to the selected game package, and raw traffic is never stored.
 - Builds Sunday-to-Saturday Standard or Gunsmoke Frontline weekly tables around the 05:00 game reset, with cut-off points and manual correction for missing data.
 - Offers guided capture that tracks the three useful Platoon payloads and stops automatically when the checklist is complete.
 - Explains every weekly cell on tap and summarizes missing or uncertain evidence in an Evidence Health panel.
-- Previews roster CSV impact before import and keeps an automatic one-level checkpoint for undo.
+- Recovers interrupted imports before previewing roster CSV impact and keeps an automatic one-level checkpoint for undo.
 - Saves or shares a weekly PNG with opt-in controls for names, UIDs, and private notes.
 - Can send a validated original CSV to an optional user-owned Discord incoming webhook after confirmation.
 - Stores the latest 100 parsed packets and up to 50 saved packets, with table and raw views, copy, export, selection, and deletion.
@@ -42,8 +42,8 @@ uid,name,level,weeklyMerit,totalMerit,highScore,totalScore,lastLogin,logTime
 
 The app keeps parsed history, management data, and generated CSV files in private on-device storage. It does not bypass TLS, certificate pinning, or anti-cheat systems, and it does not modify game traffic. Server responses may contain only recent incremental history, so older missing membership records can be entered manually.
 
-## Inspiration
+## Reference
 
-mobileGF2logger was inspired by [gfl2logger](https://github.com/blead/gfl2logger),
+mobileGF2logger was inspired by [blead/gfl2logger](https://github.com/blead/gfl2logger),
 a GF2 logger for the Windows client. This project is an independent Android
 implementation tailored to on-device Platoon management.

@@ -454,6 +454,8 @@ class MainActivity : LocalizedActivity() {
         statusText.text = getString(R.string.csv_import_preparing_preview)
         fileIoExecutor.execute {
             val result = runCatching {
+                // Recover an interrupted prior import before reading the preview baseline.
+                CsvImportCheckpointManager(this)
                 require(sources.size <= MAX_CSV_IMPORT_FILES) {
                     "Too many Platoon CSV files were selected"
                 }

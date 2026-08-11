@@ -487,6 +487,38 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     @Test
+    fun unfinishedCsvImportRecoversBeforePreviewRepositoryReads() {
+        seedDatabase(ARCHIVED_UID, "Before interrupted import", "before-interrupted-import.csv")
+        val checkpoint = FilePaths.csvCheckpointDirectory(context)
+        assertTrue(checkpoint.mkdirs())
+        java.io.FileOutputStream(java.io.File(checkpoint, "platoon.gf2backup")).use { output ->
+            PlatoonBackupManager(context).export(output)
+        }
+        val plannedFileName = "import-20260811T000000Z-00000000000000000006.csv"
+        java.io.File(checkpoint, "planned-files.txt").writeText(
+            "$plannedFileName\n",
+            Charsets.UTF_8,
+        )
+        replaceDatabaseForCheckpoint(CURRENT_UID, "Interrupted import", plannedFileName)
+        val retained = java.io.File(
+            context.filesDir,
+            PlatoonRepository.RETAINED_CSV_DIRECTORY,
+        ).apply { mkdirs() }
+        java.io.File(retained, plannedFileName).writeText(
+            "interrupted evidence",
+            Charsets.UTF_8,
+        )
+
+        CsvImportCheckpointManager(context)
+
+        val members = PlatoonRepository(context).listMemberStatuses()
+        assertTrue(members.any { it.uid == ARCHIVED_UID })
+        assertFalse(members.any { it.uid == CURRENT_UID })
+        assertFalse(java.io.File(retained, plannedFileName).exists())
+        assertFalse(FilePaths.csvCheckpointDirectory(context).exists())
+    }
+
+    @Test
     fun malformedCompleteBackupDoesNotMutateExistingState() {
         seedDatabase(CURRENT_UID, "Current member", "current-source.csv")
         settingsStore.replace(currentSettings())

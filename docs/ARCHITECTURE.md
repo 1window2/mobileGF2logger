@@ -213,8 +213,9 @@ retained cache is restored alongside the previous database and settings.
 
 
 User-selected roster CSV files are prepared and validated without retaining the
-new selection. Before classification, crash-left retained evidence is reconciled
-so the preview and confirmation start from one represented source set.
+new selection. Before repository reads begin, unfinished checkpoints are recovered;
+then crash-left retained evidence is reconciled so preview and confirmation start
+from one represented source set.
 `CsvImportPreviewAnalyzer` compares the immutable candidates to that recovered
 roster and presents their bounded impact. Only explicit confirmation retains
 new files. Before that mutation, `CsvImportCheckpointManager` exports a private

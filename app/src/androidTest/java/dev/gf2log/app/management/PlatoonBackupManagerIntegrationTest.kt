@@ -3,9 +3,12 @@ package dev.gf2log.app.management
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.gf2log.app.TargetPackagePreferences
+import dev.gf2log.app.WeeklyPngPendingState
+import dev.gf2log.app.WeeklyReportActivity
 import dev.gf2log.app.settings.AppBackupSettings
 import dev.gf2log.app.settings.AppBackupSettingsCodec
 import dev.gf2log.app.settings.AppSettingsStore
@@ -426,6 +429,99 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     @Test
+    fun failedCsvImportPreservesThePreviousSuccessfulUndoCheckpoint() {
+        seedDatabase(ARCHIVED_UID, "Before first import", "before-first-import.csv")
+        val firstImport = CsvImportCheckpointManager(context)
+        firstImport.create(emptySet())
+        replaceDatabaseForCheckpoint(CURRENT_UID, "After first import", "after-first-import.csv")
+        firstImport.seal()
+
+        val failedImport = CsvImportCheckpointManager(context)
+        failedImport.create(emptySet())
+        replaceDatabaseForCheckpoint(THIRD_UID, "Failed second import", "failed-import.csv")
+        failedImport.rollbackFailedImport()
+
+        PlatoonDatabase(context).use { database ->
+            val db = database.readableDatabase
+            assertEquals(1L, count(db, "members", "uid = ?", CURRENT_UID))
+            assertEquals(0L, count(db, "members", "uid = ?", THIRD_UID))
+        }
+
+        val previousUndo = CsvImportCheckpointManager(context)
+        assertTrue(previousUndo.canUndo())
+        previousUndo.restore()
+
+        PlatoonDatabase(context).use { database ->
+            val db = database.readableDatabase
+            assertEquals(1L, count(db, "members", "uid = ?", ARCHIVED_UID))
+            assertEquals(0L, count(db, "members", "uid = ?", CURRENT_UID))
+        }
+        assertFalse(CsvImportCheckpointManager(context).canUndo())
+    }
+
+    @Test
+    fun interruptedCsvUndoCompletesAfterDatabaseInstallationOnRestart() {
+        seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
+        val manager = CsvImportCheckpointManager(context) { checkpoint ->
+            if (checkpoint == PlatoonBackupManager.RestoreCheckpoint.DATABASE_INSTALLED) {
+                throw SimulatedProcessDeath()
+            }
+        }
+        manager.create(emptySet())
+        replaceDatabaseForCheckpoint(CURRENT_UID, "After import", "after-import.csv")
+        manager.seal()
+
+        assertThrows(SimulatedProcessDeath::class.java) {
+            manager.restore()
+        }
+
+        val recovered = CsvImportCheckpointManager(context)
+
+        assertFalse(recovered.canUndo())
+        PlatoonDatabase(context).use { database ->
+            val db = database.readableDatabase
+            assertEquals(1L, count(db, "members", "uid = ?", ARCHIVED_UID))
+            assertEquals(0L, count(db, "members", "uid = ?", CURRENT_UID))
+        }
+        assertFalse(FilePaths.csvCheckpointDirectory(context).exists())
+        assertFalse(FilePaths.csvCheckpointStagingDirectory(context).exists())
+        assertFalse(FilePaths.csvCheckpointPreviousDirectory(context).exists())
+        assertFalse(FilePaths.restoreTransactionDirectory(context).exists())
+    }
+
+    @Test
+    fun unfinishedCsvImportRecoversBeforePreviewRepositoryReads() {
+        seedDatabase(ARCHIVED_UID, "Before interrupted import", "before-interrupted-import.csv")
+        val checkpoint = FilePaths.csvCheckpointDirectory(context)
+        assertTrue(checkpoint.mkdirs())
+        java.io.FileOutputStream(java.io.File(checkpoint, "platoon.gf2backup")).use { output ->
+            PlatoonBackupManager(context).export(output)
+        }
+        val plannedFileName = "import-20260811T000000Z-00000000000000000006.csv"
+        java.io.File(checkpoint, "planned-files.txt").writeText(
+            "$plannedFileName\n",
+            Charsets.UTF_8,
+        )
+        replaceDatabaseForCheckpoint(CURRENT_UID, "Interrupted import", plannedFileName)
+        val retained = java.io.File(
+            context.filesDir,
+            PlatoonRepository.RETAINED_CSV_DIRECTORY,
+        ).apply { mkdirs() }
+        java.io.File(retained, plannedFileName).writeText(
+            "interrupted evidence",
+            Charsets.UTF_8,
+        )
+
+        CsvImportCheckpointManager(context)
+
+        val members = PlatoonRepository(context).listMemberStatuses()
+        assertTrue(members.any { it.uid == ARCHIVED_UID })
+        assertFalse(members.any { it.uid == CURRENT_UID })
+        assertFalse(java.io.File(retained, plannedFileName).exists())
+        assertFalse(FilePaths.csvCheckpointDirectory(context).exists())
+    }
+
+    @Test
     fun malformedCompleteBackupDoesNotMutateExistingState() {
         seedDatabase(CURRENT_UID, "Current member", "current-source.csv")
         settingsStore.replace(currentSettings())
@@ -446,10 +542,14 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     private fun replaceDatabaseWithCurrentState() {
+        replaceDatabaseForCheckpoint(CURRENT_UID, "Current member", "current-source.csv")
+    }
+
+    private fun replaceDatabaseForCheckpoint(uid: Long, name: String, sourceFile: String) {
         PlatoonRepository.withExclusiveDatabase {
             context.deleteDatabase(PlatoonSchema.DATABASE_NAME)
         }
-        seedDatabase(CURRENT_UID, "Current member", "current-source.csv")
+        seedDatabase(uid, name, sourceFile)
     }
 
     private fun seedDatabase(uid: Long, name: String, sourceFile: String) {
@@ -636,8 +736,12 @@ class PlatoonBackupManagerIntegrationTest {
         }
         context.getSharedPreferences(USER_SETTINGS, Context.MODE_PRIVATE).edit().clear().commit()
         FilePaths.restoreDirectory(context).deleteRecursively()
+        FilePaths.restoreTransactionDirectory(context).deleteRecursively()
         FilePaths.retainedCsvDirectory(context).deleteRecursively()
         FilePaths.previousRetainedCsvDirectory(context).deleteRecursively()
+        FilePaths.csvCheckpointDirectory(context).deleteRecursively()
+        FilePaths.csvCheckpointStagingDirectory(context).deleteRecursively()
+        FilePaths.csvCheckpointPreviousDirectory(context).deleteRecursively()
     }
 
     private object FilePaths {
@@ -671,14 +775,51 @@ class PlatoonBackupManagerIntegrationTest {
             context.getDatabasePath(PlatoonSchema.DATABASE_NAME).parentFile,
             "${PlatoonSchema.DATABASE_NAME}.pre_restore",
         )
+
+        fun csvCheckpointDirectory(context: Context) =
+            java.io.File(context.filesDir, "csv-import-checkpoint")
+
+        fun csvCheckpointStagingDirectory(context: Context) =
+            java.io.File(context.filesDir, "csv-import-checkpoint.staging")
+
+        fun csvCheckpointPreviousDirectory(context: Context) =
+            java.io.File(context.filesDir, "csv-import-checkpoint.previous")
     }
+
+    private class SimulatedProcessDeath : Error()
 
     private companion object {
         const val USER_SETTINGS = "user_settings"
         const val ARCHIVED_UID = 1001L
         const val CURRENT_UID = 2002L
+        const val THIRD_UID = 3003L
         const val ARCHIVED_NOTE = "Weekly review"
         const val INVALID_TARGET_PACKAGE = "not a package"
         val PERIOD_START: LocalDate = LocalDate.of(2026, 7, 26)
+    }
+}
+@RunWith(AndroidJUnit4::class)
+class WeeklyReportActivityStateTest {
+    @Test
+    fun pendingWeeklyPngSurvivesActivityRecreation() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val target = java.io.File(
+            WeeklyPngPendingState.directory(context.cacheDir).apply { mkdirs() },
+            "GF2logger-week-20260809.png",
+        ).apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val field = WeeklyReportActivity::class.java.getDeclaredField("pendingPng").apply {
+            isAccessible = true
+        }
+        try {
+            ActivityScenario.launch(WeeklyReportActivity::class.java).use { scenario ->
+                scenario.onActivity { activity -> field.set(activity, target) }
+                scenario.recreate()
+                scenario.onActivity { activity ->
+                    assertEquals(target.canonicalFile, (field.get(activity) as java.io.File).canonicalFile)
+                }
+            }
+        } finally {
+            target.delete()
+        }
     }
 }

@@ -130,6 +130,7 @@ class CaptureVpnService : VpnService() {
             ACTION_STOP -> stopCapture()
             ACTION_START -> {
                 captureOnce = intent.getBooleanExtra(EXTRA_CAPTURE_ONCE, false)
+                CaptureStatus.beginSession(captureOnce)
                 startCapture(intent.getStringExtra(EXTRA_TARGET_PACKAGE).orEmpty())
             }
         }
@@ -329,19 +330,13 @@ class CaptureVpnService : VpnService() {
             }
             val routed = platoonPayloadDispatcher.dispatch(event.value, flowEnded)
             routed.activity
-                ?.onSuccess { accepted ->
-                    if (accepted) {
-                        capturedRequiredTypes += Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY
-                        maybeStopCaptureOnce()
-                    }
+                ?.onSuccess {
+                    markRequiredPayloadCaptured(Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY)
                 }
                 ?.onFailure { CaptureStatus.update("Unable to update Platoon activity history") }
             routed.updates
-                ?.onSuccess { accepted ->
-                    if (accepted) {
-                        capturedRequiredTypes += Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES
-                        maybeStopCaptureOnce()
-                    }
+                ?.onSuccess {
+                    markRequiredPayloadCaptured(Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES)
                 }
                 ?.onFailure { CaptureStatus.update("Unable to update exact Platoon history") }
             routed.members
@@ -372,11 +367,16 @@ class CaptureVpnService : VpnService() {
     }
 
     private fun markRosterCaptured() {
-        capturedRequiredTypes += Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS
+        markRequiredPayloadCaptured(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS)
         if (captureOnce) {
             mainHandler.removeCallbacks(captureOnceGraceStop)
             mainHandler.postDelayed(captureOnceGraceStop, CAPTURE_ONCE_GRACE_MILLIS)
         }
+    }
+
+    private fun markRequiredPayloadCaptured(payloadType: Int) {
+        capturedRequiredTypes += payloadType
+        CaptureStatus.markUsefulPayload(payloadType)
         maybeStopCaptureOnce()
     }
 

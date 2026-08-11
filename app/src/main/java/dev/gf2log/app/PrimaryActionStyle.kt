@@ -10,3 +10,10 @@ fun Button.usePrimaryActionStyle() {
     setTypeface(typeface, Typeface.BOLD)
     minHeight = (48 * resources.displayMetrics.density).toInt()
 }
+
+fun Button.useDestructiveActionStyle() {
+    backgroundTintList = ColorStateList.valueOf(context.getColor(R.color.destructive_action_background))
+    setTextColor(context.getColor(R.color.destructive_action_foreground))
+    setTypeface(typeface, Typeface.BOLD)
+    minHeight = (48 * resources.displayMetrics.density).toInt()
+}

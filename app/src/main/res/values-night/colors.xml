@@ -3,4 +3,12 @@
     <color name="primary_action_background">#86AFFF</color>
     <color name="primary_action_foreground">#111214</color>
     <color name="destructive_action">#FF8AA4</color>
+    <color name="destructive_action_background">#E18484</color>
+    <color name="destructive_action_foreground">#111214</color>
+    <color name="webhook_configured_background">#1F3A2A</color>
+    <color name="webhook_configured_foreground">#9DDBB3</color>
+    <color name="webhook_configured_border">#4F8E68</color>
+    <color name="webhook_missing_background">#3B3120</color>
+    <color name="webhook_missing_foreground">#F2D28C</color>
+    <color name="webhook_missing_border">#A8853A</color>
 </resources>

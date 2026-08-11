@@ -27,6 +27,22 @@ class PlatoonCsvImportStoreTest {
         assertTrue(first.file.readText() == VALID_CSV)
     }
 
+    @Test
+    fun prepareValidatesWithoutPublishingUntilConfirmation() {
+        val directory = temporary.newFolder("preview")
+        val store = PlatoonCsvImportStore(directory)
+
+        val prepared = store.prepare(ByteArrayInputStream(VALID_CSV.toByteArray()))
+
+        assertEquals(VALID_CSV.toByteArray().size, prepared.byteCount)
+        assertEquals(Instant.parse("2026-07-19T19:29:33Z"), prepared.capturedAt)
+        assertEquals(emptyList<String>(), directory.listFiles().orEmpty().map { it.name })
+        val retained = store.retain(prepared)
+        assertTrue(retained.file.isFile)
+        assertFalse(retained.duplicate)
+    }
+
+
     @Test(expected = IllegalArgumentException::class)
     fun malformedCsvIsRejectedBeforeAnythingIsRetained() {
         val store = PlatoonCsvImportStore(temporary.newFolder("invalid"))

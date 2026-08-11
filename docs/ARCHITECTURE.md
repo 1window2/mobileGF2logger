@@ -169,11 +169,12 @@ the native listener contract); encapsulation is provided by stores and the
 repository facade. Android lifecycle inheritance remains shallow through
 `LocalizedActivity`, `VpnService`, and `SQLiteOpenHelper`.
 
-The large SQLite helper remains a known maintenance boundary. Schema,
-migrations, and transactional evidence correlation stay together for v2.0.1
-to avoid a risky pre-release rewrite; future schema work should extract those
-concerns behind the existing repository while retaining single-transaction
-ingestion.
+The large SQLite helper remains a maintenance boundary. Schema, migrations,
+and transactional evidence correlation stay together to preserve atomic
+ingestion. Read-only roster snapshot projection is extracted into
+`WeeklySnapshotStore` behind the repository-facing database API; further
+extractions must preserve the same single-transaction write owner and must not
+let Activities issue SQL directly.
 
 ## Parsed-packet history
 
@@ -210,15 +211,45 @@ backed-up database, and keeping unrelated target-side files would allow a later
 screen startup to mutate the restored state. If any commit step fails, the
 retained cache is restored alongside the previous database and settings.
 
+
+User-selected roster CSV files are prepared and validated without retaining the
+new selection. Before repository reads begin, unfinished checkpoints are recovered;
+then crash-left retained evidence is reconciled so preview and confirmation start
+from one represented source set.
+`CsvImportPreviewAnalyzer` compares the immutable candidates to that recovered
+roster and presents their bounded impact. Only explicit confirmation retains
+new files. Before that mutation, `CsvImportCheckpointManager` exports a private
+checkpoint containing the database state and deterministic planned identities.
+A provisional checkpoint keeps the preceding successful undo until the new
+import seals. Undo quarantines only the planned identities and restores the
+database under the repository's exclusive maintenance lock. Durable restore
+state resumes interrupted quarantine/database replacement after process death;
+ordinary failures restore both the evidence and the preceding undo checkpoint.
+A post-import database digest refuses undo after any later Platoon mutation so
+a one-level rollback cannot silently overwrite newer work.
+
+Weekly PNG export builds a privacy projection rather than screenshotting the
+Activity. Names are included by default; UIDs and private notes are opt-in.
+Rendering caps rows, dimensions, pixels, and note length. A document-picker save
+persists only the validated cache filename across activity recreation, and Android
+shares only a generated cache file through a non-exported `FileProvider`. Optional
+Discord delivery accepts only canonical HTTPS `discord.com` incoming-webhook
+URLs, stores the secret with Android Keystore AES-GCM, sends only the validated
+CSV body after confirmation, refuses redirects, and bounds bytes and timeouts.
+
 Weekly tables remain projections over persisted snapshots, activity facts,
 membership events, notes, and manual overrides. The repository owns available
 period discovery and report construction; Activities only request reports and
-format them for display or CSV export.
+format them for display or export. `StandardWeekSolver` and
+`GunsmokeWeekSolver` own their respective counter inference, while
+`WeeklyEvidenceAnalyzer` explains certainty without duplicating solver policy.
 
 `WeeklyReportActivity` loads one immutable projection on a serialized worker.
-A generation token rejects results superseded by navigation or lifecycle
-changes, and the activity adds nested member rows in small display-frame
-batches. The Gunsmoke solver merges equivalent partial histories instead of
+A lifecycle-independent `WeeklyReportStateHolder` owns the selected date and
+generation token, rejects results superseded by navigation or lifecycle
+changes, and survives Activity recreation. A bounded `RecyclerView` recycles
+member rows instead of accumulating the entire nested table hierarchy. The
+Gunsmoke solver merges equivalent partial histories instead of
 retaining every complete path and enforces deterministic state/operation
 budgets; evidence beyond those budgets stays conservative rather than blocking
 Android input or publishing an unsupported estimate. Per-day state consensus

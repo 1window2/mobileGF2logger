@@ -19,7 +19,9 @@ import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.LinearLayout
@@ -27,6 +29,9 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.FileProvider
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import dev.gf2log.app.management.PlatoonPeriods
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.MemberEvent
@@ -36,36 +41,73 @@ import dev.gf2log.app.management.MembershipEventPresentation
 import dev.gf2log.app.management.DailyEvidence
 import dev.gf2log.app.management.MetricCertainty
 import dev.gf2log.app.management.WeeklyCellOverride
+import dev.gf2log.app.management.WeeklyEvidenceAnalyzer
 import dev.gf2log.app.management.WeeklyNote
 import dev.gf2log.app.management.WeeklyReportBuilder
 import dev.gf2log.app.management.WeeklyReportCsv
+import dev.gf2log.app.management.WeeklyReportStateHolder
+import dev.gf2log.app.management.WeeklyShareProjection
 import dev.gf2log.app.management.WeeklyMetricPresentation
 import dev.gf2log.app.settings.MemberOrderPreferences
 import dev.gf2log.app.settings.WeeklyCutlinePreferences
 import dev.gf2log.app.settings.WeeklyCutlines
 import java.time.Instant
+import java.io.File
+import java.io.FileOutputStream
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.Executors
 
+/** Keeps a pending weekly PNG bound to the app-private share cache across recreation. */
+internal object WeeklyPngPendingState {
+    fun directory(cacheDirectory: File): File = File(cacheDirectory, DIRECTORY_NAME)
+
+    fun nameForState(cacheDirectory: File, pendingFile: File?): String? = runCatching {
+        val candidate = pendingFile?.canonicalFile ?: return@runCatching null
+        val root = directory(cacheDirectory).canonicalFile
+        candidate.name.takeIf {
+            candidate.isFile && candidate.parentFile == root && it.matches(FILE_NAME)
+        }
+    }.getOrNull()
+
+    fun restore(cacheDirectory: File, savedName: String?): File? = runCatching {
+        val name = savedName?.takeIf { it.matches(FILE_NAME) } ?: return@runCatching null
+        val root = directory(cacheDirectory).canonicalFile
+        File(root, name).canonicalFile.takeIf { candidate ->
+            candidate.isFile && candidate.parentFile == root
+        }
+    }.getOrNull()
+
+    private const val DIRECTORY_NAME = "shared-weekly"
+    private val FILE_NAME = Regex("GF2logger-week-\\d{8}\\.png")
+}
+
 class WeeklyReportActivity : LocalizedActivity() {
     private lateinit var repository: PlatoonRepository
     private lateinit var body: LinearLayout
-    private var referenceDay: LocalDate =
-        PlatoonPeriods.gameDay(Instant.now(), ZoneId.systemDefault())
+    private lateinit var reportState: WeeklyReportStateHolder
     private var pendingCsv: String? = null
+    private var pendingPng: File? = null
     private val workerExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "GF2WeeklyWorker")
     }
     private var editingPeriodStart: LocalDate? = null
     private val editDraft = mutableMapOf<CellKey, EditableCell>()
-    private var renderGeneration = 0
-    private var screenResumed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         repository = PlatoonRepository(this)
+        pendingPng = WeeklyPngPendingState.restore(
+            cacheDir,
+            savedInstanceState?.getString(STATE_PENDING_PNG_NAME),
+        )
+        reportState = WeeklyReportStateHolder(
+            savedInstanceState?.takeIf { it.containsKey(STATE_REFERENCE_DAY) }
+                ?.getLong(STATE_REFERENCE_DAY)
+                ?.let(LocalDate::ofEpochDay)
+                ?: PlatoonPeriods.gameDay(Instant.now(), ZoneId.systemDefault()),
+        )
         body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(16), dp(16), dp(16))
@@ -75,15 +117,22 @@ class WeeklyReportActivity : LocalizedActivity() {
 
     override fun onResume() {
         super.onResume()
-        screenResumed = true
+        reportState.onResume()
         requestRender(reconcileRetainedCsv = true)
     }
 
     override fun onPause() {
-        screenResumed = false
-        renderGeneration += 1
+        reportState.onPause()
         super.onPause()
     }
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putLong(STATE_REFERENCE_DAY, reportState.referenceDay.toEpochDay())
+        WeeklyPngPendingState.nameForState(cacheDir, pendingPng)?.let {
+            outState.putString(STATE_PENDING_PNG_NAME, it)
+        }
+        super.onSaveInstanceState(outState)
+    }
+
 
     override fun onDestroy() {
         workerExecutor.shutdownNow()
@@ -99,18 +148,17 @@ class WeeklyReportActivity : LocalizedActivity() {
     // Returns:
     // - Returns immediately after scheduling the load.
     private fun requestRender(reconcileRetainedCsv: Boolean = false) {
-        val targetDay = referenceDay
-        val generation = ++renderGeneration
+        val request = reportState.newRenderRequest()
         showLoading()
         workerExecutor.execute {
             val result = runCatching {
                 if (reconcileRetainedCsv) repository.reconcileRetainedCsvFiles()
-                loadRenderModel(targetDay)
+                loadRenderModel(request.referenceDay)
             }
             runOnUiThread {
-                if (!canApplyRender(generation)) return@runOnUiThread
+                if (!canApplyRender(request.generation)) return@runOnUiThread
                 result.fold(
-                    onSuccess = { render(it, generation) },
+                    onSuccess = { render(it) },
                     onFailure = { showLoadFailure() },
                 )
             }
@@ -131,6 +179,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         val membershipStartInstant = periodStart.atStartOfDay(zone).toInstant()
         val membershipEndInstant = periodStart.plusDays(7).atStartOfDay(zone).toInstant()
         val report = repository.buildWeeklyReport(targetDay, zone)
+        val memberStatuses = repository.listMemberStatuses()
         return RenderModel(
             zone = zone,
             report = report,
@@ -145,15 +194,16 @@ class WeeklyReportActivity : LocalizedActivity() {
                 it.type in MembershipEventPresentation.displayedTypes &&
                     it.source in MembershipEventPresentation.displayedSources
             },
-            namesByUid = repository.listMemberStatuses().associate { it.uid to it.name },
+            namesByUid = memberStatuses.associate { it.uid to it.name },
             cutlines = WeeklyCutlinePreferences(this).read(),
+            memberNotesByUid = memberStatuses.associate { it.uid to it.note },
             displayedMembers = MemberOrderPreferences(this).apply(report.members) { it.uid },
             scoreRanks = report.members.withIndex().associate { it.value.uid to it.index + 1 },
         )
     }
 
     private fun canApplyRender(generation: Int): Boolean =
-        generation == renderGeneration && screenResumed && !isFinishing && !isDestroyed
+        reportState.canApply(generation) && !isFinishing && !isDestroyed
 
     private fun showLoading() {
         body.removeAllViews()
@@ -180,13 +230,12 @@ class WeeklyReportActivity : LocalizedActivity() {
     // Function Name: render
     // Description:
     // - Builds the weekly screen from an already-loaded immutable model.
-    // - Delegates table rows to frame-sized batches so input remains responsive.
+    // - Delegates member rows to a bounded RecyclerView viewport.
     // Parameters:
     // - model: Repository and preference state for one reporting week.
-    // - generation: Token used to cancel stale row batches.
     // Returns:
-    // - Returns after building the screen shell and scheduling table rows.
-    private fun render(model: RenderModel, generation: Int) {
+    // - Unit after building the current screen projection.
+    private fun render(model: RenderModel) {
         body.removeAllViews()
         val zone = model.zone
         val report = model.report
@@ -215,6 +264,17 @@ class WeeklyReportActivity : LocalizedActivity() {
                     } else {
                         showManualEditWarning(report)
                     }
+                }
+            }, LinearLayout.LayoutParams(dp(48), dp(48)))
+            addView(ImageButton(context).apply {
+                setImageResource(R.drawable.ic_share)
+                setBackgroundColor(Color.TRANSPARENT)
+                contentDescription = getString(R.string.share_weekly_table)
+                setPadding(dp(10), dp(10), dp(10), dp(10))
+                isEnabled = !isEditing && report.members.isNotEmpty()
+                alpha = if (isEnabled) 1f else 0.35f
+                setOnClickListener {
+                    showWeeklyShareOptions(model)
                 }
             }, LinearLayout.LayoutParams(dp(48), dp(48)))
             addView(ImageButton(context).apply {
@@ -253,6 +313,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                 setPadding(0, dp(8), 0, dp(8))
             }, matchWidth())
         }
+        addEvidenceHealthPanel(report)
         body.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             addView(Button(context).apply {
@@ -260,7 +321,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                 isEnabled = !isEditing
                 contentDescription = getString(R.string.previous_week)
                 setOnClickListener {
-                    referenceDay = report.periodStart.minusDays(1)
+                    reportState.showPreviousWeek(report.periodStart)
                     requestRender()
                 }
             }, LinearLayout.LayoutParams(0, wrap(), 1f))
@@ -274,7 +335,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                 isEnabled = !isEditing
                 contentDescription = getString(R.string.next_week)
                 setOnClickListener {
-                    referenceDay = report.periodEnd.plusDays(1)
+                    reportState.showNextWeek(report.periodEnd)
                     requestRender()
                 }
             }, LinearLayout.LayoutParams(0, wrap(), 1f))
@@ -311,7 +372,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                 setPadding(0, dp(16), 0, dp(16))
             }, matchWidth())
         } else {
-            body.addView(buildTable(model, isEditing, generation), matchWidth())
+            body.addView(buildVirtualizedTable(model, isEditing), matchWidth())
         }
 
         if (isEditing) return
@@ -336,61 +397,99 @@ class WeeklyReportActivity : LocalizedActivity() {
         addNoteEditor(report)
     }
 
-    private fun buildTable(
-        model: RenderModel,
-        isEditing: Boolean,
-        generation: Int,
-    ) = HorizontalScrollView(this).apply {
-        isFillViewport = false
-        val rows = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(headerRow(model.report), wrapWidth())
-        }
-        addView(rows)
-        appendMemberRows(rows, model, isEditing, generation)
-    }
 
-    // Function Name: appendMemberRows
+
+    // Function Name: buildVirtualizedTable
     // Description:
-    // - Creates only a small number of expensive nested table rows per display frame.
-    // - Stops immediately when navigation or lifecycle changes invalidate this render.
+    // - Keeps the shared header and member rows in one horizontal coordinate space.
+    // - Bounds the vertical viewport so RecyclerView recycles expensive metric rows.
     // Parameters:
-    // - rows: Vertical table container receiving rendered member rows.
     // - model: Immutable data and display ordering for the selected week.
     // - isEditing: Whether rows contain editable fields.
-    // - generation: Token identifying the active render request.
     // Returns:
-    // - Returns after scheduling the first batch.
-    private fun appendMemberRows(
-        rows: LinearLayout,
+    // - A horizontally scrollable table with a virtualized member list.
+    private fun buildVirtualizedTable(
         model: RenderModel,
         isEditing: Boolean,
-        generation: Int,
-    ) {
-        var nextIndex = 0
-        val appendBatch = object : Runnable {
-            override fun run() {
-                if (!canApplyRender(generation)) return
-                val until = minOf(nextIndex + TABLE_ROW_BATCH_SIZE, model.displayedMembers.size)
-                while (nextIndex < until) {
-                    val member = model.displayedMembers[nextIndex++]
-                    rows.addView(
-                        memberRow(
-                            member = member,
-                            rank = model.scoreRanks[member.uid],
-                            gunsmokeWeek = model.report.isGunsmokeWeek,
-                            cutlines = model.cutlines,
-                            isEditing = isEditing,
-                            zoneId = model.zone,
-                        ),
-                        wrapWidth(),
+    ) = HorizontalScrollView(this).apply {
+        isFillViewport = false
+        val report = model.report
+        val rowHeight = dp(metricGroupHeight(report.isGunsmokeWeek))
+        val tableWidth = dp(
+            (if (report.isGunsmokeWeek) RANK_WIDTH else 0) +
+                MEMBER_WIDTH + DAILY_WIDTH * (report.days.size + 1),
+        )
+        val visibleRows = minOf(
+            MAX_VISIBLE_TABLE_ROWS,
+            model.displayedMembers.size,
+        ).coerceAtLeast(1)
+        val rows = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(
+                headerRow(report),
+                LinearLayout.LayoutParams(tableWidth, dp(HEADER_HEIGHT)),
+            )
+            addView(
+                RecyclerView(context).apply {
+                    layoutManager = LinearLayoutManager(context)
+                    adapter = WeeklyMemberAdapter(
+                        model = model,
+                        isEditing = isEditing,
+                        tableWidth = tableWidth,
+                        rowHeight = rowHeight,
                     )
-                }
-                if (nextIndex < model.displayedMembers.size) rows.postOnAnimation(this)
-            }
+                    itemAnimator = null
+                    setHasFixedSize(true)
+                },
+                LinearLayout.LayoutParams(tableWidth, rowHeight * visibleRows),
+            )
         }
-        rows.postOnAnimation(appendBatch)
+        addView(rows)
     }
+
+    private inner class WeeklyMemberAdapter(
+        private val model: RenderModel,
+        private val isEditing: Boolean,
+        private val tableWidth: Int,
+        private val rowHeight: Int,
+    ) : RecyclerView.Adapter<WeeklyMemberViewHolder>() {
+        override fun onCreateViewHolder(
+            parent: ViewGroup,
+            viewType: Int,
+        ): WeeklyMemberViewHolder = WeeklyMemberViewHolder(
+            FrameLayout(parent.context).apply {
+                layoutParams = RecyclerView.LayoutParams(tableWidth, rowHeight)
+            },
+        )
+
+        override fun getItemCount(): Int = model.displayedMembers.size
+
+        override fun onBindViewHolder(holder: WeeklyMemberViewHolder, position: Int) {
+            val member = model.displayedMembers[position]
+            holder.container.removeAllViews()
+            holder.container.addView(
+                memberRow(
+                    member = member,
+                    rank = model.scoreRanks[member.uid],
+                    gunsmokeWeek = model.report.isGunsmokeWeek,
+                    cutlines = model.cutlines,
+                    isEditing = isEditing,
+                    zoneId = model.zone,
+                ),
+                FrameLayout.LayoutParams(tableWidth, rowHeight),
+            )
+        }
+
+        override fun onViewRecycled(holder: WeeklyMemberViewHolder) {
+            holder.container.removeAllViews()
+            super.onViewRecycled(holder)
+
+        }
+    }
+
+    private class WeeklyMemberViewHolder(
+        val container: FrameLayout,
+    ) : RecyclerView.ViewHolder(container)
 
     private fun headerRow(report: WeeklyReportBuilder.Report) = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
@@ -426,6 +525,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                     editableDailyMetricGroup(member.uid, cell, gunsmokeWeek)
                 } else {
                     dailyMetricGroup(
+                        memberName = member.name,
                         cell = cell,
                         gunsmokeWeek = gunsmokeWeek,
                         dayClosed = !PlatoonPeriods.periodStartInstant(
@@ -437,7 +537,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                 },
             )
         }
-        addView(totalMetricGroup(member, gunsmokeWeek, cutlines))
+        addView(totalMetricGroup(member.name, member, gunsmokeWeek, cutlines))
     }
 
     private fun editableDailyMetricGroup(
@@ -595,12 +695,17 @@ class WeeklyReportActivity : LocalizedActivity() {
     }
 
     private fun dailyMetricGroup(
+        memberName: String,
         cell: WeeklyReportBuilder.DayCell,
         gunsmokeWeek: Boolean,
         dayClosed: Boolean,
         cutlines: WeeklyCutlines,
     ): LinearLayout {
         return metricGroup(
+        memberName = memberName,
+        explanations = WeeklyEvidenceAnalyzer.Metric.values().associateWith { metric ->
+            WeeklyEvidenceAnalyzer.explainDaily(cell, metric)
+        },
         showGunsmokeMetrics = gunsmokeWeek,
         merit = metricText(
             getString(R.string.merit_short),
@@ -661,11 +766,16 @@ class WeeklyReportActivity : LocalizedActivity() {
     }
 
     private fun totalMetricGroup(
+        memberName: String,
         member: WeeklyReportBuilder.MemberRow,
         gunsmokeWeek: Boolean,
         cutlines: WeeklyCutlines,
     ): LinearLayout {
         return metricGroup(
+        memberName = memberName,
+        explanations = WeeklyEvidenceAnalyzer.Metric.values().associateWith { metric ->
+            WeeklyEvidenceAnalyzer.explainTotal(member, metric)
+        },
         showGunsmokeMetrics = gunsmokeWeek,
         merit = metricText(
             getString(R.string.merit_short),
@@ -727,6 +837,8 @@ class WeeklyReportActivity : LocalizedActivity() {
     }
 
     private fun metricGroup(
+        memberName: String,
+        explanations: Map<WeeklyEvidenceAnalyzer.Metric, WeeklyEvidenceAnalyzer.Explanation>,
         showGunsmokeMetrics: Boolean,
         merit: CharSequence,
         score: CharSequence,
@@ -738,7 +850,18 @@ class WeeklyReportActivity : LocalizedActivity() {
         val groupHeight = metricGroupHeight(showGunsmokeMetrics)
         layoutParams = LinearLayout.LayoutParams(dp(DAILY_WIDTH), dp(groupHeight))
         addView(
-            gridCell(merit, DAILY_WIDTH, METRIC_HEIGHT, textSize = 11f),
+            gridCell(
+                merit,
+                DAILY_WIDTH,
+                METRIC_HEIGHT,
+                textSize = 11f,
+                onClick = {
+                    showEvidenceExplanation(
+                        memberName,
+                        requireNotNull(explanations[WeeklyEvidenceAnalyzer.Metric.MERIT]),
+                    )
+                },
+            ),
             LinearLayout.LayoutParams(dp(DAILY_WIDTH), dp(METRIC_HEIGHT)),
         )
         if (showGunsmokeMetrics) {
@@ -746,11 +869,33 @@ class WeeklyReportActivity : LocalizedActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 isBaselineAligned = false
                 addView(
-                    gridCell(score, DAILY_WIDTH / 2, METRIC_HEIGHT, textSize = 10f),
+                    gridCell(
+                        score,
+                        DAILY_WIDTH / 2,
+                        METRIC_HEIGHT,
+                        textSize = 10f,
+                        onClick = {
+                            showEvidenceExplanation(
+                                memberName,
+                                requireNotNull(explanations[WeeklyEvidenceAnalyzer.Metric.SCORE]),
+                            )
+                        },
+                    ),
                     LinearLayout.LayoutParams(0, dp(METRIC_HEIGHT), 1f),
                 )
                 addView(
-                    gridCell(attempts, DAILY_WIDTH / 2, METRIC_HEIGHT, textSize = 10f),
+                    gridCell(
+                        attempts,
+                        DAILY_WIDTH / 2,
+                        METRIC_HEIGHT,
+                        textSize = 10f,
+                        onClick = {
+                            showEvidenceExplanation(
+                                memberName,
+                                requireNotNull(explanations[WeeklyEvidenceAnalyzer.Metric.ATTEMPTS]),
+                            )
+                        },
+                    ),
                     LinearLayout.LayoutParams(0, dp(METRIC_HEIGHT), 1f),
                 )
             }, LinearLayout.LayoutParams(dp(DAILY_WIDTH), dp(METRIC_HEIGHT)))
@@ -759,11 +904,33 @@ class WeeklyReportActivity : LocalizedActivity() {
             orientation = LinearLayout.HORIZONTAL
             isBaselineAligned = false
             addView(
-                gridCell(login, DAILY_WIDTH / 2, METRIC_HEIGHT, textSize = 10f),
+                gridCell(
+                    login,
+                    DAILY_WIDTH / 2,
+                    METRIC_HEIGHT,
+                    textSize = 10f,
+                    onClick = {
+                        showEvidenceExplanation(
+                            memberName,
+                            requireNotNull(explanations[WeeklyEvidenceAnalyzer.Metric.LOGIN]),
+                        )
+                    },
+                ),
                 LinearLayout.LayoutParams(0, dp(METRIC_HEIGHT), 1f),
             )
             addView(
-                gridCell(patrol, DAILY_WIDTH / 2, METRIC_HEIGHT, textSize = 10f),
+                gridCell(
+                    patrol,
+                    DAILY_WIDTH / 2,
+                    METRIC_HEIGHT,
+                    textSize = 10f,
+                    onClick = {
+                        showEvidenceExplanation(
+                            memberName,
+                            requireNotNull(explanations[WeeklyEvidenceAnalyzer.Metric.DAILY_PATROL]),
+                        )
+                    },
+                ),
                 LinearLayout.LayoutParams(0, dp(METRIC_HEIGHT), 1f),
             )
         }, LinearLayout.LayoutParams(dp(DAILY_WIDTH), dp(METRIC_HEIGHT)))
@@ -778,6 +945,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         height: Int,
         header: Boolean = false,
         textSize: Float = if (header) 12f else 11f,
+        onClick: (() -> Unit)? = null,
     ) = TextView(this).apply {
         text = value
         gravity = Gravity.CENTER
@@ -792,6 +960,103 @@ class WeeklyReportActivity : LocalizedActivity() {
             setStroke(1, GRID_COLOR)
         }
         layoutParams = LinearLayout.LayoutParams(dp(width), dp(height))
+        onClick?.let {
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { it() }
+        }
+    }
+
+    private fun addEvidenceHealthPanel(report: WeeklyReportBuilder.Report) {
+        val health = WeeklyEvidenceAnalyzer.health(report)
+        body.addView(TextView(this).apply {
+            text = buildString {
+                append(getString(R.string.evidence_health_title))
+                append("\n")
+                append(
+                    getString(
+                        R.string.evidence_health_summary,
+                        health.observedDays,
+                        health.totalDays,
+                        health.exactMetrics,
+                        health.lowerBoundMetrics,
+                        health.unknownMetrics,
+                        health.directLoginDays,
+                        health.directPatrolDays,
+                        health.closingBoundaries,
+                    ),
+                )
+            }
+            textSize = 14f
+            setTextColor(if (health.isComplete) Color.rgb(35, 105, 62) else WARNING_COLOR)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = GradientDrawable().apply {
+                setColor(if (health.isComplete) Color.rgb(231, 246, 236) else Color.rgb(255, 247, 222))
+                cornerRadius = dp(8).toFloat()
+            }
+        }, matchWidth())
+    }
+
+    private fun showEvidenceExplanation(
+        memberName: String,
+        explanation: WeeklyEvidenceAnalyzer.Explanation,
+    ) {
+        val target = explanation.gameDay?.format(DATE) ?: getString(R.string.total)
+        val facts = explanation.facts
+            .ifEmpty { listOf(WeeklyEvidenceAnalyzer.Fact.NO_OBSERVATION) }
+            .joinToString("\n") { "\u2022 " + getString(evidenceFactString(it)) }
+        AlertDialog.Builder(this)
+            .setTitle(
+                getString(
+                    R.string.evidence_explanation_title,
+                    memberName,
+                    target,
+                    metricLabel(explanation.metric),
+                ),
+            )
+            .setMessage(
+                getString(
+                    R.string.evidence_explanation_message,
+                    getString(
+                        when (explanation.certainty) {
+                            MetricCertainty.EXACT -> R.string.evidence_certainty_exact
+                            MetricCertainty.LOWER_BOUND -> R.string.evidence_certainty_lower_bound
+                            MetricCertainty.UNKNOWN -> R.string.evidence_certainty_unknown
+                        },
+                    ),
+                    facts,
+                ),
+            )
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun metricLabel(metric: WeeklyEvidenceAnalyzer.Metric): String = getString(
+        when (metric) {
+            WeeklyEvidenceAnalyzer.Metric.MERIT -> R.string.merit_short
+            WeeklyEvidenceAnalyzer.Metric.SCORE -> R.string.point_short
+            WeeklyEvidenceAnalyzer.Metric.ATTEMPTS -> R.string.attempt_short
+            WeeklyEvidenceAnalyzer.Metric.LOGIN -> R.string.login_short
+            WeeklyEvidenceAnalyzer.Metric.DAILY_PATROL -> R.string.patrol_short
+        },
+    )
+
+    private fun evidenceFactString(fact: WeeklyEvidenceAnalyzer.Fact): Int = when (fact) {
+        WeeklyEvidenceAnalyzer.Fact.MANUAL_OVERRIDE -> R.string.evidence_fact_manual
+        WeeklyEvidenceAnalyzer.Fact.EXACT_CLOSING_BOUNDARY -> R.string.evidence_fact_closing
+        WeeklyEvidenceAnalyzer.Fact.FINAL_GUNSMOKE_SCORE -> R.string.evidence_fact_final_score
+        WeeklyEvidenceAnalyzer.Fact.EXACT_DAILY_PATROL_EVENT -> R.string.evidence_fact_patrol
+        WeeklyEvidenceAnalyzer.Fact.LOGIN_TIMESTAMP -> R.string.evidence_fact_login
+        WeeklyEvidenceAnalyzer.Fact.SOLVER_CONSENSUS -> R.string.evidence_fact_solver
+        WeeklyEvidenceAnalyzer.Fact.DAILY_CAP_REACHED -> R.string.evidence_fact_daily_cap
+        WeeklyEvidenceAnalyzer.Fact.WEEKLY_CAP_REACHED -> R.string.evidence_fact_weekly_cap
+        WeeklyEvidenceAnalyzer.Fact.ALL_DAYS_EXACT -> R.string.evidence_fact_all_exact
+        WeeklyEvidenceAnalyzer.Fact.CONFIRMED_LOWER_BOUND -> R.string.evidence_fact_lower_bound
+        WeeklyEvidenceAnalyzer.Fact.NO_OBSERVATION -> R.string.evidence_fact_no_observation
+        WeeklyEvidenceAnalyzer.Fact.INCOMPLETE_BOUNDARY -> R.string.evidence_fact_incomplete_boundary
+        WeeklyEvidenceAnalyzer.Fact.PARTIAL_DAY -> R.string.evidence_fact_partial
+        WeeklyEvidenceAnalyzer.Fact.SPARSE_INFERENCE -> R.string.evidence_fact_sparse
+        WeeklyEvidenceAnalyzer.Fact.AMBIGUOUS_ALLOCATION -> R.string.evidence_fact_ambiguous
     }
 
     private fun metricText(label: String, value: String, highlighted: Boolean): CharSequence {
@@ -938,12 +1203,12 @@ class WeeklyReportActivity : LocalizedActivity() {
         DatePickerDialog(
             this,
             { _, year, month, day ->
-                referenceDay = LocalDate.of(year, month + 1, day)
+                reportState.selectDate(LocalDate.of(year, month + 1, day))
                 requestRender()
             },
-            referenceDay.year,
-            referenceDay.monthValue - 1,
-            referenceDay.dayOfMonth,
+            reportState.referenceDay.year,
+            reportState.referenceDay.monthValue - 1,
+            reportState.referenceDay.dayOfMonth,
         ).show()
     }
 
@@ -1072,10 +1337,163 @@ class WeeklyReportActivity : LocalizedActivity() {
             .show()
     }
 
+
+    private fun showWeeklyShareOptions(model: RenderModel) {
+        val includeNames = CheckBox(this).apply {
+            text = getString(R.string.share_include_member_names)
+            isChecked = true
+        }
+        val includeUids = CheckBox(this).apply {
+            text = getString(R.string.share_include_uids)
+            isChecked = false
+        }
+        val includeNotes = CheckBox(this).apply {
+            text = getString(R.string.share_include_private_notes)
+            isChecked = false
+        }
+        val options = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+            addView(includeNames, matchWidth())
+            addView(includeUids, matchWidth())
+            addView(includeNotes, matchWidth())
+            addView(TextView(context).apply {
+                text = getString(R.string.share_privacy_notice)
+                textSize = 13f
+                setPadding(0, dp(8), 0, 0)
+            }, matchWidth())
+        }
+        fun privacy() = WeeklyShareProjection.Privacy(
+            includeMemberNames = includeNames.isChecked,
+            includeUids = includeUids.isChecked,
+            includePrivateNotes = includeNotes.isChecked,
+        )
+        AlertDialog.Builder(this)
+            .setTitle(R.string.share_weekly_table)
+            .setView(options)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setNeutralButton(R.string.save_png) { _, _ ->
+                generateWeeklyPng(model, privacy(), shareAfter = false)
+            }
+            .setPositiveButton(R.string.share_png) { _, _ ->
+                generateWeeklyPng(model, privacy(), shareAfter = true)
+            }
+            .show()
+    }
+
+    private fun generateWeeklyPng(
+        model: RenderModel,
+        privacy: WeeklyShareProjection.Privacy,
+        shareAfter: Boolean,
+    ) {
+        Toast.makeText(this, R.string.weekly_png_rendering, Toast.LENGTH_SHORT).show()
+        workerExecutor.execute {
+            val result = runCatching {
+                val document = WeeklyShareProjection.build(
+                    report = model.report,
+                    displayedMembers = model.displayedMembers,
+                    privateNotesByUid = model.memberNotesByUid,
+                    privacy = privacy,
+                )
+                writeWeeklyPng(document, model.report.periodStart)
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                result.fold(
+                    onSuccess = { file ->
+                        if (shareAfter) shareWeeklyPng(file) else saveWeeklyPng(file)
+                    },
+                    onFailure = {
+                        Toast.makeText(
+                            this,
+                            R.string.weekly_png_failed,
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    },
+                )
+            }
+        }
+    }
+
+    private fun writeWeeklyPng(
+        document: WeeklyShareProjection.Document,
+        periodStart: LocalDate,
+    ): File {
+        val directory = WeeklyPngPendingState.directory(cacheDir).apply { mkdirs() }
+        require(directory.isDirectory) { "Unable to create weekly share cache" }
+        directory.listFiles().orEmpty().forEach(File::delete)
+        val target = File(
+            directory,
+            "GF2logger-week-" + periodStart.format(FILE_DATE) + ".png",
+        )
+        val temporary = File.createTempFile(".weekly-", ".png", directory)
+        val bitmap = WeeklyReportPngRenderer.render(document)
+        try {
+            FileOutputStream(temporary).use { output ->
+                check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)) {
+                    "Unable to encode weekly PNG"
+                }
+                output.fd.sync()
+            }
+            check(temporary.renameTo(target)) { "Unable to publish weekly PNG" }
+        } finally {
+            bitmap.recycle()
+            temporary.delete()
+        }
+        return target
+    }
+
+    private fun shareWeeklyPng(file: File) {
+        val uri = FileProvider.getUriForFile(
+            this,
+            packageName + ".fileprovider",
+            file,
+        )
+        val share = Intent(Intent.ACTION_SEND)
+            .setType("image/png")
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        share.clipData = ClipData.newUri(contentResolver, getString(R.string.share_weekly_table), uri)
+        startActivity(Intent.createChooser(share, getString(R.string.share_weekly_table)))
+    }
+
+    @Suppress("DEPRECATION")
+    private fun saveWeeklyPng(file: File) {
+        pendingPng = file
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("image/png")
+            .putExtra(Intent.EXTRA_TITLE, file.name)
+        startActivityForResult(intent, REQUEST_EXPORT_WEEKLY_PNG)
+    }
     @Deprecated("Uses the platform document picker without an AndroidX dependency")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_EXPORT_WEEKLY_PNG) {
+            val source = pendingPng
+            pendingPng = null
+            val destination = data?.data
+            if (resultCode != RESULT_OK || destination == null || source == null) return
+            val exported = runCatching {
+                val output = TrustedExportDestination.openOutputStream(contentResolver, destination)
+                    ?: error("Document provider did not open an output stream")
+                output.use { target ->
+                    source.inputStream().use { input -> input.copyTo(target) }
+                }
+            }.isSuccess
+            source.delete()
+            Toast.makeText(
+                this,
+                getString(
+                    if (exported) R.string.weekly_png_saved else R.string.weekly_png_failed,
+                ),
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
+
         if (requestCode != REQUEST_EXPORT_WEEKLY) return
+
         val content = pendingCsv
         pendingCsv = null
         val destination = data?.data
@@ -1186,6 +1604,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         val cutlines: WeeklyCutlines,
         val displayedMembers: List<WeeklyReportBuilder.MemberRow>,
         val scoreRanks: Map<Long, Int>,
+        val memberNotesByUid: Map<Long, String>,
     )
 
     private data class ActivityMark(val symbol: String, val color: Int?)
@@ -1231,12 +1650,15 @@ class WeeklyReportActivity : LocalizedActivity() {
         private val DAY = DateTimeFormatter.ofPattern("MM/dd")
         private val FILE_DATE = DateTimeFormatter.BASIC_ISO_DATE
         private const val REQUEST_EXPORT_WEEKLY = 201
+        private const val STATE_REFERENCE_DAY = "weekly.reference_day"
+        private const val STATE_PENDING_PNG_NAME = "weekly.pending_png_name"
         private const val HEADER_HEIGHT = 40
+        private const val REQUEST_EXPORT_WEEKLY_PNG = 202
         private const val METRIC_HEIGHT = 36
         private const val RANK_WIDTH = 42
         private const val MEMBER_WIDTH = 120
         private const val DAILY_WIDTH = 128
-        private const val TABLE_ROW_BATCH_SIZE = 2
+        private const val MAX_VISIBLE_TABLE_ROWS = 6
         private val GRID_COLOR = Color.rgb(112, 118, 128)
         private val EDITABLE_FIELD_COLOR = Color.rgb(47, 58, 72)
         private val EDITABLE_FIELD_BORDER_COLOR = Color.rgb(126, 164, 218)

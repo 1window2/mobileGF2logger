@@ -4,4 +4,12 @@
     <color name="primary_action_background">#315DA8</color>
     <color name="primary_action_foreground">#FFFFFF</color>
     <color name="destructive_action">#C43D5C</color>
+    <color name="destructive_action_background">#C45B5B</color>
+    <color name="destructive_action_foreground">#FFFFFF</color>
+    <color name="webhook_configured_background">#E4F4EA</color>
+    <color name="webhook_configured_foreground">#17633A</color>
+    <color name="webhook_configured_border">#7DBA93</color>
+    <color name="webhook_missing_background">#FFF3D6</color>
+    <color name="webhook_missing_foreground">#765311</color>
+    <color name="webhook_missing_border">#D5B05A</color>
 </resources>

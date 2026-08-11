@@ -6,6 +6,7 @@ import java.io.BufferedOutputStream
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FilterOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.MessageDigest
@@ -26,7 +27,7 @@ internal object BackupArchive {
         } else {
             BackupFormatPolicy.COMPLETE_VERSION
         }
-        ZipOutputStream(BufferedOutputStream(output)).use { zip ->
+        ZipOutputStream(BufferedOutputStream(NonClosingOutputStream(output))).use { zip ->
             zip.putNextEntry(ZipEntry(MANIFEST_ENTRY))
             Properties().apply {
                 setProperty(KEY_FORMAT_VERSION, formatVersion.toString())
@@ -174,6 +175,11 @@ internal object BackupArchive {
         .hex()
 
     private fun ByteArray.hex(): String = joinToString("") { "%02x".format(it) }
+
+    /** Lets ZIP cleanup release its deflater without closing the caller-owned destination. */
+    private class NonClosingOutputStream(output: OutputStream) : FilterOutputStream(output) {
+        override fun close() = flush()
+    }
 
     private const val MANIFEST_ENTRY = "manifest.properties"
     private const val DATABASE_ENTRY = "platoon.db"

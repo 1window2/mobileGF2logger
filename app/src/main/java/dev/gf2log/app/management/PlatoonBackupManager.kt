@@ -12,6 +12,7 @@ import java.io.EOFException
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
+import java.security.MessageDigest
 import java.util.zip.ZipException
 
 class PlatoonBackupManager internal constructor(
@@ -33,6 +34,23 @@ class PlatoonBackupManager internal constructor(
         PlatoonRepository(appContext).reconcileRetainedCsvFiles()
         PlatoonRepository.withExclusiveDatabase {
             BackupArchive.write(output, databaseFile, settings = null)
+        }
+    }
+
+    /** Returns a stable digest after closing SQLite so WAL state is checkpointed. */
+    internal fun currentDatabaseSha256(): String = PlatoonRepository.withExclusiveDatabase {
+        ensureDatabaseExists()
+        val digest = MessageDigest.getInstance("SHA-256")
+        databaseFile.inputStream().use { input ->
+            val buffer = ByteArray(8 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        digest.digest().joinToString("") { value ->
+            String.format("%02x", value.toInt() and 0xff)
         }
     }
 
@@ -63,6 +81,37 @@ class PlatoonBackupManager internal constructor(
                 validateDatabase(stagedDatabase, requireCurrentSchema = false)
             }
             replaceRestoredState(stagedDatabase, restoredSettings = null)
+        } finally {
+            stagedDatabase.delete()
+        }
+    }
+
+    // Function Name: restoreCheckpoint
+    // Description:
+    // - Restores a same-device, current-schema checkpoint without retiring retained CSV evidence.
+    // - Used only after the caller removes deterministic files planned by the reverted import.
+    // Parameters:
+    // - input: Checkpoint archive created by this application.
+    // Returns:
+    // - Unit after validated, crash-aware database replacement.
+    internal fun restoreCheckpoint(input: InputStream) {
+        val restoreDirectory = File(appContext.cacheDir, "platoon-restore").apply { mkdirs() }
+        val stagedDatabase = File(restoreDirectory, "platoon.db.staged")
+        if (stagedDatabase.exists() && !stagedDatabase.delete()) {
+            error("Unable to clear a previous staged restore")
+        }
+        val staged = validateSelectedBackup {
+            BackupArchive.stage(input, stagedDatabase)
+        }
+        try {
+            validateSelectedBackup {
+                BackupFormatPolicy.requirePlatoonOnly(
+                    staged.formatVersion,
+                    staged.settings != null,
+                )
+                validateDatabase(stagedDatabase, requireCurrentSchema = true)
+            }
+            replaceRestoredState(stagedDatabase, restoredSettings = null, retireRetainedCsv = false)
         } finally {
             stagedDatabase.delete()
         }
@@ -123,6 +172,7 @@ class PlatoonBackupManager internal constructor(
     private fun replaceRestoredState(
         stagedDatabase: File,
         restoredSettings: AppBackupSettings?,
+        retireRetainedCsv: Boolean = true,
     ) {
         val retainedCsvDirectory = File(
             appContext.filesDir,
@@ -148,11 +198,13 @@ class PlatoonBackupManager internal constructor(
                     settingsStore.replace(restoredSettings)
                     restoreObserver(RestoreCheckpoint.SETTINGS_REPLACED)
                 }
-                retireRetainedCsvCache(
-                    retainedCsvDirectory,
-                    previousRetainedCsvDirectory,
-                )
-                restoreObserver(RestoreCheckpoint.RETAINED_CSV_RETIRED)
+                if (retireRetainedCsv) {
+                    retireRetainedCsvCache(
+                        retainedCsvDirectory,
+                        previousRetainedCsvDirectory,
+                    )
+                    restoreObserver(RestoreCheckpoint.RETAINED_CSV_RETIRED)
+                }
                 writeRestoreState(RestoreState.COMMITTED)
                 restoreObserver(RestoreCheckpoint.COMMITTED)
                 cleanupCommittedRestore(

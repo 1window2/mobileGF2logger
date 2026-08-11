@@ -3,9 +3,12 @@ package dev.gf2log.app.management
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.gf2log.app.TargetPackagePreferences
+import dev.gf2log.app.WeeklyPngPendingState
+import dev.gf2log.app.WeeklyReportActivity
 import dev.gf2log.app.settings.AppBackupSettings
 import dev.gf2log.app.settings.AppBackupSettingsCodec
 import dev.gf2log.app.settings.AppSettingsStore
@@ -793,5 +796,30 @@ class PlatoonBackupManagerIntegrationTest {
         const val ARCHIVED_NOTE = "Weekly review"
         const val INVALID_TARGET_PACKAGE = "not a package"
         val PERIOD_START: LocalDate = LocalDate.of(2026, 7, 26)
+    }
+}
+@RunWith(AndroidJUnit4::class)
+class WeeklyReportActivityStateTest {
+    @Test
+    fun pendingWeeklyPngSurvivesActivityRecreation() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val target = java.io.File(
+            WeeklyPngPendingState.directory(context.cacheDir).apply { mkdirs() },
+            "GF2logger-week-20260809.png",
+        ).apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val field = WeeklyReportActivity::class.java.getDeclaredField("pendingPng").apply {
+            isAccessible = true
+        }
+        try {
+            ActivityScenario.launch(WeeklyReportActivity::class.java).use { scenario ->
+                scenario.onActivity { activity -> field.set(activity, target) }
+                scenario.recreate()
+                scenario.onActivity { activity ->
+                    assertEquals(target.canonicalFile, (field.get(activity) as java.io.File).canonicalFile)
+                }
+            }
+        } finally {
+            target.delete()
+        }
     }
 }

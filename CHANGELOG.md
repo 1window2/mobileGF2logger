@@ -49,7 +49,8 @@ All notable changes to mobileGF2logger are documented here.
   preserve the preceding undo until a replacement import seals, and recover
   database/quarantine state after a failed import, undo, or process death.
 - Bound weekly PNG dimensions, pixel count, row count, and private-note length;
-  share only through a cache-scoped non-exported `FileProvider` grant.
+  preserve pending save state across activity recreation, and share only through
+  a cache-scoped non-exported `FileProvider` grant.
 - Restrict Discord destinations to canonical HTTPS `discord.com` incoming
   webhook URLs, disallow redirects, and bound request/response sizes and timeouts.
 

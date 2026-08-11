@@ -230,8 +230,9 @@ a one-level rollback cannot silently overwrite newer work.
 
 Weekly PNG export builds a privacy projection rather than screenshotting the
 Activity. Names are included by default; UIDs and private notes are opt-in.
-Rendering caps rows, dimensions, pixels, and note length, and Android shares
-only a generated cache file through a non-exported `FileProvider`. Optional
+Rendering caps rows, dimensions, pixels, and note length. A document-picker save
+persists only the validated cache filename across activity recreation, and Android
+shares only a generated cache file through a non-exported `FileProvider`. Optional
 Discord delivery accepts only canonical HTTPS `discord.com` incoming-webhook
 URLs, stores the secret with Android Keystore AES-GCM, sends only the validated
 CSV body after confirmation, refuses redirects, and bounds bytes and timeouts.

@@ -59,6 +59,30 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.Executors
 
+/** Keeps a pending weekly PNG bound to the app-private share cache across recreation. */
+internal object WeeklyPngPendingState {
+    fun directory(cacheDirectory: File): File = File(cacheDirectory, DIRECTORY_NAME)
+
+    fun nameForState(cacheDirectory: File, pendingFile: File?): String? = runCatching {
+        val candidate = pendingFile?.canonicalFile ?: return@runCatching null
+        val root = directory(cacheDirectory).canonicalFile
+        candidate.name.takeIf {
+            candidate.isFile && candidate.parentFile == root && it.matches(FILE_NAME)
+        }
+    }.getOrNull()
+
+    fun restore(cacheDirectory: File, savedName: String?): File? = runCatching {
+        val name = savedName?.takeIf { it.matches(FILE_NAME) } ?: return@runCatching null
+        val root = directory(cacheDirectory).canonicalFile
+        File(root, name).canonicalFile.takeIf { candidate ->
+            candidate.isFile && candidate.parentFile == root
+        }
+    }.getOrNull()
+
+    private const val DIRECTORY_NAME = "shared-weekly"
+    private val FILE_NAME = Regex("GF2logger-week-\\d{8}\\.png")
+}
+
 class WeeklyReportActivity : LocalizedActivity() {
     private lateinit var repository: PlatoonRepository
     private lateinit var body: LinearLayout
@@ -74,6 +98,10 @@ class WeeklyReportActivity : LocalizedActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         repository = PlatoonRepository(this)
+        pendingPng = WeeklyPngPendingState.restore(
+            cacheDir,
+            savedInstanceState?.getString(STATE_PENDING_PNG_NAME),
+        )
         reportState = WeeklyReportStateHolder(
             savedInstanceState?.takeIf { it.containsKey(STATE_REFERENCE_DAY) }
                 ?.getLong(STATE_REFERENCE_DAY)
@@ -99,6 +127,9 @@ class WeeklyReportActivity : LocalizedActivity() {
     }
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putLong(STATE_REFERENCE_DAY, reportState.referenceDay.toEpochDay())
+        WeeklyPngPendingState.nameForState(cacheDir, pendingPng)?.let {
+            outState.putString(STATE_PENDING_PNG_NAME, it)
+        }
         super.onSaveInstanceState(outState)
     }
 
@@ -1388,7 +1419,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         document: WeeklyShareProjection.Document,
         periodStart: LocalDate,
     ): File {
-        val directory = File(cacheDir, "shared-weekly").apply { mkdirs() }
+        val directory = WeeklyPngPendingState.directory(cacheDir).apply { mkdirs() }
         require(directory.isDirectory) { "Unable to create weekly share cache" }
         directory.listFiles().orEmpty().forEach(File::delete)
         val target = File(
@@ -1620,6 +1651,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         private val FILE_DATE = DateTimeFormatter.BASIC_ISO_DATE
         private const val REQUEST_EXPORT_WEEKLY = 201
         private const val STATE_REFERENCE_DAY = "weekly.reference_day"
+        private const val STATE_PENDING_PNG_NAME = "weekly.pending_png_name"
         private const val HEADER_HEIGHT = 40
         private const val REQUEST_EXPORT_WEEKLY_PNG = 202
         private const val METRIC_HEIGHT = 36

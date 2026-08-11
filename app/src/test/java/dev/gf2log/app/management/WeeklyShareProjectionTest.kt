@@ -1,12 +1,36 @@
 package dev.gf2log.app.management
 
+import dev.gf2log.app.WeeklyPngPendingState
+
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 
 class WeeklyShareProjectionTest {
+    @get:Rule
+    val temporary = TemporaryFolder()
+
+    @Test
+    fun pendingWeeklyPngRestoresOnlyFromTheBoundedShareCache() {
+        val cache = temporary.newFolder("cache")
+        val shared = WeeklyPngPendingState.directory(cache).apply { mkdirs() }
+        val published = java.io.File(shared, "GF2logger-week-20260809.png").apply {
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+
+        val savedName = WeeklyPngPendingState.nameForState(cache, published)
+
+        assertEquals(published.canonicalFile, WeeklyPngPendingState.restore(cache, savedName))
+        assertEquals(null, WeeklyPngPendingState.restore(cache, "../outside.png"))
+        assertEquals(null, WeeklyPngPendingState.restore(cache, "GF2logger-week-20260810.png"))
+        val outside = temporary.newFile("GF2logger-week-20260811.png")
+        assertEquals(null, WeeklyPngPendingState.nameForState(cache, outside))
+    }
+
     @Test
     fun privateFieldsAreExcludedByDefaultAndCanBeIndividuallyEnabled() {
         val report = report()

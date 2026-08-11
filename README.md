@@ -18,6 +18,11 @@ capture to the selected game package, and raw traffic is never stored.
 - Captures the mandatory Members (`21917`), Activity (`21935`), and Updates (`21960`) responses without a computer or root access.
 - Tracks active and withdrawn members, repeat membership periods, exact Updates timestamps, editable nicknames, and private notes.
 - Builds Sunday-to-Saturday Standard or Gunsmoke Frontline weekly tables around the 05:00 game reset, with cut-off points and manual correction for missing data.
+- Offers guided capture that tracks the three useful Platoon payloads and stops automatically when the checklist is complete.
+- Explains every weekly cell on tap and summarizes missing or uncertain evidence in an Evidence Health panel.
+- Previews roster CSV impact before import and keeps an automatic one-level checkpoint for undo.
+- Saves or shares a weekly PNG with opt-in controls for names, UIDs, and private notes.
+- Can send a validated original CSV to an optional user-owned Discord incoming webhook after confirmation.
 - Stores the latest 100 parsed packets and up to 50 saved packets, with table and raw views, copy, export, selection, and deletion.
 - Supports member sorting, persistent drag ordering, snapshot comparison, single-week and all-week CSV export, and complete `.gf2backup` export/restore.
 - Supports English and Korean and uses the Android device timezone for display.
@@ -36,3 +41,9 @@ uid,name,level,weeklyMerit,totalMerit,highScore,totalScore,lastLogin,logTime
 5. Return to GF2logger to review the captured packets and Platoon data.
 
 The app keeps parsed history, management data, and generated CSV files in private on-device storage. It does not bypass TLS, certificate pinning, or anti-cheat systems, and it does not modify game traffic. Server responses may contain only recent incremental history, so older missing membership records can be entered manually.
+
+## Inspiration
+
+mobileGF2logger was inspired by [gfl2logger](https://github.com/blead/gfl2logger),
+a GF2 logger for the Windows client. This project is an independent Android
+implementation tailored to on-device Platoon management.

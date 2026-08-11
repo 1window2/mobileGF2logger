@@ -4,6 +4,53 @@ All notable changes to mobileGF2logger are documented here.
 
 ## Unreleased
 
+### Added
+
+- Make every weekly metric cell explain its value, certainty, and supporting
+  facts when tapped, and add an Evidence Health panel summarizing observed,
+  exact, lower-bound, unknown, Login, Daily Patrol, and closing-boundary data.
+- Add guided capture with a live Members, Activity, and Updates checklist that
+  stops automatically when all three management payloads have arrived.
+- Preview the effects of one or more roster CSV files before mutation, create a
+  private automatic checkpoint before import, and provide one-level undo for
+  the most recent confirmed import.
+- Export the displayed weekly table as a bounded PNG or share it through
+  Android, with independent controls for member names, UIDs, and private notes.
+  UIDs and private notes remain excluded by default.
+- Send a parsed packet's validated original CSV body to a user-configured
+  Discord incoming webhook after explicit confirmation. The webhook is stored
+  with Android Keystore encryption and is never displayed after saving.
+- Add a security policy with private-reporting and data-redaction guidance.
+
+### Changed
+
+- Move weekly navigation and stale-result validity into a lifecycle-independent
+  state holder, persist the selected week across recreation, and recycle heavy
+  weekly member rows in a bounded `RecyclerView` viewport.
+- Extract standard-week counter inference from report assembly and extract
+  weekly snapshot projection SQL from the schema and transaction helper.
+- Pin every GitHub Action to a verified commit SHA and make unsigned CI artifact
+  names commit-specific instead of carrying a stale release version.
+- Add deterministic randomized invariants for standard-week inference and
+  malformed protocol streams alongside focused tests for evidence, sharing,
+  guided capture, import preview, checkpoint identity, and webhook policy.
+- Clarify guided capture, stop, and Discord actions with accessible color,
+  Discord icons, aligned packet actions, and an explicit webhook-availability
+  indicator.
+
+### Fixed
+
+- Reject stale asynchronous weekly renders after navigation, pause, or screen
+  recreation and preserve the selected reporting date instead of allowing
+  overlapping week loads to replace each other.
+- Keep CSV selection read-only until the user confirms the impact preview, cap
+  multi-file imports, and restore both the database and newly retained evidence
+  if a confirmed import fails or is undone.
+- Bound weekly PNG dimensions, pixel count, row count, and private-note length;
+  share only through a cache-scoped non-exported `FileProvider` grant.
+- Restrict Discord destinations to canonical HTTPS `discord.com` incoming
+  webhook URLs, disallow redirects, and bound request/response sizes and timeouts.
+
 ## 2.1.2 - 2026-08-09
 
 ### Changed

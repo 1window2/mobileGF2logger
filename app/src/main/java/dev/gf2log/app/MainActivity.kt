@@ -16,6 +16,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.view.View
 import android.view.ViewGroup
 import android.view.Gravity
 import android.widget.Button
@@ -30,6 +31,8 @@ import dev.gf2log.app.capture.CaptureVpnService
 import dev.gf2log.app.history.CaptureHistoryStore
 import dev.gf2log.app.history.SavedHistoryStore
 import dev.gf2log.app.management.PlatoonBackupManager
+import dev.gf2log.app.management.CsvImportCheckpointManager
+import dev.gf2log.app.management.CsvImportPreviewAnalyzer
 import dev.gf2log.app.management.PlatoonCsvImportStore
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.BackupFileName
@@ -44,6 +47,8 @@ import java.util.concurrent.Executors
 class MainActivity : LocalizedActivity() {
     private lateinit var packageNameInput: EditText
     private lateinit var statusText: TextView
+    private lateinit var captureStatusText: TextView
+    private lateinit var guidedCaptureText: TextView
     private lateinit var historyContainer: LinearLayout
     private lateinit var savedHistoryContainer: LinearLayout
     private lateinit var historyStore: CaptureHistoryStore
@@ -56,12 +61,14 @@ class MainActivity : LocalizedActivity() {
     }
     private val refreshStatus = object : Runnable {
         override fun run() {
-            statusText.text = CaptureStatus.read()
+            captureStatusText.text = CaptureStatus.read()
+            renderGuidedCaptureProgress()
             statusHandler.postDelayed(this, STATUS_REFRESH_MILLIS)
         }
     }
     private var pendingExport: File? = null
     private var captureOnceRequested = false
+    private var pendingCsvImport: PendingCsvImport? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,7 +84,7 @@ class MainActivity : LocalizedActivity() {
 
     override fun onResume() {
         super.onResume()
-        statusText.text = CaptureStatus.read()
+        captureStatusText.text = CaptureStatus.read()
         refreshHistory()
         statusHandler.postDelayed(refreshStatus, STATUS_REFRESH_MILLIS)
     }
@@ -157,7 +164,7 @@ class MainActivity : LocalizedActivity() {
                     }
                     data?.data?.let(::add)
                 }.distinct()
-                if (sources.isNotEmpty()) importPlatoonCsvSources(sources)
+                if (sources.isNotEmpty()) preparePlatoonCsvSources(sources)
             }
         }
     }
@@ -221,17 +228,34 @@ class MainActivity : LocalizedActivity() {
             }, matchWidth())
             addView(Button(context).apply {
                 text = getString(R.string.capture_one_roster)
+                usePrimaryActionStyle()
                 setOnClickListener { requestVpnAndStart(captureOnce = true) }
             }, matchWidth())
+            addView(TextView(context).apply {
+                text = getString(R.string.guided_capture_description)
+                textSize = 13f
+                setPadding(dp(16), 0, 0, dp(8))
+            }, matchWidth())
+            guidedCaptureText = TextView(context).apply {
+                visibility = View.GONE
+                textSize = 14f
+                setPadding(dp(16), 0, 0, dp(8))
+            }
+            addView(guidedCaptureText, matchWidth())
             addView(Button(context).apply {
                 text = getString(R.string.stop_capture)
+                useDestructiveActionStyle()
                 setOnClickListener { stopCaptureService() }
             }, matchWidth())
 
-            statusText = TextView(context).apply {
+            captureStatusText = TextView(context).apply {
                 text = CaptureStatus.read()
                 textSize = 15f
                 setPadding(0, spacing, 0, 0)
+            }
+            addView(captureStatusText, matchWidth())
+            statusText = TextView(context).apply {
+                textSize = 14f
             }
             addView(statusText, matchWidth())
             addView(Button(context).apply {
@@ -255,6 +279,10 @@ class MainActivity : LocalizedActivity() {
             addView(Button(context).apply {
                 text = getString(R.string.export_platoon_backup)
                 setOnClickListener { exportPlatoonBackup() }
+            }, matchWidth())
+            addView(Button(context).apply {
+                text = getString(R.string.undo_last_csv_import)
+                setOnClickListener { confirmUndoLastCsvImport() }
             }, matchWidth())
             addView(Button(context).apply {
                 text = getString(R.string.import_platoon_backup)
@@ -302,6 +330,28 @@ class MainActivity : LocalizedActivity() {
         return ScrollView(this).apply { addView(container, matchWidth()) }
     }
 
+    // Function Name: renderGuidedCaptureProgress
+    // Description:
+    // - Renders the three useful Platoon payloads as a live checklist.
+    // - Keeps display logic independent from capture-service status messages.
+    // Parameters:
+    // - None.
+    // Returns:
+    // - Unit after updating the checklist visibility and text.
+    private fun renderGuidedCaptureProgress() {
+        val progress = CaptureStatus.readGuidedProgress()
+        guidedCaptureText.visibility = if (progress == null) View.GONE else View.VISIBLE
+        if (progress == null) return
+        fun mark(payloadType: Int): String =
+            if (payloadType in progress.capturedPayloadTypes) "\u2713" else "\u25cb"
+        guidedCaptureText.text = getString(
+            R.string.guided_capture_checklist,
+            mark(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS),
+            mark(Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY),
+            mark(Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES),
+        )
+    }
+
     @Suppress("DEPRECATION")
     private fun requestVpnAndStart(captureOnce: Boolean) {
         val targetPackage = packageNameInput.text.toString().trim()
@@ -322,7 +372,7 @@ class MainActivity : LocalizedActivity() {
             .putExtra(CaptureVpnService.EXTRA_CAPTURE_ONCE, captureOnceRequested)
         startForegroundService(intent)
         captureOnceRequested = false
-        statusText.text = getString(R.string.status_preparing)
+        captureStatusText.text = getString(R.string.status_preparing)
     }
 
     private fun stopCaptureService() {
@@ -330,7 +380,7 @@ class MainActivity : LocalizedActivity() {
             .setAction(CaptureVpnService.ACTION_STOP)
         startService(intent)
         CaptureStatus.markStopped()
-        statusText.text = CaptureStatus.read()
+        captureStatusText.text = CaptureStatus.read()
     }
 
     private fun requestNotificationPermissionIfNeeded() {
@@ -386,16 +436,21 @@ class MainActivity : LocalizedActivity() {
         startActivityForResult(intent, REQUEST_CSV_IMPORT)
     }
 
-    // Function Name: importPlatoonCsvSources
+
+    // Function Name: preparePlatoonCsvSources
     // Description:
-    // - Validates and retains a bounded user selection away from the UI thread.
-    // - Reconciles every accepted roster into weekly and membership projections.
-    // - Rolls back newly retained files when any selected source is invalid.
+    // - Validates a bounded selection without changing retained evidence or the database.
+    // - Computes a user-visible impact preview from the current repository state.
     // Parameters:
     // - sources: Distinct document-provider URIs returned by the picker.
     // Returns:
-    // - Unit after scheduling the import and status update.
-    private fun importPlatoonCsvSources(sources: List<Uri>) {
+    // - Unit after scheduling validation and preview display.
+    private fun preparePlatoonCsvSources(sources: List<Uri>) {
+        if (CaptureStatus.isRunning) {
+            statusText.text = getString(R.string.stop_capture_before_csv_import)
+            return
+        }
+        statusText.text = getString(R.string.csv_import_preparing_preview)
         fileIoExecutor.execute {
             val result = runCatching {
                 require(sources.size <= MAX_CSV_IMPORT_FILES) {
@@ -403,35 +458,130 @@ class MainActivity : LocalizedActivity() {
                 }
                 val directory = File(filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY)
                 val store = PlatoonCsvImportStore(directory)
+                val selected = ArrayList<PlatoonCsvImportStore.PreparedImport>(sources.size)
+                var selectedBytes = 0L
+                sources.forEach { source ->
+                    val input = TrustedImportSource.openInputStream(contentResolver, source)
+                        ?: error("Document provider did not open an input stream")
+                    val prepared = input.use(store::prepare)
+                    selectedBytes += prepared.byteCount
+                    require(selectedBytes <= MAX_CSV_IMPORT_BYTES) {
+                        "Selected Platoon CSV files exceed the total import size limit"
+                    }
+                    selected += prepared
+                }
+                val unique = selected.distinctBy(PlatoonCsvImportStore.PreparedImport::fileName)
+                val duplicateNames = unique.filter(store::isRetained).mapTo(mutableSetOf()) {
+                    it.fileName
+                }
+                val repository = PlatoonRepository(this)
+                val analyzed = CsvImportPreviewAnalyzer.analyze(
+                    prepared = unique,
+                    duplicateFileNames = duplicateNames,
+                    existingMembers = repository.listMemberStatuses(),
+                    latestSnapshot = repository.listSnapshots(limit = 1).firstOrNull(),
+                )
+                val preview = analyzed.copy(
+                    validatedFiles = selected.size,
+                    duplicateFiles = analyzed.duplicateFiles + selected.size - unique.size,
+                    totalBytes = selectedBytes,
+                )
+                PendingCsvImport(unique, preview)
+            }
+            statusHandler.post {
+                if (isFinishing || isDestroyed) return@post
+                result.fold(
+                    onSuccess = {
+                        pendingCsvImport = it
+                        showCsvImportPreview(it)
+                    },
+                    onFailure = {
+                        pendingCsvImport = null
+                        statusText.text = getString(R.string.status_platoon_csv_import_failed)
+                    },
+                )
+            }
+        }
+    }
+
+    private fun showCsvImportPreview(pending: PendingCsvImport) {
+        val preview = pending.preview
+        statusText.text = ""
+        val range = if (preview.firstCapture == null || preview.lastCapture == null) {
+            getString(R.string.none)
+        } else {
+            getString(
+                R.string.csv_import_capture_range,
+                preview.firstCapture.toString(),
+                preview.lastCapture.toString(),
+            )
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.csv_import_preview_title)
+            .setMessage(
+                getString(
+                    R.string.csv_import_preview_summary,
+                    preview.validatedFiles,
+                    preview.duplicateFiles,
+                    preview.historicalFiles,
+                    preview.uniqueMembers,
+                    preview.newMembers,
+                    preview.nameDifferences,
+                    preview.potentialJoins,
+                    preview.potentialWithdrawals,
+                    preview.totalBytes / 1024,
+                    range,
+                ),
+            )
+            .setNegativeButton(android.R.string.cancel) { _, _ -> pendingCsvImport = null }
+            .setPositiveButton(R.string.import_platoon_csv) { _, _ ->
+                applyPreparedCsvImport(pending)
+            }
+            .setOnCancelListener { pendingCsvImport = null }
+            .show()
+    }
+
+    private fun applyPreparedCsvImport(pending: PendingCsvImport) {
+        if (pendingCsvImport !== pending || CaptureStatus.isRunning) {
+            pendingCsvImport = null
+            statusText.text = getString(R.string.stop_capture_before_csv_import)
+            return
+        }
+        pendingCsvImport = null
+        statusText.text = getString(R.string.csv_import_applying)
+        fileIoExecutor.execute {
+            val directory = File(filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY)
+            val store = PlatoonCsvImportStore(directory)
+            val checkpoint = CsvImportCheckpointManager(this)
+            var checkpointCreated = false
+            val result = runCatching {
+                val plannedNames = pending.prepared
+                    .filterNot(store::isRetained)
+                    .mapTo(mutableSetOf()) { it.fileName }
+                checkpoint.create(plannedNames)
+                checkpointCreated = true
                 var retained = 0
                 var duplicates = 0
-                val createdFiles = mutableListOf<File>()
-                val imported = try {
-                    sources.forEach { source ->
-                        val input = TrustedImportSource.openInputStream(contentResolver, source)
-                            ?: error("Document provider did not open an input stream")
-                        input.use(store::retain).also {
-                            if (it.duplicate) {
-                                duplicates += 1
-                            } else {
-                                retained += 1
-                                createdFiles += it.file
-                            }
-                        }
+                pending.prepared.forEach { prepared ->
+                    store.retain(prepared).also {
+                        if (it.duplicate) duplicates += 1 else retained += 1
                     }
-                    PlatoonRepository(this).reconcileRetainedCsvFiles(directory)
-                } catch (error: Exception) {
-                    createdFiles.forEach(File::delete)
-                    throw error
                 }
+                val imported = PlatoonRepository(this).reconcileRetainedCsvFiles(directory)
+                checkpoint.seal()
                 CsvImportSummary(retained, duplicates, imported)
+            }.recoverCatching { failure ->
+                if (checkpointCreated) {
+                    runCatching(checkpoint::rollbackFailedImport).exceptionOrNull()?.let(failure::addSuppressed)
+                }
+                throw failure
             }
             statusHandler.post {
                 if (isFinishing || isDestroyed) return@post
                 statusText.text = result.fold(
                     onSuccess = { summary ->
                         getString(
-                            R.string.status_platoon_csv_imported,
+                            R.string.status_platoon_csv_imported_with_checkpoint,
                             summary.retained,
                             summary.imported.imported,
                             summary.imported.historical,
@@ -444,6 +594,35 @@ class MainActivity : LocalizedActivity() {
         }
     }
 
+    private fun confirmUndoLastCsvImport() {
+        if (CaptureStatus.isRunning) {
+            statusText.text = getString(R.string.stop_capture_before_csv_import)
+            return
+        }
+        if (!CsvImportCheckpointManager(this).canUndo()) {
+            statusText.text = getString(R.string.no_csv_import_checkpoint)
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.undo_last_csv_import)
+            .setMessage(R.string.undo_last_csv_import_warning)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.undo_last_csv_import) { _, _ -> undoLastCsvImport() }
+            .show()
+    }
+
+    private fun undoLastCsvImport() {
+        statusText.text = getString(R.string.csv_import_undoing)
+        fileIoExecutor.execute {
+            val succeeded = runCatching { CsvImportCheckpointManager(this).restore() }.isSuccess
+            statusHandler.post {
+                if (isFinishing || isDestroyed) return@post
+                statusText.text = getString(
+                    if (succeeded) R.string.csv_import_undone else R.string.csv_import_undo_failed,
+                )
+            }
+        }
+    }
     @Suppress("DEPRECATION")
     private fun importPlatoonBackup() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
@@ -656,7 +835,8 @@ class MainActivity : LocalizedActivity() {
         const val REQUEST_BACKUP_EXPORT = 103
         const val REQUEST_BACKUP_IMPORT = 104
         const val REQUEST_CSV_IMPORT = 105
-        const val MAX_CSV_IMPORT_FILES = 512
+        const val MAX_CSV_IMPORT_FILES = 64
+        const val MAX_CSV_IMPORT_BYTES = 16L * 1024 * 1024
         const val STATUS_REFRESH_MILLIS = 1_000L
         val BACKUP_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
         val BACKUP_MIME_TYPES = arrayOf(
@@ -670,5 +850,10 @@ class MainActivity : LocalizedActivity() {
         val retained: Int,
         val duplicates: Int,
         val imported: PlatoonRepository.ImportResult,
+    )
+
+    private data class PendingCsvImport(
+        val prepared: List<PlatoonCsvImportStore.PreparedImport>,
+        val preview: CsvImportPreviewAnalyzer.Preview,
     )
 }

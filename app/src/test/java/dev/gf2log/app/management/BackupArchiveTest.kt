@@ -42,6 +42,16 @@ class BackupArchiveTest {
     }
 
     @Test
+    fun `write leaves its caller-owned output open for durability sync`() {
+        val database = temporaryFile("platoon.db", realisticDatabaseBytes())
+        val output = CloseTrackingOutputStream()
+
+        BackupArchive.write(output, database, null)
+
+        assertFalse(output.closed)
+    }
+
+    @Test
     fun `rejects corrupt and incomplete lookalike files without leaving staged data`() {
         val database = realisticDatabaseBytes()
         val settings = realisticSettingsBytes()
@@ -301,4 +311,14 @@ class BackupArchiveTest {
         delete()
         deleteOnExit()
     }
+
+    private class CloseTrackingOutputStream : ByteArrayOutputStream() {
+        var closed = false
+            private set
+
+        override fun close() {
+            closed = true
+            super.close()
+        }
+}
 }

@@ -7,18 +7,22 @@ import android.database.Cursor
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.text.InputType
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CheckBox
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import dev.gf2log.app.settings.PayloadHistoryPreferences
 import dev.gf2log.app.settings.CapturePreferences
 import dev.gf2log.app.capture.CaptureDiagnosticsStore
@@ -26,6 +30,7 @@ import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.management.BackupFileName
 import dev.gf2log.app.management.InvalidBackupException
 import dev.gf2log.app.management.PlatoonBackupManager
+import dev.gf2log.app.discord.DiscordWebhookSecretStore
 import dev.gf2log.protocol.Gfl2PayloadDecoder
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -143,6 +148,96 @@ class OptionsActivity : LocalizedActivity() {
                 text = getString(R.string.back_up_all_information_description)
                 textSize = 14f
                 setPadding(dp(16), 0, 0, spacing)
+            }, matchWidth())
+
+            addView(TextView(context).apply {
+                text = getString(R.string.discord_webhook)
+                textSize = 20f
+                setTypeface(typeface, Typeface.BOLD)
+                val discordIcon = context.getDrawable(R.drawable.ic_discord)?.mutate()
+                discordIcon?.setTint(currentTextColor)
+                setCompoundDrawablesRelativeWithIntrinsicBounds(
+                    discordIcon, null, null, null,
+                )
+                compoundDrawablePadding = dp(8)
+                setPadding(0, spacing, 0, dp(4))
+            }, matchWidth())
+            addView(TextView(context).apply {
+                text = getString(R.string.discord_webhook_description)
+                textSize = 14f
+                setPadding(0, 0, 0, dp(8))
+            }, matchWidth())
+            val webhookStore = DiscordWebhookSecretStore(context)
+            val webhookConfigured = webhookStore.read() != null
+            addView(TextView(context).apply {
+                text = getString(
+                    if (!webhookConfigured) {
+                        R.string.discord_webhook_not_configured
+                    } else {
+                        R.string.discord_webhook_configured
+                    },
+                )
+                textSize = 16f
+                setTypeface(typeface, Typeface.BOLD)
+                val backgroundColor = if (webhookConfigured) {
+                    R.color.webhook_configured_background
+                } else {
+                    R.color.webhook_missing_background
+                }
+                val foregroundColor = if (webhookConfigured) {
+                    R.color.webhook_configured_foreground
+                } else {
+                    R.color.webhook_missing_foreground
+                }
+                val borderColor = if (webhookConfigured) {
+                    R.color.webhook_configured_border
+                } else {
+                    R.color.webhook_missing_border
+                }
+                setTextColor(context.getColor(foregroundColor))
+                background = GradientDrawable().apply {
+                    setColor(context.getColor(backgroundColor))
+                    cornerRadius = dp(10).toFloat()
+                    setStroke(dp(1), context.getColor(borderColor))
+                }
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+            }, matchWidth())
+            val webhookInput = EditText(context).apply {
+                hint = getString(R.string.discord_webhook_hint)
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+                setSingleLine(true)
+            }
+            addView(webhookInput, matchWidth())
+            addView(Button(context).apply {
+                text = getString(R.string.save_discord_webhook)
+                setOnClickListener {
+                    val saved = runCatching {
+                        webhookStore.save(webhookInput.text.toString())
+                    }.isSuccess
+                    Toast.makeText(
+                        this@OptionsActivity,
+                        if (saved) {
+                            R.string.discord_webhook_saved
+                        } else {
+                            R.string.discord_webhook_invalid
+                        },
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    if (saved) recreate()
+                }
+            }, matchWidth())
+            addView(Button(context).apply {
+                text = getString(R.string.clear_discord_webhook)
+                isEnabled = webhookConfigured
+                setOnClickListener {
+                    val cleared = runCatching(webhookStore::clear).isSuccess
+                    Toast.makeText(
+                        this@OptionsActivity,
+                        if (cleared) R.string.discord_webhook_cleared else R.string.discord_webhook_clear_failed,
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    if (cleared) recreate()
+                }
             }, matchWidth())
 
             addView(TextView(context).apply {

@@ -18,15 +18,15 @@ import java.time.format.DateTimeFormatter
 
 /** Validates and durably retains user-selected Platoon roster CSV evidence. */
 class PlatoonCsvImportStore(private val directory: File) {
-    // Function Name: retain
+    // Function Name: prepare
     // Description:
     // - Reads a bounded UTF-8 roster CSV, validates its complete schema, and hashes its bytes.
-    // - Publishes the file under a deterministic identity with a durable temporary write.
+    // - Does not create files, allowing callers to preview a whole selection before confirmation.
     // Parameters:
     // - input: User-selected document stream owned by the caller.
     // Returns:
-    // - Stable retained file identity and whether identical bytes already existed.
-    fun retain(input: InputStream): RetainResult {
+    // - An immutable prepared import containing only validated data and its stable identity.
+    fun prepare(input: InputStream): PreparedImport {
         val bytes = readBounded(input)
         val text = StandardCharsets.UTF_8.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
@@ -39,10 +39,28 @@ class PlatoonCsvImportStore(private val directory: File) {
         val hash = MessageDigest.getInstance("SHA-256").digest(bytes)
             .take(HASH_BYTES)
             .joinToString("") { "%02x".format(it) }
-        val file = File(
-            directory,
-            "import-${FILE_TIME.format(capturedAt)}-$hash.csv",
+        return PreparedImport(
+            encoded = bytes,
+            snapshot = parsed,
+            capturedAt = capturedAt,
+            fileName = "import-" + FILE_TIME.format(capturedAt) + "-" + hash + ".csv",
         )
+    }
+
+    fun retain(input: InputStream): RetainResult = retain(prepare(input))
+
+    // Function Name: retain
+    // Description:
+    // - Publishes a previously validated import under its deterministic identity.
+    // - Uses a durable temporary write and rejects a content-hash identity collision.
+    // Parameters:
+    // - prepared: Validated content returned by prepare.
+    // Returns:
+    // - Stable retained file identity and whether identical bytes already existed.
+    fun retain(prepared: PreparedImport): RetainResult {
+        val bytes = prepared.encoded
+        val capturedAt = prepared.capturedAt
+        val file = File(directory, prepared.fileName)
         directory.mkdirs()
         require(directory.isDirectory) { "Unable to create the Platoon CSV directory" }
         if (file.isFile) {
@@ -78,6 +96,13 @@ class PlatoonCsvImportStore(private val directory: File) {
         return RetainResult(file, duplicate = false)
     }
 
+    fun isRetained(prepared: PreparedImport): Boolean {
+        val file = File(directory, prepared.fileName)
+        if (!file.isFile) return false
+        require(file.readBytes().contentEquals(prepared.encoded)) { "CSV identity collision" }
+        return true
+    }
+
     private fun readBounded(input: InputStream): ByteArray {
         val output = ByteArrayOutputStream()
         val buffer = ByteArray(READ_BUFFER_BYTES)
@@ -93,6 +118,16 @@ class PlatoonCsvImportStore(private val directory: File) {
     }
 
     data class RetainResult(val file: File, val duplicate: Boolean)
+
+    class PreparedImport internal constructor(
+        internal val encoded: ByteArray,
+        val snapshot: GuildMembersCsv.Snapshot,
+        val capturedAt: Instant,
+        val fileName: String,
+    ) {
+        val byteCount: Int
+            get() = encoded.size
+    }
 
     companion object {
         internal fun latestRetainedFile(directory: File): File? = directory.listFiles()

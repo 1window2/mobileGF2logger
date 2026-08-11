@@ -70,6 +70,61 @@ class CsvImportPreviewAnalyzerTest {
         assertEquals(0, preview.potentialWithdrawals)
     }
 
+    @Test
+    fun databaseRepresentedSourcesRemainDuplicatesWithoutRetainedFiles() {
+        val item = prepared(
+            "import-20260811T000000Z-00000000000000000004.csv",
+            "2026-08-11T00:00:00Z",
+            member(4, "Four"),
+        )
+
+        val duplicates = CsvImportPreviewAnalyzer.duplicateFileNames(
+            prepared = listOf(item),
+            retainedFileNames = emptySet(),
+            representedSourceFiles = setOf(item.fileName),
+        )
+
+        assertEquals(setOf(item.fileName), duplicates)
+    }
+
+    @Test
+    fun equalCaptureTimesUseSourceFileAsCurrentRosterTieBreak() {
+        val capturedAt = "2026-08-11T00:00:00Z"
+        val latest = PlatoonSnapshot(
+            id = 1,
+            capturedAt = Instant.parse(capturedAt),
+            members = listOf(snapshotMember(1, "One"), snapshotMember(2, "Two")),
+            sourceFile = "import-20260811T000000Z-00000000000000000002.csv",
+        )
+        val prepared = listOf(
+            prepared(
+                "import-20260811T000000Z-00000000000000000001.csv",
+                capturedAt,
+                member(99, "Historical"),
+            ),
+            prepared(
+                "import-20260811T000000Z-00000000000000000003.csv",
+                capturedAt,
+                member(1, "One"),
+                member(3, "Three"),
+            ),
+        )
+
+        val preview = CsvImportPreviewAnalyzer.analyze(
+            prepared = prepared,
+            duplicateFileNames = emptySet(),
+            existingMembers = listOf(
+                status(1, "One", active = true),
+                status(2, "Two", active = true),
+            ),
+            latestSnapshot = latest,
+        )
+
+        assertEquals(1, preview.historicalFiles)
+        assertEquals(1, preview.potentialJoins)
+        assertEquals(1, preview.potentialWithdrawals)
+    }
+
     private fun prepared(
         fileName: String,
         capturedAt: String,

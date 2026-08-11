@@ -177,6 +177,9 @@ class PlatoonRepository(context: Context) {
     fun listSnapshots(limit: Int = 100): List<PlatoonSnapshot> =
         access { it.listSnapshots(limit) }
 
+    fun representedSnapshotSources(): Set<String> =
+        access(PlatoonDatabase::snapshotSourceFiles)
+
     fun hasSnapshotSource(sourceFile: String): Boolean =
         access { sourceFile in it.snapshotSourceFiles() }
 

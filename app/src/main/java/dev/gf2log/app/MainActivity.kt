@@ -471,10 +471,15 @@ class MainActivity : LocalizedActivity() {
                     selected += prepared
                 }
                 val unique = selected.distinctBy(PlatoonCsvImportStore.PreparedImport::fileName)
-                val duplicateNames = unique.filter(store::isRetained).mapTo(mutableSetOf()) {
+                val retainedNames = unique.filter(store::isRetained).mapTo(mutableSetOf()) {
                     it.fileName
                 }
                 val repository = PlatoonRepository(this)
+                val duplicateNames = CsvImportPreviewAnalyzer.duplicateFileNames(
+                    prepared = unique,
+                    retainedFileNames = retainedNames,
+                    representedSourceFiles = repository.representedSnapshotSources(),
+                )
                 val analyzed = CsvImportPreviewAnalyzer.analyze(
                     prepared = unique,
                     duplicateFileNames = duplicateNames,

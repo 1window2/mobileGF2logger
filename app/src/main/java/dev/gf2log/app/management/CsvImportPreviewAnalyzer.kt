@@ -18,6 +18,16 @@ object CsvImportPreviewAnalyzer {
         val lastCapture: Instant?,
     )
 
+    /** Returns selected source identities already retained or represented in the database. */
+    fun duplicateFileNames(
+        prepared: List<PlatoonCsvImportStore.PreparedImport>,
+        retainedFileNames: Set<String>,
+        representedSourceFiles: Set<String>,
+    ): Set<String> {
+        val selectedNames = prepared.mapTo(mutableSetOf()) { it.fileName }
+        return selectedNames.intersect(retainedFileNames + representedSourceFiles)
+    }
+
     fun analyze(
         prepared: List<PlatoonCsvImportStore.PreparedImport>,
         duplicateFileNames: Set<String>,
@@ -37,10 +47,13 @@ object CsvImportPreviewAnalyzer {
             item.snapshot.members.forEach { importedNames[it.uid.toLong()] = it.name }
         }
         val existingNames = existingMembers.associate { it.uid to it.name }
-        val baselineAt = latestSnapshot?.capturedAt
-        val historicalFiles = actionable.count { item ->
-            baselineAt != null && !item.capturedAt.isAfter(baselineAt)
+        fun isHistorical(item: PlatoonCsvImportStore.PreparedImport): Boolean {
+            val baseline = latestSnapshot ?: return false
+            return item.capturedAt.isBefore(baseline.capturedAt) ||
+                (item.capturedAt == baseline.capturedAt &&
+                    item.fileName <= baseline.sourceFile.orEmpty())
         }
+        val historicalFiles = actionable.count(::isHistorical)
 
         var roster = latestSnapshot?.members
             ?.associate { it.uid to it.name }
@@ -48,7 +61,7 @@ object CsvImportPreviewAnalyzer {
         var joins = 0
         var withdrawals = 0
         actionable
-            .filter { item -> baselineAt == null || item.capturedAt.isAfter(baselineAt) }
+            .filterNot(::isHistorical)
             .forEach { item ->
                 val next = item.snapshot.members.associate { it.uid.toLong() to it.name }
                 joins += (next.keys - roster.keys).size

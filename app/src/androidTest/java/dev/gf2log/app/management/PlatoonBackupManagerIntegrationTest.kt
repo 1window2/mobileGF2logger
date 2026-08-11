@@ -3,6 +3,7 @@ package dev.gf2log.app.management
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import androidx.core.content.FileProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -27,6 +28,7 @@ import java.util.zip.ZipException
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -801,12 +803,70 @@ class PlatoonBackupManagerIntegrationTest {
 @RunWith(AndroidJUnit4::class)
 class WeeklyReportActivityStateTest {
     @Test
+    fun repeatedWeeklyPngRendersUseDifferentProviderUris() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val periodStart = LocalDate.of(2026, 8, 9)
+        val document = WeeklyShareProjection.Document(
+            title = "GF2logger",
+            subtitle = "2026-08-09 - 2026-08-15",
+            headers = listOf("Member", "08/09", "Total"),
+            rows = emptyList(),
+            includeNotes = false,
+            evidenceHealth = WeeklyEvidenceAnalyzer.Health(
+                observedDays = 0,
+                totalDays = 7,
+                exactMetrics = 0,
+                lowerBoundMetrics = 0,
+                unknownMetrics = 0,
+                directLoginDays = 0,
+                directPatrolDays = 0,
+                closingBoundaries = 0,
+            ),
+        )
+        val writeMethod = WeeklyReportActivity::class.java.getDeclaredMethod(
+            "writeWeeklyPng",
+            WeeklyShareProjection.Document::class.java,
+            LocalDate::class.java,
+        ).apply { isAccessible = true }
+        try {
+            ActivityScenario.launch(WeeklyReportActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val first = writeMethod.invoke(activity, document, periodStart) as java.io.File
+                    val firstUri = FileProvider.getUriForFile(
+                        activity,
+                        activity.packageName + ".fileprovider",
+                        first,
+                    )
+                    val second = writeMethod.invoke(activity, document, periodStart) as java.io.File
+                    val secondUri = FileProvider.getUriForFile(
+                        activity,
+                        activity.packageName + ".fileprovider",
+                        second,
+                    )
+
+                    assertFalse(first.exists())
+                    assertNotEquals(first.canonicalPath, second.canonicalPath)
+                    assertNotEquals(firstUri, secondUri)
+                    activity.contentResolver.openInputStream(secondUri).use { input ->
+                        assertTrue(input != null && input.read() >= 0)
+                    }
+                }
+            }
+        } finally {
+            WeeklyPngPendingState.directory(context.cacheDir)
+                .listFiles()
+                .orEmpty()
+                .forEach(java.io.File::delete)
+        }
+    }
+
+    @Test
     fun pendingWeeklyPngSurvivesActivityRecreation() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val target = java.io.File(
-            WeeklyPngPendingState.directory(context.cacheDir).apply { mkdirs() },
-            "GF2logger-week-20260809.png",
-        ).apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        WeeklyPngPendingState.directory(context.cacheDir).mkdirs()
+        val target = WeeklyPngPendingState
+            .newRenderTarget(context.cacheDir, LocalDate.of(2026, 8, 9))
+            .apply { writeBytes(byteArrayOf(1, 2, 3)) }
         val field = WeeklyReportActivity::class.java.getDeclaredField("pendingPng").apply {
             isAccessible = true
         }

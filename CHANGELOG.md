@@ -2,7 +2,7 @@
 
 All notable changes to mobileGF2logger are documented here.
 
-## Unreleased
+## 2.2.0 - 2026-08-11
 
 ### Added
 
@@ -50,7 +50,9 @@ All notable changes to mobileGF2logger are documented here.
   database/quarantine state after a failed import, undo, or process death.
 - Bound weekly PNG dimensions, pixel count, row count, and private-note length;
   preserve pending save state across activity recreation, and share only through
-  a cache-scoped non-exported `FileProvider` grant.
+  a cache-scoped non-exported `FileProvider` grant. Give every render a fresh
+  UUID-backed cache identity and revoke prior URI grants before removing stale
+  files so an earlier recipient cannot read a later privacy projection.
 - Restrict Discord destinations to canonical HTTPS `discord.com` incoming
   webhook URLs, disallow redirects, and bound request/response sizes and timeouts.
 

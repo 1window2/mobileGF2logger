@@ -439,8 +439,9 @@ class MainActivity : LocalizedActivity() {
 
     // Function Name: preparePlatoonCsvSources
     // Description:
-    // - Validates a bounded selection without changing retained evidence or the database.
-    // - Computes a user-visible impact preview from the current repository state.
+    // - Reconciles crash-left retained evidence before classifying selected source identities.
+    // - Validates a bounded selection without retaining any newly selected source.
+    // - Computes a user-visible impact preview from the recovered repository state.
     // Parameters:
     // - sources: Distinct document-provider URIs returned by the picker.
     // Returns:
@@ -471,13 +472,10 @@ class MainActivity : LocalizedActivity() {
                     selected += prepared
                 }
                 val unique = selected.distinctBy(PlatoonCsvImportStore.PreparedImport::fileName)
-                val retainedNames = unique.filter(store::isRetained).mapTo(mutableSetOf()) {
-                    it.fileName
-                }
                 val repository = PlatoonRepository(this)
+                repository.reconcileRetainedCsvFiles(directory)
                 val duplicateNames = CsvImportPreviewAnalyzer.duplicateFileNames(
                     prepared = unique,
-                    retainedFileNames = retainedNames,
                     representedSourceFiles = repository.representedSnapshotSources(),
                 )
                 val analyzed = CsvImportPreviewAnalyzer.analyze(
@@ -491,7 +489,7 @@ class MainActivity : LocalizedActivity() {
                     duplicateFiles = analyzed.duplicateFiles + selected.size - unique.size,
                     totalBytes = selectedBytes,
                 )
-                PendingCsvImport(unique, preview)
+                PendingCsvImport(unique, duplicateNames, preview)
             }
             statusHandler.post {
                 if (isFinishing || isDestroyed) return@post
@@ -561,7 +559,7 @@ class MainActivity : LocalizedActivity() {
             var checkpointCreated = false
             val result = runCatching {
                 val plannedNames = pending.prepared
-                    .filterNot(store::isRetained)
+                    .filterNot { it.fileName in pending.duplicateFileNames }
                     .mapTo(mutableSetOf()) { it.fileName }
                 checkpoint.create(plannedNames)
                 checkpointCreated = true
@@ -859,6 +857,7 @@ class MainActivity : LocalizedActivity() {
 
     private data class PendingCsvImport(
         val prepared: List<PlatoonCsvImportStore.PreparedImport>,
+        val duplicateFileNames: Set<String>,
         val preview: CsvImportPreviewAnalyzer.Preview,
     )
 }

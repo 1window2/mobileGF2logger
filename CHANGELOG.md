@@ -43,9 +43,10 @@ All notable changes to mobileGF2logger are documented here.
 - Reject stale asynchronous weekly renders after navigation, pause, or screen
   recreation and preserve the selected reporting date instead of allowing
   overlapping week loads to replace each other.
-- Keep CSV selection read-only until the user confirms the impact preview, cap
-  multi-file imports, and restore both the database and newly retained evidence
-  if a confirmed import fails or is undone.
+- Keep newly selected CSV sources unretained until the user confirms the impact
+  preview, reconcile crash-left evidence before classification, cap multi-file
+  imports, preserve the preceding undo until a replacement import seals, and
+  recover database/quarantine state after a failed import, undo, or process death.
 - Bound weekly PNG dimensions, pixel count, row count, and private-note length;
   share only through a cache-scoped non-exported `FileProvider` grant.
 - Restrict Discord destinations to canonical HTTPS `discord.com` incoming

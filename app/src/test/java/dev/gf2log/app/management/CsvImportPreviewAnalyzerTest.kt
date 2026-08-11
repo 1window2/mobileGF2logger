@@ -80,11 +80,26 @@ class CsvImportPreviewAnalyzerTest {
 
         val duplicates = CsvImportPreviewAnalyzer.duplicateFileNames(
             prepared = listOf(item),
-            retainedFileNames = emptySet(),
             representedSourceFiles = setOf(item.fileName),
         )
 
         assertEquals(setOf(item.fileName), duplicates)
+    }
+
+    @Test
+    fun retainedOnlySourcesRemainActionableUntilRecoveryRepresentsThem() {
+        val item = prepared(
+            "import-20260811T000000Z-00000000000000000005.csv",
+            "2026-08-11T00:00:00Z",
+            member(5, "Five"),
+        )
+
+        val duplicates = CsvImportPreviewAnalyzer.duplicateFileNames(
+            prepared = listOf(item),
+            representedSourceFiles = emptySet(),
+        )
+
+        assertEquals(emptySet<String>(), duplicates)
     }
 
     @Test

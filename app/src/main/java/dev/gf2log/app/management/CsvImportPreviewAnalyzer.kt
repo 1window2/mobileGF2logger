@@ -18,14 +18,13 @@ object CsvImportPreviewAnalyzer {
         val lastCapture: Instant?,
     )
 
-    /** Returns selected source identities already retained or represented in the database. */
+    /** Returns selected source identities already represented in the database. */
     fun duplicateFileNames(
         prepared: List<PlatoonCsvImportStore.PreparedImport>,
-        retainedFileNames: Set<String>,
         representedSourceFiles: Set<String>,
     ): Set<String> {
         val selectedNames = prepared.mapTo(mutableSetOf()) { it.fileName }
-        return selectedNames.intersect(retainedFileNames + representedSourceFiles)
+        return selectedNames.intersect(representedSourceFiles)
     }
 
     fun analyze(

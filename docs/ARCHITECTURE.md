@@ -212,14 +212,18 @@ screen startup to mutate the restored state. If any commit step fails, the
 retained cache is restored alongside the previous database and settings.
 
 
-User-selected roster CSV files are prepared and validated without writing to
-app storage. `CsvImportPreviewAnalyzer` compares those immutable candidates to
-the current roster and presents their bounded impact. Only explicit
-confirmation retains the files and reconciles them. Before that mutation,
-`CsvImportCheckpointManager` exports a one-level private checkpoint containing
-the database state and deterministic planned file identities. Undo quarantines
-only those identities, restores the checkpoint under the repository's exclusive
-maintenance lock, and restores the files if database replacement fails.
+User-selected roster CSV files are prepared and validated without retaining the
+new selection. Before classification, crash-left retained evidence is reconciled
+so the preview and confirmation start from one represented source set.
+`CsvImportPreviewAnalyzer` compares the immutable candidates to that recovered
+roster and presents their bounded impact. Only explicit confirmation retains
+new files. Before that mutation, `CsvImportCheckpointManager` exports a private
+checkpoint containing the database state and deterministic planned identities.
+A provisional checkpoint keeps the preceding successful undo until the new
+import seals. Undo quarantines only the planned identities and restores the
+database under the repository's exclusive maintenance lock. Durable restore
+state resumes interrupted quarantine/database replacement after process death;
+ordinary failures restore both the evidence and the preceding undo checkpoint.
 A post-import database digest refuses undo after any later Platoon mutation so
 a one-level rollback cannot silently overwrite newer work.
 

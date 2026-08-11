@@ -57,11 +57,28 @@ import java.io.FileOutputStream
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.UUID
 import java.util.concurrent.Executors
 
 /** Keeps a pending weekly PNG bound to the app-private share cache across recreation. */
 internal object WeeklyPngPendingState {
     fun directory(cacheDirectory: File): File = File(cacheDirectory, DIRECTORY_NAME)
+
+    fun newRenderTarget(cacheDirectory: File, periodStart: LocalDate): File {
+        val root = directory(cacheDirectory).canonicalFile
+        require(root.isDirectory) { "Weekly PNG cache is unavailable" }
+        val candidate = File(
+            root,
+            "GF2logger-week-${periodStart.format(DATE)}-${UUID.randomUUID()}.png",
+        ).canonicalFile
+        check(candidate.parentFile == root && !candidate.exists()) {
+            "Weekly PNG target must be a new private cache file"
+        }
+        return candidate
+    }
+
+    fun exportName(periodStart: LocalDate): String =
+        "GF2logger-week-${periodStart.format(DATE)}.png"
 
     fun nameForState(cacheDirectory: File, pendingFile: File?): String? = runCatching {
         val candidate = pendingFile?.canonicalFile ?: return@runCatching null
@@ -80,7 +97,10 @@ internal object WeeklyPngPendingState {
     }.getOrNull()
 
     private const val DIRECTORY_NAME = "shared-weekly"
-    private val FILE_NAME = Regex("GF2logger-week-\\d{8}\\.png")
+    private val DATE = DateTimeFormatter.BASIC_ISO_DATE
+    private val FILE_NAME = Regex(
+        "GF2logger-week-\\d{8}-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\.png",
+    )
 }
 
 class WeeklyReportActivity : LocalizedActivity() {
@@ -1401,7 +1421,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 result.fold(
                     onSuccess = { file ->
-                        if (shareAfter) shareWeeklyPng(file) else saveWeeklyPng(file)
+                        if (shareAfter) shareWeeklyPng(file) else saveWeeklyPng(file, model.report.periodStart)
                     },
                     onFailure = {
                         Toast.makeText(
@@ -1421,11 +1441,8 @@ class WeeklyReportActivity : LocalizedActivity() {
     ): File {
         val directory = WeeklyPngPendingState.directory(cacheDir).apply { mkdirs() }
         require(directory.isDirectory) { "Unable to create weekly share cache" }
-        directory.listFiles().orEmpty().forEach(File::delete)
-        val target = File(
-            directory,
-            "GF2logger-week-" + periodStart.format(FILE_DATE) + ".png",
-        )
+        revokeAndDeleteOldWeeklyPngs(directory)
+        val target = WeeklyPngPendingState.newRenderTarget(cacheDir, periodStart)
         val temporary = File.createTempFile(".weekly-", ".png", directory)
         val bitmap = WeeklyReportPngRenderer.render(document)
         try {
@@ -1443,6 +1460,22 @@ class WeeklyReportActivity : LocalizedActivity() {
         return target
     }
 
+    private fun revokeAndDeleteOldWeeklyPngs(directory: File) {
+        directory.listFiles().orEmpty()
+            .filter(java.io.File::isFile)
+            .forEach { stale ->
+                runCatching {
+                    val uri = FileProvider.getUriForFile(
+                        this,
+                        packageName + ".fileprovider",
+                        stale,
+                    )
+                    revokeUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                stale.delete()
+            }
+    }
+
     private fun shareWeeklyPng(file: File) {
         val uri = FileProvider.getUriForFile(
             this,
@@ -1458,12 +1491,12 @@ class WeeklyReportActivity : LocalizedActivity() {
     }
 
     @Suppress("DEPRECATION")
-    private fun saveWeeklyPng(file: File) {
+    private fun saveWeeklyPng(file: File, periodStart: LocalDate) {
         pendingPng = file
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
             .setType("image/png")
-            .putExtra(Intent.EXTRA_TITLE, file.name)
+            .putExtra(Intent.EXTRA_TITLE, WeeklyPngPendingState.exportName(periodStart))
         startActivityForResult(intent, REQUEST_EXPORT_WEEKLY_PNG)
     }
     @Deprecated("Uses the platform document picker without an AndroidX dependency")

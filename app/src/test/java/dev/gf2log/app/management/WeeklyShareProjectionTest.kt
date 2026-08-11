@@ -5,6 +5,7 @@ import dev.gf2log.app.WeeklyPngPendingState
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -17,17 +18,22 @@ class WeeklyShareProjectionTest {
     @Test
     fun pendingWeeklyPngRestoresOnlyFromTheBoundedShareCache() {
         val cache = temporary.newFolder("cache")
-        val shared = WeeklyPngPendingState.directory(cache).apply { mkdirs() }
-        val published = java.io.File(shared, "GF2logger-week-20260809.png").apply {
+        WeeklyPngPendingState.directory(cache).mkdirs()
+        val periodStart = LocalDate.of(2026, 8, 9)
+        val published = WeeklyPngPendingState.newRenderTarget(cache, periodStart).apply {
             writeBytes(byteArrayOf(1, 2, 3))
         }
+        val nextRender = WeeklyPngPendingState.newRenderTarget(cache, periodStart)
 
         val savedName = WeeklyPngPendingState.nameForState(cache, published)
 
+        assertNotEquals(published.name, nextRender.name)
+        assertEquals("GF2logger-week-20260809.png", WeeklyPngPendingState.exportName(periodStart))
         assertEquals(published.canonicalFile, WeeklyPngPendingState.restore(cache, savedName))
         assertEquals(null, WeeklyPngPendingState.restore(cache, "../outside.png"))
-        assertEquals(null, WeeklyPngPendingState.restore(cache, "GF2logger-week-20260810.png"))
-        val outside = temporary.newFile("GF2logger-week-20260811.png")
+        assertEquals(null, WeeklyPngPendingState.restore(cache, "GF2logger-week-20260809.png"))
+        assertEquals(null, WeeklyPngPendingState.restore(cache, nextRender.name))
+        val outside = temporary.newFile(published.name)
         assertEquals(null, WeeklyPngPendingState.nameForState(cache, outside))
     }
 

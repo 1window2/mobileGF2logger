@@ -60,7 +60,7 @@ class OnboardingActivity : LocalizedActivity() {
                         recreate()
                     }
                 },
-                LinearLayout.LayoutParams(dp(136), dp(42)),
+                LinearLayout.LayoutParams(dp(136), dp(54)),
             )
         }, matchWidth())
 
@@ -322,7 +322,7 @@ private class OnboardingLanguageToggle(
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = resolveSize(dp(136), widthMeasureSpec)
-        val height = resolveSize(dp(42), heightMeasureSpec)
+        val height = resolveSize(dp(54), heightMeasureSpec)
         setMeasuredDimension(width, height)
         val childWidth = (width - paddingLeft - paddingRight) / 2
         val childHeight = height - paddingTop - paddingBottom
@@ -362,6 +362,7 @@ private class OnboardingLanguageToggle(
                 .start()
         } else {
             thumb.translationX = target
+            if (animate) onLanguageChanged(language)
         }
         val selectedColor = context.getColor(R.color.accent_text)
         val idleColor = context.getColor(R.color.text_primary)

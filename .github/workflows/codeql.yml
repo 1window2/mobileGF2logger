@@ -99,10 +99,19 @@ jobs:
           queries: security-extended
 
       - name: Compile Kotlin sources
+        env:
+          # Keep the scanner-only compatibility compiler isolated from every
+          # persistent Gradle cache. Production builds continue to use the
+          # patched 2.4.20-Beta1 plugin declared in build.gradle.
+          GRADLE_USER_HOME: ${{ runner.temp }}/codeql-gradle-home
         run: >
           ./gradlew
           :app:compileDebugKotlin
           :protocol:compileDebugKotlin
+          --init-script .github/codeql/codeql-kotlin-compat.init.gradle
+          --rerun-tasks
+          --no-build-cache
+          --no-configuration-cache
           --no-daemon
           --stacktrace
 

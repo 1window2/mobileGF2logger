@@ -1,0 +1,14 @@
+// CodeQL 2.26.x can analyze Kotlin 2.4.0 through 2.4.19, while the production
+// build must use 2.4.20-Beta1 or newer to address GHSA-r937-wjx7-w2jp.
+// This init script is used only by the isolated, cache-disabled CodeQL compile.
+gradle.beforeProject { project ->
+    project.buildscript.configurations.configureEach { configuration ->
+        configuration.resolutionStrategy.eachDependency { details ->
+            if (details.requested.group == 'org.jetbrains.kotlin' &&
+                    details.requested.name == 'kotlin-gradle-plugin') {
+                details.useVersion('2.4.10')
+                details.because('CodeQL 2.26.x supports Kotlin versions below 2.4.20')
+            }
+        }
+    }
+}

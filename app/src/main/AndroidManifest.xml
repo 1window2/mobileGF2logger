@@ -27,6 +27,10 @@
         </activity>
 
         <activity
+            android:name=".OnboardingActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".PacketHistoryActivity"
             android:exported="false" />
 

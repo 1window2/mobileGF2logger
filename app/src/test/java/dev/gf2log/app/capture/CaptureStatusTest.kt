@@ -12,15 +12,23 @@ class CaptureStatusTest {
     fun tracksOnlyTheCurrentApplicationProcess() {
         CaptureStatus.markStopped()
         assertFalse(CaptureStatus.isRunning)
+        assertFalse(CaptureStatus.isStarting)
         assertEquals("Capture is stopped", CaptureStatus.read())
+
+        CaptureStatus.markStarting()
+        assertFalse(CaptureStatus.isRunning)
+        assertTrue(CaptureStatus.isStarting)
+        assertEquals("Preparing capture", CaptureStatus.read())
 
         CaptureStatus.markRunning("Capturing selected package")
         CaptureStatus.update("Decoded Platoon members")
         assertTrue(CaptureStatus.isRunning)
+        assertFalse(CaptureStatus.isStarting)
         assertEquals("Decoded Platoon members", CaptureStatus.read())
 
         CaptureStatus.markStopped("Capture failed")
         assertFalse(CaptureStatus.isRunning)
+        assertFalse(CaptureStatus.isStarting)
         assertEquals("Capture failed", CaptureStatus.read())
     }
 

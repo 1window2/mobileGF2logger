@@ -47,7 +47,13 @@ class PlatoonActivity : LocalizedActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         repository = PlatoonRepository(this)
-        setContentView(buildContentView())
+        setContentView(
+            PrimaryNavigation.wrap(
+                this,
+                buildContentView(),
+                PrimaryNavigation.Destination.PLATOON,
+            ),
+        )
     }
 
     override fun onResume() {
@@ -91,23 +97,25 @@ class PlatoonActivity : LocalizedActivity() {
             setPadding(spacing, spacing, spacing, spacing)
             addView(TextView(context).apply {
                 text = getString(R.string.platoon_management)
-                textSize = 28f
+                textSize = 24f
                 setTypeface(typeface, Typeface.BOLD)
             }, matchWidth())
             summary = TextView(context).apply {
-                textSize = 15f
-                setPadding(0, dp(8), 0, dp(8))
+                textSize = 14f
+                setTextColor(getColor(R.color.text_secondary))
+                setPadding(0, dp(6), 0, dp(8))
             }
             addView(summary, matchWidth())
             addView(Button(context).apply {
                 text = getString(R.string.weekly_table)
-                usePrimaryActionStyle()
+                useFeatureActionStyle()
                 setOnClickListener {
                     startActivity(Intent(this@PlatoonActivity, WeeklyReportActivity::class.java))
                 }
             }, matchWidth())
             addView(Button(context).apply {
                 text = getString(R.string.compare_latest_snapshots)
+                useNavigationActionStyle()
                 setOnClickListener {
                     startActivity(
                         Intent(this@PlatoonActivity, SnapshotComparisonActivity::class.java),
@@ -116,10 +124,12 @@ class PlatoonActivity : LocalizedActivity() {
             }, matchWidth())
             addView(Button(context).apply {
                 text = getString(R.string.export_selected_members)
+                useNavigationActionStyle()
                 setOnClickListener { exportSelectedMembers() }
             }, matchWidth())
             addView(Button(context).apply {
                 text = getString(R.string.add_withdrawn_member)
+                useNavigationActionStyle()
                 setOnClickListener { showAddWithdrawnMemberDialog() }
             }, matchWidth())
             searchInput = EditText(context).apply {
@@ -228,31 +238,38 @@ class PlatoonActivity : LocalizedActivity() {
                         if (checked) selectedUids += status.uid else selectedUids -= status.uid
                     }
                 }, LinearLayout.LayoutParams(wrap(), ViewGroup.LayoutParams.MATCH_PARENT))
-                addView(Button(context).apply {
-                    isAllCaps = false
-                    text = buildString {
-                        append(if (status.isActive) "● " else "○ ")
+                addView(ModernUi.actionRow(
+                    context = context,
+                    title = buildString {
                         append(status.name)
-                        append("  #")
+                        append(" · ")
+                        append(
+                            getString(
+                                if (status.isActive) R.string.active_member else R.string.departed_member,
+                            ),
+                        )
+                    },
+                    detail = buildString {
+                        append("#")
                         append(status.uid)
                         if (latest != null) {
-                            append("\n")
+                            append(" · ")
                             append(getString(R.string.merit_this_week))
-                            append(": ")
+                            append(" ")
                             append(latest.weeklyMerit)
                             append(" · ")
                             append(getString(R.string.total_merit))
-                            append(": ")
+                            append(" ")
                             append(latest.totalMerit)
                         }
-                    }
-                    setOnClickListener {
+                    },
+                    onClick = {
                         startActivity(
                             Intent(this@PlatoonActivity, MemberDetailActivity::class.java)
                                 .putExtra(MemberDetailActivity.EXTRA_UID, status.uid),
                         )
-                    }
-                }, LinearLayout.LayoutParams(0, wrap(), 1f))
+                    },
+                ), LinearLayout.LayoutParams(0, wrap(), 1f))
             }, matchWidth())
         }
     }

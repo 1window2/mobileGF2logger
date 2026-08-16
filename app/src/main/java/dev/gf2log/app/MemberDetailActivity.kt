@@ -45,13 +45,13 @@ class MemberDetailActivity : LocalizedActivity() {
             setText(status.note)
             minLines = 2
         }
-        setContentView(ScrollView(this).apply {
+        val content = ScrollView(this).apply {
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(16), dp(16), dp(16), dp(16))
                 addView(TextView(context).apply {
                     text = getString(R.string.member_details)
-                    textSize = 28f
+                    textSize = 24f
                     setTypeface(typeface, Typeface.BOLD)
                 }, matchWidth())
                 addView(TextView(context).apply {
@@ -66,48 +66,60 @@ class MemberDetailActivity : LocalizedActivity() {
                             },
                         ),
                     )
-                    textSize = 16f
+                    textSize = 14f
+                    setTextColor(getColor(R.color.text_secondary))
                     setPadding(0, dp(4), 0, dp(8))
                 }, matchWidth())
                 addView(nameInput, matchWidth())
                 addView(noteInput, matchWidth())
-                addView(Button(context).apply {
-                    text = getString(R.string.save_member)
-                    setOnClickListener {
-                        val saved = runCatching {
-                            repository.updateMember(
-                                status.uid,
-                                nameInput.text.toString(),
-                                noteInput.text.toString(),
-                            )
-                        }.getOrDefault(false)
-                        Toast.makeText(
-                            this@MemberDetailActivity,
-                            getString(if (saved) R.string.saved else R.string.save_failed),
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                    }
-                }, matchWidth())
-                addView(Button(context).apply {
-                    text = getString(R.string.add_membership_history)
-                    setOnClickListener { addMembershipHistory(status) }
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    addView(Button(context).apply {
+                        text = getString(R.string.save_member)
+                        usePrimaryActionStyle()
+                        setOnClickListener {
+                            val saved = runCatching {
+                                repository.updateMember(
+                                    status.uid,
+                                    nameInput.text.toString(),
+                                    noteInput.text.toString(),
+                                )
+                            }.getOrDefault(false)
+                            Toast.makeText(
+                                this@MemberDetailActivity,
+                                getString(if (saved) R.string.saved else R.string.save_failed),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        marginEnd = dp(4)
+                    })
+                    addView(Button(context).apply {
+                        text = getString(R.string.add_membership_history_short)
+                        useSecondaryActionStyle()
+                        setOnClickListener { addMembershipHistory(status) }
+                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        marginStart = dp(4)
+                    })
                 }, matchWidth())
                 addView(Button(context).apply {
                     text = getString(R.string.delete_member)
-                    setTextColor(getColor(R.color.destructive_action))
+                    useDestructiveTextActionStyle()
                     setOnClickListener { confirmMemberDeletion(status) }
                 }, matchWidth())
                 addView(TextView(context).apply {
                     text = getString(R.string.membership_history)
-                    textSize = 21f
+                    textSize = 17f
                     setTypeface(typeface, Typeface.BOLD)
                     setPadding(0, dp(16), 0, dp(4))
                 }, matchWidth())
                 status.membershipPeriods.forEachIndexed { index, membershipPeriod ->
-                    addView(membershipPeriodButton(status, membershipPeriod, index), matchWidth())
+                    addView(membershipPeriodRow(status, membershipPeriod, index), matchWidth())
                 }
             }, matchWidth())
-        })
+        }
+        setContentView(content)
+        ModernUi.prepareContent(window.decorView)
     }
 
     private fun confirmMemberDeletion(status: MemberStatus) {
@@ -145,15 +157,15 @@ class MemberDetailActivity : LocalizedActivity() {
         dialog.show()
     }
 
-    private fun membershipPeriodButton(
+    private fun membershipPeriodRow(
         status: MemberStatus,
         membershipPeriod: MembershipPeriod,
         index: Int,
-    ) = Button(this).apply {
-        isAllCaps = false
-        text = getString(
-            R.string.membership_period_summary,
-            index + 1,
+    ) = ModernUi.actionRow(
+        context = this,
+        title = getString(R.string.membership_period_title, index + 1),
+        detail = getString(
+            R.string.membership_period_dates,
             format(
                 membershipPeriod.joinedDate,
                 membershipPeriod.joinedAt,
@@ -164,9 +176,9 @@ class MemberDetailActivity : LocalizedActivity() {
                 membershipPeriod.leftAt,
                 membershipPeriod.leftTimeKnown ?: (membershipPeriod.leftAt != null),
             ),
-        )
-        setOnClickListener { editMembershipPeriod(status, membershipPeriod) }
-    }
+        ),
+        onClick = { editMembershipPeriod(status, membershipPeriod) },
+    )
 
     private fun editMembershipPeriod(status: MemberStatus, membershipPeriod: MembershipPeriod) {
         val joined = DateTimePickerInput(
@@ -199,7 +211,7 @@ class MemberDetailActivity : LocalizedActivity() {
             if (status.membershipPeriods.size == 1) {
                 addView(TextView(context).apply {
                     setText(R.string.membership_period_delete_last_hint)
-                    setTextColor(getColor(android.R.color.darker_gray))
+                    setTextColor(getColor(R.color.text_secondary))
                     setPadding(0, dp(8), 0, 0)
                 }, matchWidth())
             }

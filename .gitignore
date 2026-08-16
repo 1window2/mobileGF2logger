@@ -13,6 +13,7 @@ local.properties
 *.pcapng
 *.csv
 *.json
+!/.impeccable/design.json
 *.log
 *.jks
 *.keystore
@@ -21,6 +22,7 @@ keystore.properties
 keystore.properties.*
 .tmp-*/
 .tmp-*
+/.impeccable/review/
 
 # Operating-system metadata
 desktop.ini

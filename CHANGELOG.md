@@ -2,6 +2,37 @@
 
 All notable changes to mobileGF2logger are documented here.
 
+## 2.3.0 - 2026-08-17
+
+### Added
+
+- Add a five-page first-launch guide for Main, Settings, Platoon management,
+  weekly-table controls, and parsed-packet pages. The bilingual segmented
+  selector persists its language choice immediately, while Skip and Get
+  started permanently complete onboarding for that installation.
+- Add System, Light, and Dark appearance choices to Settings and preserve the
+  selected theme in complete backups.
+
+### Changed
+
+- Refresh every Activity with a compact, black-and-white-first interface,
+  restrained accent color, flatter geometry, accessible touch targets, and
+  theme-aware packet and weekly-table cells.
+- Refine the bilingual onboarding copy around the actual capture, evidence,
+  backup, Discord, and weekly-table workflows, enlarge its page icons, and use
+  compact `1/5` progress labels in both languages.
+- Preserve existing unified settings while migrating upgraded v2.2.0 installs
+  past the first-use guide; fresh installs still receive onboarding once.
+- Extend complete-backup settings to schema v2 while restoring v1 backups with
+  safe theme and onboarding defaults.
+
+### Fixed
+
+- Explicitly resolve the build-only Kotlin Gradle Plugin to patched
+  `2.4.20-Beta1`, replacing the vulnerable `2.2.10` version pulled transitively
+  by Android Gradle Plugin 9.3.1 and giving Dependabot a direct manifest entry
+  it can update in the future.
+
 ## 2.2.0 - 2026-08-11
 
 ### Added

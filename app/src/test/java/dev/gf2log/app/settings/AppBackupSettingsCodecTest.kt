@@ -19,6 +19,20 @@ class AppBackupSettingsCodecTest {
     }
 
     @Test
+    fun `restores legacy settings with safe display defaults`() {
+        val legacy = encodedProperties().apply {
+            setProperty("schemaVersion", "1")
+            remove("themeMode")
+            remove("onboardingCompleted")
+        }
+
+        val restored = AppBackupSettingsCodec.decode(legacy.toBytes())
+
+        assertEquals("system", restored.themeMode)
+        assertEquals(true, restored.onboardingCompleted)
+    }
+
+    @Test
     fun `rejects a missing required setting`() {
         val properties = encodedProperties()
         properties.remove("language")
@@ -91,6 +105,8 @@ class AppBackupSettingsCodecTest {
 
     private fun completeSettings() = AppBackupSettings(
         language = "ko",
+        themeMode = "dark",
+        onboardingCompleted = true,
         detailedNotifications = false,
         targetPackage = "com.example.game_client",
         payloadHistory = PayloadCatalog.categories.associate { category ->

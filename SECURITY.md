@@ -5,6 +5,11 @@
 Security fixes are made on the latest published release and the current
 `main` branch. Older releases should be upgraded before a report is evaluated.
 
+| Version | Supported |
+| --- | --- |
+| 2.3.x | Yes |
+| 2.2.x and earlier | No |
+
 ## Reporting a vulnerability
 
 Please do not publish exploit details, captured player data, backup archives,

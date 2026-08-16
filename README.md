@@ -18,14 +18,15 @@ capture to the selected game package, and raw traffic is never stored.
 - Captures the mandatory Members (`21917`), Activity (`21935`), and Updates (`21960`) responses without a computer or root access.
 - Tracks active and withdrawn members, repeat membership periods, exact Updates timestamps, editable nicknames, and private notes.
 - Builds Sunday-to-Saturday Standard or Gunsmoke Frontline weekly tables around the 05:00 game reset, with cut-off points and manual correction for missing data.
-- Offers guided capture that tracks the three useful Platoon payloads and stops automatically when the checklist is complete.
+- Offers One-time Capture that tracks the three useful Platoon payloads and stops automatically when the checklist is complete.
 - Explains every weekly cell on tap and summarizes missing or uncertain evidence in an Evidence Health panel.
 - Recovers interrupted imports before previewing roster CSV impact and keeps an automatic one-level checkpoint for undo.
 - Saves or shares a weekly PNG with opt-in controls for names, UIDs, and private notes.
 - Can send a validated original CSV to an optional user-owned Discord incoming webhook after confirmation.
 - Stores the latest 100 parsed packets and up to 50 saved packets, with table and raw views, copy, export, selection, and deletion.
 - Supports member sorting, persistent drag ordering, snapshot comparison, single-week and all-week CSV export, and complete `.gf2backup` export/restore.
-- Supports English and Korean and uses the Android device timezone for display.
+- Guides first-time users through Main, Settings, Platoon management, weekly controls, and parsed-packet pages, with a persistent English/Korean selector and Skip action.
+- Supports English and Korean, System/Light/Dark themes, and the Android device timezone for display.
 - Creates UTF-8 Platoon-member CSV files with this column order:
 
 ```text
@@ -35,7 +36,7 @@ uid,name,level,weeklyMerit,totalMerit,highScore,totalScore,lastLogin,logTime
 ## Use
 
 1. Install the ARM64 APK on Android 8.0 or newer.
-2. Open **GF2logger**, confirm the game package, and select **Capture one Platoon roster**.
+2. Open **GF2logger**, confirm the game package, and select **One-time Capture**.
 3. Approve Android's VPN prompt, then open the game.
 4. Enter **Platoon(서클)** and open **Updates(동향)** and **Members(멤버)**.
 5. Return to GF2logger to review the captured packets and Platoon data.

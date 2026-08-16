@@ -5,7 +5,6 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -70,48 +69,57 @@ class PacketHistoryActivity : LocalizedActivity() {
                 textSize = 24f
                 setTypeface(typeface, Typeface.BOLD)
             }, matchWidth())
-            actionButton = Button(context).apply {
-                setOnClickListener {
-                    if (showingRaw) copyToClipboard(rawContent) else showRawContent()
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                actionButton = Button(context).apply {
+                    useSecondaryActionStyle()
+                    setOnClickListener {
+                        if (showingRaw) copyToClipboard(rawContent) else showRawContent()
+                    }
                 }
-            }
-            addView(actionButton, matchWidth())
-            sendButton = Button(context).apply {
-                text = getString(R.string.send_original_csv)
-                usePrimaryActionStyle()
-                setCompoundDrawablesRelativeWithIntrinsicBounds(
-                    R.drawable.ic_discord, 0, 0, 0,
-                )
-                compoundDrawableTintList = ColorStateList.valueOf(
-                    context.getColor(R.color.primary_action_foreground),
-                )
-                compoundDrawablePadding = dp(8)
-                setPaddingRelative(
-                    paddingStart, paddingTop, paddingEnd + dp(32), paddingBottom,
-                )
-                setOnClickListener { confirmSendOriginalCsv() }
-            }
-            addView(FrameLayout(context).apply {
-                addView(
-                    sendButton,
-                    FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ),
-                )
-                sendUnavailableOverlay = View(context).apply {
-                    isClickable = true
-                    isFocusable = true
-                    contentDescription = getString(R.string.discord_webhook_not_configured)
-                    setOnClickListener { showWebhookRequiredDialog() }
+                addView(actionButton, LinearLayout.LayoutParams(
+                    0,
+                    dp(48),
+                    1f,
+                ).apply { marginEnd = dp(4) })
+                sendButton = Button(context).apply {
+                    text = getString(R.string.send_original_csv)
+                    usePrimaryActionStyle()
+                    setCompoundDrawablesRelativeWithIntrinsicBounds(
+                        R.drawable.ic_discord, 0, 0, 0,
+                    )
+                    compoundDrawableTintList = ColorStateList.valueOf(
+                        context.getColor(R.color.primary_action_foreground),
+                    )
+                    compoundDrawablePadding = dp(6)
+                    setOnClickListener { confirmSendOriginalCsv() }
                 }
-                addView(
-                    sendUnavailableOverlay,
-                    FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    ),
-                )
+                addView(FrameLayout(context).apply {
+                    addView(
+                        sendButton,
+                        FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        ),
+                    )
+                    sendUnavailableOverlay = View(context).apply {
+                        isClickable = true
+                        isFocusable = true
+                        contentDescription = getString(R.string.discord_webhook_not_configured)
+                        setOnClickListener { showWebhookRequiredDialog() }
+                    }
+                    addView(
+                        sendUnavailableOverlay,
+                        FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        ),
+                    )
+                }, LinearLayout.LayoutParams(
+                    0,
+                    dp(48),
+                    1f,
+                ).apply { marginStart = dp(4) })
             }, matchWidth())
             contentContainer = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
@@ -237,14 +245,14 @@ class PacketHistoryActivity : LocalizedActivity() {
                 text = value
                 textSize = if (header) 14f else 13f
                 gravity = Gravity.CENTER_VERTICAL
-                setTextColor(Color.rgb(28, 32, 38))
+                setTextColor(getColor(R.color.text_primary))
                 if (header) setTypeface(typeface, Typeface.BOLD)
                 val horizontal = (10 * resources.displayMetrics.density).toInt()
                 val vertical = (8 * resources.displayMetrics.density).toInt()
                 setPadding(horizontal, vertical, horizontal, vertical)
                 background = GradientDrawable().apply {
-                    setColor(if (header) Color.rgb(225, 231, 241) else Color.WHITE)
-                    setStroke(1, Color.rgb(160, 170, 185))
+                    setColor(getColor(if (header) R.color.table_header else R.color.table_cell))
+                    setStroke(1, getColor(R.color.outline_strong))
                 }
             }, TableRow.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,

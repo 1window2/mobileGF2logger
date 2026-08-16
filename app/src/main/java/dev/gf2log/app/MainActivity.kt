@@ -5,8 +5,8 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.database.Cursor
-import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -47,10 +47,16 @@ import java.util.concurrent.Executors
 class MainActivity : LocalizedActivity() {
     private lateinit var packageNameInput: EditText
     private lateinit var statusText: TextView
+    private lateinit var captureStateText: TextView
     private lateinit var captureStatusText: TextView
+    private lateinit var prepareCaptureButton: Button
+    private lateinit var captureOnceButton: Button
+    private lateinit var stopCaptureButton: Button
     private lateinit var guidedCaptureText: TextView
     private lateinit var historyContainer: LinearLayout
+    private lateinit var historyActions: LinearLayout
     private lateinit var savedHistoryContainer: LinearLayout
+    private lateinit var savedHistoryActions: LinearLayout
     private lateinit var historyStore: CaptureHistoryStore
     private lateinit var savedHistoryStore: SavedHistoryStore
     private val selectedHistoryIds = linkedSetOf<String>()
@@ -61,7 +67,7 @@ class MainActivity : LocalizedActivity() {
     }
     private val refreshStatus = object : Runnable {
         override fun run() {
-            captureStatusText.text = CaptureStatus.read()
+            renderCaptureStatus()
             renderGuidedCaptureProgress()
             statusHandler.postDelayed(this, STATUS_REFRESH_MILLIS)
         }
@@ -72,6 +78,11 @@ class MainActivity : LocalizedActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!OnboardingPreferences.isCompleted(this)) {
+            startActivity(Intent(this, OnboardingActivity::class.java))
+            finish()
+            return
+        }
         historyStore = CaptureHistoryStore(
             File(filesDir, CaptureHistoryStore.HISTORY_DIRECTORY),
         )
@@ -84,7 +95,8 @@ class MainActivity : LocalizedActivity() {
 
     override fun onResume() {
         super.onResume()
-        captureStatusText.text = CaptureStatus.read()
+        if (!::captureStatusText.isInitialized) return
+        renderCaptureStatus()
         refreshHistory()
         statusHandler.postDelayed(refreshStatus, STATUS_REFRESH_MILLIS)
     }
@@ -184,150 +196,268 @@ class MainActivity : LocalizedActivity() {
         }
     }
 
-    private fun buildContentView(): ScrollView {
-        val spacing = (16 * resources.displayMetrics.density).toInt()
+    private fun buildContentView(): View {
+        val spacing = dp(16)
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(spacing, spacing, spacing, spacing)
+            setPadding(spacing, dp(10), spacing, dp(20))
 
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
+                addView(android.widget.ImageView(context).apply {
+                    setImageResource(R.mipmap.ic_launcher)
+                    scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
+                }, LinearLayout.LayoutParams(dp(40), dp(40)).apply {
+                    marginEnd = dp(10)
+                })
                 addView(TextView(context).apply {
                     text = getString(R.string.app_name)
-                    textSize = 28f
+                    textSize = 22f
                     setTypeface(typeface, Typeface.BOLD)
                 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 addView(ImageButton(context).apply {
                     setImageResource(R.drawable.ic_settings)
                     contentDescription = getString(R.string.open_options)
-                    setBackgroundColor(Color.TRANSPARENT)
+                    useModernIconStyle()
                     setPadding(dp(10), dp(10), dp(10), dp(10))
                     setOnClickListener {
                         startActivity(Intent(this@MainActivity, OptionsActivity::class.java))
                     }
                 }, LinearLayout.LayoutParams(dp(48), dp(48)))
             }, matchWidth())
-            addView(TextView(context).apply {
-                text = getString(R.string.app_description)
-                textSize = 16f
-                setPadding(0, spacing / 2, 0, spacing)
-            })
 
-            packageNameInput = EditText(context).apply {
-                hint = getString(R.string.target_package_hint)
-                setSingleLine(true)
-                setText(TargetPackagePreferences.get(context))
-            }
-            addView(packageNameInput, matchWidth())
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(10), dp(10), dp(10), dp(10))
+                background = ModernUi.panelBackground(context).apply {
+                    setStroke(dp(1), getColor(R.color.outline))
+                    cornerRadius = dp(8).toFloat()
+                }
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(View(context).apply {
+                        background = GradientDrawable().apply {
+                            shape = GradientDrawable.OVAL
+                            setColor(getColor(R.color.accent))
+                        }
+                    }, LinearLayout.LayoutParams(dp(8), dp(8)).apply { marginEnd = dp(8) })
+                    addView(TextView(context).apply {
+                        text = getString(R.string.capture_status_label)
+                        textSize = 13f
+                        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                }, matchWidth())
+                captureStateText = TextView(context).apply {
+                    textSize = 22f
+                    setTextColor(getColor(R.color.success_text))
+                    setTypeface(typeface, Typeface.BOLD)
+                    setPadding(0, dp(8), 0, 0)
+                }
+                addView(captureStateText, matchWidth())
+                captureStatusText = TextView(context).apply {
+                    textSize = 13f
+                    setTextColor(getColor(R.color.text_secondary))
+                    setPadding(0, dp(1), 0, dp(8))
+                }
+                addView(captureStatusText, matchWidth())
+                addView(TextView(context).apply {
+                    text = getString(R.string.capture_target)
+                    textSize = 12f
+                    setTextColor(getColor(R.color.text_secondary))
+                    setPadding(0, dp(2), 0, dp(3))
+                }, matchWidth())
+                packageNameInput = EditText(context).apply {
+                    hint = getString(R.string.target_package_hint)
+                    setSingleLine(true)
+                    textSize = 13f
+                    setText(TargetPackagePreferences.get(context))
+                }
+                addView(packageNameInput, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    dp(48),
+                ))
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    prepareCaptureButton = Button(context).apply {
+                        text = getString(R.string.prepare_capture)
+                        useCaptureActionStyle()
+                        allowCompactMultilineLabel()
+                        setOnClickListener { requestVpnAndStart(captureOnce = false) }
+                    }
+                    addView(prepareCaptureButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+                        marginEnd = dp(3)
+                    })
+                    captureOnceButton = Button(context).apply {
+                        text = getString(R.string.capture_one_roster)
+                        usePrimaryActionStyle()
+                        allowCompactMultilineLabel()
+                        setOnClickListener { requestVpnAndStart(captureOnce = true) }
+                    }
+                    addView(captureOnceButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+                        marginStart = dp(3)
+                        marginEnd = dp(3)
+                    })
+                    stopCaptureButton = Button(context).apply {
+                        text = getString(R.string.stop_capture)
+                        useDestructiveActionStyle()
+                        setOnClickListener { stopCaptureService() }
+                    }
+                    addView(stopCaptureButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+                        marginStart = dp(3)
+                    })
+                }, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(4) })
+                guidedCaptureText = TextView(context).apply {
+                    visibility = View.GONE
+                    textSize = 12f
+                    setTextColor(getColor(R.color.text_secondary))
+                    setPadding(0, dp(4), 0, 0)
+                }
+                addView(guidedCaptureText, matchWidth())
+                renderCaptureStatus()
+            }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(8) })
 
-            addView(Button(context).apply {
-                text = getString(R.string.prepare_capture)
-                usePrimaryActionStyle()
-                setOnClickListener { requestVpnAndStart(captureOnce = false) }
-            }, matchWidth())
-            addView(Button(context).apply {
-                text = getString(R.string.capture_one_roster)
-                usePrimaryActionStyle()
-                setOnClickListener { requestVpnAndStart(captureOnce = true) }
-            }, matchWidth())
-            addView(TextView(context).apply {
-                text = getString(R.string.guided_capture_description)
-                textSize = 13f
-                setPadding(dp(16), 0, 0, dp(8))
-            }, matchWidth())
-            guidedCaptureText = TextView(context).apply {
-                visibility = View.GONE
-                textSize = 14f
-                setPadding(dp(16), 0, 0, dp(8))
-            }
-            addView(guidedCaptureText, matchWidth())
-            addView(Button(context).apply {
-                text = getString(R.string.stop_capture)
-                useDestructiveActionStyle()
-                setOnClickListener { stopCaptureService() }
-            }, matchWidth())
-
-            captureStatusText = TextView(context).apply {
-                text = CaptureStatus.read()
-                textSize = 15f
-                setPadding(0, spacing, 0, 0)
-            }
-            addView(captureStatusText, matchWidth())
             statusText = TextView(context).apply {
-                textSize = 14f
+                textSize = 13f
+                setTextColor(getColor(R.color.text_secondary))
+                setPadding(dp(4), dp(6), dp(4), 0)
             }
             addView(statusText, matchWidth())
-            addView(Button(context).apply {
-                text = getString(R.string.open_platoon_management)
-                usePrimaryActionStyle()
-                setOnClickListener {
-                    startActivity(Intent(this@MainActivity, PlatoonActivity::class.java))
-                }
-            }, matchWidth())
-            addView(Button(context).apply {
-                text = getString(R.string.weekly_table)
-                usePrimaryActionStyle()
-                setOnClickListener {
-                    startActivity(Intent(this@MainActivity, WeeklyReportActivity::class.java))
-                }
-            }, matchWidth())
-            addView(Button(context).apply {
-                text = getString(R.string.import_platoon_csv)
-                setOnClickListener { selectPlatoonCsvFiles() }
-            }, matchWidth())
-            addView(Button(context).apply {
-                text = getString(R.string.export_platoon_backup)
-                setOnClickListener { exportPlatoonBackup() }
-            }, matchWidth())
-            addView(Button(context).apply {
-                text = getString(R.string.undo_last_csv_import)
-                setOnClickListener { confirmUndoLastCsvImport() }
-            }, matchWidth())
-            addView(Button(context).apply {
-                text = getString(R.string.import_platoon_backup)
-                setOnClickListener { confirmImportPlatoonBackup() }
-            }, matchWidth())
 
-            addView(TextView(context).apply {
-                text = getString(R.string.recent_packets, CaptureHistoryStore.MAX_ENTRIES)
-                textSize = 20f
-                setTypeface(typeface, Typeface.BOLD)
-                setPadding(0, spacing, 0, spacing / 2)
-            }, matchWidth())
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(featureShortcut(
+                    title = getString(R.string.platoon_management),
+                    detail = getString(R.string.platoon_shortcut_detail),
+                    icon = R.drawable.ic_group,
+                ) { startActivity(Intent(this@MainActivity, PlatoonActivity::class.java)) },
+                    LinearLayout.LayoutParams(0, dp(76), 1f).apply { marginEnd = dp(5) })
+                addView(featureShortcut(
+                    title = getString(R.string.weekly_table),
+                    detail = getString(R.string.weekly_shortcut_detail),
+                    icon = R.drawable.ic_calendar,
+                ) { startActivity(Intent(this@MainActivity, WeeklyReportActivity::class.java)) },
+                    LinearLayout.LayoutParams(0, dp(76), 1f).apply { marginStart = dp(5) })
+            }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(10) })
+
+            addView(sectionLabel(getString(R.string.data_tools)), matchWidth())
+            listOf(
+                ModernUi.listRow(context, getString(R.string.import_platoon_csv), icon = R.drawable.ic_edit) {
+                    selectPlatoonCsvFiles()
+                },
+                ModernUi.listRow(context, getString(R.string.export_platoon_backup), icon = R.drawable.ic_save) {
+                    exportPlatoonBackup()
+                },
+                ModernUi.listRow(context, getString(R.string.undo_last_csv_import), icon = R.drawable.ic_arrow_back) {
+                    confirmUndoLastCsvImport()
+                },
+                ModernUi.listRow(context, getString(R.string.import_platoon_backup), icon = R.drawable.ic_save) {
+                    confirmImportPlatoonBackup()
+                },
+            ).forEach { row ->
+                addView(row, matchWidth())
+            }
+
+            addView(sectionLabel(getString(R.string.recent_packets, CaptureHistoryStore.MAX_ENTRIES)), matchWidth())
             historyContainer = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
             }
             addView(historyContainer, matchWidth())
-            addView(Button(context).apply {
-                text = getString(R.string.delete_selected_history)
-                setOnClickListener { deleteSelectedHistory() }
-            }, matchWidth())
-            addView(Button(context).apply {
-                text = getString(R.string.save_selected_history)
-                setOnClickListener { saveSelectedHistory() }
-            }, matchWidth())
+            historyActions = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(Button(context).apply {
+                    text = getString(R.string.delete_selected_history)
+                    useDestructiveTextActionStyle()
+                    setOnClickListener { deleteSelectedHistory() }
+                }, matchWidth())
+                addView(Button(context).apply {
+                    text = getString(R.string.save_selected_history)
+                    useSecondaryActionStyle()
+                    setOnClickListener { saveSelectedHistory() }
+                }, matchWidth())
+            }
+            addView(historyActions, matchWidth())
 
-            addView(TextView(context).apply {
-                text = getString(R.string.saved_packets, SavedHistoryStore.MAX_ENTRIES)
-                textSize = 20f
-                setTypeface(typeface, Typeface.BOLD)
-                setPadding(0, spacing, 0, spacing / 2)
-            }, matchWidth())
+            addView(sectionLabel(getString(R.string.saved_packets, SavedHistoryStore.MAX_ENTRIES)), matchWidth())
             savedHistoryContainer = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
             }
             addView(savedHistoryContainer, matchWidth())
-            addView(Button(context).apply {
-                text = getString(R.string.delete_selected_saved_history)
-                setOnClickListener { deleteSelectedSavedHistory() }
-            }, matchWidth())
-            addView(Button(context).apply {
-                text = getString(R.string.export_latest_platoon_csv)
-                setOnClickListener { exportLatestPlatoonCsv() }
-            }, matchWidth())
+            savedHistoryActions = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(Button(context).apply {
+                    text = getString(R.string.delete_selected_saved_history)
+                    useDestructiveTextActionStyle()
+                    setOnClickListener { deleteSelectedSavedHistory() }
+                }, matchWidth())
+                addView(Button(context).apply {
+                    text = getString(R.string.export_latest_platoon_csv)
+                    useSecondaryActionStyle()
+                    setOnClickListener { exportLatestPlatoonCsv() }
+                }, matchWidth())
+            }
+            addView(savedHistoryActions, matchWidth())
         }
-        return ScrollView(this).apply { addView(container, matchWidth()) }
+        val scroll = ScrollView(this).apply { addView(container, matchWidth()) }
+        return PrimaryNavigation.wrap(this, scroll, PrimaryNavigation.Destination.HOME)
+    }
+
+    private fun sectionLabel(textValue: CharSequence, topPadding: Int = dp(18)) = TextView(this).apply {
+        text = textValue
+        textSize = 15f
+        setTypeface(typeface, Typeface.BOLD)
+        setPadding(dp(2), topPadding, 0, dp(7))
+    }
+
+    private fun featureShortcut(
+        title: CharSequence,
+        detail: CharSequence,
+        icon: Int,
+        onClick: () -> Unit,
+    ) = Button(this).apply {
+        text = "$title\n$detail"
+        contentDescription = "$title. $detail"
+        setCompoundDrawablesRelativeWithIntrinsicBounds(icon, 0, 0, 0)
+        compoundDrawablePadding = dp(8)
+        compoundDrawableTintList = ColorStateList.valueOf(getColor(R.color.accent_text))
+        useFeatureActionStyle()
+        setOnClickListener { onClick() }
+    }
+
+    private fun renderCaptureStatus() {
+        if (!::captureStateText.isInitialized || !::captureStatusText.isInitialized) return
+        val starting = CaptureStatus.isStarting
+        val running = CaptureStatus.isRunning
+        captureStateText.text = getString(
+            when {
+                starting -> R.string.status_preparing
+                running -> R.string.capture_running
+                else -> R.string.capture_ready
+            },
+        )
+        val status = CaptureStatus.read()
+        captureStatusText.text = when (status) {
+            "Capture is stopped" -> getString(R.string.capture_stopped_detail)
+            "Preparing capture" -> getString(R.string.status_preparing)
+            else -> status
+        }
+        captureStateText.contentDescription = captureStateText.text
+        captureStatusText.contentDescription = captureStatusText.text
+        val busy = starting || running
+        if (::packageNameInput.isInitialized) packageNameInput.isEnabled = !busy
+        if (::prepareCaptureButton.isInitialized) prepareCaptureButton.isEnabled = !busy
+        if (::captureOnceButton.isInitialized) captureOnceButton.isEnabled = !busy
+        if (::stopCaptureButton.isInitialized) stopCaptureButton.isEnabled = busy
     }
 
     // Function Name: renderGuidedCaptureProgress
@@ -366,13 +496,14 @@ class MainActivity : LocalizedActivity() {
     }
 
     private fun startCaptureService() {
+        CaptureStatus.markStarting()
+        renderCaptureStatus()
         val intent = Intent(this, CaptureVpnService::class.java)
             .setAction(CaptureVpnService.ACTION_START)
             .putExtra(CaptureVpnService.EXTRA_TARGET_PACKAGE, packageNameInput.text.toString().trim())
             .putExtra(CaptureVpnService.EXTRA_CAPTURE_ONCE, captureOnceRequested)
         startForegroundService(intent)
         captureOnceRequested = false
-        captureStatusText.text = getString(R.string.status_preparing)
     }
 
     private fun stopCaptureService() {
@@ -380,7 +511,7 @@ class MainActivity : LocalizedActivity() {
             .setAction(CaptureVpnService.ACTION_STOP)
         startService(intent)
         CaptureStatus.markStopped()
-        captureStatusText.text = CaptureStatus.read()
+        renderCaptureStatus()
     }
 
     private fun requestNotificationPermissionIfNeeded() {
@@ -668,20 +799,25 @@ class MainActivity : LocalizedActivity() {
     }
 
     private fun refreshHistory() {
+        val recentEntries = historyStore.list()
         renderHistoryEntries(
             container = historyContainer,
-            entries = historyStore.list(),
+            entries = recentEntries,
             selectedIds = selectedHistoryIds,
             saved = false,
             emptyMessage = R.string.no_parsed_packets,
         )
+        historyActions.visibility = if (recentEntries.isEmpty()) View.GONE else View.VISIBLE
+
+        val savedEntries = savedHistoryStore.list()
         renderHistoryEntries(
             container = savedHistoryContainer,
-            entries = savedHistoryStore.list(),
+            entries = savedEntries,
             selectedIds = selectedSavedHistoryIds,
             saved = true,
             emptyMessage = R.string.no_saved_packets,
         )
+        savedHistoryActions.visibility = if (savedEntries.isEmpty()) View.GONE else View.VISIBLE
     }
 
     private fun renderHistoryEntries(
@@ -718,6 +854,7 @@ class MainActivity : LocalizedActivity() {
                 addView(Button(context).apply {
                     text = entry.title
                     isAllCaps = false
+                    useNavigationActionStyle()
                     setOnClickListener {
                         startActivity(
                             Intent(this@MainActivity, PacketHistoryActivity::class.java)
@@ -731,13 +868,13 @@ class MainActivity : LocalizedActivity() {
                     val localizedTag = localizedPayloadTag(entry.payloadType)
                     text = localizedTag
                     textSize = 12f
-                    setTextColor(Color.WHITE)
+                    setTextColor(getColor(R.color.primary_action_foreground))
                     gravity = Gravity.CENTER
                     setPadding(dp(8), dp(5), dp(8), dp(5))
                     background = GradientDrawable().apply {
                         shape = GradientDrawable.RECTANGLE
                         cornerRadius = tagHeight / 2f
-                        setColor(Color.rgb(49, 93, 168))
+                        setColor(getColor(R.color.primary_action_background))
                     }
                     contentDescription = getString(
                         R.string.payload_tag_description,

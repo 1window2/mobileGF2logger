@@ -11,6 +11,10 @@ object CaptureStatus {
         private set
 
     @Volatile
+    var isStarting: Boolean = false
+        private set
+
+    @Volatile
     private var guidedProgress: GuidedProgress? = null
 
     fun read(): String = message
@@ -23,12 +27,20 @@ object CaptureStatus {
 
     fun markRunning(message: String, guided: Boolean = guidedProgress != null) {
         isRunning = true
+        isStarting = false
         this.message = message
         if (guided && guidedProgress == null) guidedProgress = GuidedProgress()
     }
 
+    fun markStarting(message: String = "Preparing capture") {
+        isRunning = false
+        isStarting = true
+        this.message = message
+    }
+
     fun markStopped(message: String = DEFAULT_MESSAGE) {
         isRunning = false
+        isStarting = false
         this.message = message
     }
 

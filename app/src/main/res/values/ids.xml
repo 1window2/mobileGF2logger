@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="gf2_ui_role" type="id" />
+    <item name="gf2_ui_compact_multiline" type="id" />
+</resources>

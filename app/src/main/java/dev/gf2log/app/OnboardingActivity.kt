@@ -58,13 +58,13 @@ class OnboardingActivity : LocalizedActivity() {
                         recreate()
                     }
                 },
-                LinearLayout.LayoutParams(dp(184), dp(44)),
+                LinearLayout.LayoutParams(dp(148), dp(40)),
             )
         }, matchWidth())
 
         addView(TextView(context).apply {
             text = getString(R.string.onboarding_welcome)
-            textSize = 28f
+            textSize = 26f
             setTypeface(typeface, Typeface.BOLD)
             setPadding(0, dp(24), 0, dp(4))
         }, matchWidth())
@@ -154,9 +154,9 @@ class OnboardingActivity : LocalizedActivity() {
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(22), dp(22), dp(22), dp(22))
+            setPadding(dp(18), dp(18), dp(18), dp(18))
             background = ModernUi.panelBackground(context)
-            elevation = dp(2).toFloat()
+            elevation = 0f
 
             addView(FrameLayout(context).apply {
                 background = ModernUi.panelBackground(context, emphasized = true)
@@ -165,14 +165,14 @@ class OnboardingActivity : LocalizedActivity() {
                     imageTintList = if (page.icon == R.mipmap.ic_launcher) null else
                         android.content.res.ColorStateList.valueOf(getColor(R.color.primary))
                     scaleType = ImageView.ScaleType.CENTER_INSIDE
-                    setPadding(dp(16), dp(16), dp(16), dp(16))
-                }, FrameLayout.LayoutParams(dp(78), dp(78), Gravity.CENTER))
-            }, LinearLayout.LayoutParams(dp(92), dp(92)).apply {
-                bottomMargin = dp(18)
+                    setPadding(dp(13), dp(13), dp(13), dp(13))
+                }, FrameLayout.LayoutParams(dp(62), dp(62), Gravity.CENTER))
+            }, LinearLayout.LayoutParams(dp(72), dp(72)).apply {
+                bottomMargin = dp(16)
             })
             addView(TextView(context).apply {
                 text = getString(page.title)
-                textSize = 25f
+                textSize = 23f
                 gravity = Gravity.CENTER
                 setTypeface(typeface, Typeface.BOLD)
             }, matchWidth())
@@ -210,7 +210,7 @@ class OnboardingActivity : LocalizedActivity() {
             text = "✓"
             textSize = 17f
             setTypeface(typeface, Typeface.BOLD)
-            setTextColor(getColor(R.color.primary))
+            setTextColor(getColor(R.color.accent))
             gravity = Gravity.CENTER
         }, LinearLayout.LayoutParams(dp(28), ViewGroup.LayoutParams.WRAP_CONTENT))
         addView(TextView(context).apply {
@@ -323,8 +323,8 @@ private class OnboardingLanguageToggle(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val width = resolveSize(dp(184), widthMeasureSpec)
-        val height = resolveSize(dp(44), heightMeasureSpec)
+        val width = resolveSize(dp(148), widthMeasureSpec)
+        val height = resolveSize(dp(40), heightMeasureSpec)
         setMeasuredDimension(width, height)
         val childWidth = (width - paddingLeft - paddingRight) / 2
         val childHeight = height - paddingTop - paddingBottom

@@ -3,6 +3,7 @@ package dev.gf2log.app
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.InsetDrawable
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -23,10 +24,10 @@ object ModernUi {
     fun panelBackground(context: Context, emphasized: Boolean = false): GradientDrawable =
         GradientDrawable().apply {
             setColor(context.getColor(if (emphasized) R.color.primary_soft else R.color.surface))
-            cornerRadius = context.dp(22).toFloat()
+            cornerRadius = context.dp(10).toFloat()
             setStroke(
                 context.dp(1),
-                context.getColor(if (emphasized) R.color.primary else R.color.outline),
+                context.getColor(if (emphasized) R.color.outline_strong else R.color.outline),
             )
         }
 
@@ -37,6 +38,15 @@ object ModernUi {
                 view.isAllCaps = false
                 view.elevation = 0f
                 view.stateListAnimator = null
+                view.background?.let { drawable ->
+                    view.background = InsetDrawable(
+                        drawable,
+                        view.context.dp(3),
+                        view.context.dp(7),
+                        view.context.dp(3),
+                        view.context.dp(7),
+                    )
+                }
             }
             is EditText -> view.elevation = 0f
             is ImageButton -> {
@@ -54,13 +64,9 @@ object ModernUi {
         val content = root.findViewById<ViewGroup>(android.R.id.content) ?: return
         val screen = content.getChildAt(0) ?: return
         screen.setBackgroundColor(screen.context.getColor(R.color.app_background))
-        if (screen !is ScrollView || screen.childCount == 0) return
-        screen.isFillViewport = true
-        screen.clipToPadding = false
-        screen.setPadding(screen.context.dp(8), screen.context.dp(8), screen.context.dp(8), screen.context.dp(8))
-        screen.getChildAt(0).apply {
-            background = panelBackground(context)
-            elevation = context.dp(1).toFloat()
+        if (screen is ScrollView) {
+            screen.isFillViewport = true
+            screen.clipToPadding = false
         }
     }
 
@@ -72,7 +78,7 @@ object ModernUi {
         ),
         intArrayOf(
             context.getColor(R.color.outline),
-            context.getColor(R.color.primary),
+            context.getColor(R.color.accent),
             context.getColor(R.color.outline_strong),
         ),
     )
@@ -81,7 +87,7 @@ object ModernUi {
 internal fun Context.dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
 internal fun ImageButton.useModernIconStyle() {
-    background = ModernUi.panelBackground(context, emphasized = true)
+    background = InsetDrawable(ModernUi.panelBackground(context), context.dp(6))
     imageTintList = ColorStateList.valueOf(context.getColor(R.color.primary))
     elevation = 0f
 }

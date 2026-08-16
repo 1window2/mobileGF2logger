@@ -8,7 +8,8 @@ import dev.gf2log.protocol.PayloadCatalog
 
 internal object UserSettingsPreferences {
     private const val PREFERENCES = "user_settings"
-    private const val SCHEMA_VERSION = 1
+    private const val SCHEMA_VERSION = 2
+    private const val LEGACY_UNIFIED_SCHEMA_VERSION = 1
     private const val KEY_SCHEMA_VERSION = "schema_version"
     private const val KEY_LANGUAGE = "language"
     private const val KEY_THEME_MODE = "theme_mode"
@@ -130,8 +131,17 @@ internal object UserSettingsPreferences {
 
     private fun preferencesLocked(context: Context): SharedPreferences {
         val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
-        if (preferences.getInt(KEY_SCHEMA_VERSION, 0) == SCHEMA_VERSION) return preferences
-        val migrated = readLegacy(context)
+        val storedVersion = preferences.getInt(KEY_SCHEMA_VERSION, 0)
+        if (storedVersion == SCHEMA_VERSION) return preferences
+        val migrated = if (storedVersion == LEGACY_UNIFIED_SCHEMA_VERSION) {
+            // v2.2.0 already used the unified store. Preserve it and keep the
+            // new-user walkthrough exclusive to genuinely fresh installs.
+            readLocked(preferences).copy(
+                onboardingCompleted = preferences.getBoolean(KEY_ONBOARDING_COMPLETED, true),
+            )
+        } else {
+            readLegacy(context)
+        }
         check(writeSettings(preferences.edit().clear(), migrated).commit()) {
             "Unable to migrate app settings"
         }

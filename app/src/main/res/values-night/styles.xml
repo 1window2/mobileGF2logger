@@ -3,7 +3,7 @@
     <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans-serif</item>
         <item name="android:windowBackground">@color/app_background</item>
-        <item name="android:colorAccent">@color/primary</item>
+        <item name="android:colorAccent">@color/accent</item>
         <item name="android:textColorPrimary">@color/text_primary</item>
         <item name="android:textColorSecondary">@color/text_secondary</item>
         <item name="android:textViewStyle">@style/Widget.GF2.TextView</item>

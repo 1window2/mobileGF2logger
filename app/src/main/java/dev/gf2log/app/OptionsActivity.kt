@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.database.Cursor
-import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
 import android.graphics.drawable.GradientDrawable
@@ -123,6 +122,34 @@ class OptionsActivity : LocalizedActivity() {
                     isChecked = current == LanguagePreferences.KOREAN
                     setOnClickListener { changeLanguage(LanguagePreferences.KOREAN) }
                 })
+            }, matchWidth())
+
+            addView(TextView(context).apply {
+                text = getString(R.string.appearance)
+                textSize = 20f
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, spacing, 0, dp(4))
+            }, matchWidth())
+            addView(TextView(context).apply {
+                text = getString(R.string.theme_description)
+                textSize = 14f
+                setTextColor(getColor(R.color.text_secondary))
+                setPadding(0, 0, 0, dp(6))
+            }, matchWidth())
+            addView(RadioGroup(context).apply {
+                orientation = RadioGroup.HORIZONTAL
+                val current = ThemePreferences.get(context)
+                listOf(
+                    ThemePreferences.SYSTEM to R.string.theme_system,
+                    ThemePreferences.LIGHT to R.string.theme_light,
+                    ThemePreferences.DARK to R.string.theme_dark,
+                ).forEach { (mode, label) ->
+                    addView(RadioButton(context).apply {
+                        text = getString(label)
+                        isChecked = current == mode
+                        setOnClickListener { changeTheme(mode) }
+                    })
+                }
             }, matchWidth())
 
             addView(TextView(context).apply {
@@ -274,7 +301,7 @@ class OptionsActivity : LocalizedActivity() {
                     if (category.isRequired) {
                         buttonTintList = ColorStateList(
                             arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
-                            intArrayOf(Color.rgb(49, 93, 168), Color.rgb(49, 93, 168)),
+                            intArrayOf(getColor(R.color.primary), getColor(R.color.primary)),
                         )
                     }
                     setOnCheckedChangeListener { _, enabled ->
@@ -399,6 +426,12 @@ class OptionsActivity : LocalizedActivity() {
     private fun changeLanguage(language: String) {
         if (LanguagePreferences.get(this) == language) return
         LanguagePreferences.set(this, language)
+        recreate()
+    }
+
+    private fun changeTheme(mode: String) {
+        if (ThemePreferences.get(this) == mode) return
+        ThemePreferences.set(this, mode)
         recreate()
     }
 

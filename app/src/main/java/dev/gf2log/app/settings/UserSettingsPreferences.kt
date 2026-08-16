@@ -11,6 +11,8 @@ internal object UserSettingsPreferences {
     private const val SCHEMA_VERSION = 1
     private const val KEY_SCHEMA_VERSION = "schema_version"
     private const val KEY_LANGUAGE = "language"
+    private const val KEY_THEME_MODE = "theme_mode"
+    private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
     private const val KEY_DETAILED_NOTIFICATIONS = "detailed_notifications"
     private const val KEY_TARGET_PACKAGE = "target_package"
     private const val KEY_MEMBER_ORDER = "member_order"
@@ -45,6 +47,25 @@ internal object UserSettingsPreferences {
 
     fun setLanguage(context: Context, language: String) = edit(context) {
         putString(KEY_LANGUAGE, language)
+    }
+
+    fun themeMode(context: Context): String = synchronized(lock) {
+        preferencesLocked(context.applicationContext)
+            .getString(KEY_THEME_MODE, "system")
+            .orEmpty()
+    }
+
+    fun setThemeMode(context: Context, mode: String) = edit(context) {
+        putString(KEY_THEME_MODE, mode)
+    }
+
+    fun onboardingCompleted(context: Context): Boolean = synchronized(lock) {
+        preferencesLocked(context.applicationContext)
+            .getBoolean(KEY_ONBOARDING_COMPLETED, false)
+    }
+
+    fun setOnboardingCompleted(context: Context, completed: Boolean) = edit(context) {
+        putBoolean(KEY_ONBOARDING_COMPLETED, completed)
     }
 
     fun detailedNotifications(context: Context): Boolean = synchronized(lock) {
@@ -120,6 +141,8 @@ internal object UserSettingsPreferences {
     private fun readLocked(preferences: SharedPreferences) = AppBackupSettings(
         language = preferences.getString(KEY_LANGUAGE, LanguagePreferences.DEFAULT_LANGUAGE)
             .orEmpty(),
+        themeMode = preferences.getString(KEY_THEME_MODE, "system").orEmpty(),
+        onboardingCompleted = preferences.getBoolean(KEY_ONBOARDING_COMPLETED, false),
         detailedNotifications = preferences.getBoolean(KEY_DETAILED_NOTIFICATIONS, true),
         targetPackage = preferences.getString(
             KEY_TARGET_PACKAGE,
@@ -161,6 +184,8 @@ internal object UserSettingsPreferences {
             ?: TargetPackagePreferences.DEFAULT_TARGET_PACKAGE
         return AppBackupSettings(
             language = language,
+            themeMode = "system",
+            onboardingCompleted = false,
             detailedNotifications = detailedNotifications,
             targetPackage = targetPackage,
             payloadHistory = PayloadCatalog.categories.associate { category ->
@@ -234,6 +259,8 @@ internal object UserSettingsPreferences {
     ): SharedPreferences.Editor = editor
         .putInt(KEY_SCHEMA_VERSION, SCHEMA_VERSION)
         .putString(KEY_LANGUAGE, settings.language)
+        .putString(KEY_THEME_MODE, settings.themeMode)
+        .putBoolean(KEY_ONBOARDING_COMPLETED, settings.onboardingCompleted)
         .putBoolean(KEY_DETAILED_NOTIFICATIONS, settings.detailedNotifications)
         .putString(KEY_TARGET_PACKAGE, settings.targetPackage)
         .putString(KEY_MEMBER_ORDER, settings.memberOrder.joinToString(","))

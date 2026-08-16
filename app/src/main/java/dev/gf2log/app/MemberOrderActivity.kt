@@ -159,7 +159,7 @@ class MemberOrderActivity : LocalizedActivity() {
                 text = "\u2630"
                 textSize = 25f
                 gravity = Gravity.CENTER
-                setTextColor(Color.rgb(90, 94, 101))
+                setTextColor(getColor(R.color.text_secondary))
                 contentDescription = getString(R.string.drag_member, member.name)
                 setOnLongClickListener {
                     performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)

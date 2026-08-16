@@ -6,7 +6,6 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.Cursor
-import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -72,6 +71,11 @@ class MainActivity : LocalizedActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!OnboardingPreferences.isCompleted(this)) {
+            startActivity(Intent(this, OnboardingActivity::class.java))
+            finish()
+            return
+        }
         historyStore = CaptureHistoryStore(
             File(filesDir, CaptureHistoryStore.HISTORY_DIRECTORY),
         )
@@ -84,6 +88,7 @@ class MainActivity : LocalizedActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!::captureStatusText.isInitialized) return
         captureStatusText.text = CaptureStatus.read()
         refreshHistory()
         statusHandler.postDelayed(refreshStatus, STATUS_REFRESH_MILLIS)
@@ -201,7 +206,7 @@ class MainActivity : LocalizedActivity() {
                 addView(ImageButton(context).apply {
                     setImageResource(R.drawable.ic_settings)
                     contentDescription = getString(R.string.open_options)
-                    setBackgroundColor(Color.TRANSPARENT)
+                    useModernIconStyle()
                     setPadding(dp(10), dp(10), dp(10), dp(10))
                     setOnClickListener {
                         startActivity(Intent(this@MainActivity, OptionsActivity::class.java))
@@ -731,13 +736,13 @@ class MainActivity : LocalizedActivity() {
                     val localizedTag = localizedPayloadTag(entry.payloadType)
                     text = localizedTag
                     textSize = 12f
-                    setTextColor(Color.WHITE)
+                    setTextColor(getColor(R.color.primary_action_foreground))
                     gravity = Gravity.CENTER
                     setPadding(dp(8), dp(5), dp(8), dp(5))
                     background = GradientDrawable().apply {
                         shape = GradientDrawable.RECTANGLE
                         cornerRadius = tagHeight / 2f
-                        setColor(Color.rgb(49, 93, 168))
+                        setColor(getColor(R.color.primary_action_background))
                     }
                     contentDescription = getString(
                         R.string.payload_tag_description,

@@ -25,7 +25,8 @@ capture to the selected game package, and raw traffic is never stored.
 - Can send a validated original CSV to an optional user-owned Discord incoming webhook after confirmation.
 - Stores the latest 100 parsed packets and up to 50 saved packets, with table and raw views, copy, export, selection, and deletion.
 - Supports member sorting, persistent drag ordering, snapshot comparison, single-week and all-week CSV export, and complete `.gf2backup` export/restore.
-- Supports English and Korean and uses the Android device timezone for display.
+- Guides first-time users through Main, Settings, Platoon management, weekly controls, and parsed-packet pages, with a persistent English/Korean selector and Skip action.
+- Supports English and Korean, System/Light/Dark themes, and the Android device timezone for display.
 - Creates UTF-8 Platoon-member CSV files with this column order:
 
 ```text

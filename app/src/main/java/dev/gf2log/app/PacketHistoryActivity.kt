@@ -5,7 +5,6 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -237,14 +236,14 @@ class PacketHistoryActivity : LocalizedActivity() {
                 text = value
                 textSize = if (header) 14f else 13f
                 gravity = Gravity.CENTER_VERTICAL
-                setTextColor(Color.rgb(28, 32, 38))
+                setTextColor(getColor(R.color.text_primary))
                 if (header) setTypeface(typeface, Typeface.BOLD)
                 val horizontal = (10 * resources.displayMetrics.density).toInt()
                 val vertical = (8 * resources.displayMetrics.density).toInt()
                 setPadding(horizontal, vertical, horizontal, vertical)
                 background = GradientDrawable().apply {
-                    setColor(if (header) Color.rgb(225, 231, 241) else Color.WHITE)
-                    setStroke(1, Color.rgb(160, 170, 185))
+                    setColor(getColor(if (header) R.color.table_header else R.color.table_cell))
+                    setStroke(1, getColor(R.color.outline_strong))
                 }
             }, TableRow.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,

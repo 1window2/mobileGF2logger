@@ -1,3 +1,12 @@
+// AGP 9.3.1 otherwise contributes vulnerable Kotlin Gradle Plugin 2.2.10 only
+// as a transitive build dependency. Declaring the patched plugin explicitly
+// gives Gradle and Dependabot a concrete root constraint to resolve and track.
+buildscript {
+    dependencies {
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.20-Beta2'
+    }
+}
+
 plugins {
     id 'com.android.application' version '9.3.1' apply false
     id 'com.android.library' version '9.3.1' apply false

@@ -1,5 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="app_background">#0F131A</color>
+    <color name="surface">#171C25</color>
+    <color name="surface_variant">#222936</color>
+    <color name="surface_pressed">#2D3646</color>
+    <color name="text_primary">#EEF2F8</color>
+    <color name="text_secondary">#AEB8C7</color>
+    <color name="outline">#3D4758</color>
+    <color name="outline_strong">#69778C</color>
+    <color name="primary">#86AFFF</color>
+    <color name="primary_soft">#223454</color>
+    <color name="primary_soft_pressed">#2B426B</color>
+    <color name="table_header">#293A55</color>
+    <color name="table_cell">#171C25</color>
+    <color name="success_surface">#1F3A2A</color>
+    <color name="success_text">#9DDBB3</color>
+    <color name="warning_surface">#3B3120</color>
+    <color name="warning_text">#F2D28C</color>
+    <color name="control_ripple">#4086AFFF</color>
     <color name="primary_action_background">#86AFFF</color>
     <color name="primary_action_foreground">#111214</color>
     <color name="destructive_action">#FF8AA4</color>

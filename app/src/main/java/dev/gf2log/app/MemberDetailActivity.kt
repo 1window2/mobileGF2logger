@@ -199,7 +199,7 @@ class MemberDetailActivity : LocalizedActivity() {
             if (status.membershipPeriods.size == 1) {
                 addView(TextView(context).apply {
                     setText(R.string.membership_period_delete_last_hint)
-                    setTextColor(getColor(android.R.color.darker_gray))
+                    setTextColor(getColor(R.color.text_secondary))
                     setPadding(0, dp(8), 0, 0)
                 }, matchWidth())
             }

@@ -651,6 +651,8 @@ class PlatoonBackupManagerIntegrationTest {
         dailyMerit: Long,
     ) = AppBackupSettings(
         language = language,
+        themeMode = "system",
+        onboardingCompleted = true,
         detailedNotifications = detailedNotifications,
         targetPackage = targetPackage,
         payloadHistory = PayloadCatalog.categories.associate { category ->

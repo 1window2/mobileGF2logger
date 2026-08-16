@@ -273,7 +273,7 @@ class WeeklyReportActivity : LocalizedActivity() {
             }, LinearLayout.LayoutParams(0, wrap(), 1f))
             addView(ImageButton(context).apply {
                 setImageResource(if (isEditing) R.drawable.ic_save else R.drawable.ic_edit)
-                setBackgroundColor(Color.TRANSPARENT)
+                useModernIconStyle()
                 contentDescription = getString(
                     if (isEditing) R.string.save_weekly_edits else R.string.edit_weekly_table,
                 )
@@ -288,7 +288,7 @@ class WeeklyReportActivity : LocalizedActivity() {
             }, LinearLayout.LayoutParams(dp(48), dp(48)))
             addView(ImageButton(context).apply {
                 setImageResource(R.drawable.ic_share)
-                setBackgroundColor(Color.TRANSPARENT)
+                useModernIconStyle()
                 contentDescription = getString(R.string.share_weekly_table)
                 setPadding(dp(10), dp(10), dp(10), dp(10))
                 isEnabled = !isEditing && report.members.isNotEmpty()
@@ -299,7 +299,7 @@ class WeeklyReportActivity : LocalizedActivity() {
             }, LinearLayout.LayoutParams(dp(48), dp(48)))
             addView(ImageButton(context).apply {
                 setImageResource(R.drawable.ic_settings)
-                setBackgroundColor(Color.TRANSPARENT)
+                useModernIconStyle()
                 contentDescription = getString(R.string.weekly_table_settings)
                 setPadding(dp(10), dp(10), dp(10), dp(10))
                 isEnabled = !isEditing
@@ -970,14 +970,14 @@ class WeeklyReportActivity : LocalizedActivity() {
         text = value
         gravity = Gravity.CENTER
         this.textSize = textSize
+        setTextColor(getColor(R.color.text_primary))
         if (header) {
-            setTextColor(Color.rgb(28, 32, 38))
             setTypeface(typeface, Typeface.BOLD)
         }
         setPadding(dp(4), dp(2), dp(4), dp(2))
         background = GradientDrawable().apply {
-            setColor(if (header) Color.rgb(210, 222, 241) else Color.TRANSPARENT)
-            setStroke(1, GRID_COLOR)
+            setColor(if (header) getColor(R.color.table_header) else Color.TRANSPARENT)
+            setStroke(1, getColor(R.color.outline_strong))
         }
         layoutParams = LinearLayout.LayoutParams(dp(width), dp(height))
         onClick?.let {
@@ -1008,11 +1008,15 @@ class WeeklyReportActivity : LocalizedActivity() {
                 )
             }
             textSize = 14f
-            setTextColor(if (health.isComplete) Color.rgb(35, 105, 62) else WARNING_COLOR)
+            setTextColor(getColor(if (health.isComplete) R.color.success_text else R.color.warning_text))
             setPadding(dp(12), dp(10), dp(12), dp(10))
             background = GradientDrawable().apply {
-                setColor(if (health.isComplete) Color.rgb(231, 246, 236) else Color.rgb(255, 247, 222))
-                cornerRadius = dp(8).toFloat()
+                setColor(getColor(if (health.isComplete) R.color.success_surface else R.color.warning_surface))
+                cornerRadius = dp(14).toFloat()
+                setStroke(
+                    dp(1),
+                    getColor(if (health.isComplete) R.color.success_text else R.color.warning_text),
+                )
             }
         }, matchWidth())
     }
@@ -1669,13 +1673,13 @@ class WeeklyReportActivity : LocalizedActivity() {
 
     private fun gridBackground() = GradientDrawable().apply {
         setColor(Color.TRANSPARENT)
-        setStroke(1, GRID_COLOR)
+        setStroke(1, getColor(R.color.outline_strong))
     }
 
     private fun editableFieldBackground() = GradientDrawable().apply {
-        setColor(EDITABLE_FIELD_COLOR)
-        setStroke(dp(1), EDITABLE_FIELD_BORDER_COLOR)
-        cornerRadius = dp(3).toFloat()
+        setColor(getColor(R.color.surface_variant))
+        setStroke(dp(1), getColor(R.color.primary))
+        cornerRadius = dp(8).toFloat()
     }
 
     companion object {
@@ -1692,9 +1696,6 @@ class WeeklyReportActivity : LocalizedActivity() {
         private const val MEMBER_WIDTH = 120
         private const val DAILY_WIDTH = 128
         private const val MAX_VISIBLE_TABLE_ROWS = 6
-        private val GRID_COLOR = Color.rgb(112, 118, 128)
-        private val EDITABLE_FIELD_COLOR = Color.rgb(47, 58, 72)
-        private val EDITABLE_FIELD_BORDER_COLOR = Color.rgb(126, 164, 218)
         private val WARNING_COLOR = Color.rgb(255, 193, 7)
         private val SUCCESS_GREEN = Color.rgb(45, 170, 75)
         private val FAILURE_RED = Color.rgb(215, 60, 55)

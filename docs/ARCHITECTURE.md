@@ -163,6 +163,24 @@ plaintext TCP streams. Do not add pinning or anti-cheat bypasses.
 - Activities own Android presentation and delegate evidence precedence,
   inference, ordering, and CSV construction to pure policy objects.
 
+## Display and first-launch boundary
+
+`LocalizedActivity` applies both locale and System, Light, or Dark appearance
+through a configuration-wrapped base context before an Activity creates its
+views. `ModernUi` supplies shared presentation primitives only; it does not own
+capture, parsing, persistence, or report policy. Theme-specific resources keep
+packet tables, weekly grids, controls, and status surfaces readable without
+duplicating domain logic in Activities.
+
+`MainActivity` routes an installation with no completed first-use flag to the
+non-exported `OnboardingActivity`. The five-page guide may be finished or
+skipped, and writes completion only at that explicit exit. Its English/Korean
+segmented control persists the same language preference used by Settings.
+Complete backup settings schema v2 includes language, theme, and onboarding
+completion; schema-v1 backups remain accepted with System theme and completed
+onboarding defaults so an experienced restoring user is not trapped in the
+guide.
+
 The design deliberately favors composition over deep inheritance. Abstraction
 and polymorphism appear at real variation points (`GameData`, `ParseEvent`, and
 the native listener contract); encapsulation is provided by stores and the

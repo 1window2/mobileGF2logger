@@ -105,7 +105,9 @@ class CaptureVpnService : VpnService() {
                     }
                 }
                 if (recovery.isFailure) {
-                    throw directResult.exceptionOrNull() ?: recovery.exceptionOrNull()!!
+                    throw directResult.exceptionOrNull()
+                        ?: recovery.exceptionOrNull()
+                        ?: IllegalStateException("Roster ingestion and recovery both failed")
                 }
                 CaptureStatus.update("Recovered Platoon database from the completed roster CSV")
                 markRosterCaptured()

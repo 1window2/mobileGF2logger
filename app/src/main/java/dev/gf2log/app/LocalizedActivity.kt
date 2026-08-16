@@ -28,5 +28,11 @@ abstract class LocalizedActivity : Activity() {
     override fun onPostCreate(savedInstanceState: Bundle?) {
         super.onPostCreate(savedInstanceState)
         ModernUi.prepareContent(window.decorView)
+        // Android restores parts of the view hierarchy after onPostCreate during
+        // locale/theme recreation. Reapply presentation roles on the next frame so
+        // restored platform drawables cannot replace the app's semantic controls.
+        window.decorView.post {
+            if (!isFinishing) ModernUi.prepareContent(window.decorView)
+        }
     }
 }

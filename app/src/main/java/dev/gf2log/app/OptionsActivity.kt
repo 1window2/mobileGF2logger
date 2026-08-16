@@ -17,8 +17,6 @@ import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.RadioButton
-import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -94,39 +92,35 @@ class OptionsActivity : LocalizedActivity() {
 
             addView(TextView(context).apply {
                 text = getString(R.string.payload_options)
-                textSize = 26f
+                textSize = 23f
                 setTypeface(typeface, Typeface.BOLD)
             }, matchWidth())
             addView(TextView(context).apply {
                 text = getString(R.string.payload_options_description)
-                textSize = 15f
-                setPadding(0, dp(8), 0, spacing)
+                textSize = 13f
+                setTextColor(getColor(R.color.text_secondary))
+                setPadding(0, dp(4), 0, spacing)
             }, matchWidth())
 
             addView(TextView(context).apply {
                 text = getString(R.string.language)
-                textSize = 20f
+                textSize = 17f
                 setTypeface(typeface, Typeface.BOLD)
                 setPadding(0, 0, 0, dp(4))
             }, matchWidth())
-            addView(RadioGroup(context).apply {
-                orientation = RadioGroup.HORIZONTAL
-                val current = LanguagePreferences.get(context)
-                addView(RadioButton(context).apply {
-                    text = getString(R.string.language_english)
-                    isChecked = current == LanguagePreferences.DEFAULT_LANGUAGE
-                    setOnClickListener { changeLanguage(LanguagePreferences.DEFAULT_LANGUAGE) }
-                })
-                addView(RadioButton(context).apply {
-                    text = getString(R.string.language_korean)
-                    isChecked = current == LanguagePreferences.KOREAN
-                    setOnClickListener { changeLanguage(LanguagePreferences.KOREAN) }
-                })
-            }, matchWidth())
+            addView(ModernUi.segmentedControl(
+                context = context,
+                options = listOf(
+                    LanguagePreferences.DEFAULT_LANGUAGE to getString(R.string.language_english),
+                    LanguagePreferences.KOREAN to getString(R.string.language_korean),
+                ),
+                selectedValue = LanguagePreferences.get(context),
+                onSelected = ::changeLanguage,
+            ), matchWidth())
 
             addView(TextView(context).apply {
                 text = getString(R.string.appearance)
-                textSize = 20f
+                textSize = 17f
                 setTypeface(typeface, Typeface.BOLD)
                 setPadding(0, spacing, 0, dp(4))
             }, matchWidth())
@@ -136,50 +130,42 @@ class OptionsActivity : LocalizedActivity() {
                 setTextColor(getColor(R.color.text_secondary))
                 setPadding(0, 0, 0, dp(6))
             }, matchWidth())
-            addView(RadioGroup(context).apply {
-                orientation = RadioGroup.HORIZONTAL
-                val current = ThemePreferences.get(context)
-                listOf(
-                    ThemePreferences.SYSTEM to R.string.theme_system,
-                    ThemePreferences.LIGHT to R.string.theme_light,
-                    ThemePreferences.DARK to R.string.theme_dark,
-                ).forEach { (mode, label) ->
-                    addView(RadioButton(context).apply {
-                        text = getString(label)
-                        isChecked = current == mode
-                        setOnClickListener { changeTheme(mode) }
-                    })
-                }
-            }, matchWidth())
+            addView(ModernUi.segmentedControl(
+                context = context,
+                options = listOf(
+                    ThemePreferences.SYSTEM to getString(R.string.theme_system),
+                    ThemePreferences.LIGHT to getString(R.string.theme_light),
+                    ThemePreferences.DARK to getString(R.string.theme_dark),
+                ),
+                selectedValue = ThemePreferences.get(context),
+                onSelected = ::changeTheme,
+            ), matchWidth())
 
             addView(TextView(context).apply {
                 text = getString(R.string.backup)
-                textSize = 20f
+                textSize = 17f
                 setTypeface(typeface, Typeface.BOLD)
                 setPadding(0, spacing, 0, dp(4))
             }, matchWidth())
-            addView(Button(context).apply {
-                text = getString(R.string.restore_full_backup)
-                setOnClickListener { confirmFullRestore() }
-            }, matchWidth())
-            addView(TextView(context).apply {
-                text = getString(R.string.restore_full_backup_description)
-                textSize = 14f
-                setPadding(dp(16), 0, 0, spacing)
-            }, matchWidth())
-            addView(Button(context).apply {
-                text = getString(R.string.back_up_all_information)
-                setOnClickListener { exportFullBackup() }
-            }, matchWidth())
-            addView(TextView(context).apply {
-                text = getString(R.string.back_up_all_information_description)
-                textSize = 14f
-                setPadding(dp(16), 0, 0, spacing)
-            }, matchWidth())
+            addView(ModernUi.actionRow(
+                context,
+                getString(R.string.restore_full_backup),
+                getString(R.string.restore_full_backup_description),
+                ::confirmFullRestore,
+            ), matchWidth())
+            addView(ModernUi.actionRow(
+                context,
+                getString(R.string.back_up_all_information),
+                getString(R.string.back_up_all_information_description),
+                ::exportFullBackup,
+            ), LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(5) })
 
             addView(TextView(context).apply {
                 text = getString(R.string.discord_webhook)
-                textSize = 20f
+                textSize = 17f
                 setTypeface(typeface, Typeface.BOLD)
                 val discordIcon = context.getDrawable(R.drawable.ic_discord)?.mutate()
                 discordIcon?.setTint(currentTextColor)
@@ -216,16 +202,10 @@ class OptionsActivity : LocalizedActivity() {
                 } else {
                     R.color.webhook_missing_foreground
                 }
-                val borderColor = if (webhookConfigured) {
-                    R.color.webhook_configured_border
-                } else {
-                    R.color.webhook_missing_border
-                }
                 setTextColor(context.getColor(foregroundColor))
                 background = GradientDrawable().apply {
                     setColor(context.getColor(backgroundColor))
-                    cornerRadius = dp(10).toFloat()
-                    setStroke(dp(1), context.getColor(borderColor))
+                    cornerRadius = dp(12).toFloat()
                 }
                 setPadding(dp(12), dp(10), dp(12), dp(10))
             }, matchWidth())
@@ -237,6 +217,7 @@ class OptionsActivity : LocalizedActivity() {
             addView(webhookInput, matchWidth())
             addView(Button(context).apply {
                 text = getString(R.string.save_discord_webhook)
+                usePrimaryActionStyle()
                 setOnClickListener {
                     val saved = runCatching {
                         webhookStore.save(webhookInput.text.toString())
@@ -255,6 +236,7 @@ class OptionsActivity : LocalizedActivity() {
             }, matchWidth())
             addView(Button(context).apply {
                 text = getString(R.string.clear_discord_webhook)
+                useDestructiveTextActionStyle()
                 isEnabled = webhookConfigured
                 setOnClickListener {
                     val cleared = runCatching(webhookStore::clear).isSuccess
@@ -269,7 +251,7 @@ class OptionsActivity : LocalizedActivity() {
 
             addView(TextView(context).apply {
                 text = getString(R.string.payload_history)
-                textSize = 20f
+                textSize = 17f
                 setTypeface(typeface, Typeface.BOLD)
                 setPadding(0, spacing, 0, dp(4))
             }, matchWidth())
@@ -324,7 +306,7 @@ class OptionsActivity : LocalizedActivity() {
 
             addView(TextView(context).apply {
                 text = getString(R.string.last_capture_diagnostics)
-                textSize = 20f
+                textSize = 17f
                 setTypeface(typeface, Typeface.BOLD)
                 setPadding(0, spacing, 0, dp(4))
             }, matchWidth())

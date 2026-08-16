@@ -1,15 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">GF2logger</string>
+    <string name="capture_workspace">Capture workspace</string>
+    <string name="data_tools">Data tools</string>
+    <string name="platoon_shortcut_detail">Members &amp; history</string>
+    <string name="weekly_shortcut_detail">Review, edit &amp; share</string>
     <string name="app_description">On-device protocol capture for one explicitly selected game package. Raw traffic is not stored.</string>
     <string name="target_package_hint">Installed game package name</string>
     <string name="prepare_capture">Prepare capture</string>
-    <string name="capture_one_roster">Guided capture (auto-stop)</string>
-    <string name="guided_capture_description">Shows useful payload progress and stops after roster, activity, and update payloads arrive.</string>
+    <string name="capture_one_roster">One-time Capture</string>
     <string name="guided_capture_checklist">%1$s Platoon roster\n%2$s Activity evidence\n%3$s Membership updates</string>
     <string name="stop_capture">Stop</string>
     <string name="open_options">Open payload options</string>
-    <string name="open_platoon_management">Open Platoon management</string>
     <string name="export_platoon_backup">Export Platoon backup</string>
     <string name="import_platoon_backup">Import Platoon backup</string>
     <string name="import_backup_warning">This replaces current structured Platoon history, membership dates, and notes. Capture must remain stopped.</string>
@@ -32,12 +34,10 @@
     <string name="onboarding_finish">Get started</string>
     <string name="onboarding_step">%1$d of %2$d</string>
     <string name="onboarding_language_toggle">Change onboarding language</string>
-    <string name="onboarding_welcome">A compact guide to GF2logger</string>
-    <string name="onboarding_intro">Five quick pages explain every screen you need for capture and Platoon management.</string>
     <string name="onboarding_main_title">Main page</string>
     <string name="onboarding_main_description">Start a consent-based capture for the selected GF2 package and see useful payload progress at a glance.</string>
     <string name="onboarding_main_feature_1">Prepare capture keeps running until you stop it.</string>
-    <string name="onboarding_main_feature_2">Guided capture checks roster, activity, and membership updates, then stops automatically.</string>
+    <string name="onboarding_main_feature_2">One-time Capture checks roster, activity, and membership updates, then stops automatically.</string>
     <string name="onboarding_main_feature_3">Recent and saved packet history stays private on this device.</string>
     <string name="onboarding_main_warning">Android will show its VPN consent screen. GF2logger only observes the selected app, does not decrypt TLS, and never stores raw network packets.</string>
     <string name="onboarding_settings_title">Settings</string>
@@ -112,6 +112,7 @@
     <string name="save_failed">Unable to save</string>
     <string name="membership_history">Membership history</string>
     <string name="add_membership_history">Add Membership History</string>
+    <string name="add_membership_history_short">Add period</string>
     <string name="delete_member">Delete member</string>
     <string name="delete_member_warning">Deleting this member permanently removes saved history, notes, and weekly edits. A future roster packet may add the member again, but the deleted details cannot be recovered.</string>
     <string name="member_deleted">Member deleted</string>
@@ -131,6 +132,8 @@
     <string name="clear">Clear</string>
     <string name="invalid_withdrawn_member">Enter a unique positive UID and nickname, select both dates, and keep withdrawal after join.</string>
     <string name="membership_period_summary">Membership period %1$d\nJoin: %2$s\nWithdrawal: %3$s</string>
+    <string name="membership_period_title">Period %1$d</string>
+    <string name="membership_period_dates">%1$s → %2$s</string>
     <string name="delete_membership_period">Delete membership period</string>
     <string name="delete_membership_period_warning">Delete this join and withdrawal record? This cannot be undone. Continue?</string>
     <string name="membership_period_deleted">Membership period deleted</string>
@@ -299,6 +302,8 @@
         <item quantity="other">Deleted %1$d saved entries</item>
     </plurals>
     <string name="evidence_health_title">Evidence Health</string>
+    <string name="weekly_evidence_guide">How evidence states work</string>
+    <string name="weekly_evidence_guide_summary">✓ exact · ≥ confirmed minimum · ? unknown — tap for details</string>
     <string name="evidence_health_summary">Observed days %1$d/%2$d · Exact %3$d · Minimum %4$d · Unknown %5$d\nDirect login %6$d days · Direct patrol %7$d days · Closing boundaries %8$d</string>
     <string name="evidence_explanation_title">%1$s · %2$s · %3$s</string>
     <string name="evidence_explanation_message">Answer: %1$s\n\nWhy:\n%2$s</string>

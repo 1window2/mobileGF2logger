@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="AppTheme" parent="@style/GF2BaseTheme" />
+
+    <style name="GF2BaseTheme" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans-serif</item>
         <item name="android:windowBackground">@color/app_background</item>
         <item name="android:colorAccent">@color/accent</item>
@@ -19,7 +21,7 @@
     <style name="Widget.GF2.TextView" parent="@android:style/Widget.TextView">
         <item name="android:textColor">@color/text_primary</item>
         <item name="android:fontFamily">sans-serif</item>
-        <item name="android:lineSpacingMultiplier">1.08</item>
+        <item name="android:lineSpacingMultiplier">1.12</item>
     </style>
 
     <style name="Widget.GF2.Button" parent="@android:style/Widget.Material.Button">
@@ -29,13 +31,13 @@
         <item name="android:fontFamily">sans-serif-medium</item>
         <item name="android:textSize">14sp</item>
         <item name="android:minHeight">48dp</item>
-        <item name="android:minWidth">64dp</item>
-        <item name="android:insetLeft">3dp</item>
-        <item name="android:insetRight">3dp</item>
-        <item name="android:insetTop">7dp</item>
-        <item name="android:insetBottom">7dp</item>
-        <item name="android:paddingLeft">14dp</item>
-        <item name="android:paddingRight">14dp</item>
+        <item name="android:minWidth">48dp</item>
+        <item name="android:insetLeft">0dp</item>
+        <item name="android:insetRight">0dp</item>
+        <item name="android:insetTop">5dp</item>
+        <item name="android:insetBottom">5dp</item>
+        <item name="android:paddingLeft">12dp</item>
+        <item name="android:paddingRight">12dp</item>
     </style>
 
     <style name="Widget.GF2.EditText" parent="@android:style/Widget.Material.EditText">

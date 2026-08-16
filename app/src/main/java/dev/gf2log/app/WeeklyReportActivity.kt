@@ -16,6 +16,7 @@ import android.text.Spanned
 import android.text.TextWatcher
 import android.text.style.ForegroundColorSpan
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -268,7 +269,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                 text = getString(
                     if (report.isGunsmokeWeek) R.string.gunsmoke_week else R.string.off_week,
                 )
-                textSize = 27f
+                textSize = 24f
                 setTypeface(typeface, Typeface.BOLD)
             }, LinearLayout.LayoutParams(0, wrap(), 1f))
             addView(ImageButton(context).apply {
@@ -318,26 +319,26 @@ class WeeklyReportActivity : LocalizedActivity() {
                 report.periodEnd.format(DATE),
                 zone.id,
             )
-            textSize = 15f
+            textSize = 14f
+            setTextColor(getColor(R.color.text_secondary))
         }, matchWidth())
         if (report.hasIncompleteDailyEvidence) {
-            body.addView(TextView(this).apply {
-                text = getString(
-                    if (report.isGunsmokeWeek) {
-                        R.string.incomplete_daily_evidence_gunsmoke
-                    } else {
-                        R.string.incomplete_daily_evidence_standard
-                    },
-                )
-                setTextColor(WARNING_COLOR)
-                setPadding(0, dp(8), 0, dp(8))
-            }, matchWidth())
+            body.addView(ModernUi.actionRow(
+                context = this,
+                title = getString(R.string.weekly_evidence_guide),
+                detail = getString(R.string.weekly_evidence_guide_summary),
+                onClick = { showWeeklyEvidenceGuide(report.isGunsmokeWeek) },
+            ), LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(8) })
         }
         addEvidenceHealthPanel(report)
         body.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             addView(Button(context).apply {
                 text = "\u2039"
+                useTertiaryActionStyle()
                 isEnabled = !isEditing
                 contentDescription = getString(R.string.previous_week)
                 setOnClickListener {
@@ -347,11 +348,13 @@ class WeeklyReportActivity : LocalizedActivity() {
             }, LinearLayout.LayoutParams(0, wrap(), 1f))
             addView(Button(context).apply {
                 text = getString(R.string.current_week)
+                useSecondaryActionStyle()
                 isEnabled = !isEditing
                 setOnClickListener { showDatePicker() }
             }, LinearLayout.LayoutParams(0, wrap(), 2f))
             addView(Button(context).apply {
                 text = "\u203a"
+                useTertiaryActionStyle()
                 isEnabled = !isEditing
                 contentDescription = getString(R.string.next_week)
                 setOnClickListener {
@@ -364,22 +367,26 @@ class WeeklyReportActivity : LocalizedActivity() {
             orientation = LinearLayout.HORIZONTAL
             addView(Button(context).apply {
                 text = getString(R.string.export_weekly_csv)
+                useSecondaryActionStyle()
                 isEnabled = !isEditing
                 setOnClickListener { exportWeeklyCsv(report) }
             }, LinearLayout.LayoutParams(0, wrap(), 1f))
             addView(Button(context).apply {
                 text = getString(R.string.copy_weekly_csv)
+                useSecondaryActionStyle()
                 isEnabled = !isEditing
                 setOnClickListener { copyWeeklyCsv(report) }
             }, LinearLayout.LayoutParams(0, wrap(), 1f))
         }, matchWidth())
         body.addView(Button(this).apply {
             text = getString(R.string.export_all_weekly_tables)
+            useSecondaryActionStyle()
             isEnabled = !isEditing
             setOnClickListener { exportAllWeeklyTables() }
         }, matchWidth())
         body.addView(Button(this).apply {
             text = getString(R.string.edit_member_order)
+            useNavigationActionStyle()
             isEnabled = !isEditing
             setOnClickListener {
                 startActivity(Intent(this@WeeklyReportActivity, MemberOrderActivity::class.java))
@@ -989,12 +996,28 @@ class WeeklyReportActivity : LocalizedActivity() {
 
     private fun addEvidenceHealthPanel(report: WeeklyReportBuilder.Report) {
         val health = WeeklyEvidenceAnalyzer.health(report)
-        body.addView(TextView(this).apply {
-            text = buildString {
-                append(getString(R.string.evidence_health_title))
-                append("\n")
-                append(
-                    getString(
+        val statusColor = if (health.isComplete) R.color.success_text else R.color.warning_text
+        body.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = GradientDrawable().apply {
+                setColor(getColor(R.color.surface))
+                cornerRadius = dp(14).toFloat()
+            }
+            addView(View(context).apply {
+                setBackgroundColor(getColor(statusColor))
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(dp(3), ViewGroup.LayoutParams.MATCH_PARENT))
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                addView(TextView(context).apply {
+                    text = getString(R.string.evidence_health_title)
+                    textSize = 14f
+                    setTypeface(typeface, Typeface.BOLD)
+                    setTextColor(getColor(statusColor))
+                }, matchWidth())
+                addView(TextView(context).apply {
+                    text = getString(
                         R.string.evidence_health_summary,
                         health.observedDays,
                         health.totalDays,
@@ -1004,21 +1027,30 @@ class WeeklyReportActivity : LocalizedActivity() {
                         health.directLoginDays,
                         health.directPatrolDays,
                         health.closingBoundaries,
-                    ),
-                )
-            }
-            textSize = 14f
-            setTextColor(getColor(if (health.isComplete) R.color.success_text else R.color.warning_text))
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            background = GradientDrawable().apply {
-                setColor(getColor(if (health.isComplete) R.color.success_surface else R.color.warning_surface))
-                cornerRadius = dp(14).toFloat()
-                setStroke(
-                    dp(1),
-                    getColor(if (health.isComplete) R.color.success_text else R.color.warning_text),
-                )
-            }
-        }, matchWidth())
+                    )
+                    textSize = 13f
+                    setTextColor(getColor(R.color.text_secondary))
+                    setPadding(0, dp(2), 0, 0)
+                }, matchWidth())
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = dp(6) })
+    }
+
+    private fun showWeeklyEvidenceGuide(isGunsmokeWeek: Boolean) {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.weekly_evidence_guide)
+            .setMessage(
+                if (isGunsmokeWeek) {
+                    R.string.incomplete_daily_evidence_gunsmoke
+                } else {
+                    R.string.incomplete_daily_evidence_standard
+                },
+            )
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
     }
 
     private fun showEvidenceExplanation(
@@ -1087,7 +1119,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         val result = SpannableString("$label\n$value")
         if (highlighted) {
             result.setSpan(
-                ForegroundColorSpan(CUTLINE_YELLOW),
+                ForegroundColorSpan(getColor(R.color.cutline_mark)),
                 label.length + 1,
                 result.length,
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
@@ -1111,20 +1143,20 @@ class WeeklyReportActivity : LocalizedActivity() {
 
     private fun activityMark(value: Boolean?, observed: Boolean, dayClosed: Boolean): ActivityMark =
         when {
-            value == true -> ActivityMark("\u2713", SUCCESS_GREEN)
+            value == true -> ActivityMark("\u2713", getColor(R.color.success_mark))
             !observed -> ActivityMark("-", null)
-            value == false && dayClosed -> ActivityMark("\u00d7", FAILURE_RED)
+            value == false && dayClosed -> ActivityMark("\u00d7", getColor(R.color.failure_mark))
             value == false -> ActivityMark("-", null)
             else -> ActivityMark("?", null)
         }
 
     private fun editableActivityMark(value: Boolean?): ActivityMark = when (value) {
-        true -> ActivityMark("\u2713", SUCCESS_GREEN)
-        false -> ActivityMark("\u00d7", FAILURE_RED)
+        true -> ActivityMark("\u2713", getColor(R.color.success_mark))
+        false -> ActivityMark("\u00d7", getColor(R.color.failure_mark))
         null -> ActivityMark("-", null)
     }
 
-    private fun unknownActivityMark() = ActivityMark("?", WARNING_COLOR)
+    private fun unknownActivityMark() = ActivityMark("?", getColor(R.color.warning_mark))
 
     private fun showManualEditWarning(report: WeeklyReportBuilder.Report) {
         AlertDialog.Builder(this)
@@ -1696,9 +1728,5 @@ class WeeklyReportActivity : LocalizedActivity() {
         private const val MEMBER_WIDTH = 120
         private const val DAILY_WIDTH = 128
         private const val MAX_VISIBLE_TABLE_ROWS = 6
-        private val WARNING_COLOR = Color.rgb(255, 193, 7)
-        private val SUCCESS_GREEN = Color.rgb(45, 170, 75)
-        private val FAILURE_RED = Color.rgb(215, 60, 55)
-        private val CUTLINE_YELLOW = Color.rgb(232, 174, 22)
     }
 }

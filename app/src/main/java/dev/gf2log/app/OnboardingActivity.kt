@@ -1,8 +1,10 @@
 package dev.gf2log.app
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.content.Intent
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -41,14 +43,14 @@ class OnboardingActivity : LocalizedActivity() {
 
     private fun buildContent(): View = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(20), dp(16), dp(20), dp(16))
+        setPadding(dp(20), dp(10), dp(20), dp(12))
 
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(TextView(context).apply {
                 text = getString(R.string.app_name)
-                textSize = 22f
+                textSize = 20f
                 setTypeface(typeface, Typeface.BOLD)
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(
@@ -58,21 +60,8 @@ class OnboardingActivity : LocalizedActivity() {
                         recreate()
                     }
                 },
-                LinearLayout.LayoutParams(dp(148), dp(40)),
+                LinearLayout.LayoutParams(dp(136), dp(42)),
             )
-        }, matchWidth())
-
-        addView(TextView(context).apply {
-            text = getString(R.string.onboarding_welcome)
-            textSize = 26f
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, dp(24), 0, dp(4))
-        }, matchWidth())
-        addView(TextView(context).apply {
-            text = getString(R.string.onboarding_intro)
-            textSize = 15f
-            setTextColor(getColor(R.color.text_secondary))
-            setPadding(0, 0, 0, dp(16))
         }, matchWidth())
 
         pageHost = FrameLayout(context)
@@ -84,9 +73,10 @@ class OnboardingActivity : LocalizedActivity() {
 
         stepLabel = TextView(context).apply {
             gravity = Gravity.CENTER
-            textSize = 13f
-            setTextColor(getColor(R.color.text_secondary))
-            setPadding(0, dp(12), 0, dp(8))
+            textSize = 15f
+            letterSpacing = 0.16f
+            setTextColor(getColor(R.color.accent))
+            setPadding(0, dp(8), 0, dp(6))
         }
         addView(stepLabel, matchWidth())
 
@@ -94,6 +84,7 @@ class OnboardingActivity : LocalizedActivity() {
             orientation = LinearLayout.HORIZONTAL
             backButton = Button(context).apply {
                 text = getString(R.string.onboarding_back)
+                useSecondaryActionStyle()
                 setOnClickListener {
                     if (pageIndex > 0) {
                         pageIndex--
@@ -123,6 +114,7 @@ class OnboardingActivity : LocalizedActivity() {
         skipButton = Button(context).apply {
             text = getString(R.string.onboarding_skip)
             contentDescription = getString(R.string.onboarding_skip)
+            useTertiaryActionStyle()
             setOnClickListener { finishOnboarding() }
         }
         addView(skipButton, matchWidth())
@@ -135,17 +127,24 @@ class OnboardingActivity : LocalizedActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT,
         ))
-        if (animate) {
+        if (animate && ValueAnimator.areAnimatorsEnabled()) {
             content.alpha = 0f
-            content.translationX = (direction * dp(24)).toFloat()
-            content.animate().alpha(1f).translationX(0f).setDuration(180L).start()
+            content.translationX = (direction * dp(12)).toFloat()
+            content.animate().alpha(1f).translationX(0f).setDuration(140L).start()
         }
-        stepLabel.text = getString(R.string.onboarding_step, pageIndex + 1, PAGES.size)
+        stepLabel.text = PAGES.indices.joinToString("  ") { index ->
+            if (index == pageIndex) "●" else "○"
+        }
+        stepLabel.contentDescription = getString(R.string.onboarding_step, pageIndex + 1, PAGES.size)
         backButton.isEnabled = pageIndex > 0
         nextButton.text = getString(
             if (pageIndex == PAGES.lastIndex) R.string.onboarding_finish else R.string.onboarding_next,
         )
-        skipButton.visibility = if (pageIndex == PAGES.lastIndex) View.INVISIBLE else View.VISIBLE
+        // Reapply the role after locale recreation so the translated final action cannot
+        // fall back to the platform button drawable while the page is restored.
+        nextButton.isEnabled = true
+        nextButton.usePrimaryActionStyle()
+        skipButton.visibility = View.VISIBLE
     }
 
     private fun pageView(page: OnboardingPage): View = ScrollView(this).apply {
@@ -154,69 +153,71 @@ class OnboardingActivity : LocalizedActivity() {
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(18), dp(18), dp(18), dp(18))
-            background = ModernUi.panelBackground(context)
-            elevation = 0f
+            setPadding(0, dp(22), 0, dp(10))
 
             addView(FrameLayout(context).apply {
-                background = ModernUi.panelBackground(context, emphasized = true)
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(getColor(R.color.accent_surface))
+                    setStroke(dp(1), getColor(R.color.outline))
+                }
                 addView(ImageView(context).apply {
                     setImageResource(page.icon)
                     imageTintList = if (page.icon == R.mipmap.ic_launcher) null else
-                        android.content.res.ColorStateList.valueOf(getColor(R.color.primary))
+                        android.content.res.ColorStateList.valueOf(getColor(R.color.accent_text))
                     scaleType = ImageView.ScaleType.CENTER_INSIDE
-                    setPadding(dp(13), dp(13), dp(13), dp(13))
-                }, FrameLayout.LayoutParams(dp(62), dp(62), Gravity.CENTER))
-            }, LinearLayout.LayoutParams(dp(72), dp(72)).apply {
-                bottomMargin = dp(16)
-            })
+                    setPadding(dp(18), dp(18), dp(18), dp(18))
+                }, FrameLayout.LayoutParams(dp(76), dp(76), Gravity.CENTER))
+            }, LinearLayout.LayoutParams(dp(100), dp(100)).apply { bottomMargin = dp(20) })
             addView(TextView(context).apply {
                 text = getString(page.title)
-                textSize = 23f
                 gravity = Gravity.CENTER
+                textSize = 26f
                 setTypeface(typeface, Typeface.BOLD)
             }, matchWidth())
             addView(TextView(context).apply {
                 text = getString(page.description)
-                textSize = 15f
                 gravity = Gravity.CENTER
+                textSize = 14f
                 setTextColor(getColor(R.color.text_secondary))
-                setPadding(0, dp(8), 0, dp(18))
+                setPadding(dp(12), dp(7), dp(12), dp(18))
             }, matchWidth())
-            page.features.forEach { feature -> addView(featureRow(feature), matchWidth()) }
+            page.features.forEach { feature ->
+                addView(featureRow(feature), matchWidth())
+            }
             page.warning?.let { warning ->
                 addView(TextView(context).apply {
                     text = getString(warning)
-                    textSize = 13f
+                    textSize = 14f
                     setTextColor(getColor(R.color.warning_text))
-                    setPadding(dp(14), dp(12), dp(14), dp(12))
+                    setPadding(dp(14), dp(11), dp(14), dp(11))
                     background = ModernUi.panelBackground(context, emphasized = true).apply {
                         setColor(getColor(R.color.warning_surface))
-                        setStroke(dp(1), getColor(R.color.warning_text))
                     }
                 }, LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = dp(8) })
+                ).apply { topMargin = dp(12) })
             }
         }, matchWidth())
     }
 
     private fun featureRow(@StringRes feature: Int): View = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.TOP
-        setPadding(0, dp(7), 0, dp(7))
+        gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = dp(48)
+        setPadding(dp(12), dp(4), dp(12), dp(4))
         addView(TextView(context).apply {
-            text = "✓"
-            textSize = 17f
-            setTypeface(typeface, Typeface.BOLD)
+            text = "•"
+            textSize = 20f
             setTextColor(getColor(R.color.accent))
             gravity = Gravity.CENTER
-        }, LinearLayout.LayoutParams(dp(28), ViewGroup.LayoutParams.WRAP_CONTENT))
+        }, LinearLayout.LayoutParams(dp(24), ViewGroup.LayoutParams.MATCH_PARENT))
         addView(TextView(context).apply {
             text = getString(feature)
             textSize = 14f
             setTextColor(getColor(R.color.text_primary))
+            setPadding(dp(8), 0, 0, 0)
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
     }
 
@@ -312,10 +313,7 @@ private class OnboardingLanguageToggle(
         setPadding(dp(3), dp(3), dp(3), dp(3))
         background = ModernUi.panelBackground(context)
         contentDescription = context.getString(R.string.onboarding_language_toggle)
-        thumb.background = ModernUi.panelBackground(context, emphasized = true).apply {
-            setColor(context.getColor(R.color.primary))
-            setStroke(0, context.getColor(R.color.primary))
-        }
+        thumb.background = ModernUi.panelBackground(context, emphasized = true)
         addView(thumb)
         addView(english)
         addView(korean)
@@ -323,8 +321,8 @@ private class OnboardingLanguageToggle(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val width = resolveSize(dp(148), widthMeasureSpec)
-        val height = resolveSize(dp(40), heightMeasureSpec)
+        val width = resolveSize(dp(136), widthMeasureSpec)
+        val height = resolveSize(dp(42), heightMeasureSpec)
         setMeasuredDimension(width, height)
         val childWidth = (width - paddingLeft - paddingRight) / 2
         val childHeight = height - paddingTop - paddingBottom
@@ -355,17 +353,17 @@ private class OnboardingLanguageToggle(
         selectedLanguage = language
         val distance = ((width - paddingLeft - paddingRight) / 2).toFloat()
         val target = if (language == LanguagePreferences.KOREAN) distance else 0f
-        if (animate) {
+        if (animate && ValueAnimator.areAnimatorsEnabled()) {
             thumb.animate().cancel()
             thumb.animate()
                 .translationX(target)
-                .setDuration(180L)
+                .setDuration(140L)
                 .withEndAction { onLanguageChanged(language) }
                 .start()
         } else {
             thumb.translationX = target
         }
-        val selectedColor = context.getColor(R.color.primary_action_foreground)
+        val selectedColor = context.getColor(R.color.accent_text)
         val idleColor = context.getColor(R.color.text_primary)
         english.setTextColor(if (language == LanguagePreferences.DEFAULT_LANGUAGE) selectedColor else idleColor)
         korean.setTextColor(if (language == LanguagePreferences.KOREAN) selectedColor else idleColor)

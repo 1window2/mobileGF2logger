@@ -24,7 +24,7 @@ class SnapshotComparisonActivity : LocalizedActivity() {
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(16), dp(16), dp(16), dp(16))
-                addView(heading(getString(R.string.snapshot_comparison), 28f))
+                addView(heading(getString(R.string.snapshot_comparison), 24f))
                 if (snapshots.size < 2) {
                     addView(text(getString(R.string.need_two_snapshots)))
                 } else {
@@ -41,9 +41,7 @@ class SnapshotComparisonActivity : LocalizedActivity() {
                     )
                     addView(Button(context).apply {
                         text = getString(R.string.copy_csv)
-                        textSize = 12f
-                        minHeight = 0
-                        setPadding(dp(12), dp(4), dp(12), dp(4))
+                        useTertiaryActionStyle()
                         setOnClickListener {
                             getSystemService(ClipboardManager::class.java).setPrimaryClip(
                                 ClipData.newPlainText(

@@ -172,6 +172,12 @@ capture, parsing, persistence, or report policy. Theme-specific resources keep
 packet tables, weekly grids, controls, and status surfaces readable without
 duplicating domain logic in Activities.
 
+The concrete presentation roles, warm light/dark palette, compact touch-target
+contract, and accessibility review gates are documented in
+[`UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md). Activities select semantic roles;
+they do not define one-off button palettes or treat compound controls as generic
+buttons.
+
 `MainActivity` routes an installation with no completed first-use flag to the
 non-exported `OnboardingActivity`. The five-page guide may be finished or
 skipped, and writes completion only at that explicit exit. Its English/Korean

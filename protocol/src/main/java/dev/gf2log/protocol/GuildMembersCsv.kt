@@ -91,8 +91,9 @@ object GuildMembersCsv {
                     lastLogin = row[7].trim().toUIntOrNull() ?: return null,
                 )
             }
-        if (!isValidRoster(members) || logTime == null) return null
-        return Snapshot(logTime = logTime!!, members = members)
+        if (!isValidRoster(members)) return null
+        val snapshotTime = logTime ?: return null
+        return Snapshot(logTime = snapshotTime, members = members)
     }
 
     private fun parseRecords(content: String): List<List<String>>? {

@@ -1,7 +1,9 @@
 package dev.gf2log.app
 
+import android.graphics.Typeface
 import android.os.Bundle
 import android.text.InputType
+import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CheckBox
@@ -36,7 +38,8 @@ class WeeklySettingsActivity : LocalizedActivity() {
 
             addView(TextView(context).apply {
                 text = getString(R.string.weekly_table_settings)
-                textSize = 26f
+                textSize = 24f
+                setTypeface(typeface, Typeface.BOLD)
             }, matchWidth())
             addView(TextView(context).apply {
                 text = getString(R.string.cutline_description)
@@ -81,6 +84,7 @@ class WeeklySettingsActivity : LocalizedActivity() {
 
             addView(Button(context).apply {
                 text = getString(R.string.save_settings)
+                usePrimaryActionStyle()
                 setOnClickListener { save() }
             }, matchWidth())
         }
@@ -104,6 +108,7 @@ class WeeklySettingsActivity : LocalizedActivity() {
             checkBox = CheckBox(context).apply {
                 text = getString(label)
                 isChecked = value != null
+                gravity = Gravity.CENTER_VERTICAL
             },
             value = EditText(context).apply {
                 inputType = InputType.TYPE_CLASS_NUMBER
@@ -111,6 +116,7 @@ class WeeklySettingsActivity : LocalizedActivity() {
                 hint = getString(R.string.cutline_value)
                 setText(value?.toString().orEmpty())
                 isEnabled = value != null
+                gravity = Gravity.CENTER_VERTICAL
             },
             maximum = maximum,
         )
@@ -120,8 +126,10 @@ class WeeklySettingsActivity : LocalizedActivity() {
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             isBaselineAligned = false
-            addView(input.checkBox, LinearLayout.LayoutParams(0, wrap(), 2f))
-            addView(input.value, LinearLayout.LayoutParams(0, wrap(), 1f))
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(56)
+            addView(input.checkBox, LinearLayout.LayoutParams(0, dp(48), 2f))
+            addView(input.value, LinearLayout.LayoutParams(0, dp(48), 1f))
         }, matchWidth())
         return input
     }

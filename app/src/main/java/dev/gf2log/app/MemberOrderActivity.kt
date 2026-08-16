@@ -2,7 +2,6 @@ package dev.gf2log.app
 
 import android.animation.LayoutTransition
 import android.content.ClipData
-import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.graphics.Typeface
 import android.os.Bundle
@@ -13,6 +12,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
@@ -88,7 +88,7 @@ class MemberOrderActivity : LocalizedActivity() {
             setPadding(dp(16), dp(16), dp(16), dp(16))
             addView(TextView(context).apply {
                 text = getString(R.string.member_order)
-                textSize = 26f
+                textSize = 24f
                 setTypeface(typeface, Typeface.BOLD)
             }, matchWidth())
             addView(TextView(context).apply {
@@ -99,6 +99,7 @@ class MemberOrderActivity : LocalizedActivity() {
             addView(sortControlRow(R.string.sort_direction, sortDirection), matchWidth())
             addView(Button(context).apply {
                 text = getString(R.string.apply_sort)
+                usePrimaryActionStyle()
                 setOnClickListener {
                     members = MemberOrderSorter.sort(
                         members = members,
@@ -111,6 +112,7 @@ class MemberOrderActivity : LocalizedActivity() {
             }, matchWidth())
             addView(Button(context).apply {
                 text = getString(R.string.reset_member_order)
+                useTertiaryActionStyle()
                 setOnClickListener {
                     preferences.clear()
                     members = defaultMembers.toMutableList()
@@ -155,12 +157,11 @@ class MemberOrderActivity : LocalizedActivity() {
                     setPadding(dp(8), dp(6), dp(8), dp(6))
                 }, LinearLayout.LayoutParams(0, wrap(), 1f))
             }
-            row.addView(TextView(this).apply {
-                text = "\u2630"
-                textSize = 25f
-                gravity = Gravity.CENTER
-                setTextColor(getColor(R.color.text_secondary))
+            row.addView(ImageView(this).apply {
+                setImageResource(R.drawable.ic_drag_handle)
+                setPadding(dp(14), dp(14), dp(14), dp(14))
                 contentDescription = getString(R.string.drag_member, member.name)
+                isFocusable = true
                 setOnLongClickListener {
                     performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                     startDragAndDrop(
@@ -260,9 +261,9 @@ class MemberOrderActivity : LocalizedActivity() {
             row.elevation = if (selected) dp(5).toFloat() else 0f
             row.background = if (selected) {
                 GradientDrawable().apply {
-                    setColor(DRAG_SURFACE)
-                    setStroke(dp(2), DRAG_BORDER)
-                    cornerRadius = dp(7).toFloat()
+                    setColor(getColor(R.color.accent_surface))
+                    setStroke(dp(2), getColor(R.color.accent))
+                    cornerRadius = dp(2).toFloat()
                 }
             } else {
                 null
@@ -284,7 +285,5 @@ class MemberOrderActivity : LocalizedActivity() {
 
     private companion object {
         const val DRAG_TRANSITION_MILLIS = 120L
-        val DRAG_BORDER = Color.rgb(232, 132, 32)
-        val DRAG_SURFACE = Color.argb(48, 232, 132, 32)
     }
 }

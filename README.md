@@ -18,7 +18,7 @@ capture to the selected game package, and raw traffic is never stored.
 - Captures the mandatory Members (`21917`), Activity (`21935`), and Updates (`21960`) responses without a computer or root access.
 - Tracks active and withdrawn members, repeat membership periods, exact Updates timestamps, editable nicknames, and private notes.
 - Builds Sunday-to-Saturday Standard or Gunsmoke Frontline weekly tables around the 05:00 game reset, with cut-off points and manual correction for missing data.
-- Offers guided capture that tracks the three useful Platoon payloads and stops automatically when the checklist is complete.
+- Offers One-time Capture that tracks the three useful Platoon payloads and stops automatically when the checklist is complete.
 - Explains every weekly cell on tap and summarizes missing or uncertain evidence in an Evidence Health panel.
 - Recovers interrupted imports before previewing roster CSV impact and keeps an automatic one-level checkpoint for undo.
 - Saves or shares a weekly PNG with opt-in controls for names, UIDs, and private notes.
@@ -36,7 +36,7 @@ uid,name,level,weeklyMerit,totalMerit,highScore,totalScore,lastLogin,logTime
 ## Use
 
 1. Install the ARM64 APK on Android 8.0 or newer.
-2. Open **GF2logger**, confirm the game package, and select **Capture one Platoon roster**.
+2. Open **GF2logger**, confirm the game package, and select **One-time Capture**.
 3. Approve Android's VPN prompt, then open the game.
 4. Enter **Platoon(서클)** and open **Updates(동향)** and **Members(멤버)**.
 5. Return to GF2logger to review the captured packets and Platoon data.

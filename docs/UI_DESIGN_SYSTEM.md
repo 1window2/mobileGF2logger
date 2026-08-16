@@ -44,9 +44,15 @@ Do not encode `CheckBox` or `RadioButton` as generic buttons.
 ## Layout and accessibility
 
 - Spacing follows a 4dp/8dp rhythm. Neighboring touch targets retain a 6-8dp gap.
+- The approved v2.3.0 visual contract is recorded in `PRODUCT.md` and
+  `.interface-design/system.md`. Home is status-led, Settings is a grouped flat
+  list, and onboarding is a five-step editorial dark surface.
 - Screens use three interaction levels: a bounded primary workspace, distinctive
   feature shortcuts, and quiet utility rows. Do not render every action as the
   same full-width button.
+- Home, Platoon management, and the weekly table share a persistent three-item
+  bottom navigation bar. Settings remains a secondary screen with a normal back
+  action; deeper detail and edit screens continue to use Android Back.
 - Compact controls may look smaller, but their hit area remains at least 48dp.
 - Text wraps when it carries meaning; only short button labels may ellipsize.
 - Icon-only controls require an accessible name. Decorative icons beside text

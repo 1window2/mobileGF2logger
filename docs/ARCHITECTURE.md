@@ -172,6 +172,12 @@ capture, parsing, persistence, or report policy. Theme-specific resources keep
 packet tables, weekly grids, controls, and status surfaces readable without
 duplicating domain logic in Activities.
 
+`PrimaryNavigation` is the presentation-only shell shared by Home, Platoon, and
+Weekly. It launches existing Activities and owns no data or domain state.
+Onboarding overrides only the resolved presentation theme so the approved dark
+walkthrough remains stable; its selected language still persists through the
+same user-settings store as the rest of the app.
+
 The concrete presentation roles, warm light/dark palette, compact touch-target
 contract, and accessibility review gates are documented in
 [`UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md). Activities select semantic roles;

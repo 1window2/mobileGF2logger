@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-16T23:16:52+09:00",
+  "title": "Design System: GF2logger",
+  "extensions": {
+    "colorMeta": {
+      "brand-orange": {
+        "role": "primary",
+        "displayName": "Muted Signal Orange",
+        "canonical": "#D7824B",
+        "tonalRamp": ["#3C2113", "#65351D", "#914D29", "#BC6838", "#D7824B", "#E8A477", "#F2C9AD", "#FBEDE2"]
+      },
+      "warm-paper": {
+        "role": "neutral",
+        "displayName": "Warm Paper",
+        "canonical": "#F7F4EF",
+        "tonalRamp": ["#272521", "#4A4741", "#6F6A62", "#969087", "#BBB5AC", "#D9D4CC", "#ECE8E1", "#F7F4EF"]
+      },
+      "soft-charcoal": {
+        "role": "neutral",
+        "displayName": "Soft Charcoal",
+        "canonical": "#20211F",
+        "tonalRamp": ["#111210", "#20211F", "#353632", "#555650", "#777871", "#9D9E96", "#C7C7C0", "#F0F0EA"]
+      },
+      "capture-green": {
+        "role": "tertiary",
+        "displayName": "Capture Green",
+        "canonical": "#4B7955",
+        "tonalRamp": ["#17261A", "#294330", "#3C6245", "#4B7955", "#6B966F", "#91B496", "#BDD2BF", "#E9F1E8"]
+      },
+      "stop-red": {
+        "role": "tertiary",
+        "displayName": "Stop Red",
+        "canonical": "#A85258",
+        "tonalRamp": ["#351619", "#5A292E", "#823E44", "#A85258", "#C5777C", "#D99DA0", "#EBC5C7", "#F9ECEC"]
+      }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Headline", "purpose": "Screen and onboarding titles." },
+      "title": { "displayName": "Title", "purpose": "Sections, destinations, and prominent states." },
+      "body": { "displayName": "Body", "purpose": "Actions and operational explanations." },
+      "label": { "displayName": "Label", "purpose": "Navigation, metadata, and supporting text." }
+    },
+    "shadows": [],
+    "motion": [],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Commitment action such as Next or One-time Capture.",
+      "html": "<button class=\"ds-btn-primary\">NEXT</button>",
+      "css": ".ds-btn-primary { min-height: 48px; padding: 0 16px; border: 0; border-radius: 14px; background: #D7824B; color: #25231F; font: 600 14px sans-serif; } .ds-btn-primary:hover { background: #C8733D; } .ds-btn-primary:focus-visible { outline: 2px solid #7D3F1E; outline-offset: 2px; } .ds-btn-primary:active { background: #C8733D; }"
+    },
+    {
+      "name": "Quiet List Row",
+      "kind": "custom",
+      "refersTo": "list-row",
+      "description": "Compact utility or settings action with optional supporting copy.",
+      "html": "<div class=\"ds-list-row\"><span><strong>Packet viewer</strong><small>Open saved packet data</small></span><b aria-hidden=\"true\">›</b></div>",
+      "css": ".ds-list-row { min-height: 60px; padding: 6px 8px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #DED8CF; background: #FFFCF8; color: #25231F; font: 14px sans-serif; } .ds-list-row span { display: grid; gap: 2px; } .ds-list-row small { color: #6C665F; font-size: 12px; } .ds-list-row:focus-within { outline: 2px solid #D7824B; outline-offset: -2px; }"
+    },
+    {
+      "name": "Segmented Choice",
+      "kind": "chip",
+      "description": "Native semantic choice group for language and theme.",
+      "html": "<div class=\"ds-segment\" role=\"radiogroup\"><button class=\"ds-segment-active\" role=\"radio\" aria-checked=\"true\">한국어</button><button role=\"radio\" aria-checked=\"false\">English</button></div>",
+      "css": ".ds-segment { min-height: 54px; padding: 3px; display: flex; border-radius: 14px; background: #EEEAE3; } .ds-segment button { flex: 1; min-height: 48px; border: 0; border-radius: 11px; background: transparent; color: #25231F; font: 600 14px sans-serif; } .ds-segment .ds-segment-active { background: #F6E4D7; color: #7D3F1E; } .ds-segment button:focus-visible { outline: 2px solid #D7824B; outline-offset: -2px; }"
+    },
+    {
+      "name": "Capture Status Panel",
+      "kind": "card",
+      "description": "The primary operational group for state, target, and capture actions.",
+      "html": "<section class=\"ds-capture\"><small>● Capture status</small><h2>Ready</h2><p>Capture is stopped</p><div><button>Prepare</button><button class=\"ds-capture-primary\">One-time Capture</button><button disabled>Stop</button></div></section>",
+      "css": ".ds-capture { padding: 16px; border: 1px solid #44453F; border-radius: 16px; background: #292A27; color: #F5F0E8; font-family: sans-serif; } .ds-capture small { color: #E49B68; } .ds-capture h2 { margin: 12px 0 4px; color: #A9C9A8; } .ds-capture p { color: #BDB6AC; } .ds-capture div { display: flex; gap: 8px; } .ds-capture button { flex: 1; min-height: 48px; border: 1px solid #858077; border-radius: 14px; background: #33342F; color: #F5F0E8; } .ds-capture .ds-capture-primary { border: 0; background: #E49B68; color: #2B1D14; } .ds-capture button:focus-visible { outline: 2px solid #E49B68; outline-offset: 2px; } .ds-capture button:disabled { opacity: .55; }"
+    },
+    {
+      "name": "Primary Bottom Navigation",
+      "kind": "nav",
+      "refersTo": "bottom-navigation",
+      "description": "The only persistent navigation, limited to Home, Platoon, and Weekly.",
+      "html": "<nav class=\"ds-bottom-nav\"><button class=\"ds-nav-active\">⌂<span>Home</span></button><button>♟<span>Platoon</span></button><button>▣<span>Weekly</span></button></nav>",
+      "css": ".ds-bottom-nav { height: 64px; display: flex; border-top: 1px solid #DED8CF; background: #FFFCF8; } .ds-bottom-nav button { flex: 1; border: 0; background: transparent; color: #6C665F; display: grid; place-content: center; gap: 2px; font: 500 11px sans-serif; } .ds-bottom-nav .ds-nav-active { color: #D7824B; } .ds-bottom-nav button:focus-visible { outline: 2px solid #D7824B; outline-offset: -2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Evidence Field Instrument",
+    "overview": "GF2logger should feel like a quiet, dependable instrument used during and after a game session. Its hierarchy is operational rather than decorative: capture state comes first, Platoon and Weekly are unmistakable destinations, and data utilities stay compact and calm. Warm paper and soft charcoal replace sterile white and absolute black. Muted orange is rare enough to remain meaningful, while green and red communicate capture and destructive states only when paired with text or an icon.",
+    "keyCharacteristics": [
+      "Compact, status-led Android layouts.",
+      "Warm neutral fields with one restrained brand accent.",
+      "Flat tonal grouping, hairlines, and minimal shadow.",
+      "Equal care for English, Korean, and enlarged system text."
+    ],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "Orange marks brand, selection, or commitment; it does not fill ordinary utility rows.", "section": "colors" },
+      { "name": "The State Is a Sentence Rule", "body": "Green, red, and warning tones never carry meaning alone.", "section": "colors" },
+      { "name": "The System Scale Rule", "body": "Never replace scalable text with text baked into an image.", "section": "typography" },
+      { "name": "The Flat Instrument Rule", "body": "A surface must earn separation through function before receiving a container.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep capture state and next actions visible without scrolling on the primary screen.",
+      "Do preserve 48dp targets, native checked semantics, and Android Back behavior.",
+      "Do verify English, Korean, light/dark themes, system bars, and enlarged text on a physical device.",
+      "Do use orange sparingly for primary action and selection."
+    ],
+    "donts": [
+      "Don't use absolute black, stark white, gradients, glass effects, decorative blur, or deep shadows.",
+      "Don't turn every row into a large card or invent mockup-only settings.",
+      "Don't use color as the only status signal.",
+      "Don't move parser, capture, repository, or report policy into Activities while changing presentation."
+    ]
+  }
+}

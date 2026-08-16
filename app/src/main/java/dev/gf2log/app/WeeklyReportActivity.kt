@@ -133,7 +133,13 @@ class WeeklyReportActivity : LocalizedActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(16), dp(16), dp(16))
         }
-        setContentView(ScrollView(this).apply { addView(body, matchWidth()) })
+        setContentView(
+            PrimaryNavigation.wrap(
+                this,
+                ScrollView(this).apply { addView(body, matchWidth()) },
+                PrimaryNavigation.Destination.WEEKLY,
+            ),
+        )
     }
 
     override fun onResume() {

@@ -18,8 +18,10 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.annotation.DrawableRes
 
 /** Shared presentation primitives for the warm, editorial product surface. */
 object ModernUi {
@@ -46,6 +48,86 @@ object ModernUi {
             setColor(context.getColor(if (emphasized) R.color.accent_surface else R.color.surface))
             cornerRadius = context.dp(16).toFloat()
         }
+
+    /** Flat list navigation used by dashboard utilities and grouped Settings rows. */
+    fun listRow(
+        context: Context,
+        title: CharSequence,
+        detail: CharSequence? = null,
+        @DrawableRes icon: Int? = null,
+        onClick: () -> Unit,
+    ): View = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(AccessibleActionRow(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = context.dp(if (detail.isNullOrBlank()) 52 else 60)
+            setPadding(context.dp(8), context.dp(5), context.dp(6), context.dp(5))
+            background = statefulSurface(
+                context = context,
+                normalColor = R.color.app_background,
+                pressedColor = R.color.surface_pressed,
+                disabledColor = R.color.app_background,
+                normalStroke = android.R.color.transparent,
+                pressedStroke = android.R.color.transparent,
+                radiusDp = 2,
+            )
+            contentDescription = listOfNotNull(title, detail?.takeIf(CharSequence::isNotBlank))
+                .joinToString(". ")
+            setOnClickListener { onClick() }
+            icon?.let { drawable ->
+                addView(ImageView(context).apply {
+                    setImageResource(drawable)
+                    imageTintList = ColorStateList.valueOf(context.getColor(R.color.text_secondary))
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }, LinearLayout.LayoutParams(context.dp(24), context.dp(24)).apply {
+                    marginEnd = context.dp(12)
+                })
+            }
+            addView(LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                addView(TextView(context).apply {
+                    text = title
+                    textSize = 14f
+                    setTextColor(context.getColor(R.color.text_primary))
+                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                    maxLines = 2
+                    ellipsize = TextUtils.TruncateAt.END
+                }, ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ))
+                detail?.takeIf(CharSequence::isNotBlank)?.let { supportingText ->
+                    addView(TextView(context).apply {
+                        text = supportingText
+                        textSize = 12f
+                        setTextColor(context.getColor(R.color.text_secondary))
+                        maxLines = 2
+                        ellipsize = TextUtils.TruncateAt.END
+                    }, ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ))
+                }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(ImageView(context).apply {
+                setImageResource(R.drawable.ic_chevron_right)
+                imageTintList = ColorStateList.valueOf(context.getColor(R.color.text_secondary))
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(context.dp(22), context.dp(22)).apply {
+                marginStart = context.dp(8)
+            })
+        }, ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ))
+        addView(View(context).apply {
+            setBackgroundColor(context.getColor(R.color.outline))
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(1)).apply {
+            marginStart = context.dp(if (icon == null) 8 else 44)
+        })
+    }
 
     /**
      * Creates a compact multi-line navigation row without presenting its copy as an oversized button.
@@ -115,23 +197,26 @@ object ModernUi {
         options: List<Pair<String, CharSequence>>,
         selectedValue: String,
         onSelected: (String) -> Unit,
-    ): View = LinearLayout(context).apply {
-        orientation = LinearLayout.HORIZONTAL
+    ): View = RadioGroup(context).apply {
+        orientation = RadioGroup.HORIZONTAL
         setPadding(context.dp(3), context.dp(3), context.dp(3), context.dp(3))
         background = GradientDrawable().apply {
             setColor(context.getColor(R.color.surface_variant))
             cornerRadius = context.dp(14).toFloat()
         }
         options.forEach { (value, label) ->
-            addView(Button(context).apply {
+            addView(RadioButton(context).apply {
+                id = View.generateViewId()
                 text = label
+                buttonDrawable = null
+                isChecked = value == selectedValue
                 setTag(
                     R.id.gf2_ui_role,
                     if (value == selectedValue) ControlRole.SEGMENT_SELECTED else ControlRole.TERTIARY,
                 )
                 styleButton(this)
                 setOnClickListener { onSelected(value) }
-            }, LinearLayout.LayoutParams(0, context.dp(46), 1f))
+            }, RadioGroup.LayoutParams(0, context.dp(48), 1f))
         }
     }
 

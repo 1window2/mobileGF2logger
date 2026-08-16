@@ -10,16 +10,19 @@ abstract class LocalizedActivity : Activity() {
 
     override fun attachBaseContext(newBase: Context) {
         attachedLanguage = LanguagePreferences.get(newBase)
-        attachedTheme = ThemePreferences.get(newBase)
+        attachedTheme = preferredTheme(newBase)
         val localized = LanguagePreferences.wrap(newBase, attachedLanguage)
         super.attachBaseContext(ThemePreferences.wrap(localized, attachedTheme))
     }
+
+    /** Allows a purpose-built surface to use a stable presentation theme. */
+    protected open fun preferredTheme(context: Context): String = ThemePreferences.get(context)
 
     override fun onResume() {
         super.onResume()
         if (
             LanguagePreferences.get(this) != attachedLanguage ||
-            ThemePreferences.get(this) != attachedTheme
+            preferredTheme(this) != attachedTheme
         ) {
             recreate()
         }

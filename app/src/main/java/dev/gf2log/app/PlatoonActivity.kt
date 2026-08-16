@@ -47,7 +47,13 @@ class PlatoonActivity : LocalizedActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         repository = PlatoonRepository(this)
-        setContentView(buildContentView())
+        setContentView(
+            PrimaryNavigation.wrap(
+                this,
+                buildContentView(),
+                PrimaryNavigation.Destination.PLATOON,
+            ),
+        )
     }
 
     override fun onResume() {

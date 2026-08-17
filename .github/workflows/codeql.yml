@@ -47,7 +47,7 @@ jobs:
           "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "cmake;3.22.1"
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
+        uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
         with:
           languages: c-cpp
           build-mode: manual
@@ -62,7 +62,7 @@ jobs:
           --stacktrace
 
       - name: Analyze C/C++
-        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
+        uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
         with:
           category: "/language:c-cpp"
 
@@ -92,7 +92,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
+        uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
         with:
           languages: java-kotlin
           build-mode: manual
@@ -116,6 +116,6 @@ jobs:
           --stacktrace
 
       - name: Analyze Kotlin
-        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
+        uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
         with:
           category: "/language:java-kotlin"

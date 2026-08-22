@@ -24,26 +24,34 @@ class PlatoonRepository(context: Context) {
         capturedAt: Instant,
         members: List<GuildMember>,
         sourceFile: String?,
-    ): SnapshotIngestResult = access { database ->
+    ): SnapshotIngestResult {
         require(GuildMembersCsv.isValidRoster(members)) {
             "A Platoon roster must stay within the member and name limits with unique UIDs"
         }
-        database.ingestSnapshot(
-            snapshot = PlatoonSnapshot(
-                id = 0,
-                capturedAt = capturedAt,
-                members = members.map(GuildMember::toSnapshotMember),
-                sourceFile = sourceFile,
-            ),
-            source = EvidenceSource.SNAPSHOT,
-        )
+        val result = access { database ->
+            database.ingestSnapshot(
+                snapshot = PlatoonSnapshot(
+                    id = 0,
+                    capturedAt = capturedAt,
+                    members = members.map(GuildMember::toSnapshotMember),
+                    sourceFile = sourceFile,
+                ),
+                source = EvidenceSource.SNAPSHOT,
+            )
+        }
+        if (!result.duplicate) recordChangedWeeks(setOf(capturedAt))
+        return result
     }
 
     fun ingestActivity(
         data: PlatoonActivityData,
         capturedAt: Instant = Instant.now(),
-    ): ActivityIngestResult = access { database ->
-        database.ingestPlatoonActivity(
+    ): ActivityIngestResult {
+        val occurredAt = data.entries.asSequence()
+            .filter { it.occurredAt != 0u }
+            .map { Instant.ofEpochSecond(it.occurredAt.toLong()) }
+            .toSet()
+        val result = access { database -> database.ingestPlatoonActivity(
             observations = data.entries.asSequence().mapNotNull {
                 if (
                     it.occurredAt == 0u ||
@@ -65,14 +73,20 @@ class PlatoonRepository(context: Context) {
                 .take(PlatoonObservationPolicy.MAX_ACTIVITY_OBSERVATIONS)
                 .toList(),
             capturedAt = capturedAt,
-        )
+        ) }
+        if (result.inserted > 0 || result.resolved > 0) recordChangedWeeks(occurredAt)
+        return result
     }
 
     fun ingestUpdates(
         data: PlatoonUpdatesData,
         capturedAt: Instant = Instant.now(),
-    ): UpdatesIngestResult = access { database ->
-        database.ingestPlatoonUpdates(
+    ): UpdatesIngestResult {
+        val occurredAt = data.entries.asSequence()
+            .filter { it.occurredAt != 0u }
+            .map { Instant.ofEpochSecond(it.occurredAt.toLong()) }
+            .toSet()
+        val result = access { database -> database.ingestPlatoonUpdates(
             observations = data.entries.mapNotNull { entry ->
                 if (entry.occurredAt == 0u || entry.kind == 0u) {
                     null
@@ -95,13 +109,15 @@ class PlatoonRepository(context: Context) {
                 }
             },
             capturedAt = capturedAt,
-        )
+        ) }
+        if (result.membershipEvents > 0 || result.patrolFacts > 0) recordChangedWeeks(occurredAt)
+        return result
     }
 
     fun reconcileRetainedCsvFiles(
         directory: File = File(appContext.filesDir, RETAINED_CSV_DIRECTORY),
-    ): ImportResult = access { database ->
-        database.runInTransaction {
+    ): ImportResult {
+        val result = access { database -> database.runInTransaction {
             var imported = 0
             var historical = 0
             var skipped = 0
@@ -171,7 +187,11 @@ class PlatoonRepository(context: Context) {
                 skipped = skipped,
                 invalid = invalid,
             )
+        } }
+        if (result.imported > 0 || result.historical > 0) {
+            recordAllLiveWeeklyReports()
         }
+        return result
     }
 
     fun listSnapshots(limit: Int = 100): List<PlatoonSnapshot> =
@@ -272,6 +292,25 @@ class PlatoonRepository(context: Context) {
         zoneId: ZoneId,
         asOf: Instant = Instant.now(),
     ): WeeklyReportBuilder.Report {
+        val live = buildLiveWeeklyReport(referenceDay, zoneId, asOf)
+        recordHistory(live, Instant.now(), clearActiveOnChange = false)
+        val activePayload = access {
+            it.activeWeeklyReportHistoryPayload(live.periodStart.toEpochDay())
+        } ?: return live
+        return runCatching { WeeklyReportHistoryCodec.decode(activePayload) }
+            .getOrElse {
+                access { database ->
+                    database.clearActiveWeeklyReportHistory(live.periodStart.toEpochDay())
+                }
+                live
+            }
+    }
+
+    private fun buildLiveWeeklyReport(
+        referenceDay: LocalDate,
+        zoneId: ZoneId,
+        asOf: Instant,
+    ): WeeklyReportBuilder.Report {
         val periodStart = PlatoonPeriods.weekStart(referenceDay)
         val from = PlatoonPeriods.periodStartInstant(periodStart, zoneId)
         val until = PlatoonPeriods.periodStartInstant(periodStart.plusDays(7), zoneId)
@@ -306,7 +345,70 @@ class PlatoonRepository(context: Context) {
     fun replaceWeeklyOverrides(
         periodStartEpochDay: Long,
         overrides: List<WeeklyCellOverride>,
-    ) = access { it.replaceWeeklyOverrides(periodStartEpochDay, overrides) }
+    ) {
+        access { it.replaceWeeklyOverrides(periodStartEpochDay, overrides) }
+        val day = LocalDate.ofEpochDay(periodStartEpochDay)
+        val zone = ZoneId.systemDefault()
+        recordHistory(
+            report = buildLiveWeeklyReport(day, zone, Instant.now()),
+            recordedAt = Instant.now(),
+            clearActiveOnChange = true,
+        )
+    }
+
+    fun listWeeklyReportHistory(periodStart: LocalDate): List<WeeklyReportHistoryEntry> =
+        access { it.listWeeklyReportHistory(periodStart.toEpochDay()) }
+
+    fun weeklyReportHistory(id: Long, periodStart: LocalDate): WeeklyReportBuilder.Report? =
+        access { it.weeklyReportHistoryPayload(id, periodStart.toEpochDay()) }
+            ?.let { payload -> runCatching { WeeklyReportHistoryCodec.decode(payload) }.getOrNull() }
+
+    fun restoreWeeklyReportHistory(id: Long, periodStart: LocalDate): Boolean =
+        access { it.activateWeeklyReportHistory(id, periodStart.toEpochDay()) }
+
+    fun showLiveWeeklyReport(periodStart: LocalDate): Boolean =
+        access { it.clearActiveWeeklyReportHistory(periodStart.toEpochDay()) }
+
+    private fun recordChangedWeeks(instants: Set<Instant>) {
+        if (instants.isEmpty()) return
+        val zone = ZoneId.systemDefault()
+        instants.asSequence()
+            .map { PlatoonPeriods.weekStart(PlatoonPeriods.gameDay(it, zone)) }
+            .distinct()
+            .forEach { periodStart ->
+                val report = buildLiveWeeklyReport(periodStart, zone, Instant.now())
+                recordHistory(report, Instant.now(), clearActiveOnChange = true)
+            }
+    }
+
+    private fun recordAllLiveWeeklyReports() {
+        val zone = ZoneId.systemDefault()
+        WeeklyReportRange.periodStarts(access { it.listWeeklyEvidenceDays(zone) })
+            .forEach { periodStart ->
+                recordHistory(
+                    buildLiveWeeklyReport(periodStart, zone, Instant.now()),
+                    Instant.now(),
+                    clearActiveOnChange = true,
+                )
+            }
+    }
+
+    private fun recordHistory(
+        report: WeeklyReportBuilder.Report,
+        recordedAt: Instant,
+        clearActiveOnChange: Boolean,
+    ) {
+        val encoded = WeeklyReportHistoryCodec.encode(report)
+        access { database ->
+            database.recordWeeklyReportHistory(
+                periodStartEpochDay = report.periodStart.toEpochDay(),
+                recordedAt = recordedAt,
+                fingerprint = encoded.fingerprint,
+                payload = encoded.payload,
+                clearActiveOnChange = clearActiveOnChange,
+            )
+        }
+    }
 
     private fun <T> access(block: (PlatoonDatabase) -> T): T =
         withDatabase(appContext, block)

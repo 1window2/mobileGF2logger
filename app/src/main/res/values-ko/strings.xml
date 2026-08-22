@@ -7,10 +7,10 @@
     <string name="capture_ready">준비됨</string>
     <string name="capture_running">캡처 중</string>
     <string name="capture_stopped_detail">캡처가 중지되었습니다</string>
-    <string name="capture_target">지원 클라이언트</string>
-    <string name="target_package_info">캡처 대상 패키지 ID 안내</string>
-    <string name="target_package_info_title">캡처 대상 패키지 ID</string>
-    <string name="target_package_info_message">com.haoplay.game.and.exilium\nHaoPlay 클라이언트\n\ncom.Sunborn.SnqxExilium.Glo\nDarkwinter 클라이언트\n\n두 값은 고정된 Android 앱 패키지 ID이며, 네트워크 도메인이나 패킷 접두사가 아닙니다. GF2logger가 설치된 지원 앱을 Android VPN 서비스에 각각 등록합니다.</string>
+    <string name="capture_target">지원 클라이언트 ID</string>
+    <string name="target_package_info">패키지 ID</string>
+    <string name="target_package_info_title">패키지 ID</string>
+    <string name="target_package_info_message">com.haoplay.game.and.exilium\nHaoPlay 클라이언트\n\ncom.Sunborn.SnqxExilium.Glo\nDarkwinter 클라이언트</string>
     <string name="nav_home">홈</string>
     <string name="nav_platoon">서클</string>
     <string name="nav_weekly">주간</string>
@@ -379,4 +379,15 @@
     <string name="discord_csv_sent">원본 CSV를 Discord로 전송했습니다.</string>
     <string name="discord_csv_send_failed">원본 CSV를 전송할 수 없습니다. 웹훅과 네트워크 연결을 확인하세요.</string>
     <string name="discord_csv_invalid">이 파싱 패킷에는 전송할 수 있는 유효한 CSV 본문이 없습니다.</string>
+    <string name="weekly_table_history">표 히스토리</string>
+    <string name="weekly_table_history_description">자동으로 기록된 현재 주간 테이블의 과거 히스토리 목록입니다.</string>
+    <string name="weekly_table_history_empty">아직 기록된 주간 테이블 변경 이력이 없습니다.</string>
+    <string name="weekly_table_history_member_count">멤버 %1$d명</string>
+    <string name="weekly_table_history_active">현재 복원된 항목</string>
+    <string name="weekly_table_history_preview">표 히스토리 미리보기</string>
+    <string name="weekly_table_history_restore">이 표 복원</string>
+    <string name="weekly_table_history_restore_warning">이 기록을 현재 주간 표로 표시할까요? 새 패킷이나 가져오기로 표가 변경되면 자동으로 최신 표로 돌아갑니다.</string>
+    <string name="weekly_table_history_restored">기록된 주간 테이블을 복원했습니다.</string>
+    <string name="weekly_table_history_restore_failed">이 표 히스토리 항목을 더 이상 사용할 수 없습니다.</string>
+    <string name="weekly_table_history_live_notice">복원한 과거 주간 표를 표시하고 있습니다. 새 근거가 들어오면 최신 표로 돌아갑니다.</string>
 </resources>

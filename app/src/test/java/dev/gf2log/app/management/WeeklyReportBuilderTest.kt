@@ -179,6 +179,75 @@ class WeeklyReportBuilderTest {
     }
 
     @Test
+    fun mondayResetCompletesASundayFiftyPointPrefixWithTheFortyPointTail() {
+        val opening = member(uid = 1, name = "Sunday bridge", weekly = 4_000, score = 0)
+            .copy(totalMerit = 20_000)
+        val sundayPrefix = opening.copy(weeklyMerit = 4_050, totalMerit = 20_050)
+        val mondayReset = sundayPrefix.copy(weeklyMerit = 0, totalMerit = 20_090)
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 26),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-25T20:00:00Z", opening),
+                snapshotWithMembers("2026-07-26T12:00:00Z", sundayPrefix),
+                snapshotWithMembers("2026-07-27T00:05:00Z", mondayReset),
+            ),
+            asOf = Instant.parse("2026-07-27T06:00:00Z"),
+        )
+
+        val sunday = report.members.single().days.first()
+        assertEquals(90L, sunday.meritDelta)
+        assertEquals(true, sunday.attended)
+        assertEquals(true, sunday.dailyPatrol)
+        assertEquals(MetricCertainty.EXACT, sunday.meritCertainty)
+    }
+
+    @Test
+    fun exactHundredPointAggregateProvesTwoLoginsWithoutGuessingTheirDays() {
+        val opening = member(uid = 1, name = "Aggregate", weekly = 0, score = 0)
+            .copy(totalMerit = 10_000, lastLogin = 0)
+        val finalized = opening.copy(
+            weeklyMerit = 100,
+            totalMerit = 10_100,
+            lastLogin = Instant.parse("2026-07-29T00:00:00Z").epochSecond,
+        )
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 30),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-27T00:05:00Z", opening),
+                snapshotWithMembers("2026-08-01T00:05:00Z", finalized),
+                snapshotWithMembers("2026-08-01T20:05:00Z", finalized),
+            ),
+            overrides = listOf(
+                WeeklyCellOverride(
+                    uid = 1,
+                    periodStart = LocalDate.of(2026, 7, 26),
+                    gameDay = LocalDate.of(2026, 7, 26),
+                    meritDelta = 0,
+                    scoreDelta = null,
+                    attempts = null,
+                    attended = false,
+                    dailyPatrol = false,
+                ),
+            ),
+            asOf = Instant.parse("2026-08-02T00:00:00Z"),
+        )
+
+        val row = report.members.single()
+        assertEquals(100L, row.totalMerit)
+        assertEquals(MetricCertainty.EXACT, row.totalMeritCertainty)
+        assertEquals(2, row.loginDays)
+        assertEquals(MetricCertainty.EXACT, row.loginDaysCertainty)
+        assertEquals(0, row.patrolDays)
+        assertEquals(MetricCertainty.EXACT, row.patrolDaysCertainty)
+        assertEquals(
+            listOf(null, null, true),
+            row.days.drop(1).take(3).map { it.attended },
+        )
+    }
+
+    @Test
     fun latestTuesdayPacketReconcilesMondayAndTuesdayWithoutQuestionMarks() {
         val sundayBoundary = member(uid = 1, name = "Current", weekly = 4_000, score = 0)
             .copy(totalMerit = 20_000)

@@ -253,7 +253,7 @@ class GunsmokeWeekSolverTest {
         }
         repeat(4) { index -> assertEquals(true, resolved[index].dailyPatrol) }
         assertEquals(18, resolution.totals!!.attempts)
-        assertEquals(MetricCertainty.LOWER_BOUND, resolution.totals!!.attemptsCertainty)
+        assertEquals(MetricCertainty.EXACT, resolution.totals!!.attemptsCertainty)
 
         val contradictoryCheckpoints = checkpoints.toMutableList().apply {
             val contradictory = this[3].members.single().copy(weeklyMerit = 1L)
@@ -333,6 +333,17 @@ class GunsmokeWeekSolverTest {
             List(3) { MetricCertainty.LOWER_BOUND },
             resolution.cells.takeLast(3).map { it.attemptsCertainty },
         )
+
+        val missingWednesday = GunsmokeWeekSolver.resolve(
+            uid = UID,
+            days = days,
+            zoneId = zone,
+            snapshots = checkpoints.filterIndexed { index, _ -> index != 3 },
+            cells = cells,
+            dailyPatrolFacts = emptyList(),
+        )
+        assertEquals(20, requireNotNull(missingWednesday.totals).attempts)
+        assertEquals(MetricCertainty.EXACT, missingWednesday.totals.attemptsCertainty)
     }
 
     @Test

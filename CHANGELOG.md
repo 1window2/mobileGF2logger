@@ -2,6 +2,32 @@
 
 All notable changes to mobileGF2logger are documented here.
 
+## 2.3.2 - 2026-08-23
+
+### Added
+
+- Keep up to 15 immutable revisions for each weekly table after visible packet,
+  import, or manual-edit changes, with a timestamped history list, read-only
+  preview, and explicit restore action.
+- Add 512 generated sparse-capture routines and focused reset/final-event
+  regressions to the weekly inference test matrix.
+
+### Changed
+
+- Simplify the capture information popup to the fixed HaoPlay and Darkwinter
+  package IDs, and label the section as supported client IDs.
+- Return a restored weekly table to the live projection automatically when new
+  evidence changes that week.
+
+### Fixed
+
+- Reconcile a captured Sunday 50-point prefix with the remaining 40-point tail
+  proven by Monday's counter reset.
+- Preserve exact weekly Login and Daily Patrol aggregates, and per-field daily
+  consensus, even when the precise daily merit placement remains ambiguous.
+- Use the final Gunsmoke packet to retain safe aggregate and per-day consensus
+  across missing intermediate capture days.
+
 ## 2.3.1 - 2026-08-22
 
 ### Added

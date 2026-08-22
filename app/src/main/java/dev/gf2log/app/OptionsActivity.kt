@@ -226,13 +226,19 @@ class OptionsActivity : LocalizedActivity() {
                     cornerRadius = dp(12).toFloat()
                 }
                 setPadding(dp(12), dp(10), dp(12), dp(10))
-            }, matchWidth())
+            }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(8) })
             val webhookInput = EditText(context).apply {
                 hint = getString(R.string.discord_webhook_hint)
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
                 setSingleLine(true)
             }
-            addView(webhookInput, matchWidth())
+            addView(webhookInput, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(4) })
             addView(Button(context).apply {
                 text = getString(R.string.save_discord_webhook)
                 usePrimaryActionStyle()

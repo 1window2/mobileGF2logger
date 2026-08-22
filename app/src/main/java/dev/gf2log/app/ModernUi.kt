@@ -6,6 +6,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.InsetDrawable
+import android.graphics.drawable.RippleDrawable
 import android.graphics.drawable.StateListDrawable
 import android.text.TextUtils
 import android.view.Gravity
@@ -14,6 +15,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -29,7 +31,7 @@ object ModernUi {
         PRIMARY,
         CAPTURE,
         FEATURE,
-        SEGMENT_SELECTED,
+        EVIDENCE,
         SECONDARY,
         TERTIARY,
         NAVIGATION,
@@ -62,7 +64,7 @@ object ModernUi {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = context.dp(if (detail.isNullOrBlank()) 52 else 60)
-            setPadding(context.dp(8), context.dp(5), context.dp(6), context.dp(5))
+            setPadding(context.dp(8), context.dp(4), context.dp(4), context.dp(4))
             background = statefulSurface(
                 context = context,
                 normalColor = R.color.app_background,
@@ -137,12 +139,13 @@ object ModernUi {
         context: Context,
         title: CharSequence,
         detail: CharSequence? = null,
+        titleMaxLines: Int = 1,
         onClick: () -> Unit,
     ): View = AccessibleActionRow(context).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         minimumHeight = context.dp(56)
-        setPadding(context.dp(14), context.dp(6), context.dp(10), context.dp(6))
+        setPadding(context.dp(12), context.dp(8), context.dp(8), context.dp(8))
         background = statefulSurface(
             context = context,
             normalColor = R.color.surface,
@@ -163,7 +166,7 @@ object ModernUi {
                 textSize = 15f
                 setTextColor(context.getColor(R.color.text_primary))
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                maxLines = 1
+                maxLines = titleMaxLines
                 ellipsize = TextUtils.TruncateAt.END
             }, ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -176,7 +179,7 @@ object ModernUi {
                     setTextColor(context.getColor(R.color.text_secondary))
                     maxLines = 2
                     ellipsize = TextUtils.TruncateAt.END
-                    setPadding(0, context.dp(2), 0, 0)
+                    setPadding(0, context.dp(4), 0, 0)
                 }, ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -197,27 +200,115 @@ object ModernUi {
         options: List<Pair<String, CharSequence>>,
         selectedValue: String,
         onSelected: (String) -> Unit,
-    ): View = RadioGroup(context).apply {
-        orientation = RadioGroup.HORIZONTAL
-        setPadding(context.dp(3), context.dp(3), context.dp(3), context.dp(3))
-        background = GradientDrawable().apply {
-            setColor(context.getColor(R.color.surface_variant))
-            cornerRadius = context.dp(14).toFloat()
+    ): View {
+        require(options.isNotEmpty()) { "A segmented control requires at least one option" }
+        val selectedTextColors = ColorStateList(
+            arrayOf(
+                intArrayOf(android.R.attr.state_checked),
+                intArrayOf(),
+            ),
+            intArrayOf(
+                context.getColor(R.color.accent_text),
+                context.getColor(R.color.text_primary),
+            ),
+        )
+        val railInset = context.dp(4)
+        val segmentHeight = context.dp(48)
+        val selection = View(context).apply {
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            background = GradientDrawable().apply {
+                setColor(context.getColor(R.color.accent_surface))
+                cornerRadius = context.dp(12).toFloat()
+            }
         }
-        options.forEach { (value, label) ->
-            addView(RadioButton(context).apply {
+        val choices = RadioGroup(context).apply {
+            orientation = RadioGroup.HORIZONTAL
+            background = null
+        }
+        val rail = FrameLayout(context).apply {
+            minimumHeight = context.dp(56)
+            setPadding(railInset, railInset, railInset, railInset)
+            background = GradientDrawable().apply {
+                setColor(context.getColor(R.color.surface_variant))
+                cornerRadius = context.dp(16).toFloat()
+            }
+            addView(selection, FrameLayout.LayoutParams(0, segmentHeight))
+            addView(
+                choices,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    segmentHeight,
+                ),
+            )
+        }
+
+        var currentValue = selectedValue
+        fun moveSelection(index: Int, animated: Boolean, finished: (() -> Unit)? = null) {
+            val segment = choices.getChildAt(index)
+            if (segment == null || segment.width <= 0) {
+                rail.post { moveSelection(index, animated, finished) }
+                return
+            }
+            selection.layoutParams = (selection.layoutParams as FrameLayout.LayoutParams).apply {
+                width = segment.width
+                height = segmentHeight
+            }
+            val target = segment.left.toFloat()
+            selection.animate().cancel()
+            if (animated) {
+                choices.isEnabled = false
+                repeat(choices.childCount) { child -> choices.getChildAt(child).isEnabled = false }
+                selection.animate()
+                    .translationX(target)
+                    .setDuration(180L)
+                    .withEndAction {
+                        choices.isEnabled = true
+                        repeat(choices.childCount) { child -> choices.getChildAt(child).isEnabled = true }
+                        finished?.invoke()
+                    }
+                    .start()
+            } else {
+                selection.translationX = target
+                finished?.invoke()
+            }
+        }
+
+        options.forEachIndexed { index, (value, label) ->
+            choices.addView(RadioButton(context).apply {
                 id = View.generateViewId()
                 text = label
+                textSize = 14f
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                gravity = Gravity.CENTER
                 buttonDrawable = null
-                isChecked = value == selectedValue
-                setTag(
-                    R.id.gf2_ui_role,
-                    if (value == selectedValue) ControlRole.SEGMENT_SELECTED else ControlRole.TERTIARY,
+                background = RippleDrawable(
+                    ColorStateList.valueOf(context.getColor(R.color.accent_surface_pressed)),
+                    null,
+                    shape(
+                        context,
+                        android.R.color.white,
+                        android.R.color.transparent,
+                        12,
+                    ),
                 )
-                styleButton(this)
-                setOnClickListener { onSelected(value) }
-            }, RadioGroup.LayoutParams(0, context.dp(48), 1f))
+                setTextColor(selectedTextColors)
+                isChecked = value == selectedValue
+                minHeight = segmentHeight
+                minWidth = context.dp(48)
+                setPadding(0, 0, 0, 0)
+                setOnClickListener {
+                    if (value == currentValue) return@setOnClickListener
+                    currentValue = value
+                    moveSelection(index, animated = true) { onSelected(value) }
+                }
+            }, RadioGroup.LayoutParams(0, segmentHeight, 1f))
         }
+        rail.addOnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
+            if (right - left == oldRight - oldLeft) return@addOnLayoutChangeListener
+            val selectedIndex = options.indexOfFirst { it.first == currentValue }.coerceAtLeast(0)
+            moveSelection(selectedIndex, animated = false)
+        }
+        return rail
     }
 
     internal fun styleButton(button: Button) {
@@ -231,6 +322,7 @@ object ModernUi {
         button.textSize = when {
             compactMultiline -> 12f
             role == ControlRole.FEATURE -> 13f
+            role == ControlRole.EVIDENCE -> 12f
             else -> 14f
         }
         button.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
@@ -274,15 +366,15 @@ object ModernUi {
                 insetVertical = 4,
                 radiusDp = 14,
             )
-            ControlRole.SEGMENT_SELECTED -> ButtonColors(
-                normal = R.color.accent_surface,
-                pressed = R.color.accent_surface_pressed,
+            ControlRole.EVIDENCE -> ButtonColors(
+                normal = R.color.surface,
+                pressed = R.color.surface_pressed,
                 disabled = R.color.surface_variant,
                 stroke = android.R.color.transparent,
-                pressedStroke = R.color.accent,
-                text = R.color.accent_text,
-                insetVertical = 2,
-                radiusDp = 11,
+                pressedStroke = R.color.outline_strong,
+                text = R.color.text_primary,
+                insetVertical = 8,
+                radiusDp = 10,
             )
             ControlRole.DESTRUCTIVE -> ButtonColors(
                 normal = R.color.destructive_action_background,
@@ -363,10 +455,12 @@ object ModernUi {
             is CheckBox -> {
                 view.buttonTintList = controlTint(view.context)
                 view.minimumHeight = view.context.dp(48)
+                view.minimumWidth = view.context.dp(48)
             }
             is RadioButton -> {
                 view.buttonTintList = controlTint(view.context)
                 view.minimumHeight = view.context.dp(48)
+                view.minimumWidth = view.context.dp(48)
             }
             is Button -> styleButton(view)
             is EditText -> {

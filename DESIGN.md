@@ -159,7 +159,7 @@ Home, Platoon, and Weekly share a 64dp bottom bar. Each destination has a 24dp i
 
 ### Capture Status Panel
 
-Capture state, target package, and Start/One-time/Stop actions form one operational group. Start actions become unavailable while capture is preparing or active; Stop becomes unavailable while stopped.
+Capture state, two compact read-only supported-client package IDs, their concise help popover, and Start/One-time/Stop actions form one operational group. Start actions become unavailable while capture is preparing or active; Stop becomes unavailable while stopped.
 
 ### Onboarding
 

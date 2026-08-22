@@ -143,7 +143,13 @@ class PlatoonActivity : LocalizedActivity() {
                     override fun afterTextChanged(s: Editable?) = Unit
                 })
             }
-            addView(searchInput, matchWidth())
+            addView(searchInput, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                topMargin = dp(8)
+                bottomMargin = dp(8)
+            })
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 filterSpinner = spinner(
@@ -160,9 +166,16 @@ class PlatoonActivity : LocalizedActivity() {
                         getString(R.string.sort_last_login),
                     ),
                 )
-                addView(filterSpinner, LinearLayout.LayoutParams(0, wrap(), 1f))
-                addView(sortSpinner, LinearLayout.LayoutParams(0, wrap(), 1f))
-            }, matchWidth())
+                addView(filterSpinner, LinearLayout.LayoutParams(0, wrap(), 1f).apply {
+                    marginEnd = dp(4)
+                })
+                addView(sortSpinner, LinearLayout.LayoutParams(0, wrap(), 1f).apply {
+                    marginStart = dp(4)
+                })
+            }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(8) })
             filterSpinner.onItemSelectedListener = SimpleItemSelectedListener { renderMembers() }
             sortSpinner.onItemSelectedListener = SimpleItemSelectedListener { renderMembers() }
             memberContainer = LinearLayout(context).apply {
@@ -237,7 +250,9 @@ class PlatoonActivity : LocalizedActivity() {
                     setOnCheckedChangeListener { _, checked ->
                         if (checked) selectedUids += status.uid else selectedUids -= status.uid
                     }
-                }, LinearLayout.LayoutParams(wrap(), ViewGroup.LayoutParams.MATCH_PARENT))
+                }, LinearLayout.LayoutParams(dp(48), ViewGroup.LayoutParams.MATCH_PARENT).apply {
+                    marginEnd = dp(8)
+                })
                 addView(ModernUi.actionRow(
                     context = context,
                     title = buildString {
@@ -263,6 +278,7 @@ class PlatoonActivity : LocalizedActivity() {
                             append(latest.totalMerit)
                         }
                     },
+                    titleMaxLines = 2,
                     onClick = {
                         startActivity(
                             Intent(this@PlatoonActivity, MemberDetailActivity::class.java)
@@ -270,7 +286,10 @@ class PlatoonActivity : LocalizedActivity() {
                         )
                     },
                 ), LinearLayout.LayoutParams(0, wrap(), 1f))
-            }, matchWidth())
+            }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(8) })
         }
     }
 

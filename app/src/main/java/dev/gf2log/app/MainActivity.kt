@@ -7,7 +7,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.database.Cursor
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.net.VpnService
@@ -21,9 +23,9 @@ import android.view.ViewGroup
 import android.view.Gravity
 import android.widget.Button
 import android.widget.CheckBox
-import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
+import android.widget.PopupWindow
 import android.widget.ScrollView
 import android.widget.TextView
 import dev.gf2log.app.capture.CaptureStatus
@@ -45,7 +47,6 @@ import java.time.format.DateTimeFormatter
 import java.util.concurrent.Executors
 
 class MainActivity : LocalizedActivity() {
-    private lateinit var packageNameInput: EditText
     private lateinit var statusText: TextView
     private lateinit var captureStateText: TextView
     private lateinit var captureStatusText: TextView
@@ -232,7 +233,6 @@ class MainActivity : LocalizedActivity() {
                 setPadding(dp(10), dp(10), dp(10), dp(10))
                 background = ModernUi.panelBackground(context).apply {
                     setStroke(dp(1), getColor(R.color.outline))
-                    cornerRadius = dp(8).toFloat()
                 }
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
@@ -262,22 +262,29 @@ class MainActivity : LocalizedActivity() {
                     setPadding(0, dp(1), 0, dp(8))
                 }
                 addView(captureStatusText, matchWidth())
-                addView(TextView(context).apply {
-                    text = getString(R.string.capture_target)
-                    textSize = 12f
-                    setTextColor(getColor(R.color.text_secondary))
-                    setPadding(0, dp(2), 0, dp(3))
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(TextView(context).apply {
+                        text = getString(R.string.capture_target)
+                        textSize = 12f
+                        setTextColor(getColor(R.color.text_secondary))
+                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                    addView(ImageButton(context).apply {
+                        setImageResource(R.drawable.ic_info_outline)
+                        contentDescription = getString(R.string.target_package_info)
+                        useModernIconStyle()
+                        setOnClickListener(::showTargetPackageInfo)
+                    }, LinearLayout.LayoutParams(dp(48), dp(48)))
                 }, matchWidth())
-                packageNameInput = EditText(context).apply {
-                    hint = getString(R.string.target_package_hint)
-                    setSingleLine(true)
-                    textSize = 13f
-                    setText(TargetPackagePreferences.get(context))
-                }
-                addView(packageNameInput, LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    dp(48),
-                ))
+                addView(fixedTargetField(SupportedGamePackages.HAOPLAY), matchWidth())
+                addView(
+                    fixedTargetField(SupportedGamePackages.DARKWINTER),
+                    LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = dp(6) },
+                )
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     prepareCaptureButton = Button(context).apply {
@@ -454,7 +461,6 @@ class MainActivity : LocalizedActivity() {
         captureStateText.contentDescription = captureStateText.text
         captureStatusText.contentDescription = captureStatusText.text
         val busy = starting || running
-        if (::packageNameInput.isInitialized) packageNameInput.isEnabled = !busy
         if (::prepareCaptureButton.isInitialized) prepareCaptureButton.isEnabled = !busy
         if (::captureOnceButton.isInitialized) captureOnceButton.isEnabled = !busy
         if (::stopCaptureButton.isInitialized) stopCaptureButton.isEnabled = busy
@@ -482,11 +488,58 @@ class MainActivity : LocalizedActivity() {
         )
     }
 
+    private fun showTargetPackageInfo(anchor: View) {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(16))
+            background = ModernUi.panelBackground(context).apply {
+                setStroke(dp(1), getColor(R.color.outline_strong))
+            }
+            addView(TextView(context).apply {
+                text = getString(R.string.target_package_info_title)
+                textSize = 16f
+                setTextColor(getColor(R.color.text_primary))
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            }, matchWidth())
+            addView(TextView(context).apply {
+                text = getString(R.string.target_package_info_message)
+                textSize = 13f
+                setTextColor(getColor(R.color.text_secondary))
+                setLineSpacing(0f, 1.15f)
+                setPadding(0, dp(8), 0, 0)
+            }, matchWidth())
+        }
+        val popupWidth = minOf(dp(360), resources.displayMetrics.widthPixels - dp(32))
+        PopupWindow(
+            content,
+            popupWidth,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            true,
+        ).apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            isOutsideTouchable = true
+            elevation = dp(6).toFloat()
+            showAsDropDown(anchor, anchor.width - popupWidth, dp(4))
+        }
+    }
+
+    private fun fixedTargetField(packageId: String) = TextView(this).apply {
+        text = packageId
+        textSize = 12f
+        setTextColor(getColor(R.color.text_secondary))
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(12), 0, dp(12), 0)
+        minHeight = dp(38)
+        isClickable = false
+        isFocusable = false
+        background = ModernUi.panelBackground(context).apply {
+            setStroke(dp(1), getColor(R.color.outline))
+        }
+    }
+
     @Suppress("DEPRECATION")
     private fun requestVpnAndStart(captureOnce: Boolean) {
-        val targetPackage = packageNameInput.text.toString().trim()
         captureOnceRequested = captureOnce
-        TargetPackagePreferences.set(this, targetPackage)
         val permissionIntent = VpnService.prepare(this)
         if (permissionIntent == null) {
             startCaptureService()
@@ -500,7 +553,6 @@ class MainActivity : LocalizedActivity() {
         renderCaptureStatus()
         val intent = Intent(this, CaptureVpnService::class.java)
             .setAction(CaptureVpnService.ACTION_START)
-            .putExtra(CaptureVpnService.EXTRA_TARGET_PACKAGE, packageNameInput.text.toString().trim())
             .putExtra(CaptureVpnService.EXTRA_CAPTURE_ONCE, captureOnceRequested)
         startForegroundService(intent)
         captureOnceRequested = false
@@ -834,13 +886,14 @@ class MainActivity : LocalizedActivity() {
             }, matchWidth())
             return
         }
-        val rowHeight = dp(52)
+        val rowHeight = dp(48)
         val tagWidth = dp(112)
         val tagHeight = dp(32)
         entries.forEach { entry ->
             container.addView(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
+                minimumHeight = rowHeight
                 addView(CheckBox(context).apply {
                     isChecked = entry.id in selectedIds
                     contentDescription = getString(R.string.select_history_entry, entry.title)
@@ -854,7 +907,7 @@ class MainActivity : LocalizedActivity() {
                 addView(Button(context).apply {
                     text = entry.title
                     isAllCaps = false
-                    useNavigationActionStyle()
+                    useEvidenceActionStyle()
                     setOnClickListener {
                         startActivity(
                             Intent(this@MainActivity, PacketHistoryActivity::class.java)
@@ -863,17 +916,17 @@ class MainActivity : LocalizedActivity() {
                                 .putExtra(PacketHistoryActivity.EXTRA_SAVED_ENTRY, saved),
                         )
                     }
-                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+                }, LinearLayout.LayoutParams(0, rowHeight, 1f))
                 addView(TextView(context).apply {
                     val localizedTag = localizedPayloadTag(entry.payloadType)
                     text = localizedTag
                     textSize = 12f
                     setTextColor(getColor(R.color.primary_action_foreground))
                     gravity = Gravity.CENTER
-                    setPadding(dp(8), dp(5), dp(8), dp(5))
+                    setPadding(dp(8), 0, dp(8), 0)
                     background = GradientDrawable().apply {
                         shape = GradientDrawable.RECTANGLE
-                        cornerRadius = tagHeight / 2f
+                        cornerRadius = dp(10).toFloat()
                         setColor(getColor(R.color.primary_action_background))
                     }
                     contentDescription = getString(
@@ -885,7 +938,10 @@ class MainActivity : LocalizedActivity() {
                     tagWidth,
                     tagHeight,
                 ).apply { marginStart = dp(8) })
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rowHeight))
+            }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ))
         }
     }
 

@@ -36,8 +36,10 @@ and real packet contents from reproductions.
 
 ## Security boundaries
 
-mobileGF2logger observes traffic only after Android grants `VpnService` consent
-for a user-selected package. It does not decrypt TLS or authenticate the game's
+mobileGF2logger observes traffic only after Android grants `VpnService` consent.
+The fixed HaoPlay and Darkwinter package IDs are registered as separate allowed
+applications; these identifiers are not matched against network domains or
+packet contents. It does not decrypt TLS or authenticate the game's
 plaintext protocol. Parsed data and backups therefore provide local integrity
 and management convenience, not cryptographic proof that a remote payload is
 genuine.

@@ -14,6 +14,8 @@ fun Button.useTertiaryActionStyle() = useActionRole(ModernUi.ControlRole.TERTIAR
 
 fun Button.useNavigationActionStyle() = useActionRole(ModernUi.ControlRole.NAVIGATION)
 
+fun Button.useEvidenceActionStyle() = useActionRole(ModernUi.ControlRole.EVIDENCE)
+
 fun Button.useDestructiveActionStyle() = useActionRole(ModernUi.ControlRole.DESTRUCTIVE)
 
 fun Button.useDestructiveTextActionStyle() = useActionRole(ModernUi.ControlRole.DESTRUCTIVE_TEXT)

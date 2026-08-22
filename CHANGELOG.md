@@ -2,6 +2,23 @@
 
 All notable changes to mobileGF2logger are documented here.
 
+## 2.3.1 - 2026-08-22
+
+### Added
+
+- Add simultaneous HaoPlay and Darkwinter capture by registering both verified
+  Android package IDs as separate VPN application allowlist entries.
+- Add bilingual in-app guidance that distinguishes Android package IDs from
+  network domains and protocol prefixes.
+
+### Changed
+
+- Fix the verified HaoPlay (`com.haoplay.game.and.exilium`) and Darkwinter
+  (`com.Sunborn.SnqxExilium.Glo`) package IDs as the two supported clients,
+  replacing the ambiguous editable target field with compact read-only fields.
+- Refine segmented controls, packet-history evidence rows, settings spacing, and
+  member-list rhythm for more consistent compact layouts.
+
 ## 2.3.0 - 2026-08-17
 
 ### Added

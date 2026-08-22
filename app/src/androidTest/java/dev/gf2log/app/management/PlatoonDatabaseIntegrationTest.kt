@@ -1022,6 +1022,38 @@ class PlatoonDatabaseIntegrationTest {
         }
     }
 
+    @Test
+    fun weeklyHistoryDeduplicatesBoundsAndRestoresOnlyWithinItsWeek() {
+        val period = LocalDate.of(2026, 8, 16).toEpochDay()
+        var latestId = -1L
+        repeat(17) { index ->
+            latestId = database.recordWeeklyReportHistory(
+                periodStartEpochDay = period,
+                recordedAt = Instant.ofEpochMilli(index.toLong()),
+                fingerprint = index.toString(16).padStart(64, '0'),
+                payload = byteArrayOf(index.toByte()),
+                clearActiveOnChange = true,
+            )
+        }
+
+        val retained = database.listWeeklyReportHistory(period)
+        assertEquals(PlatoonDatabase.MAX_WEEKLY_REPORT_HISTORY, retained.size)
+        assertEquals(latestId, retained.first().id)
+        val duplicate = database.recordWeeklyReportHistory(
+            periodStartEpochDay = period,
+            recordedAt = Instant.ofEpochMilli(99L),
+            fingerprint = 16.toString(16).padStart(64, '0'),
+            payload = byteArrayOf(16),
+            clearActiveOnChange = true,
+        )
+        assertEquals(latestId, duplicate)
+        assertTrue(database.activateWeeklyReportHistory(latestId, period))
+        assertTrue(database.listWeeklyReportHistory(period).first().active)
+        assertFalse(database.activateWeeklyReportHistory(latestId, period + 7))
+        assertTrue(database.clearActiveWeeklyReportHistory(period))
+        assertFalse(database.listWeeklyReportHistory(period).any { it.active })
+    }
+
     private fun update(kind: Long, at: Instant, uid: Long, name: String) =
         PlatoonUpdateObservation(
             kind = kind,

@@ -15,14 +15,46 @@ local.properties
 *.json
 !/.impeccable/design.json
 *.log
+*.hprof
+*.trace
 *.jks
 *.keystore
 *.gf2backup
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
 keystore.properties
 keystore.properties.*
 .tmp-*/
 .tmp-*
+*.tmp
+*.bak
+*.orig
+*.rej
+*.patch
+*.diff
 /.impeccable/review/
+/.release-secrets/
+/.vscode/
+/.fleet/
+
+# Generated screenshots and other raster images are local-only. Existing
+# tracked Android launcher assets remain tracked; new images require an
+# explicit force-add and review.
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.bmp
+*.tif
+*.tiff
+
+# Promotion drafts and their captured device artwork are not release sources.
+/reddit-promo-*/
 
 # Operating-system metadata
 desktop.ini
@@ -30,7 +62,6 @@ Thumbs.db
 .DS_Store
 
 # Local device and UI verification artifacts (repository root only)
-/*.png
 /*.xml
 /*.db
 /*.db-*

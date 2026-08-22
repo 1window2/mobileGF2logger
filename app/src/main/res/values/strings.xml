@@ -7,10 +7,10 @@
     <string name="capture_ready">Ready</string>
     <string name="capture_running">Capturing</string>
     <string name="capture_stopped_detail">Capture is stopped</string>
-    <string name="capture_target">Supported clients</string>
-    <string name="target_package_info">About capture target package IDs</string>
-    <string name="target_package_info_title">Capture target package IDs</string>
-    <string name="target_package_info_message">com.haoplay.game.and.exilium\nHaoPlay client\n\ncom.Sunborn.SnqxExilium.Glo\nDarkwinter client\n\nThese are fixed Android application package IDs, not network domains or packet prefixes. GF2logger registers each installed supported app separately with Android’s VPN service.</string>
+    <string name="capture_target">Supported client IDs</string>
+    <string name="target_package_info">Package ID</string>
+    <string name="target_package_info_title">Package ID</string>
+    <string name="target_package_info_message">com.haoplay.game.and.exilium\nHaoPlay client\n\ncom.Sunborn.SnqxExilium.Glo\nDarkwinter client</string>
     <string name="nav_home">Home</string>
     <string name="nav_platoon">Platoon</string>
     <string name="nav_weekly">Weekly</string>
@@ -383,4 +383,15 @@
     <string name="discord_csv_sent">Original CSV sent to Discord.</string>
     <string name="discord_csv_send_failed">Unable to send the original CSV. Check the webhook and network connection.</string>
     <string name="discord_csv_invalid">This parsed packet does not contain a valid sendable CSV body.</string>
+    <string name="weekly_table_history">Table History</string>
+    <string name="weekly_table_history_description">Automatically recorded past versions of the current weekly table.</string>
+    <string name="weekly_table_history_empty">No table changes have been recorded yet.</string>
+    <string name="weekly_table_history_member_count">%1$d members</string>
+    <string name="weekly_table_history_active">Currently restored</string>
+    <string name="weekly_table_history_preview">Table history preview</string>
+    <string name="weekly_table_history_restore">Restore this table</string>
+    <string name="weekly_table_history_restore_warning">Use this recorded table as the visible version for this week? A new packet or import that changes the table will automatically return to the live version.</string>
+    <string name="weekly_table_history_restored">The recorded weekly table was restored.</string>
+    <string name="weekly_table_history_restore_failed">This table history entry is no longer available.</string>
+    <string name="weekly_table_history_live_notice">Showing a restored table history entry. New evidence will return this week to the live table.</string>
 </resources>

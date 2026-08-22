@@ -33,6 +33,7 @@ object WeeklyReportBuilder {
         val isGunsmokeWeek: Boolean = false,
         val hasFinalGunsmokeScore: Boolean = false,
         val resolvedGunsmokeTotals: ResolvedGunsmokeTotals? = null,
+        val resolvedStandardTotals: ResolvedStandardTotals? = null,
         val gunsmokeAttemptsFloor: Int? = null,
     ) {
         val observedDays: List<DayCell>
@@ -66,6 +67,8 @@ object WeeklyReportBuilder {
             get() = when {
                 resolvedGunsmokeTotals?.meritCertainty == MetricCertainty.EXACT &&
                     totalMerit == resolvedGunsmokeTotals.merit -> MetricCertainty.EXACT
+                resolvedStandardTotals?.meritCertainty == MetricCertainty.EXACT &&
+                    totalMerit == resolvedStandardTotals.merit -> MetricCertainty.EXACT
                 !isGunsmokeWeek && totalMerit == MAX_STANDARD_WEEKLY_MERIT -> MetricCertainty.EXACT
                 days.all { it.meritCertainty == MetricCertainty.EXACT } -> MetricCertainty.EXACT
                 totalMerit > 0L || days.any { it.meritDelta != null } -> MetricCertainty.LOWER_BOUND
@@ -86,13 +89,22 @@ object WeeklyReportBuilder {
                 val daily = days.count { it.attended == true }.takeIf { count ->
                     count > 0 || days.all { it.attended != null }
                 }
-                return listOfNotNull(daily, resolvedGunsmokeTotals?.loginDays).maxOrNull()
+                return listOfNotNull(
+                    daily,
+                    resolvedGunsmokeTotals?.loginDays,
+                    resolvedStandardTotals?.loginDays,
+                ).maxOrNull()
             }
 
         val loginDaysCertainty: MetricCertainty
             get() = if (
                 resolvedGunsmokeTotals?.loginDaysCertainty == MetricCertainty.EXACT &&
-                loginDays == resolvedGunsmokeTotals.loginDays
+                    loginDays == resolvedGunsmokeTotals.loginDays
+            ) {
+                MetricCertainty.EXACT
+            } else if (
+                resolvedStandardTotals?.loginDaysCertainty == MetricCertainty.EXACT &&
+                loginDays == resolvedStandardTotals.loginDays
             ) {
                 MetricCertainty.EXACT
             } else {
@@ -104,13 +116,22 @@ object WeeklyReportBuilder {
                 val daily = days.count { it.dailyPatrol == true }.takeIf { count ->
                     count > 0 || days.all { it.dailyPatrol != null }
                 }
-                return listOfNotNull(daily, resolvedGunsmokeTotals?.patrolDays).maxOrNull()
+                return listOfNotNull(
+                    daily,
+                    resolvedGunsmokeTotals?.patrolDays,
+                    resolvedStandardTotals?.patrolDays,
+                ).maxOrNull()
             }
 
         val patrolDaysCertainty: MetricCertainty
             get() = if (
                 resolvedGunsmokeTotals?.patrolDaysCertainty == MetricCertainty.EXACT &&
                 patrolDays == resolvedGunsmokeTotals.patrolDays
+            ) {
+                MetricCertainty.EXACT
+            } else if (
+                resolvedStandardTotals?.patrolDaysCertainty == MetricCertainty.EXACT &&
+                patrolDays == resolvedStandardTotals.patrolDays
             ) {
                 MetricCertainty.EXACT
             } else {
@@ -138,6 +159,15 @@ object WeeklyReportBuilder {
         val meritCertainty: MetricCertainty,
         val attempts: Int,
         val attemptsCertainty: MetricCertainty,
+        val loginDays: Int,
+        val loginDaysCertainty: MetricCertainty,
+        val patrolDays: Int,
+        val patrolDaysCertainty: MetricCertainty,
+    )
+
+    data class ResolvedStandardTotals(
+        val merit: Long,
+        val meritCertainty: MetricCertainty,
         val loginDays: Int,
         val loginDaysCertainty: MetricCertainty,
         val patrolDays: Int,
@@ -376,7 +406,7 @@ object WeeklyReportBuilder {
             } else {
                 null
             }
-            val cells = gunsmokeResolution?.cells ?: if (!isGunsmoke) {
+            val standardResolution = if (!isGunsmoke) {
                 StandardWeekSolver.resolve(
                     uid = latestKnown.uid,
                     days = days,
@@ -386,8 +416,9 @@ object WeeklyReportBuilder {
                     asOf = asOf,
                 )
             } else {
-                derivedCells
+                null
             }
+            val cells = gunsmokeResolution?.cells ?: standardResolution?.cells ?: derivedCells
             val snapshotsInPeriod = sortedSnapshots.mapNotNull { snapshot ->
                 val gameDay = PlatoonPeriods.gameDay(snapshot.capturedAt, zoneId)
                 snapshot.member(latestKnown.uid)
@@ -411,6 +442,7 @@ object WeeklyReportBuilder {
                     derivedMeritTotal,
                     sundayMerit + mondayThroughSaturday,
                     gunsmokeResolution?.totals?.merit ?: 0L,
+                    standardResolution?.totals?.merit ?: 0L,
                 ),
                 totalScore = if (isGunsmoke) {
                     maxOf(derivedScoreTotal, latestCapturedScore)
@@ -420,6 +452,7 @@ object WeeklyReportBuilder {
                 isGunsmokeWeek = isGunsmoke,
                 hasFinalGunsmokeScore = cells.any(DayCell::hasFinalGunsmokeScore),
                 resolvedGunsmokeTotals = gunsmokeResolution?.totals,
+                resolvedStandardTotals = standardResolution?.totals,
                 gunsmokeAttemptsFloor = gunsmokeResolution?.attemptsFloor,
             )
         }.filter { row ->

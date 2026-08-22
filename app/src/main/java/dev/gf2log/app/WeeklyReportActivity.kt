@@ -207,6 +207,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         val membershipEndInstant = periodStart.plusDays(7).atStartOfDay(zone).toInstant()
         val report = repository.buildWeeklyReport(targetDay, zone)
         val memberStatuses = repository.listMemberStatuses()
+        val history = repository.listWeeklyReportHistory(report.periodStart)
         return RenderModel(
             zone = zone,
             report = report,
@@ -226,6 +227,8 @@ class WeeklyReportActivity : LocalizedActivity() {
             memberNotesByUid = memberStatuses.associate { it.uid to it.note },
             displayedMembers = MemberOrderPreferences(this).apply(report.members) { it.uid },
             scoreRanks = report.members.withIndex().associate { it.value.uid to it.index + 1 },
+            historyCount = history.size,
+            restoredHistory = history.any { it.active },
         )
     }
 
@@ -279,6 +282,23 @@ class WeeklyReportActivity : LocalizedActivity() {
                 setTypeface(typeface, Typeface.BOLD)
             }, LinearLayout.LayoutParams(0, wrap(), 1f))
             addView(ImageButton(context).apply {
+                setImageResource(R.drawable.ic_history_restore)
+                useModernIconStyle()
+                contentDescription = getString(R.string.weekly_table_history)
+                setPadding(dp(10), dp(10), dp(10), dp(10))
+                isEnabled = !isEditing && model.historyCount > 0
+                alpha = if (isEnabled) 1f else 0.35f
+                setOnClickListener {
+                    startActivity(
+                        Intent(this@WeeklyReportActivity, WeeklyTableHistoryActivity::class.java)
+                            .putExtra(
+                                WeeklyTableHistoryActivity.EXTRA_PERIOD_START,
+                                report.periodStart.toEpochDay(),
+                            ),
+                    )
+                }
+            }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(8) })
+            addView(ImageButton(context).apply {
                 setImageResource(if (isEditing) R.drawable.ic_save else R.drawable.ic_edit)
                 useModernIconStyle()
                 contentDescription = getString(
@@ -292,7 +312,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                         showManualEditWarning(report)
                     }
                 }
-            }, LinearLayout.LayoutParams(dp(48), dp(48)))
+            }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(8) })
             addView(ImageButton(context).apply {
                 setImageResource(R.drawable.ic_share)
                 useModernIconStyle()
@@ -303,7 +323,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                 setOnClickListener {
                     showWeeklyShareOptions(model)
                 }
-            }, LinearLayout.LayoutParams(dp(48), dp(48)))
+            }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(8) })
             addView(ImageButton(context).apply {
                 setImageResource(R.drawable.ic_settings)
                 useModernIconStyle()
@@ -328,6 +348,18 @@ class WeeklyReportActivity : LocalizedActivity() {
             textSize = 14f
             setTextColor(getColor(R.color.text_secondary))
         }, matchWidth())
+        if (model.restoredHistory) {
+            body.addView(TextView(this).apply {
+                text = getString(R.string.weekly_table_history_live_notice)
+                textSize = 13f
+                setTextColor(getColor(R.color.accent_text))
+                background = ModernUi.panelBackground(context, emphasized = true)
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+            }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(8) })
+        }
         if (report.hasIncompleteDailyEvidence) {
             body.addView(ModernUi.actionRow(
                 context = this,
@@ -1680,6 +1712,8 @@ class WeeklyReportActivity : LocalizedActivity() {
         val displayedMembers: List<WeeklyReportBuilder.MemberRow>,
         val scoreRanks: Map<Long, Int>,
         val memberNotesByUid: Map<Long, String>,
+        val historyCount: Int,
+        val restoredHistory: Boolean,
     )
 
     private data class ActivityMark(val symbol: String, val color: Int?)

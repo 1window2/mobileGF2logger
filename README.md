@@ -21,6 +21,7 @@ never stored.
 - Builds Sunday-to-Saturday Standard or Gunsmoke Frontline weekly tables around the 05:00 game reset, with cut-off points and manual correction for missing data.
 - Offers One-time Capture that tracks the three useful Platoon payloads and stops automatically when the checklist is complete.
 - Explains every weekly cell on tap and summarizes missing or uncertain evidence in an Evidence Health panel.
+- Keeps up to 15 automatic revisions per weekly table so an earlier projection can be previewed and restored after an accidental import.
 - Recovers interrupted imports before previewing roster CSV impact and keeps an automatic one-level checkpoint for undo.
 - Saves or shares a weekly PNG with opt-in controls for names, UIDs, and private notes.
 - Can send a validated original CSV to an optional user-owned Discord incoming webhook after confirmation.

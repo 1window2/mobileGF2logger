@@ -72,7 +72,6 @@ internal object GunsmokeWeekSolver {
             .groupBy { PlatoonPeriods.gameDay(it.occurredAt, zoneId) }
         val resolved = cells.toMutableList()
         var resolvedTotals: WeeklyReportBuilder.ResolvedGunsmokeTotals? = null
-        var detailedSearchExhausted = false
         var index = 0
         while (index < days.size) {
             while (index < days.size && checkpoints[index] == null) index++
@@ -93,16 +92,10 @@ internal object GunsmokeWeekSolver {
             )
             run.cells.forEachIndexed { cellIndex, cell -> resolved[cellIndex] = cell }
             if (run.totals != null) resolvedTotals = run.totals
-            detailedSearchExhausted = detailedSearchExhausted || run.searchExhausted
             index++
         }
-        if (
-            resolvedTotals == null &&
-            detailedSearchExhausted &&
-            checkpoints.all { it != null } &&
-            resolved.last().hasFinalGunsmokeScore
-        ) {
-            resolvedTotals = resolveFinalEventTotals(
+        if (resolvedTotals == null && resolved.last().hasFinalGunsmokeScore) {
+            val aggregate = resolveFinalEventTotals(
                 days = days,
                 zoneId = zoneId,
                 anchor = anchor,
@@ -111,6 +104,23 @@ internal object GunsmokeWeekSolver {
                 cells = resolved,
                 factsByDay = factsByDay,
             )
+            if (aggregate != null) {
+                resolvedTotals = aggregate.totals
+                aggregate.dayConsensus.forEachIndexed { dayOffset, consensus ->
+                    val cellIndex = dayOffset + 1
+                    val cell = resolved[cellIndex]
+                    if (cell.manualOverride == null) {
+                        resolved[cellIndex] = cell.copy(
+                            solvedAttempts = consensus.attempts ?: cell.solvedAttempts,
+                            solvedAttemptsCertainty = consensus.attempts?.let {
+                                MetricCertainty.EXACT
+                            } ?: cell.solvedAttemptsCertainty,
+                            solvedAttended = consensus.attended ?: cell.solvedAttended,
+                            solvedDailyPatrol = consensus.patrol ?: cell.solvedDailyPatrol,
+                        )
+                    }
+                }
+            }
         }
         return Resolution(
             cells = resolved,
@@ -142,12 +152,12 @@ internal object GunsmokeWeekSolver {
         checkpoints: List<Checkpoint?>,
         cells: List<WeeklyReportBuilder.DayCell>,
         factsByDay: Map<LocalDate, List<DailyPatrolFact>>,
-    ): WeeklyReportBuilder.ResolvedGunsmokeTotals? {
+    ): FinalAggregateResolution? {
         if (days.size != 7 || checkpoints.size != days.size) return null
-        val sunday = requireNotNull(checkpoints[0])
-        val monday = requireNotNull(checkpoints[1])
-        val final = requireNotNull(checkpoints.last())
-        val ordered = checkpoints.map(::requireNotNull)
+        val sunday = checkpoints[0] ?: return null
+        val monday = checkpoints[1] ?: return null
+        val final = checkpoints.last() ?: return null
+        val ordered = checkpoints.filterNotNull()
         if (
             monday.member.totalMerit < sunday.member.totalMerit ||
             monday.member.totalScore < sunday.member.totalScore ||
@@ -155,7 +165,8 @@ internal object GunsmokeWeekSolver {
                 later.member.totalMerit < earlier.member.totalMerit ||
                     later.member.totalScore < earlier.member.totalScore
             } ||
-            ordered.drop(1).zipWithNext().any { (earlier, later) ->
+            ordered.filter { !it.capturedAt.isBefore(monday.capturedAt) }
+                .zipWithNext().any { (earlier, later) ->
                 later.member.weeklyMerit < earlier.member.weeklyMerit
             }
         ) {
@@ -217,10 +228,11 @@ internal object GunsmokeWeekSolver {
         }.distinct()
         if (sundayFinals.isEmpty()) return null
 
+        val constrainedSummaries = buildConstrainedActivitySummaries(cells.drop(1))
         val candidates = sundayFinals.flatMap { sundayFinal ->
             val remainingScore = final.member.totalScore - sundayFinal.score
             if (remainingScore < 0L) return@flatMap emptyList()
-            SIX_DAY_ACTIVITY_SUMMARIES.mapNotNull { summary ->
+            constrainedSummaries.mapNotNull { (summary, marginals) ->
                 val scoreMerit = final.member.weeklyMerit -
                     summary.baselineMerit -
                     summary.attempts * ActivityInference.MERIT_PER_ATTEMPT
@@ -234,44 +246,59 @@ internal object GunsmokeWeekSolver {
                 ) {
                     return@mapNotNull null
                 }
-                ActivityTotals(
-                    merit = sundayFinal.merit + final.member.weeklyMerit,
-                    attempts = sundayFinal.attempts + summary.attempts,
-                    loginDays = (if (sundayFinal.attended) 1 else 0) + summary.loginDays,
-                    patrolDays = (if (sundayFinal.patrol) 1 else 0) + summary.patrolDays,
+                AggregateCandidate(
+                    totals = ActivityTotals(
+                        merit = sundayFinal.merit + final.member.weeklyMerit,
+                        attempts = sundayFinal.attempts + summary.attempts,
+                        loginDays = (if (sundayFinal.attended) 1 else 0) + summary.loginDays,
+                        patrolDays = (if (sundayFinal.patrol) 1 else 0) + summary.patrolDays,
+                    ),
+                    dayOptions = marginals,
                 )
             }
         }.distinct()
         if (candidates.isEmpty()) return null
-        val minimumMerit = candidates.minOf(ActivityTotals::merit)
-        val maximumMerit = candidates.maxOf(ActivityTotals::merit)
-        val minimumAttempts = candidates.minOf(ActivityTotals::attempts)
-        val maximumAttempts = candidates.maxOf(ActivityTotals::attempts)
-        val minimumLoginDays = candidates.minOf(ActivityTotals::loginDays)
-        val maximumLoginDays = candidates.maxOf(ActivityTotals::loginDays)
-        val minimumPatrolDays = candidates.minOf(ActivityTotals::patrolDays)
-        val maximumPatrolDays = candidates.maxOf(ActivityTotals::patrolDays)
-        return WeeklyReportBuilder.ResolvedGunsmokeTotals(
-            merit = minimumMerit,
-            meritCertainty = exactOrLowerBound(
-                minimumMerit,
-                maximumMerit,
-                finalDayCanStillGainBaseline = minimumLoginDays < 7 || minimumPatrolDays < 7,
+        val totals = candidates.map(AggregateCandidate::totals)
+        val minimumMerit = totals.minOf(ActivityTotals::merit)
+        val maximumMerit = totals.maxOf(ActivityTotals::merit)
+        val minimumAttempts = totals.minOf(ActivityTotals::attempts)
+        val maximumAttempts = totals.maxOf(ActivityTotals::attempts)
+        val minimumLoginDays = totals.minOf(ActivityTotals::loginDays)
+        val maximumLoginDays = totals.maxOf(ActivityTotals::loginDays)
+        val minimumPatrolDays = totals.minOf(ActivityTotals::patrolDays)
+        val maximumPatrolDays = totals.maxOf(ActivityTotals::patrolDays)
+        val dayConsensus = List(6) { dayIndex ->
+            val options = candidates.flatMap { candidate -> candidate.dayOptions[dayIndex] }
+            DayConsensus(
+                attempts = options.map(ActivityOption::attempts).distinct().singleOrNull(),
+                attended = options.map(ActivityOption::attended).distinct().singleOrNull(),
+                patrol = options.map(ActivityOption::patrol).distinct().singleOrNull(),
+            )
+        }
+        return FinalAggregateResolution(
+            totals = WeeklyReportBuilder.ResolvedGunsmokeTotals(
+                merit = minimumMerit,
+                meritCertainty = exactOrLowerBound(
+                    minimumMerit,
+                    maximumMerit,
+                    finalDayCanStillGainBaseline = minimumLoginDays < 7 || minimumPatrolDays < 7,
+                ),
+                attempts = minimumAttempts,
+                attemptsCertainty = exactOrLowerBound(minimumAttempts, maximumAttempts),
+                loginDays = minimumLoginDays,
+                loginDaysCertainty = exactOrLowerBound(
+                    minimumLoginDays,
+                    maximumLoginDays,
+                    finalDayCanStillGainBaseline = minimumLoginDays < 7,
+                ),
+                patrolDays = minimumPatrolDays,
+                patrolDaysCertainty = exactOrLowerBound(
+                    minimumPatrolDays,
+                    maximumPatrolDays,
+                    finalDayCanStillGainBaseline = minimumPatrolDays < 7,
+                ),
             ),
-            attempts = minimumAttempts,
-            attemptsCertainty = exactOrLowerBound(minimumAttempts, maximumAttempts),
-            loginDays = minimumLoginDays,
-            loginDaysCertainty = exactOrLowerBound(
-                minimumLoginDays,
-                maximumLoginDays,
-                finalDayCanStillGainBaseline = minimumLoginDays < 7,
-            ),
-            patrolDays = minimumPatrolDays,
-            patrolDaysCertainty = exactOrLowerBound(
-                minimumPatrolDays,
-                maximumPatrolDays,
-                finalDayCanStillGainBaseline = minimumPatrolDays < 7,
-            ),
+            dayConsensus = dayConsensus,
         )
     }
 
@@ -1239,6 +1266,35 @@ internal object GunsmokeWeekSolver {
         val patrolDays: Int,
     )
 
+    private data class ActivityOption(
+        val attempts: Int,
+        val attended: Boolean,
+        val patrol: Boolean,
+    ) {
+        val baselineMerit: Long
+            get() = when {
+                patrol -> LOGIN_MERIT + PATROL_MERIT
+                attended -> LOGIN_MERIT
+                else -> 0L
+            }
+    }
+
+    private data class AggregateCandidate(
+        val totals: ActivityTotals,
+        val dayOptions: List<Set<ActivityOption>>,
+    )
+
+    private data class DayConsensus(
+        val attempts: Int?,
+        val attended: Boolean?,
+        val patrol: Boolean?,
+    )
+
+    private data class FinalAggregateResolution(
+        val totals: WeeklyReportBuilder.ResolvedGunsmokeTotals,
+        val dayConsensus: List<DayConsensus>,
+    )
+
     private data class CompletedSolution(
         val partial: PartialSolution,
         val finalStates: List<ActivityState>,
@@ -1262,33 +1318,63 @@ internal object GunsmokeWeekSolver {
             patrol = true,
         ),
     )
-    private val SIX_DAY_ACTIVITY_SUMMARIES: Set<ActivitySummary> = buildActivitySummaries(dayCount = 6)
-
-    /** Builds every aggregate attempts/baseline combination for a fixed number of game days. */
-    private fun buildActivitySummaries(dayCount: Int): Set<ActivitySummary> {
-        var summaries = setOf(ActivitySummary(0, 0L, 0, 0))
-        repeat(dayCount) {
-            summaries = buildSet {
-                summaries.forEach { summary ->
-                    for (attempts in 0..ActivityInference.MAX_DAILY_ATTEMPTS) {
-                        ACTIVITY_BASELINES.forEach { baseline ->
-                            if (attempts == 0 || baseline.attended) {
-                                add(
-                                    ActivitySummary(
-                                        attempts = summary.attempts + attempts,
-                                        baselineMerit = summary.baselineMerit + baseline.merit,
-                                        loginDays = summary.loginDays + if (baseline.attended) 1 else 0,
-                                        patrolDays = summary.patrolDays + if (baseline.patrol) 1 else 0,
-                                    ),
-                                )
-                            }
-                        }
+    /** Builds bounded aggregate states while retaining safe per-day marginal possibilities. */
+    private fun buildConstrainedActivitySummaries(
+        cells: List<WeeklyReportBuilder.DayCell>,
+    ): Map<ActivitySummary, List<Set<ActivityOption>>> {
+        var states = mapOf(ActivitySummary(0, 0L, 0, 0) to emptyList<Set<ActivityOption>>())
+        cells.forEach { cell ->
+            val options = activityOptions(cell)
+            if (options.isEmpty()) return emptyMap()
+            val next = linkedMapOf<ActivitySummary, List<Set<ActivityOption>>>()
+            states.forEach { (summary, marginals) ->
+                options.forEach { option ->
+                    val key = ActivitySummary(
+                        attempts = summary.attempts + option.attempts,
+                        baselineMerit = summary.baselineMerit + option.baselineMerit,
+                        loginDays = summary.loginDays + if (option.attended) 1 else 0,
+                        patrolDays = summary.patrolDays + if (option.patrol) 1 else 0,
+                    )
+                    val candidate = marginals + listOf(setOf(option))
+                    val existing = next[key]
+                    next[key] = if (existing == null) {
+                        candidate
+                    } else {
+                        existing.indices.map { index -> existing[index] + candidate[index] }
                     }
                 }
             }
+            states = next
         }
-        return summaries
+        return states
     }
+
+    private fun activityOptions(cell: WeeklyReportBuilder.DayCell): List<ActivityOption> =
+        buildList {
+            for (attempts in 0..ActivityInference.MAX_DAILY_ATTEMPTS) {
+                ACTIVITY_BASELINES.forEach { baseline ->
+                    if (attempts == 0 || baseline.attended) {
+                        add(ActivityOption(attempts, baseline.attended, baseline.patrol))
+                    }
+                }
+            }
+        }.filter { option ->
+            val override = cell.manualOverride
+            (override?.attempts == null || override.attempts == option.attempts) &&
+                (override?.attended == null || override.attended == option.attended) &&
+                (override?.dailyPatrol == null || override.dailyPatrol == option.patrol) &&
+                (!cell.hasLoginFact || option.attended) &&
+                (!cell.hasDailyPatrolFact || option.patrol) &&
+                (
+                    cell.solvedAttempts == null || when (cell.solvedAttemptsCertainty) {
+                        MetricCertainty.EXACT -> cell.solvedAttempts == option.attempts
+                        MetricCertainty.LOWER_BOUND -> option.attempts >= cell.solvedAttempts
+                        MetricCertainty.UNKNOWN, null -> true
+                    }
+                ) &&
+                (cell.solvedAttended == null || cell.solvedAttended == option.attended) &&
+                (cell.solvedDailyPatrol == null || cell.solvedDailyPatrol == option.patrol)
+        }
 
     private val MAX_BOUNDARY_DISTANCE: Duration = Duration.ofMinutes(15)
     private const val MAX_SCORE_MERIT_VALUES = 250_000L

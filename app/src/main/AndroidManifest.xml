@@ -47,6 +47,14 @@
             android:exported="false" />
 
         <activity
+            android:name=".WeeklyTableHistoryActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".WeeklyTableHistoryPreviewActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".WeeklySettingsActivity"
             android:exported="false" />
 

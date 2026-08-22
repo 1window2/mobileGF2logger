@@ -49,6 +49,11 @@ of Android private storage. Backups are checksummed and strictly validated but
 are not encrypted or signed. Treat exported files and webhook destinations as
 sensitive.
 
+Weekly history remains inside the private SQLite database. Its report payloads
+use a versioned bounded format, reject oversized compressed or decompressed
+content, and are never exposed through the PNG `FileProvider` unless the user
+separately chooses the existing share workflow.
+
 ## Response expectations
 
 The maintainer will acknowledge a reproducible report, assess severity, and

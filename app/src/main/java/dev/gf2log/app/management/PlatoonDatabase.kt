@@ -32,6 +32,7 @@ class PlatoonDatabase(
         if (!db.isReadOnly) {
             createPlatoonMaintenanceStateTable(db)
             createPlatoonActivityRetentionIndex(db)
+            createWeeklyReportHistoryTables(db)
             trimPlatoonActivity(db)
         }
     }
@@ -131,6 +132,7 @@ class PlatoonDatabase(
         )
         createWeeklyOverridesTable(db)
         createPlatoonMaintenanceStateTable(db)
+        createWeeklyReportHistoryTables(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -234,6 +236,33 @@ class PlatoonDatabase(
             createPlatoonMaintenanceStateTable(db)
             createPlatoonActivityRetentionIndex(db)
         }
+        if (oldVersion < 12) createWeeklyReportHistoryTables(db)
+    }
+
+    private fun createWeeklyReportHistoryTables(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS weekly_report_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                period_start INTEGER NOT NULL,
+                recorded_at INTEGER NOT NULL,
+                fingerprint TEXT NOT NULL,
+                report_blob BLOB NOT NULL
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS weekly_report_history_period " +
+                "ON weekly_report_history(period_start, recorded_at DESC, id DESC)",
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS weekly_report_history_state (
+                period_start INTEGER PRIMARY KEY,
+                active_history_id INTEGER REFERENCES weekly_report_history(id) ON DELETE SET NULL
+            )
+            """.trimIndent(),
+        )
     }
 
     // Function Name: migrateMembershipPeriodEventReference
@@ -2364,6 +2393,147 @@ class PlatoonDatabase(
         }
     }
 
+    // Function Name: recordWeeklyReportHistory
+    // Description:
+    // - Appends one changed immutable weekly projection and retains at most fifteen revisions.
+    // - Clears an older restored projection only when new evidence changes the live table.
+    // Parameters:
+    // - periodStartEpochDay: Sunday key of the projected week.
+    // - recordedAt: Time at which the changed projection became visible.
+    // - fingerprint: SHA-256 identity of the bounded serialized projection.
+    // - payload: Versioned serialized weekly projection.
+    // - clearActiveOnChange: Whether a changed live projection should leave restore mode.
+    // Returns:
+    // - ID of the existing or newly recorded revision.
+    @Synchronized
+    fun recordWeeklyReportHistory(
+        periodStartEpochDay: Long,
+        recordedAt: Instant,
+        fingerprint: String,
+        payload: ByteArray,
+        clearActiveOnChange: Boolean,
+    ): Long {
+        require(fingerprint.matches(Regex("[0-9a-f]{64}")))
+        require(payload.size in 1..WeeklyReportHistoryCodec.MAX_PAYLOAD_BYTES)
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val latest = db.rawQuery(
+                "SELECT id, fingerprint FROM weekly_report_history " +
+                    "WHERE period_start = ? ORDER BY recorded_at DESC, id DESC LIMIT 1",
+                arrayOf(periodStartEpochDay.toString()),
+            ).use { cursor ->
+                if (cursor.moveToFirst()) cursor.getLong(0) to cursor.getString(1) else null
+            }
+            if (latest?.second == fingerprint) {
+                db.setTransactionSuccessful()
+                return latest.first
+            }
+            val id = db.insertOrThrow(
+                "weekly_report_history",
+                null,
+                ContentValues().apply {
+                    put("period_start", periodStartEpochDay)
+                    put("recorded_at", recordedAt.toEpochMilli())
+                    put("fingerprint", fingerprint)
+                    put("report_blob", payload)
+                },
+            )
+            if (clearActiveOnChange) {
+                db.delete(
+                    "weekly_report_history_state",
+                    "period_start = ?",
+                    arrayOf(periodStartEpochDay.toString()),
+                )
+            }
+            db.delete(
+                "weekly_report_history",
+                "period_start = ? AND id NOT IN (" +
+                    "SELECT id FROM weekly_report_history WHERE period_start = ? " +
+                    "ORDER BY recorded_at DESC, id DESC LIMIT ?)",
+                arrayOf(
+                    periodStartEpochDay.toString(),
+                    periodStartEpochDay.toString(),
+                    MAX_WEEKLY_REPORT_HISTORY.toString(),
+                ),
+            )
+            db.setTransactionSuccessful()
+            return id
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    @Synchronized
+    fun listWeeklyReportHistory(periodStartEpochDay: Long): List<WeeklyReportHistoryEntry> =
+        readableDatabase.rawQuery(
+            "SELECT history.id, history.recorded_at, " +
+                "CASE WHEN state.active_history_id = history.id THEN 1 ELSE 0 END " +
+                "FROM weekly_report_history history " +
+                "LEFT JOIN weekly_report_history_state state " +
+                "ON state.period_start = history.period_start " +
+                "WHERE history.period_start = ? " +
+                "ORDER BY history.recorded_at DESC, history.id DESC LIMIT ?",
+            arrayOf(periodStartEpochDay.toString(), MAX_WEEKLY_REPORT_HISTORY.toString()),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        WeeklyReportHistoryEntry(
+                            id = cursor.getLong(0),
+                            periodStart = LocalDate.ofEpochDay(periodStartEpochDay),
+                            recordedAt = Instant.ofEpochMilli(cursor.getLong(1)),
+                            active = cursor.getInt(2) != 0,
+                        ),
+                    )
+                }
+            }
+        }
+
+    @Synchronized
+    fun weeklyReportHistoryPayload(id: Long, periodStartEpochDay: Long): ByteArray? =
+        readableDatabase.rawQuery(
+            "SELECT report_blob FROM weekly_report_history WHERE id = ? AND period_start = ?",
+            arrayOf(id.toString(), periodStartEpochDay.toString()),
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getBlob(0) else null }
+
+    @Synchronized
+    fun activeWeeklyReportHistoryPayload(periodStartEpochDay: Long): ByteArray? =
+        readableDatabase.rawQuery(
+            "SELECT history.report_blob FROM weekly_report_history_state state " +
+                "JOIN weekly_report_history history ON history.id = state.active_history_id " +
+                "WHERE state.period_start = ? AND history.period_start = state.period_start",
+            arrayOf(periodStartEpochDay.toString()),
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getBlob(0) else null }
+
+    @Synchronized
+    fun activateWeeklyReportHistory(id: Long, periodStartEpochDay: Long): Boolean {
+        val db = writableDatabase
+        val exists = db.rawQuery(
+            "SELECT 1 FROM weekly_report_history WHERE id = ? AND period_start = ?",
+            arrayOf(id.toString(), periodStartEpochDay.toString()),
+        ).use(Cursor::moveToFirst)
+        if (!exists) return false
+        db.insertWithOnConflict(
+            "weekly_report_history_state",
+            null,
+            ContentValues().apply {
+                put("period_start", periodStartEpochDay)
+                put("active_history_id", id)
+            },
+            SQLiteDatabase.CONFLICT_REPLACE,
+        )
+        return true
+    }
+
+    @Synchronized
+    fun clearActiveWeeklyReportHistory(periodStartEpochDay: Long): Boolean =
+        writableDatabase.delete(
+            "weekly_report_history_state",
+            "period_start = ?",
+            arrayOf(periodStartEpochDay.toString()),
+        ) > 0
+
     private fun createWeeklyOverridesTable(db: SQLiteDatabase) {
         db.execSQL(
             """
@@ -3673,6 +3843,7 @@ class PlatoonDatabase(
          */
         const val DAILY_PATROL_REWARD_ACTION_ID = 802001L
         internal const val MAX_STORED_ACTIVITY_OBSERVATIONS = 10_000
+        internal const val MAX_WEEKLY_REPORT_HISTORY = 15
         private const val MAX_UNRESOLVED_ACTIVITY_RESOLUTIONS = 250
         private const val ACTIVITY_RESOLUTION_CURSOR_KEY = "activity_resolution_cursor"
         private const val DAILY_PATROL_RELATED_ACTION_ID = 801005L

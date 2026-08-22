@@ -277,6 +277,15 @@ format them for display or export. `StandardWeekSolver` and
 `GunsmokeWeekSolver` own their respective counter inference, while
 `WeeklyEvidenceAnalyzer` explains certainty without duplicating solver policy.
 
+`PlatoonRepository` also records a changed immutable projection in
+`weekly_report_history`. The versioned codec bounds both compressed and expanded
+bytes, fingerprints the canonical report, skips consecutive duplicates, and
+retains the newest 15 rows per `period_start`. A separate state row selects an
+older projection for display without rewriting source evidence. Any subsequent
+packet, import, or manual override that changes the live fingerprint clears that
+selection. The history Activities can list, preview, and select revisions, but
+cannot mutate or delete individual history rows.
+
 `WeeklyReportActivity` loads one immutable projection on a serialized worker.
 A lifecycle-independent `WeeklyReportStateHolder` owns the selected date and
 generation token, rejects results superseded by navigation or lifecycle

@@ -10,6 +10,11 @@ import java.time.ZoneId
  * ambiguous closed days unknown.
  */
 object StandardWeekSolver {
+    data class Resolution(
+        val cells: List<WeeklyReportBuilder.DayCell>,
+        val totals: WeeklyReportBuilder.ResolvedStandardTotals?,
+    )
+
     fun resolve(
         uid: Long,
         days: List<LocalDate>,
@@ -17,7 +22,7 @@ object StandardWeekSolver {
         snapshots: List<PlatoonSnapshot>,
         cells: List<WeeklyReportBuilder.DayCell>,
         asOf: Instant,
-    ): List<WeeklyReportBuilder.DayCell> {
+    ): Resolution {
         val mutable = inferSundayMerit(
             uid = uid,
             days = days,
@@ -41,7 +46,7 @@ object StandardWeekSolver {
         val monday = days.first().plusDays(1)
         val observationsInCounterWeek = observations.filter { it.gameDay in monday..days.last() }
         val latest = observationsInCounterWeek.maxByOrNull(CounterObservation::capturedAt)
-            ?: return mutable
+            ?: return Resolution(mutable, null)
         val latestDay = latest.gameDay
         val firstObserved = observationsInCounterWeek.minBy(CounterObservation::capturedAt)
         val knownAbsentBeforeFirstObservation = snapshots.any { snapshot ->
@@ -53,7 +58,7 @@ object StandardWeekSolver {
         }
         val activeStart = if (knownAbsentBeforeFirstObservation) firstObserved.gameDay else monday
         val activeIndexes = days.indices.filter { index -> days[index] in activeStart..latestDay }
-        if (activeIndexes.isEmpty()) return mutable
+        if (activeIndexes.isEmpty()) return Resolution(mutable, null)
 
         val confirmedNoLoginDays = activeIndexes.mapNotNull { index ->
             val day = days[index]
@@ -76,7 +81,7 @@ object StandardWeekSolver {
             observations = observationsInCounterWeek,
             confirmedNoLoginDays = confirmedNoLoginDays,
         )
-        if (compatible.isEmpty()) return mutable
+        if (compatible.isEmpty()) return Resolution(mutable, null)
 
         val selected = compatible.minWith(
             compareBy<List<Long>> { it.sum() }
@@ -91,6 +96,14 @@ object StandardWeekSolver {
             if (existing.manualOverride != null) return@forEachIndexed
             val selectedMerit = selected[position]
             val exactAcrossCandidates = compatible.all { it[position] == selectedMerit }
+            val attendedConsensus = compatible
+                .map { allocation -> allocation[position] > 0L }
+                .distinct()
+                .singleOrNull()
+            val patrolConsensus = compatible
+                .map { allocation -> allocation[position] == PATROL_MERIT }
+                .distinct()
+                .singleOrNull()
             val day = days[index]
             val dayClosed = !PlatoonPeriods.periodStartInstant(day.plusDays(1), zoneId).isAfter(asOf)
             val latestCheckpoint = observationsInCounterWeek
@@ -132,9 +145,18 @@ object StandardWeekSolver {
                     )
                 },
                 evidence = evidence,
+                solvedAttended = attendedConsensus?.takeIf { it || dayClosed },
+                solvedDailyPatrol = patrolConsensus?.takeIf { it || dayClosed },
             )
         }
-        return mutable
+        return Resolution(
+            cells = mutable,
+            totals = summarizeTotals(
+                cells = mutable,
+                activeIndexes = activeIndexes,
+                compatible = compatible,
+            ),
+        )
     }
 
     private fun inferSundayMerit(
@@ -145,7 +167,7 @@ object StandardWeekSolver {
         cells: List<WeeklyReportBuilder.DayCell>,
     ): List<WeeklyReportBuilder.DayCell> {
         val sundayCell = cells.first()
-        if (sundayCell.manualOverride != null || sundayCell.evidence == DailyEvidence.ATTRIBUTED) {
+        if (sundayCell.manualOverride != null || sundayCell.hasClosingBoundary) {
             return cells
         }
         val monday = days.first().plusDays(1)
@@ -165,7 +187,7 @@ object StandardWeekSolver {
         val remainingSundayMerit = laterMember.totalMerit -
             sundayMember.totalMerit -
             laterMember.weeklyMerit
-        if (remainingSundayMerit !in DAILY_STAGE) return cells
+        if (remainingSundayMerit < 0L) return cells
 
         val observedSundayPrefix = sundayCell.meritDelta ?: return cells
         val merit = observedSundayPrefix + remainingSundayMerit
@@ -183,6 +205,66 @@ object StandardWeekSolver {
             )
         }
     }
+
+    /** Preserves whole-week facts even when their exact daily placement is ambiguous. */
+    private fun summarizeTotals(
+        cells: List<WeeklyReportBuilder.DayCell>,
+        activeIndexes: List<Int>,
+        compatible: List<List<Long>>,
+    ): WeeklyReportBuilder.ResolvedStandardTotals? {
+        if (compatible.isEmpty()) return null
+        val active = activeIndexes.toSet()
+        val outside = cells.indices.filterNot(active::contains)
+        val outsideMinimumMerit = outside.sumOf { index -> cells[index].meritDelta ?: 0L }
+        val outsideMaximumMerit = outside.sumOf { index ->
+            val cell = cells[index]
+            when (cell.meritCertainty) {
+                MetricCertainty.EXACT -> cell.meritDelta ?: 0L
+                MetricCertainty.LOWER_BOUND -> maxOf(cell.meritDelta ?: 0L, MAX_DAILY_MERIT)
+                MetricCertainty.UNKNOWN -> MAX_DAILY_MERIT
+            }
+        }
+        val outsideMinimumLogin = outside.count { index -> cells[index].attended == true }
+        val outsideMaximumLogin = outside.count { index -> cells[index].attended != false }
+        val outsideMinimumPatrol = outside.count { index -> cells[index].dailyPatrol == true }
+        val outsideMaximumPatrol = outside.count { index -> cells[index].dailyPatrol != false }
+
+        val meritTotals = compatible.map { it.sum() + outsideMinimumMerit }
+        val maximumMeritTotals = compatible.map { it.sum() + outsideMaximumMerit }
+        val loginTotals = compatible.map { allocation ->
+            allocation.count { it > 0L } + outsideMinimumLogin
+        }
+        val maximumLoginTotals = compatible.map { allocation ->
+            allocation.count { it > 0L } + outsideMaximumLogin
+        }
+        val patrolTotals = compatible.map { allocation ->
+            allocation.count { it == PATROL_MERIT } + outsideMinimumPatrol
+        }
+        val maximumPatrolTotals = compatible.map { allocation ->
+            allocation.count { it == PATROL_MERIT } + outsideMaximumPatrol
+        }
+        val minimumMerit = meritTotals.minOrNull() ?: return null
+        val maximumMerit = maximumMeritTotals.maxOrNull() ?: return null
+        val minimumLogin = loginTotals.minOrNull() ?: return null
+        val maximumLogin = maximumLoginTotals.maxOrNull() ?: return null
+        val minimumPatrol = patrolTotals.minOrNull() ?: return null
+        val maximumPatrol = maximumPatrolTotals.maxOrNull() ?: return null
+        return WeeklyReportBuilder.ResolvedStandardTotals(
+            merit = minimumMerit,
+            meritCertainty = certainty(minimumMerit, maximumMerit),
+            loginDays = minimumLogin,
+            loginDaysCertainty = certainty(minimumLogin, maximumLogin),
+            patrolDays = minimumPatrol,
+            patrolDaysCertainty = certainty(minimumPatrol, maximumPatrol),
+        )
+    }
+
+    private fun certainty(minimum: Number, maximum: Number): MetricCertainty =
+        if (minimum.toLong() == maximum.toLong()) {
+            MetricCertainty.EXACT
+        } else {
+            MetricCertainty.LOWER_BOUND
+        }
 
     private fun compatibleAllocations(
         indexes: List<Int>,

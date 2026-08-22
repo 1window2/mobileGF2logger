@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import dev.gf2log.app.R
+import dev.gf2log.app.SupportedGamePackages
 import dev.gf2log.app.history.CaptureHistoryStore
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.settings.PayloadHistoryPreferences
@@ -133,7 +134,7 @@ class CaptureVpnService : VpnService() {
             ACTION_START -> {
                 captureOnce = intent.getBooleanExtra(EXTRA_CAPTURE_ONCE, false)
                 CaptureStatus.beginSession(captureOnce)
-                startCapture(intent.getStringExtra(EXTRA_TARGET_PACKAGE).orEmpty())
+                startCapture()
             }
         }
         return Service.START_NOT_STICKY
@@ -154,7 +155,7 @@ class CaptureVpnService : VpnService() {
         super.onDestroy()
     }
 
-    private fun startCapture(targetPackage: String) {
+    private fun startCapture() {
         if (tunnel != null) {
             CaptureStatus.markRunning("Capture is already running")
             updateNotification("Capturing selected game traffic")
@@ -167,10 +168,6 @@ class CaptureVpnService : VpnService() {
 
         startInForeground("Preparing capture")
         CaptureStatus.update("Preparing capture")
-        if (targetPackage.isBlank()) {
-            failStart("Enter the installed game package name")
-            return
-        }
         if (!NativeCaptureBridge.isAvailable) {
             failStart("Protocol parser ready; native forwarding core is not integrated yet")
             return
@@ -187,27 +184,38 @@ class CaptureVpnService : VpnService() {
                 if (!captureStartPending) return@post
                 captureStartPending = false
                 migration.fold(
-                    onSuccess = { startTunnel(targetPackage) },
+                    onSuccess = { startTunnel() },
                     onFailure = { failStart("Unable to import previous Platoon history") },
                 )
             }
         }
     }
 
-    private fun startTunnel(targetPackage: String) {
-        val descriptor = try {
-            Builder()
-                .setSession("GF2logger")
-                .setMtu(VPN_MTU)
-                .addAddress(VPN_ADDRESS, VPN_PREFIX_LENGTH)
-                .addRoute("0.0.0.0", 0)
-                .addAddress(VPN_IPV6_ADDRESS, VPN_IPV6_PREFIX_LENGTH)
-                .addRoute("::", 0)
-                .addAllowedApplication(targetPackage)
-                .establish()
-        } catch (_: PackageManager.NameNotFoundException) {
-            failStart("Target package is not installed: $targetPackage")
+    private fun startTunnel() {
+        val builder = Builder()
+            .setSession("GF2logger")
+            .setMtu(VPN_MTU)
+            .addAddress(VPN_ADDRESS, VPN_PREFIX_LENGTH)
+            .addRoute("0.0.0.0", 0)
+            .addAddress(VPN_IPV6_ADDRESS, VPN_IPV6_PREFIX_LENGTH)
+            .addRoute("::", 0)
+
+        val installedTargets = mutableListOf<String>()
+        SupportedGamePackages.all.forEach { targetPackage ->
+            try {
+                builder.addAllowedApplication(targetPackage)
+                installedTargets += targetPackage
+            } catch (_: PackageManager.NameNotFoundException) {
+                // A user may install either publisher's client or both.
+            }
+        }
+        if (installedTargets.isEmpty()) {
+            failStart("Install a supported HaoPlay or Darkwinter client first")
             return
+        }
+
+        val descriptor = try {
+            builder.establish()
         } catch (error: Exception) {
             failStart("Unable to establish VPN: ${error.message ?: error.javaClass.simpleName}")
             return
@@ -269,7 +277,7 @@ class CaptureVpnService : VpnService() {
             return
         }
 
-        CaptureStatus.markRunning("Capturing only $targetPackage")
+        CaptureStatus.markRunning("Capturing only ${installedTargets.joinToString()}")
         updateNotification("Capturing selected game traffic")
     }
 
@@ -527,7 +535,6 @@ class CaptureVpnService : VpnService() {
     companion object {
         const val ACTION_START = "dev.gf2log.action.START"
         const val ACTION_STOP = "dev.gf2log.action.STOP"
-        const val EXTRA_TARGET_PACKAGE = "target_package"
         const val EXTRA_CAPTURE_ONCE = "capture_once"
         private const val NOTIFICATION_CHANNEL = "capture"
         private const val NOTIFICATION_ID = 1

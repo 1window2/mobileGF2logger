@@ -29,7 +29,7 @@ repository or policy APIs, while `ModernUi` owns reusable presentation roles.
 | Primary | The single commitment action for the current screen |
 | Capture | Start or prepare continuous capture; green state treatment |
 | Feature | Key navigation to Platoon management or the weekly table; soft orange surface |
-| Segment selected | Current language or theme choice inside a compact segmented control |
+| Evidence | Compact date/time action in a packet-history row |
 | Secondary | Ordinary bounded action on the current screen |
 | Tertiary | Low-emphasis action such as Back, Skip, or a week arrow |
 | Navigation | Neutral full-row navigation or selection |
@@ -41,9 +41,20 @@ multi-line destination uses `ModernUi.actionRow`: a 56dp row with a title,
 optional detail, and chevron instead of a tall button containing paragraphs.
 Do not encode `CheckBox` or `RadioButton` as generic buttons.
 
+Language and theme selectors are a single 56dp rail, not a row of adjacent
+buttons. The rail has a 16dp radius and 4dp padding on all four sides. One 48dp,
+12dp-radius accent thumb moves between equal-width native radio choices. This
+concentric geometry keeps the horizontal and vertical inset identical and
+prevents selected and unselected options from developing mismatched seams.
+
 ## Layout and accessibility
 
-- Spacing follows a 4dp/8dp rhythm. Neighboring touch targets retain a 6-8dp gap.
+- Spacing follows a 4dp/8dp rhythm. Neighboring bounded shapes retain an 8dp
+  visual gap; compact packet evidence may use a 32dp visible surface inside a
+  48dp touch target.
+- Repeated member surfaces use an 8dp vertical gap. Search and paired filter
+  controls use the same 8dp rhythm, split symmetrically where two controls share
+  a row.
 - The approved v2.3.0 visual contract is recorded in `PRODUCT.md` and
   `.interface-design/system.md`. Home is status-led, Settings is a grouped flat
   list, and onboarding is a five-step editorial dark surface.

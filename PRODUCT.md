@@ -3,7 +3,7 @@
 ## Product and platform
 
 GF2logger is a native Android companion for GIRLS' FRONTLINE 2 platoon leaders.
-It observes one explicitly selected game package through Android's consent-based
+It observes the fixed HaoPlay and Darkwinter game packages through Android's consent-based
 `VpnService`, parses only recognized plaintext GF2 payloads, and turns that
 evidence into private on-device packet history, platoon membership records, and
 weekly reports. It does not decrypt TLS, retain raw network packets, or run a

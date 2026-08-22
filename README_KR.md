@@ -22,6 +22,7 @@ mobileGF2logger는 서클장을 위한 가벼운 비루팅 앱입니다. Android
 - 멤버 정렬, 드래그 순서 유지, 최근 스냅샷 비교, 주간 CSV 내보내기, 서클 관리 데이터 백업 및 복원을 지원합니다.
 - 첫 사용 시 메인, 설정, 서클 관리, 주간 기능, 파싱 패킷 화면을 안내하며, 한국어/English 전환과 건너뛰기를 지원합니다.
 - 영어와 한국어, 시스템/라이트/다크 테마를 지원하며 화면에 표시하는 시각에는 Android 기기의 시간대를 사용합니다.
+- HaoPlay(`com.haoplay.game.and.exilium`)와 Darkwinter(`com.Sunborn.SnqxExilium.Glo`) Android 클라이언트를 별도의 VPN 대상으로 등록합니다.
 - 다음 열 순서의 UTF-8 서클 멤버 CSV 파일을 만듭니다.
 
 ```text
@@ -31,7 +32,7 @@ uid,name,level,weeklyMerit,totalMerit,highScore,totalScore,lastLogin,logTime
 ## 사용 방법
 
 1. Android 8.0 이상 기기에 ARM64 APK를 설치합니다.
-2. **GF2logger**를 열고 게임 패키지를 확인한 뒤 **한 번만 캡처**를 선택합니다.
+2. **GF2logger**를 열고 필요한 지원 클라이언트가 설치되어 있는지 확인한 뒤 **한 번만 캡처**를 선택합니다.
 3. Android의 VPN 요청을 승인한 뒤 게임을 엽니다.
 4. **서클(Platoon)**에 들어가 **동향(Updates)**과 **멤버(Members)**를 엽니다.
 5. GF2logger로 돌아와 캡처한 패킷과 서클 데이터를 확인합니다.

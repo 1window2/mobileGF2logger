@@ -13,10 +13,17 @@ card stack.
   by 4dp or 8dp; sections are separated by 16dp or 24dp.
 - Keep every touch target at least 48dp high, while using inset fills and
   hairlines so the visible control can remain compact.
+- Segmented choices use one 56dp rounded rail with an equal 4dp inset on every
+  side. A single 48dp selection thumb glides between equal-width options; the
+  rail uses a 16dp radius and the concentric thumb uses a 12dp radius.
+- Separate bounded sibling shapes by at least 8dp. Dense evidence rows may use
+  a 48dp hit area around a 32dp visible rounded rectangle.
 - Home is status-led: app bar, capture status, two key destinations, quiet
   utilities, recent evidence, then the persistent Home/Platoon/Weekly bar.
 - Settings uses a compact back app bar followed by grouped list rows. Do not
   turn every setting into a card.
+- Platoon member surfaces retain an 8dp vertical gap, and paired filter controls
+  split that same gap evenly so search, filters, and rows share one rhythm.
 - Onboarding uses a dark editorial field: top actions, emblem, title and short
   explanation, progress, feature list, bottom Previous/Next actions, step label.
 - Preserve ordinary Android Back behavior. Bottom navigation is reserved for

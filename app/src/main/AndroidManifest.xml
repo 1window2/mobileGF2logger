@@ -85,7 +85,7 @@
                 android:value="false" />
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="User-initiated on-device network protocol capture for one selected application" />
+                android:value="User-initiated on-device protocol capture for installed supported game applications" />
         </service>
     </application>
 

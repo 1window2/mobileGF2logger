@@ -2,12 +2,12 @@
 
 ## Design goals
 
-mobileGF2logger favors a small APK and an auditable data path over a general-purpose packet analyzer. Android owns VPN consent and package selection; a proven userspace forwarding core will own TCP/UDP forwarding and reassembly; Kotlin owns only game-specific framing and field extraction.
+mobileGF2logger favors a small APK and an auditable data path over a general-purpose packet analyzer. Android owns VPN consent and per-application routing; GF2logger registers the fixed HaoPlay and Darkwinter package IDs as separate allowed applications. A proven userspace forwarding core owns TCP/UDP forwarding and reassembly; Kotlin owns only game-specific framing and field extraction.
 
 No UML artifacts existed in the repository when this design was created. This document is the baseline component and data-flow description until UML is added.
 
 ```text
-Selected game process
+Supported game processes
         |
         v
 Android VpnService TUN (package allowlist)

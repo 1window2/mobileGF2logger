@@ -11,7 +11,8 @@ This is a **GIRLS' FRONTLINE 2: EXILIUM (GF2) Platoon/서클 management and logg
 mobileGF2logger is a lightweight, non-root GF2 logger for Platoon masters. It
 turns supported roster and activity responses into member history and weekly
 task tables entirely on the phone. Android's per-app VPN permission limits
-capture to the selected game package, and raw traffic is never stored.
+capture to the fixed HaoPlay and Darkwinter game packages, and raw traffic is
+never stored.
 
 ## Features
 
@@ -27,6 +28,8 @@ capture to the selected game package, and raw traffic is never stored.
 - Supports member sorting, persistent drag ordering, snapshot comparison, single-week and all-week CSV export, and complete `.gf2backup` export/restore.
 - Guides first-time users through Main, Settings, Platoon management, weekly controls, and parsed-packet pages, with a persistent English/Korean selector and Skip action.
 - Supports English and Korean, System/Light/Dark themes, and the Android device timezone for display.
+- Registers the HaoPlay (`com.haoplay.game.and.exilium`) and Darkwinter
+  (`com.Sunborn.SnqxExilium.Glo`) Android clients as separate VPN targets.
 - Creates UTF-8 Platoon-member CSV files with this column order:
 
 ```text
@@ -36,7 +39,7 @@ uid,name,level,weeklyMerit,totalMerit,highScore,totalScore,lastLogin,logTime
 ## Use
 
 1. Install the ARM64 APK on Android 8.0 or newer.
-2. Open **GF2logger**, confirm the game package, and select **One-time Capture**.
+2. Open **GF2logger**, confirm both supported clients are installed as needed, and select **One-time Capture**.
 3. Approve Android's VPN prompt, then open the game.
 4. Enter **Platoon(서클)** and open **Updates(동향)** and **Members(멤버)**.
 5. Return to GF2logger to review the captured packets and Platoon data.

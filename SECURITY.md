@@ -54,6 +54,11 @@ use a versioned bounded format, reject oversized compressed or decompressed
 content, and are never exposed through the PNG `FileProvider` unless the user
 separately chooses the existing share workflow.
 
+Packet-triggered weekly-history generation consumes only the same validated,
+deduplicated, count-bounded activity and update observations accepted for
+persistence. A separate 32-period cap bounds report reconstruction and SQLite
+history work even if future callers provide a broader accepted set.
+
 ## Response expectations
 
 The maintainer will acknowledge a reproducible report, assess severity, and

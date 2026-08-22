@@ -21,6 +21,8 @@ All notable changes to mobileGF2logger are documented here.
 
 ### Fixed
 
+- Derive packet-triggered weekly-history work only from validated, bounded
+  activity and update observations, with an independent 32-week fan-out cap.
 - Reconcile a captured Sunday 50-point prefix with the remaining 40-point tail
   proven by Monday's counter reset.
 - Preserve exact weekly Login and Daily Patrol aggregates, and per-field daily

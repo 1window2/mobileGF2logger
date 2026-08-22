@@ -47,34 +47,14 @@ class PlatoonRepository(context: Context) {
         data: PlatoonActivityData,
         capturedAt: Instant = Instant.now(),
     ): ActivityIngestResult {
-        val occurredAt = data.entries.asSequence()
-            .filter { it.occurredAt != 0u }
-            .map { Instant.ofEpochSecond(it.occurredAt.toLong()) }
-            .toSet()
+        val observations = PlatoonObservationPolicy.activity(data)
         val result = access { database -> database.ingestPlatoonActivity(
-            observations = data.entries.asSequence().mapNotNull {
-                if (
-                    it.occurredAt == 0u ||
-                    it.actionId == 0u ||
-                    it.memberName.isBlank() ||
-                    it.memberName.length > PlatoonObservationPolicy.MAX_ACTIVITY_MEMBER_NAME_LENGTH
-                ) {
-                    null
-                } else {
-                    PlatoonActivityObservation(
-                        occurredAt = Instant.ofEpochSecond(it.occurredAt.toLong()),
-                        actionId = it.actionId.toLong(),
-                        kind = it.kind.toLong(),
-                        memberName = it.memberName,
-                    )
-                }
-            }
-                .distinct()
-                .take(PlatoonObservationPolicy.MAX_ACTIVITY_OBSERVATIONS)
-                .toList(),
+            observations = observations,
             capturedAt = capturedAt,
         ) }
-        if (result.inserted > 0 || result.resolved > 0) recordChangedWeeks(occurredAt)
+        if (result.inserted > 0 || result.resolved > 0) {
+            recordChangedWeeks(observations.asSequence().map { it.occurredAt })
+        }
         return result
     }
 
@@ -82,35 +62,14 @@ class PlatoonRepository(context: Context) {
         data: PlatoonUpdatesData,
         capturedAt: Instant = Instant.now(),
     ): UpdatesIngestResult {
-        val occurredAt = data.entries.asSequence()
-            .filter { it.occurredAt != 0u }
-            .map { Instant.ofEpochSecond(it.occurredAt.toLong()) }
-            .toSet()
+        val observations = PlatoonObservationPolicy.updates(data)
         val result = access { database -> database.ingestPlatoonUpdates(
-            observations = data.entries.mapNotNull { entry ->
-                if (entry.occurredAt == 0u || entry.kind == 0u) {
-                    null
-                } else {
-                    PlatoonUpdateObservation(
-                        kind = entry.kind.toLong(),
-                        occurredAt = Instant.ofEpochSecond(entry.occurredAt.toLong()),
-                        members = entry.members.mapNotNull { member ->
-                            if (member.uid == 0u) {
-                                null
-                            } else {
-                                PlatoonUpdateMemberObservation(
-                                    role = member.role.toLong(),
-                                    uid = member.uid.toLong(),
-                                    name = member.name,
-                                )
-                            }
-                        },
-                    )
-                }
-            },
+            observations = observations,
             capturedAt = capturedAt,
         ) }
-        if (result.membershipEvents > 0 || result.patrolFacts > 0) recordChangedWeeks(occurredAt)
+        if (result.membershipEvents > 0 || result.patrolFacts > 0) {
+            recordChangedWeeks(observations.asSequence().map { it.occurredAt })
+        }
         return result
     }
 
@@ -369,12 +328,12 @@ class PlatoonRepository(context: Context) {
     fun showLiveWeeklyReport(periodStart: LocalDate): Boolean =
         access { it.clearActiveWeeklyReportHistory(periodStart.toEpochDay()) }
 
-    private fun recordChangedWeeks(instants: Set<Instant>) {
-        if (instants.isEmpty()) return
+    private fun recordChangedWeeks(instants: Iterable<Instant>) =
+        recordChangedWeeks(instants.asSequence())
+
+    private fun recordChangedWeeks(instants: Sequence<Instant>) {
         val zone = ZoneId.systemDefault()
-        instants.asSequence()
-            .map { PlatoonPeriods.weekStart(PlatoonPeriods.gameDay(it, zone)) }
-            .distinct()
+        WeeklyHistoryWorkPolicy.changedPeriodStarts(instants, zone)
             .forEach { periodStart ->
                 val report = buildLiveWeeklyReport(periodStart, zone, Instant.now())
                 recordHistory(report, Instant.now(), clearActiveOnChange = true)

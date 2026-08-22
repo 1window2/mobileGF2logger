@@ -1,6 +1,12 @@
 package dev.gf2log.app.management
 
+import dev.gf2log.protocol.model.PlatoonActivityData
+import dev.gf2log.protocol.model.PlatoonActivityEntry
+import dev.gf2log.protocol.model.PlatoonUpdateEntry
+import dev.gf2log.protocol.model.PlatoonUpdateMember
+import dev.gf2log.protocol.model.PlatoonUpdatesData
 import java.time.Instant
+import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -30,6 +36,22 @@ class PlatoonObservationPolicyTest {
 
         assertEquals(PlatoonObservationPolicy.MAX_ACTIVITY_OBSERVATIONS, accepted.size)
         assertEquals(observations.take(PlatoonObservationPolicy.MAX_ACTIVITY_OBSERVATIONS), accepted)
+    }
+
+    @Test
+    fun `activity payload exposes timestamps only from accepted observations`() {
+        val accepted = PlatoonObservationPolicy.activity(
+            PlatoonActivityData(
+                summaries = emptyList(),
+                entries = listOf(
+                    PlatoonActivityEntry(1u, 1u, 0u, "Rejected action"),
+                    PlatoonActivityEntry(1u, 2u, 1u, " "),
+                    PlatoonActivityEntry(1u, 3u, 1u, "Accepted"),
+                ),
+            ),
+        )
+
+        assertEquals(listOf(Instant.ofEpochSecond(3)), accepted.map { it.occurredAt })
     }
 
     @Test
@@ -77,6 +99,50 @@ class PlatoonObservationPolicyTest {
             listOf(earlier, later),
             PlatoonObservationPolicy.updates(listOf(later, earlier)),
         )
+    }
+
+    @Test
+    fun `updates payload excludes rejected timestamps and bounds accepted observations`() {
+        val entries = (1u..(PlatoonObservationPolicy.MAX_UPDATE_OBSERVATIONS + 1).toUInt())
+            .map { timestamp ->
+                PlatoonUpdateEntry(
+                    kind = PlatoonUpdateSemantics.KIND_JOIN.toUInt(),
+                    members = listOf(PlatoonUpdateMember(1u, timestamp, "Member $timestamp")),
+                    occurredAt = timestamp,
+                )
+            }
+        val accepted = PlatoonObservationPolicy.updates(
+            PlatoonUpdatesData(
+                listOf(
+                    PlatoonUpdateEntry(99u, emptyList(), 4_000u),
+                    PlatoonUpdateEntry(
+                        PlatoonUpdateSemantics.KIND_JOIN.toUInt(),
+                        listOf(PlatoonUpdateMember(1u, 0u, "Rejected UID")),
+                        5_000u,
+                    ),
+                ) + entries,
+            ),
+        )
+
+        assertEquals(PlatoonObservationPolicy.MAX_UPDATE_OBSERVATIONS, accepted.size)
+        assertEquals(Instant.ofEpochSecond(1), accepted.first().occurredAt)
+        assertEquals(
+            Instant.ofEpochSecond(PlatoonObservationPolicy.MAX_UPDATE_OBSERVATIONS.toLong()),
+            accepted.last().occurredAt,
+        )
+    }
+
+    @Test
+    fun `weekly history work is capped after distinct week mapping`() {
+        val zone = ZoneOffset.UTC
+        val instants = generateSequence(Instant.parse("2020-01-06T05:00:00Z")) {
+            it.plusSeconds(7 * 24 * 60 * 60L)
+        }.take(WeeklyHistoryWorkPolicy.MAX_CHANGED_WEEKS_PER_INGEST + 50)
+
+        val periods = WeeklyHistoryWorkPolicy.changedPeriodStarts(instants, zone)
+
+        assertEquals(WeeklyHistoryWorkPolicy.MAX_CHANGED_WEEKS_PER_INGEST, periods.size)
+        assertEquals(periods.size, periods.distinct().size)
     }
 
     private fun activity(name: String) = PlatoonActivityObservation(

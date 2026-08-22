@@ -134,7 +134,11 @@ and preserves manual or exact Updates boundaries.
 Roster CSV input is capped at 2 MiB, 256 members, 258 records, 9 columns, and
 512 characters per field; UIDs must be unique and names are capped at 256
 characters. Activity ingestion accepts at most 250 distinct observations per
-payload with 128-character names. SQLite retains the newest 10,000 activity
+payload with 128-character names, and Updates ingestion accepts at most 250
+distinct supported observations. Packet-triggered weekly-history work derives
+only from those accepted observations and is independently capped at 32
+distinct periods per ingest, so rejected timestamps cannot amplify report or
+SQLite work. SQLite retains the newest 10,000 activity
 facts, and one ingestion resolves at most 250 unresolved facts. A database-local
 cursor rotates those bounded batches through the complete retained backlog.
 Schema v11 owns the rotation cursor and a global `(captured_at, id)` retention

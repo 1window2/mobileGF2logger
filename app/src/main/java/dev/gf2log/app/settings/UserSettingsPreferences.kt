@@ -5,14 +5,17 @@ import android.content.SharedPreferences
 import dev.gf2log.app.LanguagePreferences
 import dev.gf2log.app.TargetPackagePreferences
 import dev.gf2log.protocol.PayloadCatalog
+import java.time.ZoneId
 
 internal object UserSettingsPreferences {
     private const val PREFERENCES = "user_settings"
-    private const val SCHEMA_VERSION = 2
+    private const val SCHEMA_VERSION = 4
     private const val LEGACY_UNIFIED_SCHEMA_VERSION = 1
     private const val KEY_SCHEMA_VERSION = "schema_version"
     private const val KEY_LANGUAGE = "language"
     private const val KEY_THEME_MODE = "theme_mode"
+    private const val KEY_GAME_SERVER_REGION = "game_server_region"
+    private const val KEY_GAME_TIME_ZONE = "game_time_zone"
     private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
     private const val KEY_DETAILED_NOTIFICATIONS = "detailed_notifications"
     private const val KEY_TARGET_PACKAGE = "target_package"
@@ -58,6 +61,28 @@ internal object UserSettingsPreferences {
 
     fun setThemeMode(context: Context, mode: String) = edit(context) {
         putString(KEY_THEME_MODE, mode)
+    }
+
+    fun gameTimeZoneId(context: Context): String = synchronized(lock) {
+        preferencesLocked(context.applicationContext)
+            .getString(KEY_GAME_TIME_ZONE, ZoneId.systemDefault().id)
+            .orEmpty()
+    }
+
+    fun gameServerRegion(context: Context): String = synchronized(lock) {
+        preferencesLocked(context.applicationContext)
+            .getString(KEY_GAME_SERVER_REGION, GameServerRegion.MANUAL.storedValue)
+            .orEmpty()
+    }
+
+    fun setGameServerRegion(context: Context, region: String) {
+        require(GameServerRegion.fromStored(region).storedValue == region)
+        edit(context) { putString(KEY_GAME_SERVER_REGION, region) }
+    }
+
+    fun setGameTimeZoneId(context: Context, zoneId: String) {
+        ZoneId.of(zoneId)
+        edit(context) { putString(KEY_GAME_TIME_ZONE, zoneId) }
     }
 
     fun onboardingCompleted(context: Context): Boolean = synchronized(lock) {
@@ -133,11 +158,17 @@ internal object UserSettingsPreferences {
         val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
         val storedVersion = preferences.getInt(KEY_SCHEMA_VERSION, 0)
         if (storedVersion == SCHEMA_VERSION) return preferences
-        val migrated = if (storedVersion == LEGACY_UNIFIED_SCHEMA_VERSION) {
+        val migrated = if (storedVersion in LEGACY_UNIFIED_SCHEMA_VERSION until SCHEMA_VERSION) {
             // v2.2.0 already used the unified store. Preserve it and keep the
             // new-user walkthrough exclusive to genuinely fresh installs.
             readLocked(preferences).copy(
                 onboardingCompleted = preferences.getBoolean(KEY_ONBOARDING_COMPLETED, true),
+                gameServerRegion = preferences.getString(
+                    KEY_GAME_SERVER_REGION,
+                    GameServerRegion.MANUAL.storedValue,
+                ).orEmpty(),
+                gameTimeZoneId = preferences.getString(KEY_GAME_TIME_ZONE, ZoneId.systemDefault().id)
+                    .orEmpty(),
             )
         } else {
             readLegacy(context)
@@ -152,6 +183,11 @@ internal object UserSettingsPreferences {
         language = preferences.getString(KEY_LANGUAGE, LanguagePreferences.DEFAULT_LANGUAGE)
             .orEmpty(),
         themeMode = preferences.getString(KEY_THEME_MODE, "system").orEmpty(),
+        gameServerRegion = preferences.getString(
+            KEY_GAME_SERVER_REGION,
+            GameServerRegion.MANUAL.storedValue,
+        ).orEmpty(),
+        gameTimeZoneId = preferences.getString(KEY_GAME_TIME_ZONE, ZoneId.systemDefault().id).orEmpty(),
         onboardingCompleted = preferences.getBoolean(KEY_ONBOARDING_COMPLETED, false),
         detailedNotifications = preferences.getBoolean(KEY_DETAILED_NOTIFICATIONS, true),
         targetPackage = preferences.getString(
@@ -195,6 +231,8 @@ internal object UserSettingsPreferences {
         return AppBackupSettings(
             language = language,
             themeMode = "system",
+            gameServerRegion = GameServerRegion.MANUAL.storedValue,
+            gameTimeZoneId = ZoneId.systemDefault().id,
             onboardingCompleted = false,
             detailedNotifications = detailedNotifications,
             targetPackage = targetPackage,
@@ -270,6 +308,8 @@ internal object UserSettingsPreferences {
         .putInt(KEY_SCHEMA_VERSION, SCHEMA_VERSION)
         .putString(KEY_LANGUAGE, settings.language)
         .putString(KEY_THEME_MODE, settings.themeMode)
+        .putString(KEY_GAME_SERVER_REGION, settings.gameServerRegion)
+        .putString(KEY_GAME_TIME_ZONE, settings.gameTimeZoneId)
         .putBoolean(KEY_ONBOARDING_COMPLETED, settings.onboardingCompleted)
         .putBoolean(KEY_DETAILED_NOTIFICATIONS, settings.detailedNotifications)
         .putString(KEY_TARGET_PACKAGE, settings.targetPackage)

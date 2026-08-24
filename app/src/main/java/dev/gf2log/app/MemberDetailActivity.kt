@@ -15,8 +15,8 @@ import dev.gf2log.app.management.MembershipPeriod
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.isImmutableMembershipBoundary
 import dev.gf2log.app.management.isValidMembershipRange
+import dev.gf2log.app.settings.GameTimeZonePreferences
 import java.time.Instant
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 class MemberDetailActivity : LocalizedActivity() {
@@ -189,6 +189,7 @@ class MemberDetailActivity : LocalizedActivity() {
             initialTimeKnown = membershipPeriod.joinedTimeKnown,
             dateRequired = true,
             editable = !membershipPeriod.joinedSource.isImmutableMembershipBoundary(),
+            zone = GameTimeZonePreferences.get(this),
         )
         val left = DateTimePickerInput(
             context = this,
@@ -197,6 +198,7 @@ class MemberDetailActivity : LocalizedActivity() {
             initialDate = membershipPeriod.leftDate,
             initialTimeKnown = membershipPeriod.leftTimeKnown ?: (membershipPeriod.leftAt != null),
             editable = membershipPeriod.leftSource?.isImmutableMembershipBoundary() != true,
+            zone = GameTimeZonePreferences.get(this),
         )
         val note = EditText(this).apply {
             hint = getString(R.string.membership_note_hint)
@@ -302,8 +304,13 @@ class MemberDetailActivity : LocalizedActivity() {
             this,
             getString(R.string.join_field),
             dateRequired = true,
+            zone = GameTimeZonePreferences.get(this),
         )
-        val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_field))
+        val withdrew = DateTimePickerInput(
+            this,
+            getString(R.string.withdraw_field),
+            zone = GameTimeZonePreferences.get(this),
+        )
         val note = EditText(this).apply {
             hint = getString(R.string.membership_note_hint)
             minLines = 2
@@ -351,10 +358,11 @@ class MemberDetailActivity : LocalizedActivity() {
         instant: Instant?,
         timeKnown: Boolean,
     ): String {
-        val displayDate = date ?: instant?.atZone(ZoneId.systemDefault())?.toLocalDate()
+        val zone = GameTimeZonePreferences.get(this)
+        val displayDate = date ?: instant?.atZone(zone)?.toLocalDate()
             ?: return getString(R.string.unknown)
         return if (timeKnown && instant != null) {
-            instant.atZone(ZoneId.systemDefault()).format(DISPLAY_TIME)
+            instant.atZone(zone).format(DISPLAY_TIME)
         } else {
             displayDate.format(DISPLAY_DATE)
         }

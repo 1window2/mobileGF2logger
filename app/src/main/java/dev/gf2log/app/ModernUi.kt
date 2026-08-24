@@ -213,12 +213,12 @@ object ModernUi {
             ),
         )
         val railInset = context.dp(4)
-        val segmentHeight = context.dp(48)
+        val segmentHeight = context.dp(40)
         val selection = View(context).apply {
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             background = GradientDrawable().apply {
                 setColor(context.getColor(R.color.accent_surface))
-                cornerRadius = context.dp(12).toFloat()
+                cornerRadius = context.dp(10).toFloat()
             }
         }
         val choices = RadioGroup(context).apply {
@@ -226,11 +226,11 @@ object ModernUi {
             background = null
         }
         val rail = FrameLayout(context).apply {
-            minimumHeight = context.dp(56)
+            minimumHeight = context.dp(48)
             setPadding(railInset, railInset, railInset, railInset)
             background = GradientDrawable().apply {
                 setColor(context.getColor(R.color.surface_variant))
-                cornerRadius = context.dp(16).toFloat()
+                cornerRadius = context.dp(14).toFloat()
             }
             addView(selection, FrameLayout.LayoutParams(0, segmentHeight))
             addView(
@@ -288,7 +288,7 @@ object ModernUi {
                         context,
                         android.R.color.white,
                         android.R.color.transparent,
-                        12,
+                        10,
                     ),
                 )
                 setTextColor(selectedTextColors)

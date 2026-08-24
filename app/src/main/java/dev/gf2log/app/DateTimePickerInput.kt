@@ -33,8 +33,8 @@ internal class DateTimePickerInput(
     initialTimeKnown: Boolean = initialValue != null,
     private val dateRequired: Boolean = false,
     editable: Boolean = true,
+    private val zone: ZoneId = ZoneId.systemDefault(),
 ) : LinearLayout(context) {
-    private val zone: ZoneId = ZoneId.systemDefault()
     private val selection = MembershipBoundaryDraft(
         initialValue = initialValue,
         initialDate = initialDate,

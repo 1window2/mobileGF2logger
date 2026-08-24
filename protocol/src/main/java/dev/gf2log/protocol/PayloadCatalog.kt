@@ -11,6 +11,13 @@ data class PayloadCategory(
 object PayloadCatalog {
     val categories: List<PayloadCategory> = listOf(
         PayloadCategory(
+            payloadType = Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE,
+            name = "PLATOON PROFILE",
+            tag = "PROFILE",
+            description = "Platoon ID, name, and emblem/style identifiers used to isolate records.",
+            isRequired = true,
+        ),
+        PayloadCategory(
             payloadType = Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
             name = "PLATOON MEMBERS",
             tag = "PLATOON",

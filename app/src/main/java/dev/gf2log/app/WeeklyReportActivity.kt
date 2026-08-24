@@ -50,6 +50,7 @@ import dev.gf2log.app.management.WeeklyReportStateHolder
 import dev.gf2log.app.management.WeeklyShareProjection
 import dev.gf2log.app.management.WeeklyMetricPresentation
 import dev.gf2log.app.settings.MemberOrderPreferences
+import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.WeeklyCutlinePreferences
 import dev.gf2log.app.settings.WeeklyCutlines
 import java.time.Instant
@@ -127,7 +128,7 @@ class WeeklyReportActivity : LocalizedActivity() {
             savedInstanceState?.takeIf { it.containsKey(STATE_REFERENCE_DAY) }
                 ?.getLong(STATE_REFERENCE_DAY)
                 ?.let(LocalDate::ofEpochDay)
-                ?: PlatoonPeriods.gameDay(Instant.now(), ZoneId.systemDefault()),
+                ?: PlatoonPeriods.gameDay(Instant.now(), GameTimeZonePreferences.get(this)),
         )
         body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -201,30 +202,19 @@ class WeeklyReportActivity : LocalizedActivity() {
     // Returns:
     // - An immutable render model for the requested week.
     private fun loadRenderModel(targetDay: LocalDate): RenderModel {
-        val zone = ZoneId.systemDefault()
+        val zone = GameTimeZonePreferences.get(this)
         val periodStart = PlatoonPeriods.weekStart(targetDay)
-        val membershipStartInstant = periodStart.atStartOfDay(zone).toInstant()
-        val membershipEndInstant = periodStart.plusDays(7).atStartOfDay(zone).toInstant()
-        val report = repository.buildWeeklyReport(targetDay, zone)
-        val memberStatuses = repository.listMemberStatuses()
+        val revision = repository.buildWeeklyTableRevision(targetDay, zone)
+        val report = revision.report
         val history = repository.listWeeklyReportHistory(report.periodStart)
         return RenderModel(
             zone = zone,
             report = report,
-            notes = repository.listWeeklyNotes(report.periodStart.toEpochDay())
-                .filterNot(WeeklyNote::isAutomatic),
-            events = repository.listEvents(
-                membershipStartInstant,
-                membershipEndInstant,
-                periodStart,
-                periodStart.plusDays(7),
-            ).filter {
-                it.type in MembershipEventPresentation.displayedTypes &&
-                    it.source in MembershipEventPresentation.displayedSources
-            },
-            namesByUid = memberStatuses.associate { it.uid to it.name },
+            notes = revision.notes,
+            events = revision.membershipEvents,
+            namesByUid = revision.memberNamesByUid + report.members.associate { it.uid to it.name },
             cutlines = WeeklyCutlinePreferences(this).read(),
-            memberNotesByUid = memberStatuses.associate { it.uid to it.note },
+            memberNotesByUid = revision.memberPrivateNotesByUid,
             displayedMembers = MemberOrderPreferences(this).apply(report.members) { it.uid },
             scoreRanks = report.members.withIndex().associate { it.value.uid to it.index + 1 },
             historyCount = history.size,
@@ -1633,7 +1623,7 @@ class WeeklyReportActivity : LocalizedActivity() {
     private fun exportAllWeeklyTables() {
         workerExecutor.execute {
             val content = runCatching {
-                repository.listAllWeeklyReports(ZoneId.systemDefault())
+                repository.listAllWeeklyReports(GameTimeZonePreferences.get(this))
                     .takeIf(List<*>::isNotEmpty)
                     ?.let(WeeklyReportCsv::formatAll)
             }.getOrNull()

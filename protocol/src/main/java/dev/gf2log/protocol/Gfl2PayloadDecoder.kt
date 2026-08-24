@@ -14,6 +14,7 @@ import dev.gf2log.protocol.model.GuildMembersData
 import dev.gf2log.protocol.model.PlatoonActivityData
 import dev.gf2log.protocol.model.PlatoonActivityEntry
 import dev.gf2log.protocol.model.PlatoonActivitySummary
+import dev.gf2log.protocol.model.PlatoonProfileData
 import dev.gf2log.protocol.model.PlatoonUpdateEntry
 import dev.gf2log.protocol.model.PlatoonUpdateMember
 import dev.gf2log.protocol.model.PlatoonUpdatesData
@@ -24,6 +25,7 @@ object Gfl2PayloadDecoder {
     const val TYPE_WEAPONS = 11021
     const val TYPE_ATTACHMENTS = 11061
     const val TYPE_COMMON_KEYS = 11138
+    const val TYPE_PLATOON_PROFILE = 21905
     const val TYPE_GUILD_MEMBERS = 21917
     const val TYPE_PLATOON_ACTIVITY = 21935
     const val TYPE_PLATOON_UPDATES = 21960
@@ -33,6 +35,7 @@ object Gfl2PayloadDecoder {
         TYPE_WEAPONS,
         TYPE_ATTACHMENTS,
         TYPE_COMMON_KEYS,
+        TYPE_PLATOON_PROFILE,
         TYPE_GUILD_MEMBERS,
         TYPE_PLATOON_ACTIVITY,
         TYPE_PLATOON_UPDATES,
@@ -44,6 +47,7 @@ object Gfl2PayloadDecoder {
         TYPE_WEAPONS -> decodeWeapons(ProtoReader(bytes))
         TYPE_ATTACHMENTS -> decodeAttachments(ProtoReader(bytes))
         TYPE_COMMON_KEYS -> decodeCommonKeys(ProtoReader(bytes))
+        TYPE_PLATOON_PROFILE -> decodePlatoonProfile(ProtoReader(bytes))
         TYPE_GUILD_MEMBERS -> decodeGuildMembers(ProtoReader(bytes))
         TYPE_PLATOON_ACTIVITY -> decodePlatoonActivity(ProtoReader(bytes))
         TYPE_PLATOON_UPDATES -> decodePlatoonUpdates(ProtoReader(bytes))
@@ -164,6 +168,50 @@ object Gfl2PayloadDecoder {
             }
         }
         return CommonKey(uid, keyId)
+    }
+
+    /**
+     * Decodes only stable identity and compact emblem fields from payload 21905.
+     * Free-form notices are skipped because they are not needed for routing.
+     */
+    private fun decodePlatoonProfile(reader: ProtoReader): PlatoonProfileData {
+        var profile = PlatoonProfileData(0u, "", emptyList(), emptyList())
+        while (!reader.exhausted) {
+            val field = reader.nextField() ?: break
+            if (field.number == 1) {
+                profile = decodePlatoonProfileBody(reader.readMessage(field))
+            } else {
+                reader.skip(field)
+            }
+        }
+        return profile
+    }
+
+    private fun decodePlatoonProfileBody(reader: ProtoReader): PlatoonProfileData {
+        var platoonId = 0u
+        var platoonName = ""
+        val emblemPrimary = mutableListOf<UInt>()
+        val emblemSecondary = mutableListOf<UInt>()
+        while (!reader.exhausted) {
+            val field = reader.nextField() ?: break
+            when (field.number) {
+                1 -> platoonId = reader.readUInt(field).toUInt()
+                2 -> platoonName = reader.readString(field).take(MAX_PLATOON_NAME_CHARS)
+                15 -> emblemPrimary += reader.readRepeatedUInt(field)
+                    .take(MAX_EMBLEM_PARTS)
+                    .map(ULong::toUInt)
+                16 -> emblemSecondary += reader.readRepeatedUInt(field)
+                    .take(MAX_EMBLEM_PARTS)
+                    .map(ULong::toUInt)
+                else -> reader.skip(field)
+            }
+        }
+        return PlatoonProfileData(
+            platoonId = platoonId,
+            platoonName = platoonName,
+            emblemPrimary = emblemPrimary.take(MAX_EMBLEM_PARTS),
+            emblemSecondary = emblemSecondary.take(MAX_EMBLEM_PARTS),
+        )
     }
 
     private fun decodeGuildMembers(reader: ProtoReader): GuildMembersData {
@@ -387,4 +435,7 @@ object Gfl2PayloadDecoder {
 
         return Doll(dollId, weaponUid, attachmentUids, fixedKeyIds, expansionKeyIds, commonKeyUids)
     }
+
+    private const val MAX_PLATOON_NAME_CHARS = 128
+    private const val MAX_EMBLEM_PARTS = 16
 }

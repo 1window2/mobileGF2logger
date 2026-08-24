@@ -1,6 +1,8 @@
 package dev.gf2log.app.management
 
 import android.content.Context
+import android.util.Log
+import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.MemberOrderPreferences
 import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.model.GuildMember
@@ -179,10 +181,12 @@ class PlatoonRepository(context: Context) {
         access { it.listDailyPatrolFacts(from, until) }
 
     fun updateMember(uid: Long, name: String, note: String): Boolean =
-        access { it.updateMember(uid, name, note) }
+        access { it.updateMember(uid, name, note) }.also { changed ->
+            if (changed) recordAllLiveWeeklyReports()
+        }
 
     fun deleteMember(uid: Long): Boolean {
-        return withExclusiveDatabase {
+        val deleted = withExclusiveDatabase {
             val order = MemberOrderPreferences(appContext)
             val previousOrder = order.read()
             val updatedOrder = previousOrder.filterNot { it == uid }
@@ -208,6 +212,8 @@ class PlatoonRepository(context: Context) {
                 throw error
             }
         }
+        if (deleted) recordAllLiveWeeklyReports()
+        return deleted
     }
 
     fun updateMembershipPeriod(
@@ -216,9 +222,11 @@ class PlatoonRepository(context: Context) {
         left: MembershipBoundaryValue?,
         note: String,
     ): Boolean = access { it.updateMembershipPeriod(membershipPeriodId, joined, left, note) }
+        .also { changed -> if (changed) recordAllLiveWeeklyReports() }
 
     fun deleteMembershipPeriod(membershipPeriodId: Long): Boolean =
         access { it.deleteMembershipPeriod(membershipPeriodId) }
+            .also { changed -> if (changed) recordAllLiveWeeklyReports() }
 
     fun addWithdrawnMember(
         uid: Long,
@@ -227,6 +235,7 @@ class PlatoonRepository(context: Context) {
         withdrew: MembershipBoundaryValue,
         note: String,
     ): Boolean = access { it.addWithdrawnMember(uid, name, joined, withdrew, note) }
+        .also { changed -> if (changed) recordAllLiveWeeklyReports() }
 
     fun addMembershipPeriod(
         uid: Long,
@@ -234,14 +243,22 @@ class PlatoonRepository(context: Context) {
         withdrew: MembershipBoundaryValue?,
         note: String,
     ): Boolean = access { it.addMembershipPeriod(uid, joined, withdrew, note) }
+        .also { changed -> if (changed) recordAllLiveWeeklyReports() }
 
     fun addWeeklyNote(periodStartEpochDay: Long, gameDayEpochDay: Long, text: String): Long =
-        access { it.addWeeklyNote(periodStartEpochDay, gameDayEpochDay, text) }
+        access { it.addWeeklyNote(periodStartEpochDay, gameDayEpochDay, text) }.also {
+            recordLiveWeeklyRevision(LocalDate.ofEpochDay(periodStartEpochDay))
+        }
 
     fun listWeeklyNotes(periodStartEpochDay: Long): List<WeeklyNote> =
         access { it.listWeeklyNotes(periodStartEpochDay) }
 
-    fun deleteWeeklyNote(id: Long): Boolean = access { it.deleteWeeklyNote(id) }
+    fun deleteWeeklyNote(id: Long): Boolean {
+        val periodStart = access { it.weeklyNotePeriodStart(id) } ?: return false
+        return access { it.deleteWeeklyNote(id) }.also { changed ->
+            if (changed) recordLiveWeeklyRevision(periodStart)
+        }
+    }
 
     fun listWeeklyOverrides(periodStartEpochDay: Long): List<WeeklyCellOverride> =
         access { it.listWeeklyOverrides(periodStartEpochDay) }
@@ -250,19 +267,63 @@ class PlatoonRepository(context: Context) {
         referenceDay: LocalDate,
         zoneId: ZoneId,
         asOf: Instant = Instant.now(),
-    ): WeeklyReportBuilder.Report {
-        val live = buildLiveWeeklyReport(referenceDay, zoneId, asOf)
+    ): WeeklyReportBuilder.Report = buildWeeklyTableRevision(referenceDay, zoneId, asOf).report
+
+    fun buildWeeklyTableRevision(
+        referenceDay: LocalDate,
+        zoneId: ZoneId,
+        asOf: Instant = Instant.now(),
+    ): WeeklyTableRevision {
+        val live = buildLiveWeeklyRevision(referenceDay, zoneId, asOf)
         recordHistory(live, Instant.now(), clearActiveOnChange = false)
         val activePayload = access {
-            it.activeWeeklyReportHistoryPayload(live.periodStart.toEpochDay())
+            it.activeWeeklyReportHistoryPayload(live.report.periodStart.toEpochDay())
         } ?: return live
-        return runCatching { WeeklyReportHistoryCodec.decode(activePayload) }
+        return runCatching { WeeklyReportHistoryCodec.decodeRevision(activePayload) }
             .getOrElse {
                 access { database ->
-                    database.clearActiveWeeklyReportHistory(live.periodStart.toEpochDay())
+                    database.clearActiveWeeklyReportHistory(live.report.periodStart.toEpochDay())
                 }
                 live
             }
+    }
+
+    private fun buildLiveWeeklyRevision(
+        referenceDay: LocalDate,
+        zoneId: ZoneId,
+        asOf: Instant,
+    ): WeeklyTableRevision {
+        val report = buildLiveWeeklyReport(referenceDay, zoneId, asOf)
+        val periodStart = report.periodStart
+        val statuses = listMemberStatuses()
+        val membershipEvents = listEvents(
+            periodStart.atStartOfDay(zoneId).toInstant(),
+            periodStart.plusDays(7).atStartOfDay(zoneId).toInstant(),
+            periodStart,
+            periodStart.plusDays(7),
+        ).filter {
+            it.type in MembershipEventPresentation.displayedTypes &&
+                it.source in MembershipEventPresentation.displayedSources
+        }.take(MAX_REVISION_EVENTS)
+            .map { it.copy(note = it.note.boundedUtf8(MAX_REVISION_NOTE_BYTES)) }
+        val relevantNameUids = (
+            report.members.asSequence().map { it.uid } + membershipEvents.asSequence().map { it.uid }
+            ).toSet()
+        return ManagementConsistencyAudit.requireValid(WeeklyTableRevision(
+            report = report,
+            membershipEvents = membershipEvents,
+            notes = listWeeklyNotes(periodStart.toEpochDay())
+                .filterNot(WeeklyNote::isAutomatic)
+                .take(MAX_REVISION_NOTES)
+                .map { it.copy(text = it.text.boundedUtf8(MAX_REVISION_NOTE_BYTES)) },
+            memberNamesByUid = statuses.asSequence()
+                .filter { it.uid in relevantNameUids }
+                .take(MAX_REVISION_NAMES)
+                .associate { it.uid to it.name.boundedUtf8(MAX_REVISION_NAME_BYTES) },
+            memberPrivateNotesByUid = statuses.asSequence()
+                .filter { status -> report.members.any { it.uid == status.uid } }
+                .associate { it.uid to it.note.boundedUtf8(MAX_REVISION_PRIVATE_NOTE_BYTES) },
+        ))
     }
 
     private fun buildLiveWeeklyReport(
@@ -307,12 +368,8 @@ class PlatoonRepository(context: Context) {
     ) {
         access { it.replaceWeeklyOverrides(periodStartEpochDay, overrides) }
         val day = LocalDate.ofEpochDay(periodStartEpochDay)
-        val zone = ZoneId.systemDefault()
-        recordHistory(
-            report = buildLiveWeeklyReport(day, zone, Instant.now()),
-            recordedAt = Instant.now(),
-            clearActiveOnChange = true,
-        )
+        val zone = GameTimeZonePreferences.get(appContext)
+        recordLiveWeeklyRevisionSafely(day, zone)
     }
 
     fun listWeeklyReportHistory(periodStart: LocalDate): List<WeeklyReportHistoryEntry> =
@@ -328,43 +385,96 @@ class PlatoonRepository(context: Context) {
     fun showLiveWeeklyReport(periodStart: LocalDate): Boolean =
         access { it.clearActiveWeeklyReportHistory(periodStart.toEpochDay()) }
 
+    fun rebuildWeeklyHistoryForTimeZoneChange() {
+        withExclusiveDatabase {
+            PlatoonDatabase(appContext).use(PlatoonDatabase::clearWeeklyReportHistory)
+        }
+        recordAllLiveWeeklyReports(failFast = true)
+    }
+
     private fun recordChangedWeeks(instants: Iterable<Instant>) =
         recordChangedWeeks(instants.asSequence())
 
     private fun recordChangedWeeks(instants: Sequence<Instant>) {
-        val zone = ZoneId.systemDefault()
+        val zone = GameTimeZonePreferences.get(appContext)
         WeeklyHistoryWorkPolicy.changedPeriodStarts(instants, zone)
             .forEach { periodStart ->
-                val report = buildLiveWeeklyReport(periodStart, zone, Instant.now())
-                recordHistory(report, Instant.now(), clearActiveOnChange = true)
+                recordLiveWeeklyRevisionSafely(periodStart, zone)
             }
     }
 
-    private fun recordAllLiveWeeklyReports() {
-        val zone = ZoneId.systemDefault()
+    // Function Name: recordAllLiveWeeklyReports
+    // Description:
+    // - Refreshes every derived weekly revision after a primary-data mutation.
+    // - Keeps committed member or packet data authoritative when optional history maintenance fails.
+    // Parameters:
+    // - failFast: Propagates failures for explicit maintenance operations such as timezone rebuilds.
+    private fun recordAllLiveWeeklyReports(failFast: Boolean = false) {
+        val zone = GameTimeZonePreferences.get(appContext)
         WeeklyReportRange.periodStarts(access { it.listWeeklyEvidenceDays(zone) })
             .forEach { periodStart ->
-                recordHistory(
-                    buildLiveWeeklyReport(periodStart, zone, Instant.now()),
-                    Instant.now(),
-                    clearActiveOnChange = true,
-                )
+                if (failFast) {
+                    val now = Instant.now()
+                    recordHistory(
+                        buildLiveWeeklyRevision(periodStart, zone, now),
+                        now,
+                        clearActiveOnChange = true,
+                    )
+                } else {
+                    recordLiveWeeklyRevisionSafely(periodStart, zone)
+                }
             }
     }
 
     private fun recordHistory(
-        report: WeeklyReportBuilder.Report,
+        revision: WeeklyTableRevision,
         recordedAt: Instant,
         clearActiveOnChange: Boolean,
     ) {
-        val encoded = WeeklyReportHistoryCodec.encode(report)
+        val encoded = WeeklyReportHistoryCodec.encode(revision)
         access { database ->
             database.recordWeeklyReportHistory(
-                periodStartEpochDay = report.periodStart.toEpochDay(),
+                periodStartEpochDay = revision.report.periodStart.toEpochDay(),
                 recordedAt = recordedAt,
                 fingerprint = encoded.fingerprint,
                 payload = encoded.payload,
                 clearActiveOnChange = clearActiveOnChange,
+            )
+        }
+    }
+
+    private fun recordLiveWeeklyRevision(periodStart: LocalDate) {
+        val zone = GameTimeZonePreferences.get(appContext)
+        recordLiveWeeklyRevisionSafely(periodStart, zone)
+    }
+
+    // Function Name: recordLiveWeeklyRevisionSafely
+    // Description:
+    // - Records a derived table revision without changing the result of an already committed mutation.
+    // - Clears a restored projection on failure so the next screen render uses authoritative live data.
+    // Parameters:
+    // - periodStart: Sunday key of the weekly table to refresh.
+    // - zone: Persisted game timezone used by every date boundary in the projection.
+    private fun recordLiveWeeklyRevisionSafely(periodStart: LocalDate, zone: ZoneId) {
+        try {
+            val now = Instant.now()
+            recordHistory(
+                buildLiveWeeklyRevision(periodStart, zone, now),
+                now,
+                clearActiveOnChange = true,
+            )
+        } catch (historyError: Exception) {
+            try {
+                access { database ->
+                    database.clearActiveWeeklyReportHistory(periodStart.toEpochDay())
+                }
+            } catch (clearError: Exception) {
+                historyError.addSuppressed(clearError)
+            }
+            Log.e(
+                TAG,
+                "Unable to refresh weekly history for $periodStart; live data remains authoritative",
+                historyError,
             )
         }
     }
@@ -392,6 +502,13 @@ class PlatoonRepository(context: Context) {
 
     companion object {
         const val RETAINED_CSV_DIRECTORY = "guild-members"
+        private const val MAX_REVISION_EVENTS = 512
+        private const val MAX_REVISION_NOTES = 128
+        private const val MAX_REVISION_NAMES = 768
+        private const val MAX_REVISION_NAME_BYTES = 1_024
+        private const val MAX_REVISION_NOTE_BYTES = 16 * 1_024
+        private const val MAX_REVISION_PRIVATE_NOTE_BYTES = 2 * 1_024
+        private const val TAG = "GF2PlatoonRepository"
         private val databaseLock = Any()
         private val maintenanceLock = ReentrantReadWriteLock(true)
 
@@ -420,6 +537,23 @@ class PlatoonRepository(context: Context) {
             }
 
     }
+}
+
+private fun String.boundedUtf8(maximumBytes: Int): String {
+    if (toByteArray(Charsets.UTF_8).size <= maximumBytes) return this
+    val result = StringBuilder()
+    var byteCount = 0
+    var offset = 0
+    while (offset < length) {
+        val codePoint = codePointAt(offset)
+        val character = String(Character.toChars(codePoint))
+        val characterBytes = character.toByteArray(Charsets.UTF_8).size
+        if (byteCount + characterBytes > maximumBytes) break
+        result.append(character)
+        byteCount += characterBytes
+        offset += Character.charCount(codePoint)
+    }
+    return result.toString()
 }
 
 private fun GuildMember.toSnapshotMember() = SnapshotMember(

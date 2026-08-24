@@ -15,9 +15,19 @@ import java.util.zip.GZIPOutputStream
 internal object WeeklyReportHistoryCodec {
     data class Encoded(val payload: ByteArray, val fingerprint: String)
 
-    fun encode(report: WeeklyReportBuilder.Report): Encoded {
+    fun encode(report: WeeklyReportBuilder.Report): Encoded = encode(
+        WeeklyTableRevision(report, emptyList(), emptyList(), emptyMap(), emptyMap()),
+    )
+
+    fun encode(revision: WeeklyTableRevision): Encoded {
+        ManagementConsistencyAudit.requireValid(revision)
+        val report = revision.report
         require(report.days.size == DAYS_PER_WEEK)
         require(report.members.size <= MAX_MEMBERS)
+        require(revision.membershipEvents.size <= MAX_EVENTS)
+        require(revision.notes.size <= MAX_NOTES)
+        require(revision.memberNamesByUid.size <= MAX_CONTEXT_MEMBERS)
+        require(revision.memberPrivateNotesByUid.size <= MAX_MEMBERS)
         val raw = ByteArrayOutputStream().use { buffer ->
             DataOutputStream(buffer).use { output ->
                 output.writeInt(MAGIC)
@@ -29,9 +39,16 @@ internal object WeeklyReportHistoryCodec {
                 report.days.forEach { output.writeLong(it.toEpochDay()) }
                 output.writeInt(report.members.size)
                 report.members.forEach { output.writeMember(it) }
+                output.writeInt(revision.membershipEvents.size)
+                revision.membershipEvents.forEach { output.writeMemberEvent(it) }
+                output.writeInt(revision.notes.size)
+                revision.notes.forEach { output.writeWeeklyNote(it) }
+                output.writeStringMap(revision.memberNamesByUid, MAX_STRING_BYTES)
+                output.writeStringMap(revision.memberPrivateNotesByUid, MAX_PRIVATE_NOTE_BYTES)
             }
             buffer.toByteArray()
         }
+        require(raw.size <= MAX_DECOMPRESSED_BYTES) { "Weekly history payload expands beyond its limit" }
         val payload = ByteArrayOutputStream().use { compressed ->
             GZIPOutputStream(compressed).use { it.write(raw) }
             compressed.toByteArray()
@@ -43,7 +60,9 @@ internal object WeeklyReportHistoryCodec {
         return Encoded(payload, fingerprint)
     }
 
-    fun decode(payload: ByteArray): WeeklyReportBuilder.Report {
+    fun decode(payload: ByteArray): WeeklyReportBuilder.Report = decodeRevision(payload).report
+
+    fun decodeRevision(payload: ByteArray): WeeklyTableRevision {
         require(payload.size in 1..MAX_PAYLOAD_BYTES) { "Invalid weekly history payload size" }
         val raw = GZIPInputStream(ByteArrayInputStream(payload)).use { compressed ->
             val output = ByteArrayOutputStream()
@@ -62,7 +81,10 @@ internal object WeeklyReportHistoryCodec {
         }
         return DataInputStream(ByteArrayInputStream(raw)).use { input ->
             require(input.readInt() == MAGIC) { "Invalid weekly history header" }
-            require(input.readInt() == FORMAT_VERSION) { "Unsupported weekly history format" }
+            val formatVersion = input.readInt()
+            require(formatVersion in LEGACY_FORMAT_VERSION..FORMAT_VERSION) {
+                "Unsupported weekly history format"
+            }
             val periodStart = LocalDate.ofEpochDay(input.readLong())
             val periodEnd = LocalDate.ofEpochDay(input.readLong())
             val gunsmoke = input.readBoolean()
@@ -72,8 +94,91 @@ internal object WeeklyReportHistoryCodec {
             require(days == List(DAYS_PER_WEEK) { periodStart.plusDays(it.toLong()) })
             val memberCount = input.readBoundedCount(MAX_MEMBERS)
             val members = List(memberCount) { input.readMember(gunsmoke, periodStart) }
+            val report = WeeklyReportBuilder.Report(periodStart, periodEnd, gunsmoke, days, members)
+            val revision = if (formatVersion == LEGACY_FORMAT_VERSION) {
+                WeeklyTableRevision(report, emptyList(), emptyList(), emptyMap(), emptyMap())
+            } else {
+                val eventCount = input.readBoundedCount(MAX_EVENTS)
+                val events = List(eventCount) { input.readMemberEvent() }
+                val noteCount = input.readBoundedCount(MAX_NOTES)
+                val notes = List(noteCount) { input.readWeeklyNote(periodStart) }
+                val names = input.readStringMap(MAX_CONTEXT_MEMBERS, MAX_STRING_BYTES)
+                val privateNotes = input.readStringMap(MAX_MEMBERS, MAX_PRIVATE_NOTE_BYTES)
+                WeeklyTableRevision(report, events, notes, names, privateNotes)
+            }
             require(input.read() == -1) { "Trailing weekly history data" }
-            WeeklyReportBuilder.Report(periodStart, periodEnd, gunsmoke, days, members)
+            ManagementConsistencyAudit.requireValid(revision)
+        }
+    }
+
+    private fun DataOutputStream.writeMemberEvent(event: MemberEvent) {
+        writeLong(event.id)
+        writeLong(event.uid)
+        writeInt(event.type.ordinal)
+        writeNullableLong(event.occurredAt?.toEpochMilli())
+        writeNullableLong(event.eventDate?.toEpochDay())
+        writeBoolean(event.timeKnown)
+        writeLong(event.observedAt.toEpochMilli())
+        writeInt(event.precision.ordinal)
+        writeInt(event.source.ordinal)
+        writeBoundedString(event.note, MAX_NOTE_BYTES)
+    }
+
+    private fun DataInputStream.readMemberEvent() = MemberEvent(
+        id = readLong(),
+        uid = readLong(),
+        type = readEnum(),
+        occurredAt = readNullableLong()?.let(Instant::ofEpochMilli),
+        eventDate = readNullableLong()?.let(LocalDate::ofEpochDay),
+        timeKnown = readBoolean(),
+        observedAt = Instant.ofEpochMilli(readLong()),
+        precision = readEnum(),
+        source = readEnum(),
+        note = readBoundedString(MAX_NOTE_BYTES),
+    )
+
+    private fun DataOutputStream.writeWeeklyNote(note: WeeklyNote) {
+        writeLong(note.id)
+        writeLong(note.periodStart.toEpochDay())
+        writeLong(note.gameDay.toEpochDay())
+        writeBoundedString(note.text, MAX_NOTE_BYTES)
+        writeNullableLong(note.eventId)
+        writeBoolean(note.isAutomatic)
+    }
+
+    private fun DataInputStream.readWeeklyNote(expectedPeriodStart: LocalDate): WeeklyNote {
+        val note = WeeklyNote(
+            id = readLong(),
+            periodStart = LocalDate.ofEpochDay(readLong()),
+            gameDay = LocalDate.ofEpochDay(readLong()),
+            text = readBoundedString(MAX_NOTE_BYTES),
+            eventId = readNullableLong(),
+            isAutomatic = readBoolean(),
+        )
+        require(note.periodStart == expectedPeriodStart)
+        require(note.gameDay in expectedPeriodStart..expectedPeriodStart.plusDays(6))
+        return note
+    }
+
+    private fun DataOutputStream.writeStringMap(values: Map<Long, String>, maximumStringBytes: Int) {
+        writeInt(values.size)
+        values.toSortedMap().forEach { (uid, value) ->
+            writeLong(uid)
+            writeBoundedString(value, maximumStringBytes)
+        }
+    }
+
+    private fun DataInputStream.readStringMap(
+        maximumEntries: Int,
+        maximumStringBytes: Int,
+    ): Map<Long, String> {
+        val count = readBoundedCount(maximumEntries)
+        return buildMap {
+            repeat(count) {
+                val uid = readLong()
+                require(uid > 0L && uid !in this)
+                put(uid, readBoundedString(maximumStringBytes))
+            }
         }
     }
 
@@ -243,15 +348,18 @@ internal object WeeklyReportHistoryCodec {
         )
     }
 
-    private fun DataOutputStream.writeBoundedString(value: String) {
+    private fun DataOutputStream.writeBoundedString(
+        value: String,
+        maximumBytes: Int = MAX_STRING_BYTES,
+    ) {
         val bytes = value.toByteArray(StandardCharsets.UTF_8)
-        require(bytes.size <= MAX_STRING_BYTES)
+        require(bytes.size <= maximumBytes)
         writeInt(bytes.size)
         write(bytes)
     }
 
-    private fun DataInputStream.readBoundedString(): String {
-        val size = readBoundedCount(MAX_STRING_BYTES)
+    private fun DataInputStream.readBoundedString(maximumBytes: Int = MAX_STRING_BYTES): String {
+        val size = readBoundedCount(maximumBytes)
         val bytes = ByteArray(size)
         readFully(bytes)
         return String(bytes, StandardCharsets.UTF_8)
@@ -297,10 +405,16 @@ internal object WeeklyReportHistoryCodec {
     }
 
     private const val MAGIC = 0x47463248
-    private const val FORMAT_VERSION = 1
+    private const val LEGACY_FORMAT_VERSION = 1
+    private const val FORMAT_VERSION = 2
     private const val DAYS_PER_WEEK = 7
     private const val MAX_MEMBERS = 256
+    private const val MAX_CONTEXT_MEMBERS = 768
+    private const val MAX_EVENTS = 512
+    private const val MAX_NOTES = 128
     private const val MAX_STRING_BYTES = 1_024
+    private const val MAX_NOTE_BYTES = 16 * 1_024
+    private const val MAX_PRIVATE_NOTE_BYTES = 2 * 1_024
     private const val MAX_DECOMPRESSED_BYTES = 4 * 1024 * 1024
     private const val STREAM_BUFFER_BYTES = 8 * 1024
     const val MAX_PAYLOAD_BYTES = 2 * 1024 * 1024

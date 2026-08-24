@@ -44,6 +44,13 @@ plaintext protocol. Parsed data and backups therefore provide local integrity
 and management convenience, not cryptographic proof that a remote payload is
 genuine.
 
+On Android 10 and newer, the active VPN may ask Android for the UID owning an
+original connection tuple and map that UID only to the fixed supported package
+IDs. Remote IP addresses and DNS/SNI labels are diagnostic hints, not trusted
+client or server identities. Payload `21905` supplies a bounded Platoon identity
+for its own decoded flow, but multi-Platoon persistence remains disabled until
+every database, CSV, import, backup, and UI path can enforce the same scope.
+
 Exports and Discord sends are explicit user actions that move selected data out
 of Android private storage. Backups are checksummed and strictly validated but
 are not encrypted or signed. Treat exported files and webhook destinations as
@@ -51,7 +58,8 @@ sensitive.
 
 Weekly history remains inside the private SQLite database. Its report payloads
 use a versioned bounded format, reject oversized compressed or decompressed
-content, and are never exposed through the PNG `FileProvider` unless the user
+content, validate the complete immutable rendering context before storage or
+restore, and are never exposed through the PNG `FileProvider` unless the user
 separately chooses the existing share workflow.
 
 Packet-triggered weekly-history generation consumes only the same validated,

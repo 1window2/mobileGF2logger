@@ -46,9 +46,11 @@ class UserSettingsPreferencesIntegrationTest {
         assertEquals("com.example.gf2", settings.targetPackage)
         assertFalse(settings.detailedNotifications)
         assertEquals("system", settings.themeMode)
+        assertEquals(GameServerRegion.MANUAL.storedValue, settings.gameServerRegion)
+        assertEquals(java.time.ZoneId.systemDefault().id, settings.gameTimeZoneId)
         assertTrue(settings.onboardingCompleted)
         assertEquals(
-            2,
+            4,
             context.getSharedPreferences("user_settings", Context.MODE_PRIVATE)
                 .getInt("schema_version", 0),
         )

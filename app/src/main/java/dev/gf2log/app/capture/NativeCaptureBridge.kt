@@ -4,6 +4,15 @@ import android.net.VpnService
 
 object NativeCaptureBridge {
     interface PayloadListener {
+        fun onFlowOpened(
+            flowId: Long,
+            protocol: Int,
+            localAddress: String,
+            localPort: Int,
+            remoteAddress: String,
+            remotePort: Int,
+        )
+
         fun onPayload(flowId: Long, isSent: Boolean, payload: ByteArray)
 
         fun onFlowClosed(flowId: Long)

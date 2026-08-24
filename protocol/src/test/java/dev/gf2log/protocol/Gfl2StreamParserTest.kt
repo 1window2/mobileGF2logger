@@ -6,6 +6,7 @@ import dev.gf2log.protocol.model.FormationsData
 import dev.gf2log.protocol.model.GuildMembersData
 import dev.gf2log.protocol.model.ParseEvent
 import dev.gf2log.protocol.model.PlatoonActivityData
+import dev.gf2log.protocol.model.PlatoonProfileData
 import dev.gf2log.protocol.model.PlatoonUpdatesData
 import dev.gf2log.protocol.model.WeaponsData
 import org.junit.Assert.assertEquals
@@ -130,6 +131,31 @@ class Gfl2StreamParserTest {
         assertEquals(listOf(1_111_111u, 2_222_222u), entry.members.map { it.uid })
         assertEquals(listOf("Leader", "Removed Member"), entry.members.map { it.name })
         assertEquals(listOf(1u, 1u), entry.members.map { it.role })
+    }
+
+    @Test
+    fun capturedPlatoonProfilePreservesStableIdentityAndEmblemParts() {
+        val bytes = hex(
+            "0aa30208b99a061205486f726e79181920e4de20325d72656a6563742073616e6974792c" +
+                "20656d627261636520686f726e792e0a0a446f6e277420666f7267657420746f20646f20" +
+                "796f75722047756e736d6f6b65206869747320616674657220636c616e6b696e67207468" +
+                "6520646f6c6c73380e4801500358c2e9a3c40662910141696d696e6720666f7220546f70" +
+                "20352520647572696e672047756e736d6f6b6520666f7220616c6c207265776172647321" +
+                "20546f70203130252069732066696e6520746f6f2e0a0a52656372756974696e67206d65" +
+                "6d626572732077686f2077696c6c20686974207477696365207065722064617920647572" +
+                "696e672047756e736d6f6b652046726f6e746c696e652e68017a0302010a820106140e0b" +
+                "110f1288010110914e2814",
+        )
+
+        val profile = Gfl2PayloadDecoder.decode(
+            Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE,
+            bytes,
+        ) as PlatoonProfileData
+
+        assertEquals(101_689u, profile.platoonId)
+        assertEquals("Horny", profile.platoonName)
+        assertEquals(listOf(2u, 1u, 10u), profile.emblemPrimary)
+        assertEquals(listOf(20u, 14u, 11u, 17u, 15u, 18u), profile.emblemSecondary)
     }
 
     @Test
@@ -398,6 +424,10 @@ class Gfl2StreamParserTest {
 
     private fun List<ParseEvent>.singlePayload(): ParseEvent.Payload =
         filterIsInstance<ParseEvent.Payload>().single()
+
+    private fun hex(value: String): ByteArray = value.chunked(2)
+        .map { it.toInt(16).toByte() }
+        .toByteArray()
 
     private fun outerMessage(messageId: Int, vararg payloads: ByteArray): ByteArray =
         outerMessageWithBody(messageId, payloads.fold(ByteArray(0)) { result, payload -> result + payload })

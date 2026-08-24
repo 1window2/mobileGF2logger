@@ -32,6 +32,14 @@ data class CommonKey(
 
 data class GuildMembersData(val members: List<GuildMember>) : GameData
 
+/** Stable identity carried ahead of roster and activity data on a platoon flow. */
+data class PlatoonProfileData(
+    val platoonId: UInt,
+    val platoonName: String,
+    val emblemPrimary: List<UInt>,
+    val emblemSecondary: List<UInt>,
+) : GameData
+
 data class GuildMember(
     val uid: UInt,
     val name: String,

@@ -42,6 +42,7 @@ typedef struct capture_context {
     jobject listener;
     jmethodID protect_method;
     jmethodID payload_method;
+    jmethodID flow_opened_method;
     jmethodID flow_closed_method;
     jmethodID traffic_method;
     jmethodID stopped_method;
@@ -257,6 +258,32 @@ static int connection_open_callback(zdtun_t *tunnel, zdtun_conn_t *connection) {
     flow->id = ++context->next_flow_id;
     flow->inspect_payload = zdtun_conn_get_5tuple(connection)->ipproto == IPPROTO_TCP;
     zdtun_conn_set_userdata(connection, flow);
+
+    const zdtun_5tuple_t *tuple = zdtun_conn_get_5tuple(connection);
+    const int family = tuple->ipver == 4 ? AF_INET : AF_INET6;
+    char local_address[INET6_ADDRSTRLEN] = {0};
+    char remote_address[INET6_ADDRSTRLEN] = {0};
+    if (inet_ntop(family, &tuple->src_ip, local_address, sizeof(local_address)) != NULL &&
+            inet_ntop(family, &tuple->dst_ip, remote_address, sizeof(remote_address)) != NULL) {
+        jstring local = (*context->env)->NewStringUTF(context->env, local_address);
+        jstring remote = (*context->env)->NewStringUTF(context->env, remote_address);
+        if (local != NULL && remote != NULL &&
+                !clear_java_exception(context, "flow address allocation")) {
+            (*context->env)->CallVoidMethod(
+                    context->env,
+                    context->listener,
+                    context->flow_opened_method,
+                    (jlong) flow->id,
+                    (jint) tuple->ipproto,
+                    local,
+                    (jint) ntohs(tuple->src_port),
+                    remote,
+                    (jint) ntohs(tuple->dst_port));
+            clear_java_exception(context, "flow open");
+        }
+        if (local != NULL) (*context->env)->DeleteLocalRef(context->env, local);
+        if (remote != NULL) (*context->env)->DeleteLocalRef(context->env, remote);
+    }
     return 0;
 }
 
@@ -502,6 +529,11 @@ Java_dev_gf2log_app_capture_NativeCaptureBridge_nativeStart(
     jclass listener_class = (*env)->GetObjectClass(env, listener);
     context->protect_method = (*env)->GetMethodID(env, service_class, "protect", "(I)Z");
     context->payload_method = (*env)->GetMethodID(env, listener_class, "onPayload", "(JZ[B)V");
+    context->flow_opened_method = (*env)->GetMethodID(
+            env,
+            listener_class,
+            "onFlowOpened",
+            "(JILjava/lang/String;ILjava/lang/String;I)V");
     context->flow_closed_method = (*env)->GetMethodID(env, listener_class, "onFlowClosed", "(J)V");
     context->traffic_method = (*env)->GetMethodID(env, listener_class, "onTraffic", "(JJJ)V");
     context->stopped_method = (*env)->GetMethodID(env, listener_class, "onCaptureStopped", "()V");
@@ -509,6 +541,7 @@ Java_dev_gf2log_app_capture_NativeCaptureBridge_nativeStart(
     (*env)->DeleteLocalRef(env, listener_class);
 
     if (context->protect_method == NULL || context->payload_method == NULL ||
+            context->flow_opened_method == NULL ||
             context->flow_closed_method == NULL || context->traffic_method == NULL ||
             context->stopped_method == NULL ||
             (*env)->ExceptionCheck(env)) {

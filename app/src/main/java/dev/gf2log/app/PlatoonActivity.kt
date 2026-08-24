@@ -23,7 +23,7 @@ import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonMemberCsv
 import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.management.isValidMembershipRange
-import java.time.ZoneId
+import dev.gf2log.app.settings.GameTimeZonePreferences
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.Executors
 
@@ -197,7 +197,7 @@ class PlatoonActivity : LocalizedActivity() {
         summary.text = if (latest == null) {
             getString(R.string.no_platoon_snapshot)
         } else {
-            val zone = ZoneId.systemDefault()
+            val zone = GameTimeZonePreferences.get(this@PlatoonActivity)
             getString(
                 R.string.platoon_summary,
                 active,
@@ -323,7 +323,7 @@ class PlatoonActivity : LocalizedActivity() {
         pendingMemberCsv = PlatoonMemberCsv.format(
             statuses = selected,
             latestMembers = latestMembers,
-            zoneId = ZoneId.systemDefault(),
+            zoneId = GameTimeZonePreferences.get(this),
         )
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
@@ -346,11 +346,13 @@ class PlatoonActivity : LocalizedActivity() {
             this,
             getString(R.string.join_field),
             dateRequired = true,
+            zone = GameTimeZonePreferences.get(this),
         )
         val withdrew = DateTimePickerInput(
             this,
             getString(R.string.withdraw_field),
             dateRequired = true,
+            zone = GameTimeZonePreferences.get(this),
         )
         val noteInput = EditText(this).apply {
             hint = getString(R.string.membership_note_hint)

@@ -568,6 +568,44 @@ class PlatoonDatabaseIntegrationTest {
     }
 
     @Test
+    fun schemaTwelveUpgradeRepairsDerivedActiveState() {
+        val databaseName = "platoon-v12-membership-state-test.db"
+        context.deleteDatabase(databaseName)
+        try {
+            PlatoonDatabase(context, databaseName).use { helper ->
+                val writable = helper.writableDatabase
+                writable.execSQL(
+                    "INSERT INTO members(" +
+                        "uid, current_name, current_level, is_active, first_seen_at, last_seen_at" +
+                        ") VALUES(?, ?, ?, ?, ?, ?)",
+                    arrayOf<Any>(TARGET_UID, "Target", 60, 0, 1_000L, 1_000L),
+                )
+                writable.execSQL(
+                    "INSERT INTO membership_periods(" +
+                        "uid, joined_at, joined_precision, joined_source" +
+                        ") VALUES(?, ?, ?, ?)",
+                    arrayOf<Any>(
+                        TARGET_UID,
+                        1_000L,
+                        EvidencePrecision.EXACT.name,
+                        EvidenceSource.GAME_UPDATES.name,
+                    ),
+                )
+            }
+            context.openOrCreateDatabase(databaseName, Context.MODE_PRIVATE, null).use { legacy ->
+                legacy.version = 12
+            }
+
+            PlatoonDatabase(context, databaseName).use { upgraded ->
+                assertEquals(PlatoonSchema.CURRENT_VERSION, upgraded.writableDatabase.version)
+                assertTrue(upgraded.listMemberStatuses().single().isActive)
+            }
+        } finally {
+            context.deleteDatabase(databaseName)
+        }
+    }
+
+    @Test
     fun exactUpdatesSynchronizeCurrentStateWithoutOverridingNewerRoster() {
         val rosterAt = Instant.parse("2026-07-31T00:00:00Z")
         database.ingestSnapshot(
@@ -901,6 +939,74 @@ class PlatoonDatabaseIntegrationTest {
         assertTrue(status.isActive)
         assertEquals(1, status.membershipPeriods.size)
         assertEquals(0L, count("member_events", "membership_period_id = ?", historicalId))
+        assertForeignKeysValid()
+    }
+
+    @Test
+    fun manualMembershipMutationsKeepCurrentStateAndChronologyConsistent() {
+        val joined = MembershipBoundaryValue(
+            LocalDate.of(2026, 1, 1),
+            Instant.parse("2026-01-01T00:00:00Z"),
+            timeKnown = true,
+        )
+        val withdrew = MembershipBoundaryValue(
+            LocalDate.of(2026, 2, 1),
+            Instant.parse("2026-02-01T00:00:00Z"),
+            timeKnown = true,
+        )
+        assertTrue(database.addWithdrawnMember(TARGET_UID, "Target", joined, withdrew, ""))
+        assertFalse(database.listMemberStatuses().single().isActive)
+
+        val rejoined = MembershipBoundaryValue(
+            LocalDate.of(2026, 3, 1),
+            Instant.parse("2026-03-01T00:00:00Z"),
+            timeKnown = true,
+        )
+        assertTrue(database.addMembershipPeriod(TARGET_UID, rejoined, null, "Current"))
+        var status = database.listMemberStatuses().single()
+        assertTrue(status.isActive)
+        val currentId = status.membershipPeriods.single { it.note == "Current" }.id
+
+        val secondWithdrawal = MembershipBoundaryValue(
+            LocalDate.of(2026, 4, 1),
+            Instant.parse("2026-04-01T00:00:00Z"),
+            timeKnown = true,
+        )
+        assertTrue(database.updateMembershipPeriod(currentId, rejoined, secondWithdrawal, "Closed"))
+        status = database.listMemberStatuses().single()
+        assertFalse(status.isActive)
+
+        assertTrue(database.updateMembershipPeriod(currentId, rejoined, null, "Reopened"))
+        assertTrue(database.listMemberStatuses().single().isActive)
+        assertForeignKeysValid()
+    }
+
+    @Test
+    fun manualMembershipMutationRejectsOverlappingRanges() {
+        val joined = MembershipBoundaryValue(
+            LocalDate.of(2026, 1, 1),
+            Instant.parse("2026-01-01T00:00:00Z"),
+            timeKnown = true,
+        )
+        val withdrew = MembershipBoundaryValue(
+            LocalDate.of(2026, 3, 1),
+            Instant.parse("2026-03-01T00:00:00Z"),
+            timeKnown = true,
+        )
+        assertTrue(database.addWithdrawnMember(TARGET_UID, "Target", joined, withdrew, ""))
+
+        val overlapStart = MembershipBoundaryValue(
+            LocalDate.of(2026, 2, 1),
+            Instant.parse("2026-02-01T00:00:00Z"),
+            timeKnown = true,
+        )
+        val overlapEnd = MembershipBoundaryValue(
+            LocalDate.of(2026, 4, 1),
+            Instant.parse("2026-04-01T00:00:00Z"),
+            timeKnown = true,
+        )
+        assertFalse(database.addMembershipPeriod(TARGET_UID, overlapStart, overlapEnd, "Overlap"))
+        assertEquals(1, database.listMemberStatuses().single().membershipPeriods.size)
         assertForeignKeysValid()
     }
 

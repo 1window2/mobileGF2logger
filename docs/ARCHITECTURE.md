@@ -20,7 +20,7 @@ Native zdtun forwarding/reassembly core
 Gfl2StreamParser (one bounded instance per live TCP flow)
         |
         v
-Gfl2PayloadDecoder (seven recognized protobuf message types)
+Gfl2PayloadDecoder (eight recognized protobuf message types)
         |
         v
 Typed GameData events
@@ -57,12 +57,21 @@ Recognized inner types:
 | 11021 | Weapons |
 | 11061 | Attachments |
 | 11138 | Common keys |
+| 21905 | Platoon profile |
 | 21917 | Platoon members |
 | 21935 | Platoon activity |
 | 21960 | Platoon updates |
 | 23201 | Formations |
 
 Unknown payload types are skipped without allocation. A recognized but malformed protobuf payload produces a warning event and does not terminate parsing of later messages.
+
+Payload `21905` is the authoritative Platoon identity for the decoded flow. On
+Android 10 and newer, the capture service also resolves the original connection
+tuple to the owning supported package through Android's VPN owner API. Remote
+IP addresses and DNS/SNI labels are diagnostic endpoint metadata only; they are
+not persistence keys. The current schema remains single-Platoon until every
+database, import, CSV, backup, history, and UI path can enforce one composite
+scope without fallback to an unscoped record.
 
 ## Memory and concurrency limits
 
@@ -90,7 +99,7 @@ string cells through a shared encoder that quotes delimiters and prefixes
 formula-like values with an apostrophe. Numeric counters remain numeric, and
 the protection is never fed back into retained member identity.
 
-The single worker is deliberate: these seven responses are sparse, and avoiding
+The single worker is deliberate: these eight responses are sparse, and avoiding
 a worker pool reduces scheduling, memory, and ordering complexity. If
 benchmarking later proves this insufficient, partition work by flow while
 preserving in-flow ordering.
@@ -142,8 +151,9 @@ SQLite work. SQLite retains the newest 10,000 activity
 facts, and one ingestion resolves at most 250 unresolved facts. A database-local
 cursor rotates those bounded batches through the complete retained backlog.
 Schema v11 owns the rotation cursor and a global `(captured_at, id)` retention
-index; supported v1-v10 backups are upgraded before strict current-schema
-validation.
+index. Schema v13 repairs the derived active-member projection from canonical
+membership periods during upgrade; supported older backups are upgraded before
+strict current-schema validation.
 These limits are enforced again at repository and persistence boundaries so a
 future caller cannot bypass the protocol-layer checks.
 
@@ -152,7 +162,7 @@ future caller cannot bypass the protocol-layer checks.
 An Android VPN can observe packet metadata, but it cannot automatically read
 TLS-protected application data. Like the desktop reference, mobileGF2logger
 identifies TLS/HTTP flows and forwards them unchanged without parsing. The
-seven recognized game frame signatures are evaluated only on candidate
+eight recognized game frame signatures are evaluated only on candidate
 plaintext TCP streams. Do not add pinning or anti-cheat bypasses.
 
 ## Module and object boundaries
@@ -192,10 +202,11 @@ buttons.
 non-exported `OnboardingActivity`. The five-page guide may be finished or
 skipped, and writes completion only at that explicit exit. Its English/Korean
 segmented control persists the same language preference used by Settings.
-Complete backup settings schema v2 includes language, theme, and onboarding
-completion; schema-v1 backups remain accepted with System theme and completed
-onboarding defaults so an experienced restoring user is not trapped in the
-guide.
+Complete backup settings schema v4 includes language, theme, onboarding
+completion, the server-region reset preset, and the persisted manual game
+timezone. Schema-v1 through schema-v3 backups remain accepted with safe
+defaults and completed onboarding defaults so an experienced restoring user is
+not trapped in the guide.
 
 The design deliberately favors composition over deep inheritance. Abstraction
 and polymorphism appear at real variation points (`GameData`, `ParseEvent`, and

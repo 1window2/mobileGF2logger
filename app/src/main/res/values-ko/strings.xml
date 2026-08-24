@@ -20,7 +20,7 @@
     <string name="app_description">설치된 HaoPlay 및 Darkwinter 클라이언트의 프로토콜을 기기에서 캡처합니다. 원본 트래픽은 저장하지 않습니다.</string>
     <string name="prepare_capture">캡처 준비</string>
     <string name="capture_one_roster">한 번만 캡처</string>
-    <string name="guided_capture_checklist">%1$s 서클 명단\n%2$s 활동 근거\n%3$s 가입/탈퇴 변경</string>
+    <string name="guided_capture_checklist">%1$s 서클 식별 정보\n%2$s 서클 명단\n%3$s 활동 근거\n%4$s 가입/탈퇴 변경</string>
     <string name="stop_capture">중지</string>
     <string name="open_options">설정 열기</string>
     <string name="export_platoon_backup">서클 관리 백업 내보내기</string>
@@ -50,7 +50,7 @@
     <string name="onboarding_main_title">메인 화면</string>
     <string name="onboarding_main_description">소녀전선2: 망명 클라이언트의 통신 패킷을 캡처하고, 패킷 수집 현황을 한눈에 확인합니다.</string>
     <string name="onboarding_main_feature_1">캡처 준비는 사용자가 중지할 때까지 계속 실행됩니다.</string>
-    <string name="onboarding_main_feature_2">한 번만 캡처는 멤버, 활동, 동향을 확인한 뒤 자동으로 중지합니다.</string>
+    <string name="onboarding_main_feature_2">한 번만 캡처는 서클 식별 정보, 멤버, 활동, 동향을 확인한 뒤 자동으로 중지합니다.</string>
     <string name="onboarding_main_feature_3">최근 패킷 및 저장한 패킷 기록은 로컬에 보관됩니다.</string>
     <string name="onboarding_main_warning">VPN 동의 화면이 표시됩니다. GF2logger는 소녀전선2: 망명 앱에 대해서만 통신 패킷을 관찰하며, TLS를 해독하거나 원본 네트워크 패킷을 저장하지 않습니다.</string>
     <string name="onboarding_settings_title">설정</string>
@@ -196,6 +196,22 @@
     <string name="payload_options_description">앞으로 기록할 디코딩 페이로드를 선택합니다. 기존 기록에는 영향을 주지 않습니다.</string>
     <string name="settings_language_detail">패킷과 보고서의 표기 언어에도 함께 적용됩니다.</string>
     <string name="settings_appearance_detail">기기 설정을 따르거나 라이트·다크 모드로 고정합니다.</string>
+    <string name="game_timezone">게임 시간대</string>
+    <string name="daily_reset_time">하루 초기화 시간</string>
+    <string name="settings_daily_reset_detail">게임 서버 지역을 선택하면 서버의 05:00 초기화 시각을 이 기기의 시간대로 환산합니다.</string>
+    <string name="server_region">서버 지역</string>
+    <string name="server_region_manual">시간대 수동 설정</string>
+    <string name="server_region_darkwinter_global">Darkwinter 글로벌</string>
+    <string name="server_region_darkwinter_china">Darkwinter 중국</string>
+    <string name="server_region_haoplay_global">HaoPlay 글로벌</string>
+    <string name="server_region_haoplay_japan">HaoPlay 일본</string>
+    <string name="server_region_haoplay_korea">HaoPlay 한국</string>
+    <string name="server_region_haoplay_asia">HaoPlay 아시아</string>
+    <string name="server_reset_summary">%1$s · 이 기기의 다음 초기화 %2$s (%3$s)</string>
+    <string name="manual_reset_region_summary">수동 · %1$s (기기: %2$s)</string>
+    <string name="manual_timezone_summary">게임: %1$s · 기기: %2$s</string>
+    <string name="game_timezone_updated">게임 시간대를 변경하고 주간 표 히스토리를 다시 구성했습니다</string>
+    <string name="game_timezone_update_failed">시간대 변경과 주간 표 히스토리 재구성을 완료하지 못했습니다</string>
     <string name="settings_backup_detail">사용자가 직접 선택한 백업 파일로만 전체 앱 데이터를 이동합니다.</string>
     <string name="back">뒤로</string>
     <string name="payload_option_label">%1$s (payloadType = %2$d)</string>
@@ -203,6 +219,7 @@
     <string name="payload_tag_description">%1$s, 페이로드 유형 %2$s</string>
     <string name="unknown_payload_type">알 수 없음</string>
     <string name="payload_name_platoon_members">서클 멤버</string>
+    <string name="payload_name_platoon_profile">서클 프로필</string>
     <string name="payload_name_platoon_activity">서클 활동</string>
     <string name="payload_name_platoon_updates">서클 동향</string>
     <string name="payload_name_weapons">무기</string>
@@ -217,6 +234,7 @@
     <string name="payload_tag_common_keys">공용키</string>
     <string name="payload_tag_formations">편성</string>
     <string name="payload_description_platoon_members">서클 멤버, 공적 합계, 점수 및 최근 접속 시각입니다.</string>
+    <string name="payload_description_platoon_profile">캡처 기록을 분리하는 데 사용하는 서클 ID, 이름 및 엠블럼·스타일 식별자입니다.</string>
     <string name="payload_description_platoon_activity">증분 방식의 일일 과업 근거 등을 포함한 시각 기반 서클 활동입니다.</string>
     <string name="payload_description_platoon_updates">UID와 정확한 시각이 포함된 가입, 탈퇴, 추방 및 과업 보급 생성 여부입니다.</string>
     <string name="payload_description_weapons">보유 무기와 재련 정보입니다.</string>

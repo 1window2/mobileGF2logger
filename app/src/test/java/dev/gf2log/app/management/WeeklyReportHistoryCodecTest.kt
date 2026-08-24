@@ -71,9 +71,32 @@ class WeeklyReportHistoryCodecTest {
             ),
         )
 
-        val first = WeeklyReportHistoryCodec.encode(report)
-        val second = WeeklyReportHistoryCodec.encode(report)
-        val decoded = WeeklyReportHistoryCodec.decode(first.payload)
+        val revision = WeeklyTableRevision(
+            report = report,
+            membershipEvents = listOf(
+                MemberEvent(
+                    id = 7L,
+                    uid = 42L,
+                    type = MemberEventType.REJOINED,
+                    occurredAt = Instant.parse("2026-07-20T04:00:00Z"),
+                    eventDate = LocalDate.of(2026, 7, 20),
+                    timeKnown = true,
+                    observedAt = Instant.parse("2026-07-20T04:01:00Z"),
+                    precision = EvidencePrecision.EXACT,
+                    source = EvidenceSource.GAME_UPDATES,
+                    note = "History member",
+                ),
+            ),
+            notes = listOf(
+                WeeklyNote(3L, start, start.plusDays(1), "Remember this", null, false),
+            ),
+            memberNamesByUid = mapOf(42L to "Custom history name"),
+            memberPrivateNotesByUid = mapOf(42L to "Private at capture time"),
+        )
+        val first = WeeklyReportHistoryCodec.encode(revision)
+        val second = WeeklyReportHistoryCodec.encode(revision)
+        val decodedRevision = WeeklyReportHistoryCodec.decodeRevision(first.payload)
+        val decoded = decodedRevision.report
 
         assertEquals(first.fingerprint, second.fingerprint)
         assertTrue(first.payload.contentEquals(second.payload))
@@ -88,6 +111,10 @@ class WeeklyReportHistoryCodecTest {
             report.members.single().days.map { it.attended },
             decoded.members.single().days.map { it.attended },
         )
+        assertEquals(revision.membershipEvents, decodedRevision.membershipEvents)
+        assertEquals(revision.notes, decodedRevision.notes)
+        assertEquals(revision.memberNamesByUid, decodedRevision.memberNamesByUid)
+        assertEquals(revision.memberPrivateNotesByUid, decodedRevision.memberPrivateNotesByUid)
     }
 
     @Test(expected = IllegalArgumentException::class)

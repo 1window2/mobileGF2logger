@@ -16,19 +16,19 @@ never stored.
 
 ## Features
 
-- Captures the mandatory Members (`21917`), Activity (`21935`), and Updates (`21960`) responses without a computer or root access.
-- Tracks active and withdrawn members, repeat membership periods, exact Updates timestamps, editable nicknames, and private notes.
+- Captures the mandatory Platoon Profile (`21905`), Members (`21917`), Activity (`21935`), and Updates (`21960`) responses without a computer or root access.
+- Tracks active and withdrawn members, non-overlapping repeat membership periods, exact Updates timestamps, editable nicknames, and private notes.
 - Builds Sunday-to-Saturday Standard or Gunsmoke Frontline weekly tables around the 05:00 game reset, with cut-off points and manual correction for missing data.
-- Offers One-time Capture that tracks the three useful Platoon payloads and stops automatically when the checklist is complete.
+- Offers One-time Capture that tracks the four useful Platoon payloads and stops automatically when the checklist is complete.
 - Explains every weekly cell on tap and summarizes missing or uncertain evidence in an Evidence Health panel.
-- Keeps up to 15 automatic revisions per weekly table so an earlier projection can be previewed and restored after an accidental import.
+- Keeps up to 15 complete automatic revisions per weekly table so an earlier projection and its displayed member context can be previewed and restored after an accidental import.
 - Recovers interrupted imports before previewing roster CSV impact and keeps an automatic one-level checkpoint for undo.
 - Saves or shares a weekly PNG with opt-in controls for names, UIDs, and private notes.
 - Can send a validated original CSV to an optional user-owned Discord incoming webhook after confirmation.
 - Stores the latest 100 parsed packets and up to 50 saved packets, with table and raw views, copy, export, selection, and deletion.
 - Supports member sorting, persistent drag ordering, snapshot comparison, single-week and all-week CSV export, and complete `.gf2backup` export/restore.
 - Guides first-time users through Main, Settings, Platoon management, weekly controls, and parsed-packet pages, with a persistent English/Korean selector and Skip action.
-- Supports English and Korean, System/Light/Dark themes, and the Android device timezone for display.
+- Supports English and Korean, System/Light/Dark themes, explicit Darkwinter/HaoPlay server-region reset presets converted to the phone timezone, and a persistent manual game-timezone fallback.
 - Registers the HaoPlay (`com.haoplay.game.and.exilium`) and Darkwinter
   (`com.Sunborn.SnqxExilium.Glo`) Android clients as separate VPN targets.
 - Creates UTF-8 Platoon-member CSV files with this column order:

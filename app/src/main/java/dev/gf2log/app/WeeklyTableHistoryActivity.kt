@@ -12,8 +12,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.WeeklyReportHistoryEntry
+import dev.gf2log.app.settings.GameTimeZonePreferences
 import java.time.LocalDate
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.concurrent.Executors
@@ -107,7 +107,7 @@ class WeeklyTableHistoryActivity : LocalizedActivity() {
         }
         val formatter = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM)
             .withLocale(resources.configuration.locales[0])
-            .withZone(ZoneId.systemDefault())
+            .withZone(GameTimeZonePreferences.get(this))
         rows.forEachIndexed { index, row ->
             body.addView(
                 ModernUi.actionRow(

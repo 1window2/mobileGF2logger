@@ -22,6 +22,7 @@ import dev.gf2log.protocol.Gfl2StreamParser
 import dev.gf2log.protocol.Gfl2PayloadDecoder
 import dev.gf2log.protocol.PayloadCatalog
 import dev.gf2log.protocol.model.ParseEvent
+import dev.gf2log.protocol.model.PlatoonProfileData
 import java.io.File
 import java.time.Instant
 import java.util.concurrent.ArrayBlockingQueue
@@ -36,6 +37,7 @@ class CaptureVpnService : VpnService() {
     private var tunnel: ParcelFileDescriptor? = null
     private val parsers = ConcurrentHashMap<Long, Gfl2StreamParser>()
     private val taintedFlows = ConcurrentHashMap.newKeySet<Long>()
+    private val flowMetadata = ConcurrentHashMap<Long, CaptureFlowMetadata>()
     private val decodedPayloadCount = AtomicLong()
     private val observedPayloadBytes = AtomicLong()
     private val inspectedPayloadBytes = AtomicLong()
@@ -231,6 +233,7 @@ class CaptureVpnService : VpnService() {
         }
         parsers.clear()
         taintedFlows.clear()
+        flowMetadata.clear()
         decodedPayloadCount.set(0)
         observedPayloadBytes.set(0)
         inspectedPayloadBytes.set(0)
@@ -248,6 +251,24 @@ class CaptureVpnService : VpnService() {
                 descriptor.fd,
                 this,
                 object : NativeCaptureBridge.PayloadListener {
+                    override fun onFlowOpened(
+                        flowId: Long,
+                        protocol: Int,
+                        localAddress: String,
+                        localPort: Int,
+                        remoteAddress: String,
+                        remotePort: Int,
+                    ) {
+                        enqueueFlowOpened(
+                            flowId,
+                            protocol,
+                            localAddress,
+                            localPort,
+                            remoteAddress,
+                            remotePort,
+                        )
+                    }
+
                     override fun onPayload(flowId: Long, isSent: Boolean, payload: ByteArray) {
                         enqueuePayload(flowId, isSent, payload)
                     }
@@ -288,7 +309,7 @@ class CaptureVpnService : VpnService() {
         if (!submitParserTask {
             if (flowId in taintedFlows) return@submitParserTask
             val parser = parsers.computeIfAbsent(flowId) { Gfl2StreamParser() }
-            processEvents(parser.accept(payload))
+            processEvents(flowId, parser.accept(payload))
         }) {
             // A missing TCP chunk makes every later byte offset unreliable.
             // Keep this flow quarantined until native closure instead of
@@ -297,14 +318,43 @@ class CaptureVpnService : VpnService() {
         }
     }
 
+    private fun enqueueFlowOpened(
+        flowId: Long,
+        protocol: Int,
+        localAddress: String,
+        localPort: Int,
+        remoteAddress: String,
+        remotePort: Int,
+    ) {
+        submitParserTask {
+            flowMetadata[flowId] = CaptureFlowMetadata(
+                protocol = protocol,
+                localAddress = localAddress,
+                localPort = localPort,
+                remoteAddress = remoteAddress,
+                remotePort = remotePort,
+                ownerPackage = CaptureFlowOwnerResolver.resolve(
+                    this,
+                    protocol,
+                    localAddress,
+                    localPort,
+                    remoteAddress,
+                    remotePort,
+                ),
+            )
+        }
+    }
+
     private fun enqueueFlowClosed(flowId: Long) {
         if (!submitParserTask {
                 if (taintedFlows.remove(flowId)) {
                     parsers.remove(flowId)
+                    flowMetadata.remove(flowId)
                     return@submitParserTask
                 }
                 val parser = parsers.remove(flowId) ?: return@submitParserTask
-                processEvents(parser.finish(), flowEnded = true)
+                processEvents(flowId, parser.finish(), flowEnded = true)
+                flowMetadata.remove(flowId)
             }
         ) {
             parsers.remove(flowId)
@@ -325,7 +375,11 @@ class CaptureVpnService : VpnService() {
         false
     }
 
-    private fun processEvents(events: List<ParseEvent>, flowEnded: Boolean = false) {
+    private fun processEvents(
+        flowId: Long,
+        events: List<ParseEvent>,
+        flowEnded: Boolean = false,
+    ) {
         val warnings = events.filterIsInstance<ParseEvent.Warning>()
         if (warnings.isNotEmpty()) parseWarningCount.addAndGet(warnings.size.toLong())
 
@@ -334,6 +388,19 @@ class CaptureVpnService : VpnService() {
             unknownPayloadCounts.computeIfAbsent(event.payloadType) { AtomicLong() }.incrementAndGet()
         }
         decoded.forEach { event ->
+            if (event.value.payloadType == Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE) {
+                val profile = event.value.data as? PlatoonProfileData
+                if (profile != null && profile.platoonId != 0u && profile.platoonName.isNotBlank()) {
+                    val client = when (flowMetadata[flowId]?.ownerPackage) {
+                        SupportedGamePackages.HAOPLAY -> "HaoPlay"
+                        SupportedGamePackages.DARKWINTER -> "Darkwinter"
+                        else -> "unknown client"
+                    }
+                    val name = profile.platoonName.replace(Regex("\\s+"), " ").take(40)
+                    CaptureStatus.update("Detected $name (${profile.platoonId}) via $client")
+                }
+                markRequiredPayloadCaptured(Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE)
+            }
             if (payloadHistoryPreferences.isEnabled(event.value.payloadType)) {
                 runCatching { historyStore.save(event.value) }
                     .onFailure { CaptureStatus.update("Unable to save parsed-packet history") }
@@ -411,6 +478,7 @@ class CaptureVpnService : VpnService() {
             tunnel = null
             drainParserTasks()
             parsers.clear()
+            flowMetadata.clear()
             CaptureStatus.markStopped("Capture stopped unexpectedly; press Prepare capture to retry")
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -440,6 +508,7 @@ class CaptureVpnService : VpnService() {
         drainParserTasks()
         parsers.clear()
         taintedFlows.clear()
+        flowMetadata.clear()
         saveDiagnostics()
     }
 
@@ -548,6 +617,7 @@ class CaptureVpnService : VpnService() {
         private const val TRAFFIC_REPORT_BYTES = 64 * 1024
         private const val CAPTURE_ONCE_GRACE_MILLIS = 60_000L
         private val REQUIRED_CAPTURE_TYPES = setOf(
+            Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE,
             Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
             Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY,
             Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES,

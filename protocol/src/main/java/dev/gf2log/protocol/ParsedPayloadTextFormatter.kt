@@ -6,6 +6,7 @@ import dev.gf2log.protocol.model.FormationsData
 import dev.gf2log.protocol.model.GuildMembersData
 import dev.gf2log.protocol.model.ParsedPayload
 import dev.gf2log.protocol.model.PlatoonActivityData
+import dev.gf2log.protocol.model.PlatoonProfileData
 import dev.gf2log.protocol.model.PlatoonUpdatesData
 import dev.gf2log.protocol.model.WeaponsData
 
@@ -17,6 +18,17 @@ object ParsedPayloadTextFormatter {
         appendLine()
 
         when (val data = payload.data) {
+            is PlatoonProfileData -> {
+                appendLine("platoonId,platoonName,emblemPrimary,emblemSecondary")
+                appendLine(
+                    listOf(
+                        data.platoonId,
+                        CsvCell.escape(data.platoonName),
+                        data.emblemPrimary.joinToString("|"),
+                        data.emblemSecondary.joinToString("|"),
+                    ).joinToString(","),
+                )
+            }
             is GuildMembersData -> {
                 appendLine(GuildMembersCsv.HEADER)
                 data.members.forEach {

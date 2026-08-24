@@ -32,8 +32,11 @@ rules below take precedence over stale copied dates in archived templates.
 - Gunsmoke runs for one week followed by two off weeks. The verified cycle
   anchor is Sunday, 2026-07-19 at 05:00. Other verified starts are 2026-02-22,
   2026-03-15, 2026-04-05, 2026-04-26, 2026-05-17, 2026-06-07, and 2026-06-28.
-- Period calculations use the configured game timezone. The initial default is
-  the Android device timezone; stored capture instants remain UTC.
+- Period calculations use the selected server region's fixed reset-zone offset.
+  The known Darkwinter Global/China and HaoPlay Global/Japan/Korea/Asia presets
+  all reset at 05:00 server time, and Settings converts the next reset to the
+  Android device timezone for display. Manual mode uses the selected game
+  timezone, initially the phone timezone. Stored capture instants remain UTC.
 
 ## Merit calculation
 
@@ -141,6 +144,12 @@ transitions.
   never deletes the member or prior snapshots.
 - A returning UID opens a new membership period. All previous join/withdraw periods remain
   available.
+- Manual edits are accepted only when every period ends after it starts, no two
+  fully dated periods overlap, and at most one period remains open. An absent
+  snapshot-derived start remains unknown rather than being treated as an
+  infinitely old boundary. Current active state is
+  derived from that open period inside the same transaction; schema-v13 upgrade
+  repairs any stale derived flag left by an older installation.
 - A roster CSV imported after newer captures still contributes historical
   presence spans. The replay creates missing inactive members and inferred
   withdrawal/rejoin periods without replacing manual or exact Updates evidence.
@@ -162,6 +171,21 @@ transitions.
   requires the separate confirmation flow described below.
 - Membership-period numbers are assigned by join date from oldest to newest and are
   recalculated after manual additions or edits.
+
+## Weekly history consistency
+
+- Each stored history item is a complete immutable weekly-table revision. The
+  report cells, displayed membership events, weekly notes, names, and private
+  notes are encoded together rather than combining an older table with current
+  member data.
+- Every revision passes deterministic structural checks before persistence and
+  after decoding: seven contiguous days, unique member UIDs, matching cell
+  dates and report mode, in-period notes, and valid contextual identities.
+- Changing the configured game timezone clears incompatible derived history
+  and rebuilds it from the unchanged UTC evidence using the new 05:00 boundary.
+- Weekly history is a derived audit trail, not the primary store. If refreshing
+  one revision fails after a successful data mutation, the affected restored
+  selection is cleared so the live database projection remains authoritative.
 
 ## Persistence and privacy
 

@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.protocol.GuildMembersCsv
 import java.time.Instant
 import java.time.LocalDate
@@ -21,6 +22,7 @@ class PlatoonDatabase(
         null,
         PlatoonSchema.CURRENT_VERSION,
     ) {
+    private val appContext = context.applicationContext
 
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
@@ -230,13 +232,14 @@ class PlatoonDatabase(
             backfillSnapshotMembershipPeriodEvents(db)
         }
         if (needsManualCalendarDateBackfill) {
-            backfillManualCalendarDates(db, ZoneId.systemDefault())
+            backfillManualCalendarDates(db, GameTimeZonePreferences.get(appContext))
         }
         if (oldVersion < 11) {
             createPlatoonMaintenanceStateTable(db)
             createPlatoonActivityRetentionIndex(db)
         }
         if (oldVersion < 12) createWeeklyReportHistoryTables(db)
+        if (oldVersion < 13) synchronizeAllMembershipStates(db)
     }
 
     private fun createWeeklyReportHistoryTables(db: SQLiteDatabase) {
@@ -1901,6 +1904,7 @@ class PlatoonDatabase(
             )
             val membershipPeriodId = insertManualMembershipPeriod(db, uid, joined, withdrew, note)
             replaceManualMembershipPeriodEvents(db, membershipPeriodId, uid, name.trim(), joined, withdrew)
+            synchronizeAndVerifyMembershipState(db, uid)
             db.setTransactionSuccessful()
             return true
         } finally {
@@ -1920,8 +1924,10 @@ class PlatoonDatabase(
         db.beginTransaction()
         try {
             val memberName = memberName(db, uid) ?: return false
+            if (!canStoreMembershipPeriod(db, uid, null, joined, withdrew)) return false
             val membershipPeriodId = insertManualMembershipPeriod(db, uid, joined, withdrew, note)
             replaceManualMembershipPeriodEvents(db, membershipPeriodId, uid, memberName, joined, withdrew)
+            synchronizeAndVerifyMembershipState(db, uid)
             db.setTransactionSuccessful()
             return true
         } finally {
@@ -2125,16 +2131,7 @@ class PlatoonDatabase(
             ) {
                 return false
             }
-            val isActive = db.rawQuery(
-                "SELECT 1 FROM membership_periods WHERE uid = ? AND left_at IS NULL LIMIT 1",
-                arrayOf(uid.toString()),
-            ).use(Cursor::moveToFirst)
-            db.update(
-                "members",
-                ContentValues().apply { put("is_active", if (isActive) 1 else 0) },
-                "uid = ?",
-                arrayOf(uid.toString()),
-            )
+            synchronizeAndVerifyMembershipState(db, uid)
             db.setTransactionSuccessful()
             return true
         } finally {
@@ -2164,6 +2161,17 @@ class PlatoonDatabase(
                 left
             }
             require(isValidMembershipRange(effectiveJoined, effectiveLeft))
+            if (
+                !canStoreMembershipPeriod(
+                    db,
+                    membershipPeriod.uid,
+                    membershipPeriodId,
+                    effectiveJoined,
+                    effectiveLeft,
+                )
+            ) {
+                return false
+            }
             val joinedChanged = editableMembershipBoundaryChanged(
                 original = membershipPeriod.joined,
                 requested = joined,
@@ -2222,12 +2230,106 @@ class PlatoonDatabase(
                     },
                 )
             }
+            if (updated) synchronizeAndVerifyMembershipState(db, membershipPeriod.uid)
             db.setTransactionSuccessful()
             return updated
         } finally {
             db.endTransaction()
         }
     }
+
+    // Function Name: canStoreMembershipPeriod
+    // Description:
+    // - Evaluates a proposed manual period together with every persisted period for the member.
+    // - Rejects overlapping ranges and multiple open periods before any database row is changed.
+    private fun canStoreMembershipPeriod(
+        db: SQLiteDatabase,
+        uid: Long,
+        replacedPeriodId: Long?,
+        joined: MembershipBoundaryValue,
+        left: MembershipBoundaryValue?,
+    ): Boolean {
+        val proposed = MembershipInterval(
+            id = replacedPeriodId ?: Long.MAX_VALUE,
+            joinedAt = joined.instant,
+            leftAt = left?.instant,
+            joinedDate = joined.date,
+            leftDate = left?.date,
+            joinedTimeKnown = joined.timeKnown,
+            leftTimeKnown = left?.timeKnown ?: true,
+        )
+        val periods = readMembershipIntervals(db, uid)
+            .filterNot { it.id == replacedPeriodId } + proposed
+        return MembershipConsistencyPolicy.violation(periods) == null
+    }
+
+    // Function Name: synchronizeAndVerifyMembershipState
+    // Description:
+    // - Derives current member activity from the canonical period timeline.
+    // - Verifies chronology and event ownership before allowing the surrounding transaction to commit.
+    private fun synchronizeAndVerifyMembershipState(db: SQLiteDatabase, uid: Long) {
+        val periods = readMembershipIntervals(db, uid)
+        checkNotNull(periods.takeIf { it.isNotEmpty() }) { "A member must retain a membership period" }
+        val violation = MembershipConsistencyPolicy.violation(periods)
+        check(violation == null) { violation.orEmpty() }
+        val updated = db.update(
+            "members",
+            ContentValues().apply {
+                put("is_active", if (MembershipConsistencyPolicy.isActive(periods)) 1 else 0)
+            },
+            "uid = ?",
+            arrayOf(uid.toString()),
+        )
+        check(updated == 1) { "Membership state has no owning member" }
+        val mismatchedEvent = db.rawQuery(
+            "SELECT 1 FROM member_events event " +
+                "JOIN membership_periods period ON period.id = event.membership_period_id " +
+                "WHERE event.uid != period.uid AND (event.uid = ? OR period.uid = ?) LIMIT 1",
+            arrayOf(uid.toString(), uid.toString()),
+        ).use(Cursor::moveToFirst)
+        check(!mismatchedEvent) { "Membership event belongs to a different member" }
+    }
+
+    // Function Name: synchronizeAllMembershipStates
+    // Description:
+    // - Repairs the derived active flag while upgrading databases created before schema v13.
+    // - Leaves every evidence period intact and derives only the current-state projection.
+    private fun synchronizeAllMembershipStates(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            UPDATE members
+            SET is_active = CASE WHEN EXISTS (
+                SELECT 1
+                FROM membership_periods period
+                WHERE period.uid = members.uid AND period.left_at IS NULL
+            ) THEN 1 ELSE 0 END
+            """.trimIndent(),
+        )
+    }
+
+    private fun readMembershipIntervals(db: SQLiteDatabase, uid: Long): List<MembershipInterval> =
+        db.rawQuery(
+            "SELECT id, joined_at, left_at, joined_date, left_date, " +
+                "joined_time_known, left_time_known " +
+                "FROM membership_periods WHERE uid = ? ORDER BY id",
+            arrayOf(uid.toString()),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        MembershipInterval(
+                            id = cursor.getLong(0),
+                            joinedAt = cursor.getNullableLong(1)?.let(Instant::ofEpochMilli),
+                            leftAt = cursor.getNullableLong(2)?.let(Instant::ofEpochMilli),
+                            joinedDate = cursor.getNullableLong(3)?.let(LocalDate::ofEpochDay),
+                            leftDate = cursor.getNullableLong(4)?.let(LocalDate::ofEpochDay),
+                            joinedTimeKnown = cursor.getNullableInt(5)?.let { it != 0 } ?: true,
+                            leftTimeKnown = cursor.getNullableInt(6)?.let { it != 0 } ?: true,
+                        ),
+                    )
+                }
+            }
+        }
 
     @Synchronized
     fun addWeeklyNote(periodStartEpochDay: Long, gameDayEpochDay: Long, text: String): Long {
@@ -2271,6 +2373,14 @@ class PlatoonDatabase(
                 }
             }
         }
+
+    @Synchronized
+    fun weeklyNotePeriodStart(id: Long): LocalDate? = readableDatabase.rawQuery(
+        "SELECT period_start FROM weekly_notes WHERE id = ? AND is_automatic = 0",
+        arrayOf(id.toString()),
+    ).use { cursor ->
+        if (cursor.moveToFirst()) LocalDate.ofEpochDay(cursor.getLong(0)) else null
+    }
 
     @Synchronized
     fun deleteWeeklyNote(id: Long): Boolean =
@@ -2533,6 +2643,19 @@ class PlatoonDatabase(
             "period_start = ?",
             arrayOf(periodStartEpochDay.toString()),
         ) > 0
+
+    @Synchronized
+    fun clearWeeklyReportHistory() {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("weekly_report_history_state", null, null)
+            db.delete("weekly_report_history", null, null)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
 
     private fun createWeeklyOverridesTable(db: SQLiteDatabase) {
         db.execSQL(
@@ -3521,11 +3644,13 @@ class PlatoonDatabase(
                         instantIndex = 1,
                         dateIndex = 3,
                         timeKnownIndex = 5,
+                        zoneId = GameTimeZonePreferences.get(appContext),
                     ),
                     left = cursor.membershipBoundaryValue(
                         instantIndex = 2,
                         dateIndex = 4,
                         timeKnownIndex = 6,
+                        zoneId = GameTimeZonePreferences.get(appContext),
                     ),
                     joinedSource = EvidenceSource.valueOf(cursor.getString(7)),
                     leftSource = cursor.getNullableString(8)?.let(EvidenceSource::valueOf),
@@ -3959,10 +4084,11 @@ private fun Cursor.membershipBoundaryValue(
     instantIndex: Int,
     dateIndex: Int,
     timeKnownIndex: Int,
+    zoneId: ZoneId,
 ): MembershipBoundaryValue? {
     val instant = getNullableLong(instantIndex)?.let(Instant::ofEpochMilli) ?: return null
     val date = getNullableLong(dateIndex)?.let(LocalDate::ofEpochDay)
-        ?: instant.atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+        ?: instant.atZone(zoneId).toLocalDate()
     return MembershipBoundaryValue(
         date = date,
         instant = instant,

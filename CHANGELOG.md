@@ -2,6 +2,39 @@
 
 All notable changes to mobileGF2logger are documented here.
 
+## 2.3.3 - 2026-08-24
+
+### Added
+
+- Add required Platoon Profile (`21905`) decoding for bounded platoon ID, name,
+  and emblem/style identifiers, plus original-flow owner attribution on Android
+  10 and newer as the safe foundation for future multi-Platoon isolation.
+- Add server-region reset presets and phone-local reset conversion, retain a
+  manual game-timezone fallback, and include the selection in complete backups.
+- Add deterministic post-condition audits for membership timelines and weekly
+  revisions, plus randomized sparse Gunsmoke solver coverage.
+
+### Changed
+
+- Store each weekly-table history entry as a complete immutable render
+  revision, including the names, private notes, weekly notes, and membership
+  events visible at that time.
+- Upgrade the management database to schema v13 and the complete-settings
+  payload to schema v4 while preserving older database and backup formats.
+
+### Fixed
+
+- Keep member active status synchronized after adding, editing, deleting, or
+  reopening membership periods, and reject overlapping periods or multiple
+  open periods before committing a manual edit.
+- Validate date-only membership boundaries by their recorded calendar dates,
+  rather than by the unrelated time when those dates were entered.
+- Repair stale active-member flags when upgrading an existing database.
+- Rebuild history safely when the configured game timezone changes, and avoid
+  mixing restored historical tables with current member facts.
+- Keep committed member, packet, note, and override changes authoritative if a
+  derived history refresh fails, and fall back from stale restored projections.
+
 ## 2.3.2 - 2026-08-23
 
 ### Added

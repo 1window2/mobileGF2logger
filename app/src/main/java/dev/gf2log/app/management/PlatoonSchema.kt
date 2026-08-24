@@ -5,7 +5,7 @@ package dev.gf2log.app.management
  */
 internal object PlatoonSchema {
     const val DATABASE_NAME = "platoon.db"
-    const val CURRENT_VERSION = 12
+    const val CURRENT_VERSION = 13
     const val MIN_BACKUP_VERSION = 1
 
     private val baseTables = setOf(

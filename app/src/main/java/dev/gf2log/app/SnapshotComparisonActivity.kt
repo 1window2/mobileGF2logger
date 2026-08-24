@@ -13,7 +13,7 @@ import android.widget.Toast
 import dev.gf2log.app.management.SnapshotComparison
 import dev.gf2log.app.management.SnapshotComparisonCsv
 import dev.gf2log.app.management.PlatoonRepository
-import java.time.ZoneId
+import dev.gf2log.app.settings.GameTimeZonePreferences
 import java.time.format.DateTimeFormatter
 
 class SnapshotComparisonActivity : LocalizedActivity() {
@@ -29,7 +29,7 @@ class SnapshotComparisonActivity : LocalizedActivity() {
                     addView(text(getString(R.string.need_two_snapshots)))
                 } else {
                     val result = SnapshotComparison.compare(snapshots[1], snapshots[0])
-                    val zone = ZoneId.systemDefault()
+                    val zone = GameTimeZonePreferences.get(this@SnapshotComparisonActivity)
                     addView(
                         text(
                             getString(

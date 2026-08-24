@@ -1,6 +1,7 @@
 package dev.gf2log.app.settings
 
 import dev.gf2log.protocol.PayloadCatalog
+import dev.gf2log.protocol.Gfl2PayloadDecoder
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.Properties
@@ -23,13 +24,43 @@ class AppBackupSettingsCodecTest {
         val legacy = encodedProperties().apply {
             setProperty("schemaVersion", "1")
             remove("themeMode")
+            remove("gameTimeZone")
+            remove("gameServerRegion")
             remove("onboardingCompleted")
+            remove("payloadHistory.${Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE}")
         }
 
         val restored = AppBackupSettingsCodec.decode(legacy.toBytes())
 
         assertEquals("system", restored.themeMode)
         assertEquals(true, restored.onboardingCompleted)
+    }
+
+    @Test
+    fun `restores schema two settings with the current device timezone`() {
+        val schemaTwo = encodedProperties().apply {
+            setProperty("schemaVersion", "2")
+            remove("gameTimeZone")
+            remove("gameServerRegion")
+            remove("payloadHistory.${Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE}")
+        }
+
+        val restored = AppBackupSettingsCodec.decode(schemaTwo.toBytes())
+
+        assertEquals(java.time.ZoneId.systemDefault().id, restored.gameTimeZoneId)
+    }
+
+    @Test
+    fun `restores schema three settings as manual server selection`() {
+        val schemaThree = encodedProperties().apply {
+            setProperty("schemaVersion", "3")
+            remove("gameServerRegion")
+            remove("payloadHistory.${Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE}")
+        }
+
+        val restored = AppBackupSettingsCodec.decode(schemaThree.toBytes())
+
+        assertEquals(GameServerRegion.MANUAL.storedValue, restored.gameServerRegion)
     }
 
     @Test
@@ -106,6 +137,8 @@ class AppBackupSettingsCodecTest {
     private fun completeSettings() = AppBackupSettings(
         language = "ko",
         themeMode = "dark",
+        gameServerRegion = GameServerRegion.HAOPLAY_KOREA.storedValue,
+        gameTimeZoneId = "Asia/Seoul",
         onboardingCompleted = true,
         detailedNotifications = false,
         targetPackage = "com.example.game_client",

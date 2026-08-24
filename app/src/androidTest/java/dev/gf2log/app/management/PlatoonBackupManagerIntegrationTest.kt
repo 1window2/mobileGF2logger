@@ -652,6 +652,8 @@ class PlatoonBackupManagerIntegrationTest {
     ) = AppBackupSettings(
         language = language,
         themeMode = "system",
+        gameServerRegion = dev.gf2log.app.settings.GameServerRegion.MANUAL.storedValue,
+        gameTimeZoneId = "Asia/Seoul",
         onboardingCompleted = true,
         detailedNotifications = detailedNotifications,
         targetPackage = targetPackage,

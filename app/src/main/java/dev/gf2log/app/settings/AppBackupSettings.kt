@@ -9,6 +9,8 @@ import java.util.Properties
 data class AppBackupSettings(
     val language: String,
     val themeMode: String,
+    val gameServerRegion: String,
+    val gameTimeZoneId: String,
     val onboardingCompleted: Boolean,
     val detailedNotifications: Boolean,
     val targetPackage: String,
@@ -18,12 +20,16 @@ data class AppBackupSettings(
 )
 
 object AppBackupSettingsCodec {
-    private const val SCHEMA_VERSION = 2
+    private const val SCHEMA_VERSION = 4
+    private const val TIME_ZONE_SCHEMA_VERSION = 3
+    private const val THEME_SCHEMA_VERSION = 2
     private const val LEGACY_SCHEMA_VERSION = 1
     private const val NONE = "none"
     private const val KEY_SCHEMA_VERSION = "schemaVersion"
     private const val KEY_LANGUAGE = "language"
     private const val KEY_THEME_MODE = "themeMode"
+    private const val KEY_GAME_SERVER_REGION = "gameServerRegion"
+    private const val KEY_GAME_TIME_ZONE = "gameTimeZone"
     private const val KEY_ONBOARDING_COMPLETED = "onboardingCompleted"
     private const val KEY_DETAILED_NOTIFICATIONS = "detailedNotifications"
     private const val KEY_TARGET_PACKAGE = "targetPackage"
@@ -43,6 +49,8 @@ object AppBackupSettingsCodec {
             setProperty(KEY_SCHEMA_VERSION, SCHEMA_VERSION.toString())
             setProperty(KEY_LANGUAGE, settings.language)
             setProperty(KEY_THEME_MODE, settings.themeMode)
+            setProperty(KEY_GAME_SERVER_REGION, settings.gameServerRegion)
+            setProperty(KEY_GAME_TIME_ZONE, settings.gameTimeZoneId)
             setProperty(KEY_ONBOARDING_COMPLETED, settings.onboardingCompleted.toString())
             setProperty(KEY_DETAILED_NOTIFICATIONS, settings.detailedNotifications.toString())
             setProperty(KEY_TARGET_PACKAGE, settings.targetPackage)
@@ -68,8 +76,10 @@ object AppBackupSettingsCodec {
         val properties = StrictProperties("Backup settings").apply {
             ByteArrayInputStream(bytes).use(::load)
         }
-        val schemaVersion = properties.required(KEY_SCHEMA_VERSION).toIntOrNull()
-        require(schemaVersion == LEGACY_SCHEMA_VERSION || schemaVersion == SCHEMA_VERSION) {
+        val schemaVersion = requireNotNull(properties.required(KEY_SCHEMA_VERSION).toIntOrNull()) {
+            "Backup settings schema is invalid"
+        }
+        require(schemaVersion in LEGACY_SCHEMA_VERSION..SCHEMA_VERSION) {
             "Unsupported settings schema"
         }
         require(properties.stringPropertyNames() == expectedKeys(schemaVersion)) {
@@ -77,12 +87,22 @@ object AppBackupSettingsCodec {
         }
         val settings = AppBackupSettings(
             language = properties.required(KEY_LANGUAGE),
-            themeMode = if (schemaVersion == SCHEMA_VERSION) {
+            themeMode = if (schemaVersion >= THEME_SCHEMA_VERSION) {
                 properties.required(KEY_THEME_MODE)
             } else {
                 "system"
             },
-            onboardingCompleted = if (schemaVersion == SCHEMA_VERSION) {
+            gameServerRegion = if (schemaVersion >= SCHEMA_VERSION) {
+                properties.required(KEY_GAME_SERVER_REGION)
+            } else {
+                GameServerRegion.MANUAL.storedValue
+            },
+            gameTimeZoneId = if (schemaVersion >= TIME_ZONE_SCHEMA_VERSION) {
+                properties.required(KEY_GAME_TIME_ZONE)
+            } else {
+                java.time.ZoneId.systemDefault().id
+            },
+            onboardingCompleted = if (schemaVersion >= THEME_SCHEMA_VERSION) {
                 properties.strictBoolean(KEY_ONBOARDING_COMPLETED)
             } else {
                 true
@@ -90,7 +110,14 @@ object AppBackupSettingsCodec {
             detailedNotifications = properties.strictBoolean(KEY_DETAILED_NOTIFICATIONS),
             targetPackage = properties.required(KEY_TARGET_PACKAGE),
             payloadHistory = PayloadCatalog.categories.associate { category ->
-                category.payloadType to properties.strictBoolean(payloadKey(category.payloadType))
+                category.payloadType to if (
+                    schemaVersion < SCHEMA_VERSION &&
+                    category.payloadType == dev.gf2log.protocol.Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE
+                ) {
+                    true
+                } else {
+                    properties.strictBoolean(payloadKey(category.payloadType))
+                }
             },
             memberOrder = properties.memberOrder(),
             weeklyCutlines = WeeklyCutlines(
@@ -112,6 +139,13 @@ object AppBackupSettingsCodec {
         require(settings.language in setOf("en", "ko")) { "Unsupported display language" }
         require(settings.themeMode in setOf("system", "light", "dark")) {
             "Unsupported display theme"
+        }
+        require(
+            GameServerRegion.fromStored(settings.gameServerRegion).storedValue ==
+                settings.gameServerRegion,
+        ) { "Unsupported game server region" }
+        require(runCatching { java.time.ZoneId.of(settings.gameTimeZoneId) }.isSuccess) {
+            "Unsupported game timezone"
         }
         require(
             settings.targetPackage.length in 3..255 &&
@@ -141,8 +175,17 @@ object AppBackupSettingsCodec {
     }
 
     private fun expectedKeys(schemaVersion: Int): Set<String> =
-        (if (schemaVersion == SCHEMA_VERSION) BASE_KEYS else LEGACY_BASE_KEYS) +
-            PayloadCatalog.categories.map { payloadKey(it.payloadType) }
+        when (schemaVersion) {
+            SCHEMA_VERSION -> BASE_KEYS
+            TIME_ZONE_SCHEMA_VERSION -> BASE_KEYS - KEY_GAME_SERVER_REGION
+            THEME_SCHEMA_VERSION -> BASE_KEYS - setOf(KEY_GAME_SERVER_REGION, KEY_GAME_TIME_ZONE)
+            else -> LEGACY_BASE_KEYS
+        } + PayloadCatalog.categories
+            .filterNot {
+                schemaVersion < SCHEMA_VERSION &&
+                    it.payloadType == dev.gf2log.protocol.Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE
+            }
+            .map { payloadKey(it.payloadType) }
 
     private fun payloadKey(payloadType: Int) = "payloadHistory.$payloadType"
 
@@ -195,6 +238,8 @@ object AppBackupSettingsCodec {
         KEY_SCHEMA_VERSION,
         KEY_LANGUAGE,
         KEY_THEME_MODE,
+        KEY_GAME_SERVER_REGION,
+        KEY_GAME_TIME_ZONE,
         KEY_ONBOARDING_COMPLETED,
         KEY_DETAILED_NOTIFICATIONS,
         KEY_TARGET_PACKAGE,
@@ -208,5 +253,11 @@ object AppBackupSettingsCodec {
         KEY_WEEKLY_LOGIN_DAYS,
         KEY_WEEKLY_PATROL_DAYS,
     )
-    private val LEGACY_BASE_KEYS = BASE_KEYS - setOf(KEY_THEME_MODE, KEY_ONBOARDING_COMPLETED)
+    private val LEGACY_BASE_KEYS = BASE_KEYS -
+        setOf(
+            KEY_THEME_MODE,
+            KEY_GAME_SERVER_REGION,
+            KEY_GAME_TIME_ZONE,
+            KEY_ONBOARDING_COMPLETED,
+        )
 }

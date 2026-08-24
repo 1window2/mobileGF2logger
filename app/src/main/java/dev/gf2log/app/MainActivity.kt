@@ -468,7 +468,7 @@ class MainActivity : LocalizedActivity() {
 
     // Function Name: renderGuidedCaptureProgress
     // Description:
-    // - Renders the three useful Platoon payloads as a live checklist.
+    // - Renders the four required Platoon payloads as a live checklist.
     // - Keeps display logic independent from capture-service status messages.
     // Parameters:
     // - None.
@@ -482,6 +482,7 @@ class MainActivity : LocalizedActivity() {
             if (payloadType in progress.capturedPayloadTypes) "\u2713" else "\u25cb"
         guidedCaptureText.text = getString(
             R.string.guided_capture_checklist,
+            mark(Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE),
             mark(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS),
             mark(Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY),
             mark(Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES),

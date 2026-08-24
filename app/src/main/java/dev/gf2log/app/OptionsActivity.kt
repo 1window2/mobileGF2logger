@@ -1,6 +1,7 @@
 package dev.gf2log.app
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.database.Cursor
@@ -24,11 +25,14 @@ import android.widget.TextView
 import android.widget.Toast
 import dev.gf2log.app.settings.PayloadHistoryPreferences
 import dev.gf2log.app.settings.CapturePreferences
+import dev.gf2log.app.settings.GameTimeZonePreferences
+import dev.gf2log.app.settings.GameServerRegion
 import dev.gf2log.app.capture.CaptureDiagnosticsStore
 import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.management.BackupFileName
 import dev.gf2log.app.management.InvalidBackupException
 import dev.gf2log.app.management.PlatoonBackupManager
+import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.discord.DiscordWebhookSecretStore
 import dev.gf2log.protocol.Gfl2PayloadDecoder
 import java.time.ZoneId
@@ -130,7 +134,6 @@ class OptionsActivity : LocalizedActivity() {
                 selectedValue = LanguagePreferences.get(context),
                 onSelected = ::changeLanguage,
             ), matchWidth())
-
             addView(TextView(context).apply {
                 text = getString(R.string.appearance)
                 textSize = 15f
@@ -153,6 +156,40 @@ class OptionsActivity : LocalizedActivity() {
                 selectedValue = ThemePreferences.get(context),
                 onSelected = ::changeTheme,
             ), matchWidth())
+
+            addView(TextView(context).apply {
+                text = getString(R.string.daily_reset_time)
+                textSize = 15f
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, spacing, 0, dp(2))
+            }, matchWidth())
+            addView(TextView(context).apply {
+                text = getString(R.string.settings_daily_reset_detail)
+                textSize = 12f
+                setTextColor(getColor(R.color.text_secondary))
+                setPadding(0, 0, 0, dp(6))
+            }, matchWidth())
+            val resetRegion = GameTimeZonePreferences.region(context)
+            addView(ModernUi.listRow(
+                context = context,
+                title = getString(R.string.server_region),
+                detail = resetSummary(resetRegion),
+                icon = R.drawable.ic_calendar,
+                onClick = ::chooseGameServerRegion,
+            ), matchWidth())
+            if (resetRegion == GameServerRegion.MANUAL) {
+                addView(ModernUi.listRow(
+                    context = context,
+                    title = getString(R.string.game_timezone),
+                    detail = getString(
+                        R.string.manual_timezone_summary,
+                        GameTimeZonePreferences.get(context).id,
+                        GameTimeZonePreferences.deviceZone().id,
+                    ),
+                    icon = R.drawable.ic_calendar,
+                    onClick = ::chooseGameTimeZone,
+                ), matchWidth())
+            }
 
             addView(TextView(context).apply {
                 text = getString(R.string.backup)
@@ -441,8 +478,116 @@ class OptionsActivity : LocalizedActivity() {
         recreate()
     }
 
+    private fun chooseGameTimeZone() {
+        val zones = ZoneId.getAvailableZoneIds().sorted()
+        val current = GameTimeZonePreferences.get(this).id
+        AlertDialog.Builder(this)
+            .setTitle(R.string.game_timezone)
+            .setSingleChoiceItems(zones.toTypedArray(), zones.indexOf(current)) { dialog, which ->
+                val selected = ZoneId.of(zones[which])
+                if (selected == GameTimeZonePreferences.get(this)) {
+                    dialog.dismiss()
+                    return@setSingleChoiceItems
+                }
+                dialog.dismiss()
+                fileIoExecutor.execute {
+                    val result = runCatching {
+                        GameTimeZonePreferences.set(this, selected)
+                        PlatoonRepository(this).rebuildWeeklyHistoryForTimeZoneChange()
+                    }
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        Toast.makeText(
+                            this,
+                            if (result.isSuccess) {
+                                R.string.game_timezone_updated
+                            } else {
+                                R.string.game_timezone_update_failed
+                            },
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                        recreate()
+                    }
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun chooseGameServerRegion() {
+        val regions = GameServerRegion.entries
+        val current = GameTimeZonePreferences.region(this)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.server_region)
+            .setSingleChoiceItems(
+                regions.map(::regionLabel).toTypedArray(),
+                regions.indexOf(current),
+            ) { dialog, which ->
+                val selected = regions[which]
+                dialog.dismiss()
+                if (selected == GameServerRegion.MANUAL) {
+                    chooseGameTimeZone()
+                } else if (selected != current) {
+                    updateResetRegion(selected)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun updateResetRegion(region: GameServerRegion) {
+        fileIoExecutor.execute {
+            val result = runCatching {
+                GameTimeZonePreferences.setRegion(this, region)
+                PlatoonRepository(this).rebuildWeeklyHistoryForTimeZoneChange()
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                Toast.makeText(
+                    this,
+                    if (result.isSuccess) R.string.game_timezone_updated
+                    else R.string.game_timezone_update_failed,
+                    Toast.LENGTH_SHORT,
+                ).show()
+                recreate()
+            }
+        }
+    }
+
+    private fun resetSummary(region: GameServerRegion): String {
+        if (region == GameServerRegion.MANUAL) {
+            return getString(
+                R.string.manual_reset_region_summary,
+                GameTimeZonePreferences.get(this).id,
+                GameTimeZonePreferences.deviceZone().id,
+            )
+        }
+        val localReset = region.nextReset()
+            .atZone(GameTimeZonePreferences.deviceZone())
+            .format(RESET_LOCAL_TIME)
+        return getString(
+            R.string.server_reset_summary,
+            regionLabel(region),
+            localReset,
+            GameTimeZonePreferences.deviceZone().id,
+        )
+    }
+
+    private fun regionLabel(region: GameServerRegion): String = getString(
+        when (region) {
+            GameServerRegion.MANUAL -> R.string.server_region_manual
+            GameServerRegion.DARKWINTER_GLOBAL -> R.string.server_region_darkwinter_global
+            GameServerRegion.DARKWINTER_CHINA -> R.string.server_region_darkwinter_china
+            GameServerRegion.HAOPLAY_GLOBAL -> R.string.server_region_haoplay_global
+            GameServerRegion.HAOPLAY_JAPAN -> R.string.server_region_haoplay_japan
+            GameServerRegion.HAOPLAY_KOREA -> R.string.server_region_haoplay_korea
+            GameServerRegion.HAOPLAY_ASIA -> R.string.server_region_haoplay_asia
+        },
+    )
+
     private fun payloadName(payloadType: Int): String = getString(
         when (payloadType) {
+            Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE -> R.string.payload_name_platoon_profile
             Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS -> R.string.payload_name_platoon_members
             Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY -> R.string.payload_name_platoon_activity
             Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES -> R.string.payload_name_platoon_updates
@@ -456,6 +601,8 @@ class OptionsActivity : LocalizedActivity() {
 
     private fun payloadDescription(payloadType: Int): String = getString(
         when (payloadType) {
+            Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE ->
+                R.string.payload_description_platoon_profile
             Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS -> R.string.payload_description_platoon_members
             Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY ->
                 R.string.payload_description_platoon_activity
@@ -478,6 +625,7 @@ class OptionsActivity : LocalizedActivity() {
 
     companion object {
         private val DIAGNOSTIC_TIME = DateTimeFormatter.ofPattern("yy/MM/dd HH:mm:ss")
+        private val RESET_LOCAL_TIME = DateTimeFormatter.ofPattern("HH:mm")
         private val BACKUP_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
         private val BACKUP_MIME_TYPES = arrayOf(
             PlatoonBackupManager.MIME_TYPE,

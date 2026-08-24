@@ -159,6 +159,15 @@ data class WeeklyNote(
     val isAutomatic: Boolean,
 )
 
+/** Complete immutable state needed to render or share one historical weekly table. */
+data class WeeklyTableRevision(
+    val report: WeeklyReportBuilder.Report,
+    val membershipEvents: List<MemberEvent>,
+    val notes: List<WeeklyNote>,
+    val memberNamesByUid: Map<Long, String>,
+    val memberPrivateNotesByUid: Map<Long, String>,
+)
+
 data class WeeklyCellOverride(
     val uid: Long,
     val periodStart: LocalDate,

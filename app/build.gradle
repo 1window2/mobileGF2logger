@@ -154,8 +154,8 @@ android {
         applicationId = 'dev.gf2log'
         minSdk = 26
         targetSdk = 36
-        versionCode = 20302
-        versionName = '2.3.2'
+        versionCode = 20303
+        versionName = '2.3.3'
         testInstrumentationRunner = 'androidx.test.runner.AndroidJUnitRunner'
 
         ndk {

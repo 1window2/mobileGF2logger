@@ -12,6 +12,7 @@ class PayloadCatalogTest {
         assertEquals("WEAPONS", PayloadCatalog.tag(11021))
         assertEquals("ATTACHMENTS", PayloadCatalog.tag(11061))
         assertEquals("KEYS", PayloadCatalog.tag(11138))
+        assertEquals("PROFILE", PayloadCatalog.tag(21905))
         assertEquals("PLATOON", PayloadCatalog.tag(21917))
         assertEquals("ACTIVITY", PayloadCatalog.tag(21935))
         assertEquals("UPDATES", PayloadCatalog.tag(21960))
@@ -23,6 +24,7 @@ class PayloadCatalogTest {
         val required = PayloadCatalog.categories.filter(PayloadCategory::isRequired)
         assertEquals(
             setOf(
+                Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE,
                 Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
                 Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY,
                 Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES,

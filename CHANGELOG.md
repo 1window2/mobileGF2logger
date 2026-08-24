@@ -32,6 +32,9 @@ All notable changes to mobileGF2logger are documented here.
 - Bound the profile registry, profile metadata, and pre-identity flow buffer;
   reject invalid restores before metadata changes, preserve the selected import
   scope through preview/apply, and restore the matching client-region routing.
+- Quarantine identity-changing or admission-failed flows, admit at most one new
+  profile per client per user-started capture, and let users forget selector
+  metadata without deleting the isolated Platoon data.
 
 ## 2.3.3 - 2026-08-24
 

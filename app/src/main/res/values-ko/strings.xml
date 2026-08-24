@@ -410,6 +410,10 @@
     <string name="weekly_table_history_restore_failed">이 표 히스토리 항목을 더 이상 사용할 수 없습니다.</string>
     <string name="weekly_table_history_live_notice">복원한 과거 주간 표를 표시하고 있습니다. 새 근거가 들어오면 최신 표로 돌아갑니다.</string>
     <string name="select_platoon">서클 선택</string>
+    <string name="forget_platoon_profile">프로필 잊기</string>
+    <string name="forget_platoon_profile_message">프로필 수용량을 확보하기 위해 이 서클을 선택 목록에서 제거할까요? 비공개 데이터는 유지되며, 해당 서클을 다시 감지하거나 복원하면 돌아옵니다.</string>
+    <string name="forget">잊기</string>
+    <string name="unable_to_forget_platoon">이 서클 프로필을 제거할 수 없습니다</string>
     <string name="no_platoon_detected">감지된 서클 없음</string>
     <string name="no_platoon_detected_detail">지원 클라이언트에서 서클 프로필 패킷이 도착할 때까지 캡처하세요.</string>
     <string name="existing_platoon_data">기존 서클 데이터</string>

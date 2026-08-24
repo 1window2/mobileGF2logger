@@ -146,6 +146,23 @@ class PlatoonProfileRegistryIntegrationTest {
         assertTrue(registry.removeIfInactive(profiles.last().storageId))
         assertEquals(PlatoonProfileRegistry.MAX_PROFILES - 1, registry.list().size)
         assertFalse(registry.removeIfInactive(profiles.first().storageId))
+
+        val retained = File(
+            PlatoonStorageScope(profiles.first().storageId).rootDirectory(context),
+            "retained-proof.txt",
+        ).apply {
+            parentFile?.mkdirs()
+            writeText("preserve")
+        }
+        assertTrue(registry.forget(profiles.first().storageId))
+        assertTrue(retained.isFile)
+        assertFalse(registry.list().any { it.storageId == profiles.first().storageId })
+        val recovered = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            PlatoonProfileData(999u, "Recovered capacity", emptyList(), emptyList()),
+        )
+        assertEquals(999L, recovered.platoonId)
     }
 
     @Test

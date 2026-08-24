@@ -11,4 +11,18 @@ internal object PlatoonProfilePolicy {
         profile.platoonName.isNotBlank() &&
         profile.platoonName.length <= MAX_NAME_LENGTH &&
         profile.platoonName.none(Char::isISOControl)
+
+    /** One user-started capture may persist at most one new profile per supported client. */
+    internal class AdmissionGate {
+        private val admittedClients = mutableSetOf<String>()
+
+        fun canAdmit(ownerPackage: String, alreadyRegistered: Boolean): Boolean =
+            alreadyRegistered || ownerPackage !in admittedClients
+
+        fun markAdmitted(ownerPackage: String) {
+            admittedClients += ownerPackage
+        }
+
+        fun clear() = admittedClients.clear()
+    }
 }

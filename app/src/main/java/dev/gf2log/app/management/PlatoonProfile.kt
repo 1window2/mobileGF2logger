@@ -263,6 +263,36 @@ internal class PlatoonProfileRegistry(context: Context) {
             .commit()
     }
 
+    /** Forgets selector metadata without deleting the isolated database or retained evidence. */
+    fun forget(storageId: String): Boolean = synchronized(lock) {
+        require(PlatoonProfileIdentity.isValidStorageId(storageId))
+        if (storageId == PlatoonProfileIdentity.LEGACY_STORAGE_ID) return@synchronized false
+        if (readLocked(storageId) == null) return@synchronized false
+        val ids = preferences.getStringSet(KEY_IDS, emptySet()).orEmpty().toMutableSet()
+        if (!ids.remove(storageId)) return@synchronized false
+        val remaining = ids.mapNotNull(::readLocked)
+        val prefix = "$KEY_PROFILE.$storageId."
+        val editor = preferences.edit()
+            .putStringSet(KEY_IDS, ids)
+            .remove(prefix + CLIENT)
+            .remove(prefix + REGION)
+            .remove(prefix + PLATOON_ID)
+            .remove(prefix + NAME)
+            .remove(prefix + EMBLEM_PRIMARY)
+            .remove(prefix + EMBLEM_SECONDARY)
+            .remove(prefix + LAST_SEEN)
+            .remove(prefix + LEGACY)
+        if (preferences.getString(KEY_ACTIVE, null) == storageId) {
+            val fallback = remaining.maxByOrNull(PlatoonProfile::lastSeenAt)
+            if (fallback == null) {
+                editor.remove(KEY_ACTIVE)
+            } else {
+                editor.putString(KEY_ACTIVE, fallback.storageId)
+            }
+        }
+        editor.commit()
+    }
+
     private fun readAllLocked(): List<PlatoonProfile> = preferences
         .getStringSet(KEY_IDS, emptySet())
         .orEmpty()

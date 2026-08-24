@@ -90,6 +90,11 @@ legacy profile instead of being copied or destructively migrated.
 - Before identity is established, each flow retains at most 32 decoded payload
   objects. Overflow rejects that flow until closure. The profile registry holds
   at most 16 bounded identities.
+- A bound flow cannot change its Platoon identity. Admission failure clears its
+  session and quarantines the flow until native closure. One user-started
+  capture may admit at most one new profile per supported client; users can
+  forget a detected profile from the selector to recover registry capacity
+  without deleting its isolated database or retained evidence.
 - TLS, HTTP, and UDP payloads remain native and are excluded from the parser.
 - Outgoing plaintext chunks are used only for native flow classification.
 - Flow-close callbacks finalize any pending recognized payload before removing parser state.

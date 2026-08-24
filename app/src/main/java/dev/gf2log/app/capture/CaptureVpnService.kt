@@ -15,6 +15,8 @@ import android.os.ParcelFileDescriptor
 import dev.gf2log.app.R
 import dev.gf2log.app.SupportedGamePackages
 import dev.gf2log.app.history.CaptureHistoryStore
+import dev.gf2log.app.management.PlatoonClient
+import dev.gf2log.app.management.PlatoonProfileIdentity
 import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonStorageScope
@@ -54,6 +56,7 @@ class CaptureVpnService : VpnService() {
     private val droppedParserTaskCount = AtomicLong()
     private val unknownPayloadCounts = ConcurrentHashMap<Int, AtomicLong>()
     private val captureChecklist = ScopedCaptureChecklist(REQUIRED_CAPTURE_TYPES)
+    private val profileAdmissionGate = PlatoonProfilePolicy.AdmissionGate()
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var historyStore: CaptureHistoryStore
     private lateinit var profileRegistry: PlatoonProfileRegistry
@@ -211,6 +214,7 @@ class CaptureVpnService : VpnService() {
         droppedParserTaskCount.set(0)
         unknownPayloadCounts.clear()
         captureChecklist.clear()
+        profileAdmissionGate.clear()
         mainHandler.removeCallbacks(captureOnceGraceStop)
         sessionStartedAt = Instant.now()
 
@@ -401,22 +405,42 @@ class CaptureVpnService : VpnService() {
     ) {
         val ownerPackage = metadata?.ownerPackage
         if (ownerPackage !in SupportedGamePackages.all) {
-            pendingFlowPayloads.reject(flowId)
+            quarantineFlow(flowId)
             CaptureStatus.update("Detected a Platoon profile, but its game client could not be verified")
             return
         }
+        val verifiedOwnerPackage = requireNotNull(ownerPackage)
+        val client = requireNotNull(PlatoonClient.fromPackage(verifiedOwnerPackage))
+        val region = clientServerRegions.get(verifiedOwnerPackage)
+        val expectedStorageId = PlatoonProfileIdentity.storageId(
+            client,
+            region,
+            data.platoonId.toLong(),
+        )
+        val current = flowSessions[flowId]
+        if (current != null && current.profile.storageId != expectedStorageId) {
+            quarantineFlow(flowId)
+            CaptureStatus.update("Discarded a flow whose Platoon identity changed")
+            return
+        }
+        val alreadyRegistered = profileRegistry.find(expectedStorageId) != null
+        if (!profileAdmissionGate.canAdmit(verifiedOwnerPackage, alreadyRegistered)) {
+            quarantineFlow(flowId)
+            CaptureStatus.update("Start a new capture before adding another Platoon for this client")
+            return
+        }
+        if (!alreadyRegistered) profileAdmissionGate.markAdmitted(verifiedOwnerPackage)
         val profile = runCatching {
             profileRegistry.upsertDetected(
-                ownerPackage = requireNotNull(ownerPackage),
-                region = clientServerRegions.get(ownerPackage),
+                ownerPackage = verifiedOwnerPackage,
+                region = region,
                 data = data,
             )
         }.getOrElse {
-            pendingFlowPayloads.reject(flowId)
+            quarantineFlow(flowId)
             CaptureStatus.update("Unable to isolate the detected Platoon")
             return
         }
-        val current = flowSessions[flowId]
         if (current?.profile?.storageId == profile.storageId) {
             markRequiredPayloadCaptured(
                 profile.storageId,
@@ -453,6 +477,13 @@ class CaptureVpnService : VpnService() {
             BoundedFlowPayloadBuffer.OfferResult.REJECTED,
             -> Unit
         }
+    }
+
+    /** Permanently blocks management routing for this flow until native closure. */
+    private fun quarantineFlow(flowId: Long) {
+        taintedFlows += flowId
+        flowSessions.remove(flowId)?.close()
+        pendingFlowPayloads.reject(flowId)
     }
 
     private fun routePayload(

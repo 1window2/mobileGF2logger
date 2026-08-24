@@ -53,7 +53,11 @@ supported client is installed; ambiguous flows remain quarantined. Payload
 composite of verified client, user-selected server region, and Platoon ID may
 select an isolated management database, retained CSV directory, checkpoint,
 weekly settings, or backup scope. Pre-identity payloads, registered profiles,
-and profile metadata are independently bounded.
+and profile metadata are independently bounded. A flow is permanently
+quarantined until closure if its identity changes or profile admission fails.
+Each user-started capture may admit at most one new profile per supported
+client; existing profiles remain usable, and a confirmed selector action can
+forget registry metadata to recover capacity without deleting isolated data.
 
 Exports and Discord sends are explicit user actions that move selected data out
 of Android private storage. Backups are checksummed and strictly validated but

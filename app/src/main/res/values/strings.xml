@@ -414,6 +414,10 @@
     <string name="weekly_table_history_restore_failed">This table history entry is no longer available.</string>
     <string name="weekly_table_history_live_notice">Showing a restored table history entry. New evidence will return this week to the live table.</string>
     <string name="select_platoon">Select platoon</string>
+    <string name="forget_platoon_profile">Forget profile</string>
+    <string name="forget_platoon_profile_message">Remove this platoon from the selectors to recover profile capacity? Its private data is retained and returns if the platoon is detected or restored again.</string>
+    <string name="forget">Forget</string>
+    <string name="unable_to_forget_platoon">Unable to forget this platoon profile</string>
     <string name="no_platoon_detected">No platoon detected</string>
     <string name="no_platoon_detected_detail">Capture a supported client until the platoon profile arrives.</string>
     <string name="existing_platoon_data">Existing platoon data</string>

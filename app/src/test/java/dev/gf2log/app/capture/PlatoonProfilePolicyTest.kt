@@ -16,6 +16,20 @@ class PlatoonProfilePolicyTest {
         assertTrue(PlatoonProfilePolicy.isValid(profile(101817u, "Owls")))
     }
 
+    @Test
+    fun admissionGateAllowsOneNewProfilePerClientAndAlwaysAllowsKnownProfiles() {
+        val gate = PlatoonProfilePolicy.AdmissionGate()
+
+        assertTrue(gate.canAdmit("haoplay", alreadyRegistered = false))
+        gate.markAdmitted("haoplay")
+        assertFalse(gate.canAdmit("haoplay", alreadyRegistered = false))
+        assertTrue(gate.canAdmit("haoplay", alreadyRegistered = true))
+        assertTrue(gate.canAdmit("darkwinter", alreadyRegistered = false))
+
+        gate.clear()
+        assertTrue(gate.canAdmit("haoplay", alreadyRegistered = false))
+    }
+
     private fun profile(id: UInt, name: String) =
         PlatoonProfileData(id, name, emptyList(), emptyList())
 }

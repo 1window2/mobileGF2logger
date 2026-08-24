@@ -48,8 +48,9 @@ internal object PlatoonProfileSelector {
             Toast.makeText(activity, R.string.no_platoon_detected_detail, Toast.LENGTH_SHORT).show()
             return
         }
-        val activeId = registry.active()?.storageId
-        AlertDialog.Builder(activity)
+        val active = registry.active()
+        val activeId = active?.storageId
+        val builder = AlertDialog.Builder(activity)
             .setTitle(R.string.select_platoon)
             .setSingleChoiceItems(
                 profiles.map { label(activity, it) }.toTypedArray(),
@@ -62,6 +63,31 @@ internal object PlatoonProfileSelector {
                 }
             }
             .setNegativeButton(android.R.string.cancel, null)
+        if (active != null && !active.legacy) {
+            builder.setNeutralButton(R.string.forget_platoon_profile) { _, _ ->
+                confirmForget(activity, registry, active)
+            }
+        }
+        builder.show()
+    }
+
+    private fun confirmForget(
+        activity: Activity,
+        registry: PlatoonProfileRegistry,
+        profile: PlatoonProfile,
+    ) {
+        AlertDialog.Builder(activity)
+            .setTitle(R.string.forget_platoon_profile)
+            .setMessage(R.string.forget_platoon_profile_message)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.forget) { _, _ ->
+                if (registry.forget(profile.storageId)) {
+                    activity.recreate()
+                } else {
+                    Toast.makeText(activity, R.string.unable_to_forget_platoon, Toast.LENGTH_SHORT)
+                        .show()
+                }
+            }
             .show()
     }
 

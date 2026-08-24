@@ -26,13 +26,16 @@ import android.widget.Toast
 import dev.gf2log.app.settings.PayloadHistoryPreferences
 import dev.gf2log.app.settings.CapturePreferences
 import dev.gf2log.app.settings.GameTimeZonePreferences
+import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.app.settings.GameServerRegion
 import dev.gf2log.app.capture.CaptureDiagnosticsStore
 import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.management.BackupFileName
 import dev.gf2log.app.management.InvalidBackupException
 import dev.gf2log.app.management.PlatoonBackupManager
+import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.management.PlatoonRepository
+import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.discord.DiscordWebhookSecretStore
 import dev.gf2log.protocol.Gfl2PayloadDecoder
 import java.time.ZoneId
@@ -112,6 +115,13 @@ class OptionsActivity : LocalizedActivity() {
                     setTypeface(typeface, Typeface.BOLD)
                 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             }, matchWidth())
+            addView(
+                PlatoonProfileSelector.button(this@OptionsActivity),
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(6) },
+            )
 
             addView(TextView(context).apply {
                 text = getString(R.string.language)
@@ -176,6 +186,20 @@ class OptionsActivity : LocalizedActivity() {
                 detail = resetSummary(resetRegion),
                 icon = R.drawable.ic_calendar,
                 onClick = ::chooseGameServerRegion,
+            ), matchWidth())
+            addView(ModernUi.listRow(
+                context = context,
+                title = getString(R.string.haoplay_capture_region),
+                detail = regionLabel(ClientServerRegionPreferences(context).get(SupportedGamePackages.HAOPLAY)),
+                icon = R.drawable.ic_group,
+                onClick = { chooseClientServerRegion(SupportedGamePackages.HAOPLAY) },
+            ), matchWidth())
+            addView(ModernUi.listRow(
+                context = context,
+                title = getString(R.string.darkwinter_capture_region),
+                detail = regionLabel(ClientServerRegionPreferences(context).get(SupportedGamePackages.DARKWINTER)),
+                icon = R.drawable.ic_group,
+                onClick = { chooseClientServerRegion(SupportedGamePackages.DARKWINTER) },
             ), matchWidth())
             if (resetRegion == GameServerRegion.MANUAL) {
                 addView(ModernUi.listRow(
@@ -479,36 +503,19 @@ class OptionsActivity : LocalizedActivity() {
     }
 
     private fun chooseGameTimeZone() {
+        val storageScope = PlatoonProfileRegistry(this).activeScope()
         val zones = ZoneId.getAvailableZoneIds().sorted()
-        val current = GameTimeZonePreferences.get(this).id
+        val current = GameTimeZonePreferences.get(this, storageScope.storageId).id
         AlertDialog.Builder(this)
             .setTitle(R.string.game_timezone)
             .setSingleChoiceItems(zones.toTypedArray(), zones.indexOf(current)) { dialog, which ->
                 val selected = ZoneId.of(zones[which])
-                if (selected == GameTimeZonePreferences.get(this)) {
+                if (selected == GameTimeZonePreferences.get(this, storageScope.storageId)) {
                     dialog.dismiss()
                     return@setSingleChoiceItems
                 }
                 dialog.dismiss()
-                fileIoExecutor.execute {
-                    val result = runCatching {
-                        GameTimeZonePreferences.set(this, selected)
-                        PlatoonRepository(this).rebuildWeeklyHistoryForTimeZoneChange()
-                    }
-                    runOnUiThread {
-                        if (isFinishing || isDestroyed) return@runOnUiThread
-                        Toast.makeText(
-                            this,
-                            if (result.isSuccess) {
-                                R.string.game_timezone_updated
-                            } else {
-                                R.string.game_timezone_update_failed
-                            },
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                        recreate()
-                    }
-                }
+                updateGameTimeZone(storageScope, GameServerRegion.MANUAL, selected)
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
@@ -535,11 +542,70 @@ class OptionsActivity : LocalizedActivity() {
             .show()
     }
 
+    private fun chooseClientServerRegion(packageName: String) {
+        val preferences = ClientServerRegionPreferences(this)
+        val regions = preferences.allowed(packageName)
+        val current = preferences.get(packageName)
+        AlertDialog.Builder(this)
+            .setTitle(
+                if (packageName == SupportedGamePackages.HAOPLAY) {
+                    R.string.haoplay_capture_region
+                } else {
+                    R.string.darkwinter_capture_region
+                },
+            )
+            .setSingleChoiceItems(
+                regions.map(::regionLabel).toTypedArray(),
+                regions.indexOf(current),
+            ) { dialog, which ->
+                preferences.set(packageName, regions[which])
+                dialog.dismiss()
+                recreate()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
     private fun updateResetRegion(region: GameServerRegion) {
+        val storageScope = PlatoonProfileRegistry(this).activeScope()
+        updateGameTimeZone(storageScope, region, requireNotNull(region.serverZone))
+    }
+
+    private fun updateGameTimeZone(
+        storageScope: PlatoonStorageScope,
+        region: GameServerRegion,
+        zoneId: ZoneId,
+    ) {
         fileIoExecutor.execute {
+            val previousRegion = GameTimeZonePreferences.region(this, storageScope.storageId)
+            val previousZone = GameTimeZonePreferences.get(this, storageScope.storageId)
             val result = runCatching {
-                GameTimeZonePreferences.setRegion(this, region)
-                PlatoonRepository(this).rebuildWeeklyHistoryForTimeZoneChange()
+                if (region == GameServerRegion.MANUAL) {
+                    GameTimeZonePreferences.set(this, zoneId, storageScope.storageId)
+                } else {
+                    GameTimeZonePreferences.setRegion(this, region, storageScope.storageId)
+                }
+                try {
+                    PlatoonRepository(this, storageScope)
+                        .rebuildWeeklyHistoryForTimeZoneChange(zoneId)
+                } catch (error: Exception) {
+                    runCatching {
+                        if (previousRegion == GameServerRegion.MANUAL) {
+                            GameTimeZonePreferences.set(
+                                this,
+                                previousZone,
+                                storageScope.storageId,
+                            )
+                        } else {
+                            GameTimeZonePreferences.setRegion(
+                                this,
+                                previousRegion,
+                                storageScope.storageId,
+                            )
+                        }
+                    }.exceptionOrNull()?.let(error::addSuppressed)
+                    throw error
+                }
             }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread

@@ -37,6 +37,8 @@ import dev.gf2log.app.management.CsvImportCheckpointManager
 import dev.gf2log.app.management.CsvImportPreviewAnalyzer
 import dev.gf2log.app.management.PlatoonCsvImportStore
 import dev.gf2log.app.management.PlatoonRepository
+import dev.gf2log.app.management.PlatoonProfileRegistry
+import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.management.BackupFileName
 import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.Gfl2PayloadDecoder
@@ -248,6 +250,13 @@ class MainActivity : LocalizedActivity() {
                         textSize = 13f
                         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                     }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                    addView(
+                        PlatoonProfileSelector.button(this@MainActivity, compact = true),
+                        LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ),
+                    )
                 }, matchWidth())
                 captureStateText = TextView(context).apply {
                     textSize = 22f
@@ -635,15 +644,16 @@ class MainActivity : LocalizedActivity() {
             statusText.text = getString(R.string.stop_capture_before_csv_import)
             return
         }
+        val storageScope = PlatoonProfileRegistry(this).activeScope()
         statusText.text = getString(R.string.csv_import_preparing_preview)
         fileIoExecutor.execute {
             val result = runCatching {
                 // Recover an interrupted prior import before reading the preview baseline.
-                CsvImportCheckpointManager(this)
+                CsvImportCheckpointManager(this, storageScope)
                 require(sources.size <= MAX_CSV_IMPORT_FILES) {
                     "Too many Platoon CSV files were selected"
                 }
-                val directory = File(filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY)
+                val directory = storageScope.retainedCsvDirectory(this)
                 val store = PlatoonCsvImportStore(directory)
                 val selected = ArrayList<PlatoonCsvImportStore.PreparedImport>(sources.size)
                 var selectedBytes = 0L
@@ -658,7 +668,7 @@ class MainActivity : LocalizedActivity() {
                     selected += prepared
                 }
                 val unique = selected.distinctBy(PlatoonCsvImportStore.PreparedImport::fileName)
-                val repository = PlatoonRepository(this)
+                val repository = PlatoonRepository(this, storageScope)
                 repository.reconcileRetainedCsvFiles(directory)
                 val duplicateNames = CsvImportPreviewAnalyzer.duplicateFileNames(
                     prepared = unique,
@@ -675,7 +685,7 @@ class MainActivity : LocalizedActivity() {
                     duplicateFiles = analyzed.duplicateFiles + selected.size - unique.size,
                     totalBytes = selectedBytes,
                 )
-                PendingCsvImport(unique, duplicateNames, preview)
+                PendingCsvImport(storageScope, unique, duplicateNames, preview)
             }
             statusHandler.post {
                 if (isFinishing || isDestroyed) return@post
@@ -739,9 +749,9 @@ class MainActivity : LocalizedActivity() {
         pendingCsvImport = null
         statusText.text = getString(R.string.csv_import_applying)
         fileIoExecutor.execute {
-            val directory = File(filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY)
+            val directory = pending.storageScope.retainedCsvDirectory(this)
             val store = PlatoonCsvImportStore(directory)
-            val checkpoint = CsvImportCheckpointManager(this)
+            val checkpoint = CsvImportCheckpointManager(this, pending.storageScope)
             var checkpointCreated = false
             val result = runCatching {
                 val plannedNames = pending.prepared
@@ -756,7 +766,8 @@ class MainActivity : LocalizedActivity() {
                         if (it.duplicate) duplicates += 1 else retained += 1
                     }
                 }
-                val imported = PlatoonRepository(this).reconcileRetainedCsvFiles(directory)
+                val imported = PlatoonRepository(this, pending.storageScope)
+                    .reconcileRetainedCsvFiles(directory)
                 checkpoint.seal()
                 CsvImportSummary(retained, duplicates, imported)
             }.recoverCatching { failure ->
@@ -836,7 +847,8 @@ class MainActivity : LocalizedActivity() {
 
     @Suppress("DEPRECATION")
     private fun exportLatestPlatoonCsv() {
-        val directory = File(filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY)
+        val directory = PlatoonProfileRegistry(this).activeScope()
+            .retainedCsvDirectory(this)
         val latest = PlatoonCsvImportStore.latestRetainedFile(directory)
         if (latest == null) {
             statusText.text = getString(R.string.status_no_platoon_csv)
@@ -1052,6 +1064,7 @@ class MainActivity : LocalizedActivity() {
     )
 
     private data class PendingCsvImport(
+        val storageScope: PlatoonStorageScope,
         val prepared: List<PlatoonCsvImportStore.PreparedImport>,
         val duplicateFileNames: Set<String>,
         val preview: CsvImportPreviewAnalyzer.Preview,

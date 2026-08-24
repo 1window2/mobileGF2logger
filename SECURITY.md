@@ -7,8 +7,8 @@ Security fixes are made on the latest published release and the current
 
 | Version | Supported |
 | --- | --- |
-| 2.3.x | Yes |
-| 2.2.x and earlier | No |
+| 2.4.x | Yes |
+| 2.3.x and earlier | No |
 
 ## Reporting a vulnerability
 
@@ -44,12 +44,16 @@ plaintext protocol. Parsed data and backups therefore provide local integrity
 and management convenience, not cryptographic proof that a remote payload is
 genuine.
 
-On Android 10 and newer, the active VPN may ask Android for the UID owning an
-original connection tuple and map that UID only to the fixed supported package
+On Android 10 and newer, the active VPN asks Android for the UID owning an
+original connection tuple and maps that UID only to the fixed supported package
 IDs. Remote IP addresses and DNS/SNI labels are diagnostic hints, not trusted
-client or server identities. Payload `21905` supplies a bounded Platoon identity
-for its own decoded flow, but multi-Platoon persistence remains disabled until
-every database, CSV, import, backup, and UI path can enforce the same scope.
+client or server identities. Android 8–9 falls back only when exactly one
+supported client is installed; ambiguous flows remain quarantined. Payload
+`21905` supplies a bounded Platoon identity for its own decoded flow. Only the
+composite of verified client, user-selected server region, and Platoon ID may
+select an isolated management database, retained CSV directory, checkpoint,
+weekly settings, or backup scope. Pre-identity payloads, registered profiles,
+and profile metadata are independently bounded.
 
 Exports and Discord sends are explicit user actions that move selected data out
 of Android private storage. Backups are checksummed and strictly validated but

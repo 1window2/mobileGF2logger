@@ -25,7 +25,7 @@
     <string name="open_options">설정 열기</string>
     <string name="export_platoon_backup">서클 관리 백업 내보내기</string>
     <string name="import_platoon_backup">서클 관리 백업 가져오기</string>
-    <string name="import_backup_warning">현재의 구조화된 서클 기록, 가입·탈퇴 시각, 비고를 대체합니다. 캡처를 중지한 상태로 유지하세요.</string>
+    <string name="import_backup_warning">백업에 포함된 서클의 관리 데이터를 대체합니다. 다른 서클의 데이터는 변경하지 않습니다. 캡처를 중지한 상태로 유지하세요.</string>
     <string name="stop_capture_before_backup">백업을 내보내거나 가져오기 전에 캡처를 중지하세요.</string>
     <string name="status_backup_exported">서클 관리 백업을 내보냈습니다</string>
     <string name="status_backup_restored">서클 관리 백업을 복원했습니다</string>
@@ -59,10 +59,10 @@
     <string name="onboarding_settings_feature_2">전체 백업을 만들거나 복원합니다.</string>
     <string name="onboarding_settings_feature_3">Discord 웹훅을 설정하고 필요한 패킷 종류를 선택합니다.</string>
     <string name="onboarding_management_title">서클 관리</string>
-    <string name="onboarding_management_description">캡처하거나 불러온 멤버 데이터가 멤버 정보 및 주간 표에 반영됩니다.</string>
+    <string name="onboarding_management_description">캡처하거나 불러온 멤버 데이터가 선택한 서클의 멤버 정보 및 주간 표에 반영됩니다.</string>
     <string name="onboarding_management_feature_1">현재 가입 중이거나 과거에 탈퇴한 멤버의 정보와 가입·탈퇴 이력을 검색하고 관리합니다.</string>
     <string name="onboarding_management_feature_2">CSV를 적용하기 전에 변경 내용을 미리 보고, 자동 체크포인트로 최근 가져오기를 되돌릴 수 있습니다.</string>
-    <string name="onboarding_management_feature_3">스냅샷을 비교하거나 선택한 멤버만 내보낼 수 있습니다.</string>
+    <string name="onboarding_management_feature_3">분리된 서클을 전환하고, 스냅샷을 비교하거나 선택한 멤버만 내보낼 수 있습니다.</string>
     <string name="onboarding_weekly_title">주간 테이블</string>
     <string name="onboarding_weekly_description">일반 주간과 흙먼지 주간이 구분된 주간 공적표를 확인합니다.</string>
     <string name="onboarding_weekly_feature_1">각 셀을 눌러 해당 값의 근거와 사용된 패킷 정보를 확인할 수 있습니다.</string>
@@ -75,10 +75,10 @@
     <string name="onboarding_packet_feature_3">패킷에 담겨 있는 여러 정보를 통해 멤버 및 주간 테이블을 완성해 나갈 수 있습니다.</string>
     <string name="backup">백업</string>
     <string name="restore_full_backup">백업 불러오기</string>
-    <string name="restore_full_backup_description">전체 설정, 서클 관리와 멤버별 가입 기록을 포함한 상세 정보, 모든 주간 과업표를 전체 백업 파일에서 불러옵니다.</string>
+    <string name="restore_full_backup_description">전체 백업에 포함된 서클의 모든 관리 데이터와 앱 설정을 복원합니다. 다른 서클은 변경하지 않습니다.</string>
     <string name="back_up_all_information">전체 정보 백업하기</string>
-    <string name="back_up_all_information_description">전체 설정, 서클 관리와 멤버별 가입 기록을 포함한 상세 정보, 모든 주간 과업표를 하나의 전체 백업 파일에 저장합니다.</string>
-    <string name="restore_full_backup_warning">현재의 전체 설정, 서클 관리 정보, 멤버와 가입 기록, 모든 주간 과업표 기록을 대체합니다. 복원하는 동안 캡처를 중지하세요.</string>
+    <string name="back_up_all_information_description">앱 설정과 선택한 서클의 가입 이력 및 주간표를 포함한 모든 관리 데이터를 저장합니다.</string>
+    <string name="restore_full_backup_warning">앱 설정과 백업에 포함된 서클 데이터를 대체한 뒤 해당 서클을 선택합니다. 다른 서클은 변경하지 않습니다. 복원하는 동안 캡처를 중지하세요.</string>
     <string name="invalid_full_backup">올바른 전체 백업 파일이 아닙니다.</string>
     <string name="full_backup_exported">전체 정보 백업을 저장했습니다</string>
     <string name="full_backup_restored">전체 정보 백업을 복원했습니다</string>
@@ -181,6 +181,7 @@
     <string name="unknown_date">불명</string>
     <string name="note_hint">선택한 게임 날짜의 비고 추가</string>
     <string name="add_note">비고 추가</string>
+    <string name="weekly_note_limit_reached">이번 주에는 최대 128개의 비고가 이미 저장되어 있습니다.</string>
     <string name="delete_note">비고 삭제</string>
     <string name="delete_note_confirmation">이 비고를 삭제할까요?</string>
     <string name="delete">삭제</string>
@@ -408,4 +409,10 @@
     <string name="weekly_table_history_restored">기록된 주간 테이블을 복원했습니다.</string>
     <string name="weekly_table_history_restore_failed">이 표 히스토리 항목을 더 이상 사용할 수 없습니다.</string>
     <string name="weekly_table_history_live_notice">복원한 과거 주간 표를 표시하고 있습니다. 새 근거가 들어오면 최신 표로 돌아갑니다.</string>
+    <string name="select_platoon">서클 선택</string>
+    <string name="no_platoon_detected">감지된 서클 없음</string>
+    <string name="no_platoon_detected_detail">지원 클라이언트에서 서클 프로필 패킷이 도착할 때까지 캡처하세요.</string>
+    <string name="existing_platoon_data">기존 서클 데이터</string>
+    <string name="haoplay_capture_region">HaoPlay 캡처 서버</string>
+    <string name="darkwinter_capture_region">Darkwinter 캡처 서버</string>
 </resources>

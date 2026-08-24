@@ -14,14 +14,27 @@ import java.io.FileOutputStream
  */
 class CsvImportCheckpointManager internal constructor(
     context: Context,
+    private val storageScope: PlatoonStorageScope =
+        PlatoonProfileRegistry(context).activeScope(),
     private val restoreObserver: (PlatoonBackupManager.RestoreCheckpoint) -> Unit,
 ) {
-    constructor(context: Context) : this(context, {})
+    constructor(context: Context) : this(
+        context,
+        PlatoonProfileRegistry(context).activeScope(),
+        {},
+    )
+
+    internal constructor(context: Context, storageScope: PlatoonStorageScope) : this(
+        context,
+        storageScope,
+        {},
+    )
 
     private val appContext = context.applicationContext
-    private val root = File(appContext.filesDir, CHECKPOINT_DIRECTORY)
-    private val staging = File(appContext.filesDir, STAGING_DIRECTORY)
-    private val previous = File(appContext.filesDir, PREVIOUS_DIRECTORY)
+    private val profileRoot = storageScope.rootDirectory(appContext)
+    private val root = File(profileRoot, CHECKPOINT_DIRECTORY)
+    private val staging = File(profileRoot, STAGING_DIRECTORY)
+    private val previous = File(profileRoot, PREVIOUS_DIRECTORY)
 
     init {
         synchronized(STATE_LOCK) {
@@ -55,7 +68,11 @@ class CsvImportCheckpointManager internal constructor(
             deleteDirectory(staging)
             check(staging.mkdirs()) { "Unable to stage the CSV import checkpoint" }
             FileOutputStream(archive(staging)).use { output ->
-                PlatoonBackupManager(appContext).export(output)
+                PlatoonBackupManager(
+                    appContext,
+                    AppSettingsStore(appContext),
+                    storageScope = storageScope,
+                ).export(output)
                 output.fd.sync()
             }
             FileOutputStream(manifest(staging)).use { output ->
@@ -91,7 +108,11 @@ class CsvImportCheckpointManager internal constructor(
         try {
             FileOutputStream(temporary).use { output ->
                 output.write(
-                    PlatoonBackupManager(appContext).currentDatabaseSha256()
+                    PlatoonBackupManager(
+                        appContext,
+                        AppSettingsStore(appContext),
+                        storageScope = storageScope,
+                    ).currentDatabaseSha256()
                         .toByteArray(Charsets.US_ASCII),
                 )
                 output.fd.sync()
@@ -120,7 +141,13 @@ class CsvImportCheckpointManager internal constructor(
             }
             val expectedDigest = digest(root).readText(Charsets.US_ASCII)
             require(expectedDigest.matches(SHA256)) { "Invalid CSV checkpoint digest" }
-            check(PlatoonBackupManager(appContext).currentDatabaseSha256() == expectedDigest) {
+            check(
+                PlatoonBackupManager(
+                    appContext,
+                    AppSettingsStore(appContext),
+                    storageScope = storageScope,
+                ).currentDatabaseSha256() == expectedDigest,
+            ) {
                 "Platoon data changed after the CSV import; undo would overwrite newer changes"
             }
             restoreUnchecked()
@@ -144,7 +171,7 @@ class CsvImportCheckpointManager internal constructor(
             .toSet()
         require(names.size <= MAX_PLANNED_FILES)
         names.forEach(::requireSafeImportName)
-        val retained = File(appContext.filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY)
+        val retained = storageScope.retainedCsvDirectory(appContext)
         val quarantine = File(root, QUARANTINE_DIRECTORY)
         if (!quarantine.exists()) {
             check(quarantine.mkdirs()) { "Unable to create the retained CSV quarantine" }
@@ -164,6 +191,7 @@ class CsvImportCheckpointManager internal constructor(
             val backupManager = PlatoonBackupManager(
                 context = appContext,
                 settingsStore = AppSettingsStore(appContext),
+                storageScope = storageScope,
                 restoreObserver = { checkpoint ->
                     if (checkpoint == PlatoonBackupManager.RestoreCheckpoint.DATABASE_INSTALLED) {
                         markRestoreDatabaseInstalled()

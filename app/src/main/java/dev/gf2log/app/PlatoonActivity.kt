@@ -100,6 +100,16 @@ class PlatoonActivity : LocalizedActivity() {
                 textSize = 24f
                 setTypeface(typeface, Typeface.BOLD)
             }, matchWidth())
+            addView(
+                PlatoonProfileSelector.button(this@PlatoonActivity),
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    topMargin = dp(8)
+                    bottomMargin = dp(4)
+                },
+            )
             summary = TextView(context).apply {
                 textSize = 14f
                 setTextColor(getColor(R.color.text_secondary))

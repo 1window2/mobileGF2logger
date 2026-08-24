@@ -15,11 +15,15 @@ import java.time.ZoneId
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.withLock
 
-class PlatoonRepository(context: Context) {
+internal class PlatoonRepository(
+    context: Context,
+    internal val storageScope: PlatoonStorageScope =
+        PlatoonProfileRegistry(context).activeScope(),
+) {
     private val appContext = context.applicationContext
 
     init {
-        PlatoonBackupManager.recoverInterruptedFullRestore(appContext)
+        PlatoonBackupManager.recoverInterruptedFullRestore(appContext, storageScope)
     }
 
     fun ingest(
@@ -76,7 +80,7 @@ class PlatoonRepository(context: Context) {
     }
 
     fun reconcileRetainedCsvFiles(
-        directory: File = File(appContext.filesDir, RETAINED_CSV_DIRECTORY),
+        directory: File = storageScope.retainedCsvDirectory(appContext),
     ): ImportResult {
         val result = access { database -> database.runInTransaction {
             var imported = 0
@@ -186,15 +190,15 @@ class PlatoonRepository(context: Context) {
         }
 
     fun deleteMember(uid: Long): Boolean {
-        val deleted = withExclusiveDatabase {
-            val order = MemberOrderPreferences(appContext)
+        val deleted = withExclusiveDatabase(storageScope) {
+            val order = MemberOrderPreferences(appContext, storageScope.storageId)
             val previousOrder = order.read()
             val updatedOrder = previousOrder.filterNot { it == uid }
             if (updatedOrder != previousOrder) {
                 check(order.write(updatedOrder)) { "Unable to update saved member order" }
             }
             try {
-                PlatoonDatabase(appContext).use { database ->
+                PlatoonDatabase(appContext, storageScope.databaseName).use { database ->
                     val deleted = database.deleteMember(uid)
                     if (!deleted && updatedOrder != previousOrder) {
                         check(order.write(previousOrder)) {
@@ -368,7 +372,7 @@ class PlatoonRepository(context: Context) {
     ) {
         access { it.replaceWeeklyOverrides(periodStartEpochDay, overrides) }
         val day = LocalDate.ofEpochDay(periodStartEpochDay)
-        val zone = GameTimeZonePreferences.get(appContext)
+        val zone = GameTimeZonePreferences.get(appContext, storageScope.storageId)
         recordLiveWeeklyRevisionSafely(day, zone)
     }
 
@@ -385,18 +389,29 @@ class PlatoonRepository(context: Context) {
     fun showLiveWeeklyReport(periodStart: LocalDate): Boolean =
         access { it.clearActiveWeeklyReportHistory(periodStart.toEpochDay()) }
 
-    fun rebuildWeeklyHistoryForTimeZoneChange() {
-        withExclusiveDatabase {
-            PlatoonDatabase(appContext).use(PlatoonDatabase::clearWeeklyReportHistory)
-        }
-        recordAllLiveWeeklyReports(failFast = true)
+    fun rebuildWeeklyHistoryForTimeZoneChange(zoneId: ZoneId) {
+        val recordedAt = Instant.now()
+        val replacements = WeeklyReportRange
+            .periodStarts(access { it.listWeeklyEvidenceDays(zoneId) })
+            .map { periodStart ->
+                val encoded = WeeklyReportHistoryCodec.encode(
+                    buildLiveWeeklyRevision(periodStart, zoneId, recordedAt),
+                )
+                WeeklyReportHistoryReplacement(
+                    periodStartEpochDay = periodStart.toEpochDay(),
+                    recordedAt = recordedAt,
+                    fingerprint = encoded.fingerprint,
+                    payload = encoded.payload,
+                )
+            }
+        access { it.replaceWeeklyReportHistory(replacements) }
     }
 
     private fun recordChangedWeeks(instants: Iterable<Instant>) =
         recordChangedWeeks(instants.asSequence())
 
     private fun recordChangedWeeks(instants: Sequence<Instant>) {
-        val zone = GameTimeZonePreferences.get(appContext)
+        val zone = GameTimeZonePreferences.get(appContext, storageScope.storageId)
         WeeklyHistoryWorkPolicy.changedPeriodStarts(instants, zone)
             .forEach { periodStart ->
                 recordLiveWeeklyRevisionSafely(periodStart, zone)
@@ -410,7 +425,7 @@ class PlatoonRepository(context: Context) {
     // Parameters:
     // - failFast: Propagates failures for explicit maintenance operations such as timezone rebuilds.
     private fun recordAllLiveWeeklyReports(failFast: Boolean = false) {
-        val zone = GameTimeZonePreferences.get(appContext)
+        val zone = GameTimeZonePreferences.get(appContext, storageScope.storageId)
         WeeklyReportRange.periodStarts(access { it.listWeeklyEvidenceDays(zone) })
             .forEach { periodStart ->
                 if (failFast) {
@@ -444,7 +459,7 @@ class PlatoonRepository(context: Context) {
     }
 
     private fun recordLiveWeeklyRevision(periodStart: LocalDate) {
-        val zone = GameTimeZonePreferences.get(appContext)
+        val zone = GameTimeZonePreferences.get(appContext, storageScope.storageId)
         recordLiveWeeklyRevisionSafely(periodStart, zone)
     }
 
@@ -480,7 +495,7 @@ class PlatoonRepository(context: Context) {
     }
 
     private fun <T> access(block: (PlatoonDatabase) -> T): T =
-        withDatabase(appContext, block)
+        withDatabase(appContext, storageScope, block)
 
     data class ImportResult(
         val imported: Int,
@@ -512,26 +527,33 @@ class PlatoonRepository(context: Context) {
         private val databaseLock = Any()
         private val maintenanceLock = ReentrantReadWriteLock(true)
 
-        @Volatile
-        private var databaseInstance: PlatoonDatabase? = null
+        private val databaseInstances = mutableMapOf<String, PlatoonDatabase>()
 
-        private fun database(context: Context): PlatoonDatabase =
-            databaseInstance ?: synchronized(databaseLock) {
-                databaseInstance ?: PlatoonDatabase(context).also { databaseInstance = it }
+        private fun database(context: Context, scope: PlatoonStorageScope): PlatoonDatabase =
+            synchronized(databaseLock) {
+                databaseInstances[scope.databaseName]
+                    ?: PlatoonDatabase(context, scope.databaseName).also {
+                        databaseInstances[scope.databaseName] = it
+                    }
             }
 
         private fun <T> withDatabase(
             context: Context,
+            scope: PlatoonStorageScope,
             block: (PlatoonDatabase) -> T,
         ): T = maintenanceLock.readLock().withLock {
-            block(database(context))
+            block(database(context, scope))
         }
 
-        internal fun <T> withExclusiveDatabase(block: () -> T): T =
+        internal fun <T> withExclusiveDatabase(
+            scope: PlatoonStorageScope = PlatoonStorageScope(
+                PlatoonProfileIdentity.LEGACY_STORAGE_ID,
+            ),
+            block: () -> T,
+        ): T =
             maintenanceLock.writeLock().withLock {
                 synchronized(databaseLock) {
-                    databaseInstance?.close()
-                    databaseInstance = null
+                    databaseInstances.remove(scope.databaseName)?.close()
                 }
                 block()
             }

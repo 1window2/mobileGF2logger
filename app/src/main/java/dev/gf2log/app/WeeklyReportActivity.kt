@@ -44,11 +44,13 @@ import dev.gf2log.app.management.MetricCertainty
 import dev.gf2log.app.management.WeeklyCellOverride
 import dev.gf2log.app.management.WeeklyEvidenceAnalyzer
 import dev.gf2log.app.management.WeeklyNote
+import dev.gf2log.app.management.WeeklyNoteLimitException
 import dev.gf2log.app.management.WeeklyReportBuilder
 import dev.gf2log.app.management.WeeklyReportCsv
 import dev.gf2log.app.management.WeeklyReportStateHolder
 import dev.gf2log.app.management.WeeklyShareProjection
 import dev.gf2log.app.management.WeeklyMetricPresentation
+import dev.gf2log.app.management.WeeklyMemberNameProjection
 import dev.gf2log.app.settings.MemberOrderPreferences
 import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.WeeklyCutlinePreferences
@@ -212,7 +214,10 @@ class WeeklyReportActivity : LocalizedActivity() {
             report = report,
             notes = revision.notes,
             events = revision.membershipEvents,
-            namesByUid = revision.memberNamesByUid + report.members.associate { it.uid to it.name },
+            namesByUid = WeeklyMemberNameProjection.merge(
+                reportNamesByUid = report.members.associate { it.uid to it.name },
+                capturedNamesByUid = revision.memberNamesByUid,
+            ),
             cutlines = WeeklyCutlinePreferences(this).read(),
             memberNotesByUid = revision.memberPrivateNotesByUid,
             displayedMembers = MemberOrderPreferences(this).apply(report.members) { it.uid },
@@ -328,6 +333,13 @@ class WeeklyReportActivity : LocalizedActivity() {
                 }
             }, LinearLayout.LayoutParams(dp(48), dp(48)))
         }, matchWidth())
+        body.addView(
+            PlatoonProfileSelector.button(this),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(6) },
+        )
         body.addView(TextView(this).apply {
             text = getString(
                 R.string.week_period,
@@ -1665,17 +1677,35 @@ class WeeklyReportActivity : LocalizedActivity() {
                 val text = note.text.toString().trim()
                 if (text.isBlank()) return@setOnClickListener
                 val gameDay = report.days[day.selectedItemPosition]
-                repository.addWeeklyNote(
-                    report.periodStart.toEpochDay(),
-                    gameDay.toEpochDay(),
-                    text,
+                runCatching {
+                    repository.addWeeklyNote(
+                        report.periodStart.toEpochDay(),
+                        gameDay.toEpochDay(),
+                        text,
+                    )
+                }.fold(
+                    onSuccess = {
+                        Toast.makeText(
+                            this@WeeklyReportActivity,
+                            getString(R.string.saved),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                        requestRender()
+                    },
+                    onFailure = { error ->
+                        Toast.makeText(
+                            this@WeeklyReportActivity,
+                            getString(
+                                if (error is WeeklyNoteLimitException) {
+                                    R.string.weekly_note_limit_reached
+                                } else {
+                                    R.string.save_failed
+                                },
+                            ),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    },
                 )
-                Toast.makeText(
-                    this@WeeklyReportActivity,
-                    getString(R.string.saved),
-                    Toast.LENGTH_SHORT,
-                ).show()
-                requestRender()
             }
         }, matchWidth())
     }

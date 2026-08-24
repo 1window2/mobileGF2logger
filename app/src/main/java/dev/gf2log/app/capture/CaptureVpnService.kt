@@ -15,13 +15,17 @@ import android.os.ParcelFileDescriptor
 import dev.gf2log.app.R
 import dev.gf2log.app.SupportedGamePackages
 import dev.gf2log.app.history.CaptureHistoryStore
+import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.management.PlatoonRepository
+import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.settings.PayloadHistoryPreferences
 import dev.gf2log.app.settings.CapturePreferences
+import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.protocol.Gfl2StreamParser
 import dev.gf2log.protocol.Gfl2PayloadDecoder
 import dev.gf2log.protocol.PayloadCatalog
 import dev.gf2log.protocol.model.ParseEvent
+import dev.gf2log.protocol.model.ParsedPayload
 import dev.gf2log.protocol.model.PlatoonProfileData
 import java.io.File
 import java.time.Instant
@@ -38,6 +42,10 @@ class CaptureVpnService : VpnService() {
     private val parsers = ConcurrentHashMap<Long, Gfl2StreamParser>()
     private val taintedFlows = ConcurrentHashMap.newKeySet<Long>()
     private val flowMetadata = ConcurrentHashMap<Long, CaptureFlowMetadata>()
+    private val flowSessions = ConcurrentHashMap<Long, PlatoonCaptureSession>()
+    private val pendingFlowPayloads = BoundedFlowPayloadBuffer<ParsedPayload>(
+        MAX_PENDING_PAYLOADS_PER_FLOW,
+    )
     private val decodedPayloadCount = AtomicLong()
     private val observedPayloadBytes = AtomicLong()
     private val inspectedPayloadBytes = AtomicLong()
@@ -45,24 +53,24 @@ class CaptureVpnService : VpnService() {
     private val parseWarningCount = AtomicLong()
     private val droppedParserTaskCount = AtomicLong()
     private val unknownPayloadCounts = ConcurrentHashMap<Int, AtomicLong>()
-    private val capturedRequiredTypes = ConcurrentHashMap.newKeySet<Int>()
+    private val captureChecklist = ScopedCaptureChecklist(REQUIRED_CAPTURE_TYPES)
     private val mainHandler = Handler(Looper.getMainLooper())
-    private lateinit var guildMembersWriter: GuildMembersCsvWriter
     private lateinit var historyStore: CaptureHistoryStore
-    private lateinit var platoonRepository: PlatoonRepository
+    private lateinit var profileRegistry: PlatoonProfileRegistry
+    private lateinit var clientServerRegions: ClientServerRegionPreferences
     private lateinit var payloadHistoryPreferences: PayloadHistoryPreferences
     private lateinit var capturePreferences: CapturePreferences
     private lateinit var diagnosticsStore: CaptureDiagnosticsStore
-    private lateinit var platoonPayloadDispatcher: PlatoonPayloadDispatcher
     private var sessionStartedAt: Instant? = null
     private var captureOnce = false
     private val captureOnceGraceStop = Runnable {
+        val captured = captureChecklist.targetCaptured()
         if (captureOnce &&
             CaptureStatus.isRunning &&
-            Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS in capturedRequiredTypes
+            Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS in captured
         ) {
             val missing = REQUIRED_CAPTURE_TYPES
-                .minus(capturedRequiredTypes)
+                .minus(captured)
                 .map(PayloadCatalog::tag)
                 .joinToString()
             stopCapture("Captured Platoon roster; missing $missing after the navigation period")
@@ -77,56 +85,14 @@ class CaptureVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
-        platoonRepository = PlatoonRepository(this)
-        guildMembersWriter = GuildMembersCsvWriter(
-            File(filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY),
-        ) { batch ->
-            val directResult = runCatching {
-                platoonRepository.ingest(
-                    capturedAt = Instant.parse(batch.logTime),
-                    members = batch.members,
-                    sourceFile = batch.file.name,
-                )
-            }
-            if (directResult.isSuccess) {
-                val result = directResult.getOrThrow()
-                if (!result.duplicate) {
-                    CaptureStatus.update(
-                        "Updated Platoon roster: +${result.joined + result.rejoined}, " +
-                            "-${result.left}",
-                    )
-                }
-                markRosterCaptured()
-            } else {
-                val recovery = runCatching {
-                    require(batch.file.isFile) { "Completed roster CSV was not published" }
-                    platoonRepository.reconcileRetainedCsvFiles(
-                        requireNotNull(batch.file.parentFile),
-                    )
-                    check(platoonRepository.hasSnapshotSource(batch.file.name)) {
-                        "Completed roster CSV was not reconciled"
-                    }
-                }
-                if (recovery.isFailure) {
-                    throw directResult.exceptionOrNull()
-                        ?: recovery.exceptionOrNull()
-                        ?: IllegalStateException("Roster ingestion and recovery both failed")
-                }
-                CaptureStatus.update("Recovered Platoon database from the completed roster CSV")
-                markRosterCaptured()
-            }
-        }
+        profileRegistry = PlatoonProfileRegistry(this)
+        clientServerRegions = ClientServerRegionPreferences(this)
         historyStore = CaptureHistoryStore(
             File(filesDir, CaptureHistoryStore.HISTORY_DIRECTORY),
         )
         payloadHistoryPreferences = PayloadHistoryPreferences(this)
         capturePreferences = CapturePreferences(this)
         diagnosticsStore = CaptureDiagnosticsStore(this)
-        platoonPayloadDispatcher = PlatoonPayloadDispatcher(
-            onMembers = guildMembersWriter::accept,
-            onActivity = { platoonRepository.ingestActivity(it).acceptedObservations > 0 },
-            onUpdates = { platoonRepository.ingestUpdates(it).acceptedObservations > 0 },
-        )
         createNotificationChannel()
     }
 
@@ -153,7 +119,7 @@ class CaptureVpnService : VpnService() {
         if (CaptureStatus.isRunning) CaptureStatus.markStopped()
         mainHandler.removeCallbacksAndMessages(null)
         migrationExecutor.shutdownNow()
-        guildMembersWriter.close()
+        closeAllFlowSessions()
         super.onDestroy()
     }
 
@@ -178,9 +144,10 @@ class CaptureVpnService : VpnService() {
         captureStartPending = true
         migrationExecutor.execute {
             val migration = runCatching {
-                platoonRepository.reconcileRetainedCsvFiles(
-                    File(filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY),
-                )
+                profileRegistry.ensureInitialized().forEach { profile ->
+                    val scope = PlatoonStorageScope(profile.storageId)
+                    PlatoonRepository(this, scope).reconcileRetainedCsvFiles()
+                }
             }
             mainHandler.post {
                 if (!captureStartPending) return@post
@@ -234,6 +201,8 @@ class CaptureVpnService : VpnService() {
         parsers.clear()
         taintedFlows.clear()
         flowMetadata.clear()
+        closeAllFlowSessions()
+        pendingFlowPayloads.clear()
         decodedPayloadCount.set(0)
         observedPayloadBytes.set(0)
         inspectedPayloadBytes.set(0)
@@ -241,7 +210,7 @@ class CaptureVpnService : VpnService() {
         parseWarningCount.set(0)
         droppedParserTaskCount.set(0)
         unknownPayloadCounts.clear()
-        capturedRequiredTypes.clear()
+        captureChecklist.clear()
         mainHandler.removeCallbacks(captureOnceGraceStop)
         sessionStartedAt = Instant.now()
 
@@ -347,17 +316,28 @@ class CaptureVpnService : VpnService() {
 
     private fun enqueueFlowClosed(flowId: Long) {
         if (!submitParserTask {
+                val metadata = flowMetadata[flowId]
                 if (taintedFlows.remove(flowId)) {
-                    parsers.remove(flowId)
-                    flowMetadata.remove(flowId)
+                    CaptureFlowStateCleanup.remove(flowId, parsers, flowMetadata)
+                    closeFlowSession(flowId)
                     return@submitParserTask
                 }
-                val parser = parsers.remove(flowId) ?: return@submitParserTask
-                processEvents(flowId, parser.finish(), flowEnded = true)
-                flowMetadata.remove(flowId)
+                val parser = CaptureFlowStateCleanup.remove(flowId, parsers, flowMetadata)
+                if (parser != null) {
+                    processEvents(
+                        flowId = flowId,
+                        events = parser.finish(),
+                        metadata = metadata,
+                        flowEnded = true,
+                    )
+                }
+                closeFlowSession(flowId)
             }
         ) {
-            parsers.remove(flowId)
+            CaptureFlowStateCleanup.remove(flowId, parsers, flowMetadata)
+            closeFlowSession(flowId)
+            // Earlier queued chunks may still run even though the close task was rejected.
+            // Keep the flow tainted until the capture session resets all parser state.
             taintedFlows += flowId
         }
     }
@@ -378,6 +358,7 @@ class CaptureVpnService : VpnService() {
     private fun processEvents(
         flowId: Long,
         events: List<ParseEvent>,
+        metadata: CaptureFlowMetadata? = flowMetadata[flowId],
         flowEnded: Boolean = false,
     ) {
         val warnings = events.filterIsInstance<ParseEvent.Warning>()
@@ -387,73 +368,161 @@ class CaptureVpnService : VpnService() {
         events.filterIsInstance<ParseEvent.UnknownPayload>().forEach { event ->
             unknownPayloadCounts.computeIfAbsent(event.payloadType) { AtomicLong() }.incrementAndGet()
         }
-        decoded.forEach { event ->
+        decoded.forEachIndexed { index, event ->
             if (event.value.payloadType == Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE) {
                 val profile = event.value.data as? PlatoonProfileData
-                if (profile != null && profile.platoonId != 0u && profile.platoonName.isNotBlank()) {
-                    val client = when (flowMetadata[flowId]?.ownerPackage) {
-                        SupportedGamePackages.HAOPLAY -> "HaoPlay"
-                        SupportedGamePackages.DARKWINTER -> "Darkwinter"
-                        else -> "unknown client"
-                    }
-                    val name = profile.platoonName.replace(Regex("\\s+"), " ").take(40)
-                    CaptureStatus.update("Detected $name (${profile.platoonId}) via $client")
+                if (PlatoonProfilePolicy.isValid(profile)) {
+                    requireNotNull(profile)
+                    identifyFlow(flowId, metadata, profile)
                 }
-                markRequiredPayloadCaptured(Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE)
             }
             if (payloadHistoryPreferences.isEnabled(event.value.payloadType)) {
                 runCatching { historyStore.save(event.value) }
                     .onFailure { CaptureStatus.update("Unable to save parsed-packet history") }
             }
-            val routed = platoonPayloadDispatcher.dispatch(event.value, flowEnded)
-            routed.activity
-                ?.onSuccess {
-                    markRequiredPayloadCaptured(Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY)
-                }
-                ?.onFailure { CaptureStatus.update("Unable to update Platoon activity history") }
-            routed.updates
-                ?.onSuccess {
-                    markRequiredPayloadCaptured(Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES)
-                }
-                ?.onFailure { CaptureStatus.update("Unable to update exact Platoon history") }
-            routed.members
-                .onSuccess { saved ->
-                    if (saved != null) {
-                        CaptureStatus.update(
-                            "Saved ${saved.rowCount} Platoon members to ${saved.file.name}",
-                        )
-                    }
-                }
-                .onFailure { CaptureStatus.update("Unable to save Platoon CSV") }
+            val session = flowSessions[flowId]
+            if (session == null) {
+                retainPendingPayload(flowId, event.value)
+                return@forEachIndexed
+            }
+            routePayload(
+                session,
+                event.value,
+                flowEnded = flowEnded && index == decoded.lastIndex,
+            )
         }
         if (decoded.isNotEmpty()) decodedPayloadCount.addAndGet(decoded.size.toLong())
     }
 
+    private fun identifyFlow(
+        flowId: Long,
+        metadata: CaptureFlowMetadata?,
+        data: PlatoonProfileData,
+    ) {
+        val ownerPackage = metadata?.ownerPackage
+        if (ownerPackage !in SupportedGamePackages.all) {
+            pendingFlowPayloads.reject(flowId)
+            CaptureStatus.update("Detected a Platoon profile, but its game client could not be verified")
+            return
+        }
+        val profile = runCatching {
+            profileRegistry.upsertDetected(
+                ownerPackage = requireNotNull(ownerPackage),
+                region = clientServerRegions.get(ownerPackage),
+                data = data,
+            )
+        }.getOrElse {
+            pendingFlowPayloads.reject(flowId)
+            CaptureStatus.update("Unable to isolate the detected Platoon")
+            return
+        }
+        val current = flowSessions[flowId]
+        if (current?.profile?.storageId == profile.storageId) {
+            markRequiredPayloadCaptured(
+                profile.storageId,
+                Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE,
+            )
+            return
+        }
+        current?.close()
+        val session = PlatoonCaptureSession(
+            context = this,
+            profile = profile,
+            onRosterCaptured = ::markRosterCaptured,
+            onStatus = CaptureStatus::update,
+        )
+        flowSessions[flowId] = session
+        pendingFlowPayloads.take(flowId).forEach { pending ->
+            routePayload(session, pending)
+        }
+        CaptureStatus.update(
+            "Detected ${profile.platoonName.take(40)} (${profile.platoonId}) via " +
+                profile.client.displayName,
+        )
+        markRequiredPayloadCaptured(
+            profile.storageId,
+            Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE,
+        )
+    }
+
+    private fun retainPendingPayload(flowId: Long, payload: ParsedPayload) {
+        when (pendingFlowPayloads.offer(flowId, payload)) {
+            BoundedFlowPayloadBuffer.OfferResult.OVERFLOW ->
+                CaptureStatus.update("Discarded an unidentified Platoon flow that exceeded its buffer")
+            BoundedFlowPayloadBuffer.OfferResult.ACCEPTED,
+            BoundedFlowPayloadBuffer.OfferResult.REJECTED,
+            -> Unit
+        }
+    }
+
+    private fun routePayload(
+        session: PlatoonCaptureSession,
+        payload: ParsedPayload,
+        flowEnded: Boolean = false,
+    ) {
+        val routed = session.dispatch(payload, flowEnded)
+        routed.activity?.onSuccess { accepted ->
+            if (accepted) {
+                markRequiredPayloadCaptured(
+                    session.profile.storageId,
+                    Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY,
+                )
+            }
+        }?.onFailure { CaptureStatus.update("Unable to update Platoon activity history") }
+        routed.updates?.onSuccess { accepted ->
+            if (accepted) {
+                markRequiredPayloadCaptured(
+                    session.profile.storageId,
+                    Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES,
+                )
+            }
+        }?.onFailure { CaptureStatus.update("Unable to update exact Platoon history") }
+        routed.members.onSuccess { saved ->
+            if (saved != null) {
+                CaptureStatus.update(
+                    "Saved ${saved.rowCount} members for ${session.profile.platoonName}",
+                )
+            }
+        }.onFailure { CaptureStatus.update("Unable to save Platoon CSV") }
+    }
+
+    private fun closeFlowSession(flowId: Long) {
+        pendingFlowPayloads.remove(flowId)
+        flowSessions.remove(flowId)?.close()
+    }
+
+    private fun closeAllFlowSessions() {
+        flowSessions.values.forEach { runCatching { it.close() } }
+        flowSessions.clear()
+    }
+
     private fun maybeStopCaptureOnce() {
         if (!captureOnce || !CaptureStatus.isRunning) return
-        if (!capturedRequiredTypes.containsAll(REQUIRED_CAPTURE_TYPES)) return
+        if (!captureChecklist.targetComplete()) return
         mainHandler.removeCallbacks(captureOnceGraceStop)
         mainHandler.post {
             if (captureOnce &&
                 CaptureStatus.isRunning &&
-                capturedRequiredTypes.containsAll(REQUIRED_CAPTURE_TYPES)
+                captureChecklist.targetComplete()
             ) {
                 stopCapture("Captured Platoon roster, activity, and updates")
             }
         }
     }
 
-    private fun markRosterCaptured() {
-        markRequiredPayloadCaptured(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS)
-        if (captureOnce) {
+    private fun markRosterCaptured(storageId: String) {
+        markRequiredPayloadCaptured(storageId, Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS)
+        if (captureOnce && captureChecklist.targetScopeId() == storageId) {
             mainHandler.removeCallbacks(captureOnceGraceStop)
             mainHandler.postDelayed(captureOnceGraceStop, CAPTURE_ONCE_GRACE_MILLIS)
         }
     }
 
-    private fun markRequiredPayloadCaptured(payloadType: Int) {
-        capturedRequiredTypes += payloadType
-        CaptureStatus.markUsefulPayload(payloadType)
+    private fun markRequiredPayloadCaptured(storageId: String, payloadType: Int) {
+        captureChecklist.mark(storageId, payloadType, chooseTarget = captureOnce)
+        if (!captureOnce || captureChecklist.targetScopeId() == storageId) {
+            CaptureStatus.markUsefulPayload(payloadType)
+        }
         maybeStopCaptureOnce()
     }
 
@@ -479,6 +548,8 @@ class CaptureVpnService : VpnService() {
             drainParserTasks()
             parsers.clear()
             flowMetadata.clear()
+            closeAllFlowSessions()
+            pendingFlowPayloads.clear()
             CaptureStatus.markStopped("Capture stopped unexpectedly; press Prepare capture to retry")
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -509,6 +580,8 @@ class CaptureVpnService : VpnService() {
         parsers.clear()
         taintedFlows.clear()
         flowMetadata.clear()
+        closeAllFlowSessions()
+        pendingFlowPayloads.clear()
         saveDiagnostics()
     }
 
@@ -616,6 +689,7 @@ class CaptureVpnService : VpnService() {
         private const val PARSER_DRAIN_TIMEOUT_SECONDS = 3L
         private const val TRAFFIC_REPORT_BYTES = 64 * 1024
         private const val CAPTURE_ONCE_GRACE_MILLIS = 60_000L
+        private const val MAX_PENDING_PAYLOADS_PER_FLOW = 32
         private val REQUIRED_CAPTURE_TYPES = setOf(
             Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE,
             Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,

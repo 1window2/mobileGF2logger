@@ -69,9 +69,13 @@ Payload `21905` is the authoritative Platoon identity for the decoded flow. On
 Android 10 and newer, the capture service also resolves the original connection
 tuple to the owning supported package through Android's VPN owner API. Remote
 IP addresses and DNS/SNI labels are diagnostic endpoint metadata only; they are
-not persistence keys. The current schema remains single-Platoon until every
-database, import, CSV, backup, history, and UI path can enforce one composite
-scope without fallback to an unscoped record.
+not persistence keys. Android 8–9 falls back only when exactly one supported
+client is installed. Management payloads are quarantined until a flow has both
+a verified supported owner and valid `21905`. The composite
+`(client package, selected server region, Platoon ID)` is hashed into a stable
+private storage ID used by every database, import, retained CSV, checkpoint,
+weekly setting, and backup path. Existing v2.3.x storage remains in place as a
+legacy profile instead of being copied or destructively migrated.
 
 ## Memory and concurrency limits
 
@@ -83,6 +87,9 @@ scope without fallback to an unscoped record.
   Quarantine is advanced from frame metadata before protobuf decoding, so even
   a malformed terminal fragment clears the discarded dataset deterministically.
 - The parser service has one worker and a queue capped at 256 payload chunks.
+- Before identity is established, each flow retains at most 32 decoded payload
+  objects. Overflow rejects that flow until closure. The profile registry holds
+  at most 16 bounded identities.
 - TLS, HTTP, and UDP payloads remain native and are excluded from the parser.
 - Outgoing plaintext chunks are used only for native flow classification.
 - Flow-close callbacks finalize any pending recognized payload before removing parser state.
@@ -170,7 +177,9 @@ plaintext TCP streams. Do not add pinning or anti-cheat bypasses.
 - `protocol` is an Android-independent decoding library. It owns framing,
   protobuf wire decoding, typed payload models, and text/CSV formatting.
 - `capture` owns the VPN/native lifecycle, bounded per-flow parsing, and
-  translation of completed capture batches into management-domain input.
+  translation of completed capture batches into management-domain input. Its
+  per-flow session is the only bridge from a verified composite identity to a
+  scoped management repository.
 - `management` owns evidence policy, reporting rules, the repository facade,
   private SQLite persistence, and the retained completed-roster directory.
   It does not depend on the capture package.
@@ -208,6 +217,18 @@ timezone. Schema-v1 through schema-v3 backups remain accepted with safe
 defaults and completed onboarding defaults so an experienced restoring user is
 not trapped in the guide.
 
+`PlatoonProfileRegistry` is a small registry, not a second source of member
+truth. Home, Platoon, Weekly, and Settings selectors only choose the active
+scope; Activities recreate and construct repositories, member ordering,
+cutlines, timezone, CSV, and checkpoint helpers from that scope. One-time
+capture maintains its required-payload checklist per scope so observations
+from two clients cannot be combined into a false completion.
+
+CSV preview and apply retain the same immutable scope even if an Activity is
+recreated. A scoped backup is validated before profile metadata changes; after
+the database transaction commits, restore selects the archived profile and
+aligns that publisher's future capture-region routing with the archived server.
+
 The design deliberately favors composition over deep inheritance. Abstraction
 and polymorphism appear at real variation points (`GameData`, `ParseEvent`, and
 the native listener contract); encapsulation is provided by stores and the
@@ -237,7 +258,10 @@ selected state without reading, validating, or replacing app settings. Format
 v2 adds a checksummed, strictly
 typed settings payload containing only user-owned configuration; capture
 diagnostics, raw packet history, signing material, and internal migration flags
-are excluded.
+are excluded. Format v3 binds either archive scope to the deterministic client,
+server-region, and Platoon identity. Restoring v3 creates or replaces only that
+profile and then selects it; other profile databases and evidence directories
+are untouched. Older v1/v2 archives restore into the unmoved legacy profile.
 
 Complete restore validates the filename, archive entries and identity,
 checksums, settings completeness and ranges, current database schema, SQLite

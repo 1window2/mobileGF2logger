@@ -23,6 +23,7 @@ class PlatoonDatabase(
         PlatoonSchema.CURRENT_VERSION,
     ) {
     private val appContext = context.applicationContext
+    private val storageScope = PlatoonStorageScope.fromDatabaseName(databaseName)
 
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
@@ -232,7 +233,10 @@ class PlatoonDatabase(
             backfillSnapshotMembershipPeriodEvents(db)
         }
         if (needsManualCalendarDateBackfill) {
-            backfillManualCalendarDates(db, GameTimeZonePreferences.get(appContext))
+            backfillManualCalendarDates(
+                db,
+                GameTimeZonePreferences.get(appContext, storageScope.storageId),
+            )
         }
         if (oldVersion < 11) {
             createPlatoonMaintenanceStateTable(db)
@@ -361,6 +365,12 @@ class PlatoonDatabase(
         db.execSQL("DROP TABLE weekly_notes_legacy_v10")
         db.execSQL("DROP TABLE platoon_activity_legacy_v10")
         db.execSQL("DROP TABLE member_events_legacy_v10")
+    }
+
+    /** Returns true only when this database contains user-visible management state. */
+    internal fun hasManagementData(): Boolean {
+        val db = readableDatabase
+        return MANAGEMENT_DATA_TABLES.any { table -> count(db, table) > 0L }
     }
 
     @Synchronized
@@ -2334,6 +2344,14 @@ class PlatoonDatabase(
     @Synchronized
     fun addWeeklyNote(periodStartEpochDay: Long, gameDayEpochDay: Long, text: String): Long {
         require(text.isNotBlank())
+        val manualNoteCount = readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM weekly_notes WHERE period_start = ? AND is_automatic = 0",
+            arrayOf(periodStartEpochDay.toString()),
+        ).use { cursor ->
+            check(cursor.moveToFirst())
+            cursor.getInt(0)
+        }
+        if (!WeeklyNotePolicy.canAdd(manualNoteCount)) throw WeeklyNoteLimitException()
         return writableDatabase.insertOrThrow(
             "weekly_notes",
             null,
@@ -2651,6 +2669,44 @@ class PlatoonDatabase(
         try {
             db.delete("weekly_report_history_state", null, null)
             db.delete("weekly_report_history", null, null)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    // Function Name: replaceWeeklyReportHistory
+    // Description:
+    // - Replaces every derived weekly revision in one SQLite transaction.
+    // - Validates the complete replacement before deleting existing history.
+    // Parameters:
+    // - replacements: One prepared current revision for each evidence-backed week.
+    // Returns:
+    // - Unit after the complete replacement commits, or after SQLite rolls back on failure.
+    @Synchronized
+    internal fun replaceWeeklyReportHistory(replacements: List<WeeklyReportHistoryReplacement>) {
+        require(replacements.map { it.periodStartEpochDay }.distinct().size == replacements.size)
+        replacements.forEach { replacement ->
+            require(replacement.fingerprint.matches(Regex("[0-9a-f]{64}")))
+            require(replacement.payload.size in 1..WeeklyReportHistoryCodec.MAX_PAYLOAD_BYTES)
+        }
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("weekly_report_history_state", null, null)
+            db.delete("weekly_report_history", null, null)
+            replacements.forEach { replacement ->
+                db.insertOrThrow(
+                    "weekly_report_history",
+                    null,
+                    ContentValues().apply {
+                        put("period_start", replacement.periodStartEpochDay)
+                        put("recorded_at", replacement.recordedAt.toEpochMilli())
+                        put("fingerprint", replacement.fingerprint)
+                        put("report_blob", replacement.payload)
+                    },
+                )
+            }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -3644,13 +3700,13 @@ class PlatoonDatabase(
                         instantIndex = 1,
                         dateIndex = 3,
                         timeKnownIndex = 5,
-                        zoneId = GameTimeZonePreferences.get(appContext),
+                        zoneId = GameTimeZonePreferences.get(appContext, storageScope.storageId),
                     ),
                     left = cursor.membershipBoundaryValue(
                         instantIndex = 2,
                         dateIndex = 4,
                         timeKnownIndex = 6,
-                        zoneId = GameTimeZonePreferences.get(appContext),
+                        zoneId = GameTimeZonePreferences.get(appContext, storageScope.storageId),
                     ),
                     joinedSource = EvidenceSource.valueOf(cursor.getString(7)),
                     leftSource = cursor.getNullableString(8)?.let(EvidenceSource::valueOf),
@@ -3969,6 +4025,15 @@ class PlatoonDatabase(
         const val DAILY_PATROL_REWARD_ACTION_ID = 802001L
         internal const val MAX_STORED_ACTIVITY_OBSERVATIONS = 10_000
         internal const val MAX_WEEKLY_REPORT_HISTORY = 15
+        private val MANAGEMENT_DATA_TABLES = listOf(
+            "snapshots",
+            "members",
+            "membership_periods",
+            "member_events",
+            "platoon_activity",
+            "weekly_notes",
+            "weekly_overrides",
+        )
         private const val MAX_UNRESOLVED_ACTIVITY_RESOLUTIONS = 250
         private const val ACTIVITY_RESOLUTION_CURSOR_KEY = "activity_resolution_cursor"
         private const val DAILY_PATROL_RELATED_ACTION_ID = 801005L
@@ -4046,6 +4111,13 @@ class PlatoonDatabase(
         )
     }
 }
+
+internal data class WeeklyReportHistoryReplacement(
+    val periodStartEpochDay: Long,
+    val recordedAt: Instant,
+    val fingerprint: String,
+    val payload: ByteArray,
+)
 
 private fun ContentValues.putNullableLong(key: String, value: Long?) {
     if (value == null) putNull(key) else put(key, value)

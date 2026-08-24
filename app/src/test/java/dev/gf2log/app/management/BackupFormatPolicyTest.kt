@@ -10,6 +10,10 @@ class BackupFormatPolicyTest {
             BackupFormatPolicy.PLATOON_ONLY_VERSION,
             hasSettings = false,
         )
+        BackupFormatPolicy.requirePlatoonOnly(
+            BackupFormatPolicy.SCOPED_VERSION,
+            hasSettings = false,
+        )
 
         assertThrows(IllegalArgumentException::class.java) {
             BackupFormatPolicy.requirePlatoonOnly(
@@ -23,6 +27,10 @@ class BackupFormatPolicyTest {
     fun `complete restore rejects legacy and incomplete backups`() {
         BackupFormatPolicy.requireComplete(
             BackupFormatPolicy.COMPLETE_VERSION,
+            hasSettings = true,
+        )
+        BackupFormatPolicy.requireComplete(
+            BackupFormatPolicy.SCOPED_VERSION,
             hasSettings = true,
         )
 

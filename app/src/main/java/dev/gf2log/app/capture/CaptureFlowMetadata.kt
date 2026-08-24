@@ -26,18 +26,43 @@ internal object CaptureFlowOwnerResolver {
         remoteAddress: String,
         remotePort: Int,
     ): String? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
-        val connectivity = context.getSystemService(ConnectivityManager::class.java)
-        val uid = runCatching {
-            connectivity.getConnectionOwnerUid(
-                protocol,
-                InetSocketAddress(InetAddress.getByName(localAddress), localPort),
-                InetSocketAddress(InetAddress.getByName(remoteAddress), remotePort),
-            )
-        }.getOrNull() ?: return null
-        if (uid < 0) return null
-        return context.packageManager.getPackagesForUid(uid)
-            .orEmpty()
-            .firstOrNull { it in SupportedGamePackages.all }
+        val visiblePackages = SupportedGamePackages.all.mapNotNull { packageName ->
+            runCatching {
+                packageName to context.packageManager.getApplicationInfo(packageName, 0).uid
+            }.getOrNull()
+        }
+        val resolved = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val connectivity = context.getSystemService(ConnectivityManager::class.java)
+            val local = InetSocketAddress(InetAddress.getByName(localAddress), localPort)
+            val remote = InetSocketAddress(InetAddress.getByName(remoteAddress), remotePort)
+            val forwardUid = runCatching {
+                connectivity.getConnectionOwnerUid(
+                    protocol,
+                    local,
+                    remote,
+                )
+            }.getOrNull()?.takeIf { it >= 0 }
+            val forwardPackage = visiblePackages.firstOrNull { it.second == forwardUid }?.first
+            val reverseUid = if (forwardPackage == null) runCatching {
+                // Some vendor network stacks report VPN tuples in the opposite direction.
+                connectivity.getConnectionOwnerUid(protocol, remote, local)
+            }.getOrNull()?.takeIf { it >= 0 } else null
+            forwardPackage ?: visiblePackages.firstOrNull { it.second == reverseUid }?.first
+        } else {
+            null
+        }
+        val installed = visiblePackages.map { it.first }
+        return CaptureFlowOwnerPolicy.choose(resolved, installed)
+    }
+}
+
+/** Falls back only when exactly one supported client is installed, avoiding ambiguous attribution. */
+internal object CaptureFlowOwnerPolicy {
+    fun choose(resolvedPackage: String?, installedPackages: Collection<String>): String? {
+        if (resolvedPackage in SupportedGamePackages.all) return resolvedPackage
+        return installedPackages
+            .filter { it in SupportedGamePackages.all }
+            .distinct()
+            .singleOrNull()
     }
 }

@@ -25,7 +25,7 @@
     <string name="open_options">Open payload options</string>
     <string name="export_platoon_backup">Export Platoon backup</string>
     <string name="import_platoon_backup">Import Platoon backup</string>
-    <string name="import_backup_warning">This replaces current structured Platoon history, membership dates, and notes. Capture must remain stopped.</string>
+    <string name="import_backup_warning">This replaces management data for the Platoon contained in the backup. Other Platoons are unchanged. Capture must remain stopped.</string>
     <string name="stop_capture_before_backup">Stop capture before exporting or importing a backup.</string>
     <string name="status_backup_exported">Platoon backup exported</string>
     <string name="status_backup_restored">Platoon backup restored</string>
@@ -59,10 +59,10 @@
     <string name="onboarding_settings_feature_2">Create or restore a complete backup.</string>
     <string name="onboarding_settings_feature_3">Configure a Discord webhook and select the packet types you need.</string>
     <string name="onboarding_management_title">Platoon management</string>
-    <string name="onboarding_management_description">Captured or imported member data is reflected in member records and the weekly table.</string>
+    <string name="onboarding_management_description">Captured or imported member data is reflected in the selected Platoon’s member records and weekly table.</string>
     <string name="onboarding_management_feature_1">Search and manage current or withdrawn members and their join and withdrawal history.</string>
     <string name="onboarding_management_feature_2">Preview CSV imports before commit and use the automatic checkpoint to undo the latest import.</string>
-    <string name="onboarding_management_feature_3">Compare snapshots or export only the members you select.</string>
+    <string name="onboarding_management_feature_3">Switch between isolated Platoons, compare snapshots, or export only selected members.</string>
     <string name="onboarding_weekly_title">Weekly table</string>
     <string name="onboarding_weekly_description">Review weekly merit tables separated into Standard and Gunsmoke weeks.</string>
     <string name="onboarding_weekly_feature_1">Tap any cell to see the basis for its value and the packet evidence used.</string>
@@ -75,10 +75,10 @@
     <string name="onboarding_packet_feature_3">Use the information in each packet to complete member records and the weekly table over time.</string>
     <string name="backup">Backup</string>
     <string name="restore_full_backup">Restore backup</string>
-    <string name="restore_full_backup_description">Restore all app settings, Platoon management and member details including membership history, and every weekly table from a complete backup.</string>
+    <string name="restore_full_backup_description">Restore app settings and all management data for the Platoon contained in a complete backup. Other Platoons remain unchanged.</string>
     <string name="back_up_all_information">Back up all information</string>
-    <string name="back_up_all_information_description">Save all app settings, Platoon management and member details including membership history, and every weekly table in one complete backup.</string>
-    <string name="restore_full_backup_warning">This replaces all current app settings, Platoon management data, member and membership history, and weekly-table history. Keep capture stopped while restoring.</string>
+    <string name="back_up_all_information_description">Save app settings and all management data for the selected Platoon, including membership history and weekly tables.</string>
+    <string name="restore_full_backup_warning">This replaces app settings and data for the Platoon contained in the backup, then selects it. Other Platoons remain unchanged. Keep capture stopped while restoring.</string>
     <string name="invalid_full_backup">This is not a valid complete backup file.</string>
     <string name="full_backup_exported">Complete backup saved</string>
     <string name="full_backup_restored">Complete backup restored</string>
@@ -181,6 +181,7 @@
     <string name="unknown_date">unknown</string>
     <string name="note_hint">Add a note for the selected game day</string>
     <string name="add_note">Add note</string>
+    <string name="weekly_note_limit_reached">This week already contains the maximum 128 notes.</string>
     <string name="delete_note">Delete note</string>
     <string name="delete_note_confirmation">Delete this note?</string>
     <string name="delete">Delete</string>
@@ -412,4 +413,10 @@
     <string name="weekly_table_history_restored">The recorded weekly table was restored.</string>
     <string name="weekly_table_history_restore_failed">This table history entry is no longer available.</string>
     <string name="weekly_table_history_live_notice">Showing a restored table history entry. New evidence will return this week to the live table.</string>
+    <string name="select_platoon">Select platoon</string>
+    <string name="no_platoon_detected">No platoon detected</string>
+    <string name="no_platoon_detected_detail">Capture a supported client until the platoon profile arrives.</string>
+    <string name="existing_platoon_data">Existing platoon data</string>
+    <string name="haoplay_capture_region">HaoPlay capture server</string>
+    <string name="darkwinter_capture_region">Darkwinter capture server</string>
 </resources>

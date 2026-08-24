@@ -735,12 +735,28 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     private fun clearState() {
-        runCatching {
-            PlatoonRepository.withExclusiveDatabase {
-                context.deleteDatabase(PlatoonSchema.DATABASE_NAME)
+        context.databaseList()
+            .filter {
+                it == PlatoonSchema.DATABASE_NAME ||
+                    it.matches(Regex("platoon-[0-9a-f]{32}\\.db"))
             }
-        }
+            .forEach { databaseName ->
+                val scope = PlatoonStorageScope.fromDatabaseName(databaseName)
+                runCatching {
+                    PlatoonRepository.withExclusiveDatabase(scope) {
+                        context.deleteDatabase(databaseName)
+                    }
+                }
+            }
         context.getSharedPreferences(USER_SETTINGS, Context.MODE_PRIVATE).edit().clear().commit()
+        listOf(
+            "platoon_profiles",
+            "platoon_member_order",
+            "platoon_weekly_cutlines",
+            "platoon_timezones",
+        ).forEach { preferences ->
+            context.getSharedPreferences(preferences, Context.MODE_PRIVATE).edit().clear().commit()
+        }
         FilePaths.restoreDirectory(context).deleteRecursively()
         FilePaths.restoreTransactionDirectory(context).deleteRecursively()
         FilePaths.retainedCsvDirectory(context).deleteRecursively()
@@ -748,6 +764,7 @@ class PlatoonBackupManagerIntegrationTest {
         FilePaths.csvCheckpointDirectory(context).deleteRecursively()
         FilePaths.csvCheckpointStagingDirectory(context).deleteRecursively()
         FilePaths.csvCheckpointPreviousDirectory(context).deleteRecursively()
+        java.io.File(context.filesDir, "platoons").deleteRecursively()
     }
 
     private object FilePaths {

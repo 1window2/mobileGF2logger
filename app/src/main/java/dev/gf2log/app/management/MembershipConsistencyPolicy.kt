@@ -59,7 +59,13 @@ internal object MembershipConsistencyPolicy {
         } else {
             requireNotNull(first.joinedAt).compareTo(requireNotNull(second.joinedAt))
         }
-        return if (dateOrder != 0) dateOrder else first.id.compareTo(second.id)
+        if (dateOrder != 0) return dateOrder
+        if (first.joinedTimeKnown && second.joinedTimeKnown) {
+            val instantOrder = requireNotNull(first.joinedAt)
+                .compareTo(requireNotNull(second.joinedAt))
+            if (instantOrder != 0) return instantOrder
+        }
+        return first.id.compareTo(second.id)
     }
 
     private fun periodsProvablyOverlap(

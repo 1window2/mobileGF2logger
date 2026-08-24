@@ -58,6 +58,8 @@ quarantined until closure if its identity changes or profile admission fails.
 Each user-started capture may admit at most one new profile per supported
 client; existing profiles remain usable, and a confirmed selector action can
 forget registry metadata to recover capacity without deleting isolated data.
+Closed flows discard address and owner metadata even when no parser was created;
+queue-rejected closes quarantine the flow so delayed open work cannot restore it.
 
 Exports and Discord sends are explicit user actions that move selected data out
 of Android private storage. Backups are checksummed and strictly validated but

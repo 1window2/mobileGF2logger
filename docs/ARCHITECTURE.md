@@ -97,7 +97,9 @@ legacy profile instead of being copied or destructively migrated.
   without deleting its isolated database or retained evidence.
 - TLS, HTTP, and UDP payloads remain native and are excluded from the parser.
 - Outgoing plaintext chunks are used only for native flow classification.
-- Flow-close callbacks finalize any pending recognized payload before removing parser state.
+- Flow-close callbacks finalize any pending recognized payload before removing parser state and
+  unconditionally remove metadata even when no parser existed. A rejected close callback
+  quarantines its flow, so an earlier queued open callback cannot recreate stale metadata.
 - Queue saturation is counted and surfaced in the capture status instead of being silently discarded.
 - Raw IP packets and application payloads are not persisted.
 - One parsed history entry is capped at 2 MiB. The packet-table projection

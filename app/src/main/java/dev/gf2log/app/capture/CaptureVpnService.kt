@@ -300,20 +300,25 @@ class CaptureVpnService : VpnService() {
         remotePort: Int,
     ) {
         submitParserTask {
-            flowMetadata[flowId] = CaptureFlowMetadata(
-                protocol = protocol,
-                localAddress = localAddress,
-                localPort = localPort,
-                remoteAddress = remoteAddress,
-                remotePort = remotePort,
-                ownerPackage = CaptureFlowOwnerResolver.resolve(
-                    this,
-                    protocol,
-                    localAddress,
-                    localPort,
-                    remoteAddress,
-                    remotePort,
+            CaptureFlowStateCleanup.registerUnlessQuarantined(
+                flowId = flowId,
+                value = CaptureFlowMetadata(
+                    protocol = protocol,
+                    localAddress = localAddress,
+                    localPort = localPort,
+                    remoteAddress = remoteAddress,
+                    remotePort = remotePort,
+                    ownerPackage = CaptureFlowOwnerResolver.resolve(
+                        this,
+                        protocol,
+                        localAddress,
+                        localPort,
+                        remoteAddress,
+                        remotePort,
+                    ),
                 ),
+                metadata = flowMetadata,
+                quarantinedFlows = taintedFlows,
             )
         }
     }

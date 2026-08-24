@@ -35,6 +35,8 @@ All notable changes to mobileGF2logger are documented here.
 - Quarantine identity-changing or admission-failed flows, admit at most one new
   profile per client per user-started capture, and let users forget selector
   metadata without deleting the isolated Platoon data.
+- Remove metadata for non-parsed VPN flows on every close path and prevent a
+  delayed open callback from restoring metadata after a rejected close.
 
 ## 2.3.3 - 2026-08-24
 

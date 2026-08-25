@@ -425,7 +425,7 @@ class OptionsActivity : LocalizedActivity() {
         gravity = Gravity.TOP
         minimumHeight = dp(52)
         setPadding(0, dp(2), 0, dp(2))
-        addView(CheckBox(context).apply {
+        val checkBox = CheckBox(context).apply {
             contentDescription = title
             isChecked = checked
             isEnabled = enabled
@@ -436,7 +436,8 @@ class OptionsActivity : LocalizedActivity() {
                 )
             }
             setOnCheckedChangeListener { _, value -> onChanged(value) }
-        }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        }
+        addView(checkBox, LinearLayout.LayoutParams(dp(48), dp(48)))
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -455,6 +456,10 @@ class OptionsActivity : LocalizedActivity() {
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
             topMargin = dp(4)
         })
+        if (enabled) {
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            setOnClickListener { checkBox.performClick() }
+        }
     }
 
     private fun confirmFullRestore() {

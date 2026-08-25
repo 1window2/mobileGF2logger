@@ -49,7 +49,7 @@ class PlatoonActivity : LocalizedActivity() {
         super.onCreate(savedInstanceState)
         profileBinding = ActivePlatoonScopeBinding(this)
         val scope = profileBinding.scope ?: run {
-            Toast.makeText(this, R.string.no_platoon_detected_detail, Toast.LENGTH_LONG).show()
+            TransientMessage.show(this, R.string.no_platoon_detected_detail, Toast.LENGTH_LONG)
             finish()
             return
         }
@@ -327,18 +327,18 @@ class PlatoonActivity : LocalizedActivity() {
                 ?: error("Document provider did not open an output stream")
             output.writer(Charsets.UTF_8).use { it.write(content) }
         }.isSuccess
-        Toast.makeText(
+        TransientMessage.show(
             this,
             getString(if (exported) R.string.members_exported else R.string.status_export_failed),
             Toast.LENGTH_SHORT,
-        ).show()
+        )
     }
 
     @Suppress("DEPRECATION")
     private fun exportSelectedMembers() {
         val selected = statuses.filter { it.uid in selectedUids }
         if (selected.isEmpty()) {
-            Toast.makeText(this, R.string.select_members_first, Toast.LENGTH_SHORT).show()
+            TransientMessage.show(this, R.string.select_members_first)
             return
         }
         pendingMemberCsv = PlatoonMemberCsv.format(
@@ -416,13 +416,13 @@ class PlatoonActivity : LocalizedActivity() {
                 if (saved) {
                     dialog.dismiss()
                     refresh()
-                    Toast.makeText(this, R.string.saved, Toast.LENGTH_SHORT).show()
+                    TransientMessage.show(this, R.string.saved)
                 } else {
-                    Toast.makeText(
+                    TransientMessage.show(
                         this,
                         R.string.invalid_withdrawn_member,
                         Toast.LENGTH_SHORT,
-                    ).show()
+                    )
                 }
             }
         }

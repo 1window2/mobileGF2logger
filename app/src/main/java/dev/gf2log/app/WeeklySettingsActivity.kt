@@ -146,7 +146,7 @@ class WeeklySettingsActivity : LocalizedActivity() {
             patrolDays,
         ).map { runCatching { it.read() }.getOrNull() }
         if (values.any { it == INVALID }) {
-            Toast.makeText(this, R.string.invalid_cutline, Toast.LENGTH_SHORT).show()
+            TransientMessage.show(this, R.string.invalid_cutline)
             return
         }
         WeeklyCutlinePreferences(this).write(
@@ -161,7 +161,7 @@ class WeeklySettingsActivity : LocalizedActivity() {
                 weeklyPatrolDays = values[7]?.toInt(),
             ),
         )
-        Toast.makeText(this, R.string.saved, Toast.LENGTH_SHORT).show()
+        TransientMessage.show(this, R.string.saved)
         finish()
     }
 

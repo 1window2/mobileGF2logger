@@ -299,7 +299,7 @@ class MainActivity : LocalizedActivity() {
                             textSize = 22f
                             setTextColor(getColor(R.color.success_text))
                             setTypeface(typeface, Typeface.BOLD)
-                            setPadding(0, dp(2), 0, 0)
+                            setPadding(0, dp(4), 0, 0)
                         }
                         addView(captureStateText, matchWidth())
                         captureStatusText = TextView(context).apply {
@@ -307,25 +307,30 @@ class MainActivity : LocalizedActivity() {
                             setTextColor(getColor(R.color.text_secondary))
                         }
                         addView(captureStatusText, matchWidth())
-                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    }, LinearLayout.LayoutParams(dp(124), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                         marginEnd = dp(8)
                     })
                     addView(
-                        PlatoonProfileSelector.controls(this@MainActivity, compact = true),
-                        LinearLayout.LayoutParams(
-                            dp(200),
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                        PlatoonProfileSelector.controls(
+                            this@MainActivity,
+                            compact = true,
+                            showManageButton = false,
                         ),
+                        LinearLayout.LayoutParams(
+                            0,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            1f,
+                        ).apply { topMargin = dp(18) },
                     )
                 }, matchWidth())
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.TOP
+                    gravity = Gravity.BOTTOM
                     addView(TextView(context).apply {
                         text = getString(R.string.capture_target)
                         textSize = 12f
                         setTextColor(getColor(R.color.text_secondary))
-                        setPadding(0, dp(4), 0, 0)
+                        setPadding(0, 0, 0, dp(4))
                     }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                     addView(ImageButton(context).apply {
                         setImageResource(R.drawable.ic_info_outline)
@@ -333,7 +338,10 @@ class MainActivity : LocalizedActivity() {
                         useModernIconStyle()
                         setOnClickListener(::showTargetPackageInfo)
                     }, LinearLayout.LayoutParams(dp(48), dp(48)))
-                }, matchWidth())
+                }, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    dp(48),
+                ))
                 addView(fixedTargetField(SupportedGamePackages.HAOPLAY), matchWidth())
                 addView(
                     fixedTargetField(SupportedGamePackages.DARKWINTER),
@@ -509,11 +517,14 @@ class MainActivity : LocalizedActivity() {
             },
         )
         val status = CaptureStatus.read()
-        captureStatusText.text = when (status) {
-            "Capture is stopped" -> getString(R.string.capture_stopped_detail)
-            "Preparing capture" -> getString(R.string.status_preparing)
+        val detail = when {
+            status.startsWith("Capturing only ") -> ""
+            status == "Capture is stopped" -> getString(R.string.capture_stopped_detail)
+            status == "Preparing capture" -> getString(R.string.status_preparing)
             else -> status
         }
+        captureStatusText.text = detail
+        captureStatusText.visibility = if (detail.isBlank()) View.GONE else View.VISIBLE
         captureStateText.contentDescription = captureStateText.text
         captureStatusText.contentDescription = captureStatusText.text
         val busy = starting || running
@@ -638,10 +649,7 @@ class MainActivity : LocalizedActivity() {
     }
 
     private fun showNoPlatoonMessage() {
-        AlertDialog.Builder(this)
-            .setMessage(R.string.no_platoon_detected_detail)
-            .setPositiveButton(android.R.string.ok, null)
-            .show()
+        TransientMessage.show(this, R.string.no_platoon_detected_detail, android.widget.Toast.LENGTH_LONG)
     }
 
     private fun showCsvImportSelector() {
@@ -961,7 +969,7 @@ class MainActivity : LocalizedActivity() {
         }
         val scope = requireActiveScope() ?: return
         if (!CsvImportCheckpointManager(this, scope).canUndo()) {
-            statusText.text = getString(R.string.no_csv_import_checkpoint)
+            TransientMessage.show(this, R.string.no_csv_import_checkpoint)
             return
         }
         AlertDialog.Builder(this)

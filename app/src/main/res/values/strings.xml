@@ -368,6 +368,12 @@
     <string name="evidence_health_title">Evidence Health</string>
     <string name="weekly_evidence_guide">How evidence states work</string>
     <string name="weekly_evidence_guide_summary">✓ exact · ≥ confirmed minimum · ? unknown — tap for details</string>
+    <string name="evidence_guide_exact">An exact value is confirmed by a closing boundary, direct event, manual edit, or unanimous valid allocation.</string>
+    <string name="evidence_guide_minimum">Captures prove at least this value, but missing evidence may make the final value higher.</string>
+    <string name="evidence_guide_unknown">The available captures cannot determine this field safely, so GF2logger does not guess.</string>
+    <string name="evidence_guide_standard_allocation">Completed days can only use valid daily merit allocations. If several 0/50/90 combinations still fit, the day remains unknown.</string>
+    <string name="evidence_guide_gunsmoke_total">The counter-backed weekly total remains useful when missing Gunsmoke days cannot be divided safely.</string>
+    <string name="evidence_guide_gap_warning">Long capture gaps can leave earlier fields unknown. Tap any weekly cell to inspect the exact evidence used.</string>
     <string name="evidence_health_summary">Observed days %1$d/%2$d · Exact %3$d · Minimum %4$d · Unknown %5$d\nDirect login %6$d days · Direct patrol %7$d days · Closing boundaries %8$d</string>
     <string name="evidence_explanation_title">%1$s · %2$s · %3$s</string>
     <string name="evidence_explanation_message">Answer: %1$s\n\nWhy:\n%2$s</string>

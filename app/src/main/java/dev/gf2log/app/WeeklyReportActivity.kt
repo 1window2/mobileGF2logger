@@ -124,7 +124,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         super.onCreate(savedInstanceState)
         profileBinding = ActivePlatoonScopeBinding(this)
         val scope = profileBinding.scope ?: run {
-            Toast.makeText(this, R.string.no_platoon_detected_detail, Toast.LENGTH_LONG).show()
+            TransientMessage.show(this, R.string.no_platoon_detected_detail, Toast.LENGTH_LONG)
             finish()
             return
         }
@@ -1094,17 +1094,62 @@ class WeeklyReportActivity : LocalizedActivity() {
     }
 
     private fun showWeeklyEvidenceGuide(isGunsmokeWeek: Boolean) {
+        fun guideRow(symbol: String, description: CharSequence): View =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(TextView(context).apply {
+                    text = symbol
+                    textSize = if (symbol.length <= 2) 20f else 15f
+                    gravity = Gravity.CENTER
+                    setTypeface(typeface, Typeface.BOLD)
+                    setTextColor(getColor(R.color.accent_text))
+                    background = ModernUi.panelBackground(context, emphasized = true)
+                    setPadding(dp(8), dp(8), dp(8), dp(8))
+                }, LinearLayout.LayoutParams(dp(76), dp(48)).apply {
+                    marginEnd = dp(12)
+                })
+                addView(TextView(context).apply {
+                    text = description
+                    textSize = 14f
+                    setTextColor(getColor(R.color.text_primary))
+                    setLineSpacing(0f, 1.12f)
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            }
+        val guide = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(12))
+            val rows = listOf(
+                "✓" to getString(R.string.evidence_guide_exact),
+                "≥" to getString(R.string.evidence_guide_minimum),
+                "?" to getString(R.string.evidence_guide_unknown),
+                (if (isGunsmokeWeek) "TOTAL" else "0 / 50 / 90") to getString(
+                    if (isGunsmokeWeek) {
+                        R.string.evidence_guide_gunsmoke_total
+                    } else {
+                        R.string.evidence_guide_standard_allocation
+                    },
+                ),
+            )
+            rows.forEachIndexed { index, (symbol, explanation) ->
+                addView(guideRow(symbol, explanation), LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { if (index > 0) topMargin = dp(12) })
+            }
+            addView(TextView(context).apply {
+                text = getString(R.string.evidence_guide_gap_warning)
+                textSize = 13f
+                setTextColor(getColor(R.color.text_secondary))
+                setLineSpacing(0f, 1.12f)
+                setPadding(0, dp(16), 0, 0)
+            }, matchWidth())
+        }
         AlertDialog.Builder(this)
             .setTitle(R.string.weekly_evidence_guide)
-            .setMessage(
-                if (isGunsmokeWeek) {
-                    R.string.incomplete_daily_evidence_gunsmoke
-                } else {
-                    R.string.incomplete_daily_evidence_standard
-                },
-            )
+            .setView(ScrollView(this).apply { addView(guide, matchWidth()) })
             .setPositiveButton(android.R.string.ok, null)
-            .show()
+            .showModern()
     }
 
     private fun showEvidenceExplanation(
@@ -1285,12 +1330,12 @@ class WeeklyReportActivity : LocalizedActivity() {
                 ).takeIf { it.hasAnyValue() }
             }
         }.getOrElse {
-            Toast.makeText(this, R.string.invalid_weekly_edit, Toast.LENGTH_LONG).show()
+            TransientMessage.show(this, R.string.invalid_weekly_edit, Toast.LENGTH_LONG)
             return
         }
         repository.replaceWeeklyOverrides(report.periodStart.toEpochDay(), overrides)
         cancelWeeklyEditing()
-        Toast.makeText(this, R.string.weekly_edits_saved, Toast.LENGTH_SHORT).show()
+        TransientMessage.show(this, R.string.weekly_edits_saved)
         requestRender()
     }
 
@@ -1329,7 +1374,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                 WeeklyReportCsv.format(report),
             ),
         )
-        Toast.makeText(this, R.string.weekly_csv_copied, Toast.LENGTH_SHORT).show()
+        TransientMessage.show(this, R.string.weekly_csv_copied)
     }
 
     private fun addMembershipEvents(
@@ -1440,7 +1485,7 @@ class WeeklyReportActivity : LocalizedActivity() {
             .setNegativeButton(android.R.string.cancel, null)
             .setPositiveButton(R.string.delete) { _, _ ->
                 if (repository.deleteWeeklyNote(note.id)) {
-                    Toast.makeText(this, R.string.note_deleted, Toast.LENGTH_SHORT).show()
+                    TransientMessage.show(this, R.string.note_deleted)
                     requestRender()
                 }
             }
@@ -1496,7 +1541,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         privacy: WeeklyShareProjection.Privacy,
         shareAfter: Boolean,
     ) {
-        Toast.makeText(this, R.string.weekly_png_rendering, Toast.LENGTH_SHORT).show()
+        TransientMessage.show(this, R.string.weekly_png_rendering)
         workerExecutor.execute {
             val result = runCatching {
                 val document = WeeklyShareProjection.build(
@@ -1514,11 +1559,11 @@ class WeeklyReportActivity : LocalizedActivity() {
                         if (shareAfter) shareWeeklyPng(file) else saveWeeklyPng(file, model.report.periodStart)
                     },
                     onFailure = {
-                        Toast.makeText(
+                        TransientMessage.show(
                             this,
                             R.string.weekly_png_failed,
                             Toast.LENGTH_LONG,
-                        ).show()
+                        )
                     },
                 )
             }
@@ -1605,13 +1650,13 @@ class WeeklyReportActivity : LocalizedActivity() {
                 }
             }.isSuccess
             source.delete()
-            Toast.makeText(
+            TransientMessage.show(
                 this,
                 getString(
                     if (exported) R.string.weekly_png_saved else R.string.weekly_png_failed,
                 ),
                 Toast.LENGTH_SHORT,
-            ).show()
+            )
             return
         }
 
@@ -1626,11 +1671,11 @@ class WeeklyReportActivity : LocalizedActivity() {
                 ?: error("Document provider did not open an output stream")
             output.writer(Charsets.UTF_8).use { it.write(content) }
         }.isSuccess
-        Toast.makeText(
+        TransientMessage.show(
             this,
             getString(if (exported) R.string.weekly_csv_exported else R.string.status_export_failed),
             Toast.LENGTH_SHORT,
-        ).show()
+        )
     }
 
     @Suppress("DEPRECATION")
@@ -1656,8 +1701,7 @@ class WeeklyReportActivity : LocalizedActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 if (content == null) {
-                    Toast.makeText(this, R.string.no_weekly_tables_to_export, Toast.LENGTH_SHORT)
-                        .show()
+                    TransientMessage.show(this, R.string.no_weekly_tables_to_export)
                     return@runOnUiThread
                 }
                 pendingCsv = content
@@ -1687,6 +1731,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         body.addView(note, matchWidth())
         body.addView(Button(this).apply {
             text = getString(R.string.add_note)
+            usePrimaryActionStyle()
             setOnClickListener {
                 val text = note.text.toString().trim()
                 if (text.isBlank()) return@setOnClickListener
@@ -1699,15 +1744,15 @@ class WeeklyReportActivity : LocalizedActivity() {
                     )
                 }.fold(
                     onSuccess = {
-                        Toast.makeText(
+                        TransientMessage.show(
                             this@WeeklyReportActivity,
                             getString(R.string.saved),
                             Toast.LENGTH_SHORT,
-                        ).show()
+                        )
                         requestRender()
                     },
                     onFailure = { error ->
-                        Toast.makeText(
+                        TransientMessage.show(
                             this@WeeklyReportActivity,
                             getString(
                                 if (error is WeeklyNoteLimitException) {
@@ -1717,11 +1762,14 @@ class WeeklyReportActivity : LocalizedActivity() {
                                 },
                             ),
                             Toast.LENGTH_SHORT,
-                        ).show()
+                        )
                     },
                 )
             }
-        }, matchWidth())
+        }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = dp(8) })
     }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()

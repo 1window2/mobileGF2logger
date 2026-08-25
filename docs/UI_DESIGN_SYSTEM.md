@@ -33,6 +33,7 @@ repository or policy APIs, while `ModernUi` owns reusable presentation roles.
 | Secondary | Ordinary bounded action on the current screen |
 | Tertiary | Low-emphasis action such as Back, Skip, or a week arrow |
 | Navigation | Neutral full-row navigation or selection |
+| Selector | Compact active-Platoon selector with a persistent outline and accent pressed state |
 | Destructive | Confirmed destructive operation |
 | Destructive text | Less prominent destructive option separated from primary work |
 

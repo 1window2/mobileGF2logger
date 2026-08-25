@@ -71,7 +71,10 @@ class MemberDetailActivity : LocalizedActivity() {
                     setPadding(0, dp(4), 0, dp(8))
                 }, matchWidth())
                 addView(nameInput, matchWidth())
-                addView(noteInput, matchWidth())
+                addView(noteInput, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(8) })
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     addView(Button(context).apply {
@@ -85,11 +88,11 @@ class MemberDetailActivity : LocalizedActivity() {
                                     noteInput.text.toString(),
                                 )
                             }.getOrDefault(false)
-                            Toast.makeText(
+                            TransientMessage.show(
                                 this@MemberDetailActivity,
                                 getString(if (saved) R.string.saved else R.string.save_failed),
                                 Toast.LENGTH_SHORT,
-                            ).show()
+                            )
                         }
                     }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                         marginEnd = dp(4)
@@ -138,18 +141,18 @@ class MemberDetailActivity : LocalizedActivity() {
                     }.getOrDefault(false)
                     if (deleted) {
                         dialog.dismiss()
-                        Toast.makeText(
+                        TransientMessage.show(
                             this@MemberDetailActivity,
                             R.string.member_deleted,
                             Toast.LENGTH_SHORT,
-                        ).show()
+                        )
                         finish()
                     } else {
-                        Toast.makeText(
+                        TransientMessage.show(
                             this@MemberDetailActivity,
                             R.string.member_delete_failed,
                             Toast.LENGTH_SHORT,
-                        ).show()
+                        )
                     }
                 }
             }
@@ -246,11 +249,11 @@ class MemberDetailActivity : LocalizedActivity() {
                         note.text.toString(),
                     )
                 }.getOrDefault(false)
-                Toast.makeText(
+                TransientMessage.show(
                     this,
                     getString(if (saved) R.string.saved else R.string.invalid_date),
                     Toast.LENGTH_SHORT,
-                ).show()
+                )
                 if (saved) {
                     dialog.dismiss()
                     render()
@@ -280,18 +283,18 @@ class MemberDetailActivity : LocalizedActivity() {
                     if (deleted) {
                         confirmation.dismiss()
                         editor.dismiss()
-                        Toast.makeText(
+                        TransientMessage.show(
                             this@MemberDetailActivity,
                             R.string.membership_period_deleted,
                             Toast.LENGTH_SHORT,
-                        ).show()
+                        )
                         render()
                     } else {
-                        Toast.makeText(
+                        TransientMessage.show(
                             this@MemberDetailActivity,
                             R.string.membership_period_delete_failed,
                             Toast.LENGTH_SHORT,
-                        ).show()
+                        )
                     }
                 }
             }
@@ -346,7 +349,7 @@ class MemberDetailActivity : LocalizedActivity() {
                     dialog.dismiss()
                     render()
                 } else {
-                    Toast.makeText(this, R.string.invalid_date, Toast.LENGTH_SHORT).show()
+                    TransientMessage.show(this, R.string.invalid_date)
                 }
             }
         }

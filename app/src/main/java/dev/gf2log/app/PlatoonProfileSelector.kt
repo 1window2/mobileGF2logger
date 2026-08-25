@@ -17,7 +17,6 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import android.widget.Toast
 import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.management.PlatoonProfile
 import dev.gf2log.app.management.PlatoonProfileAdministration
@@ -28,7 +27,11 @@ import java.util.concurrent.Executors
 
 /** Shared, presentation-only selector and manager for isolated Platoon scopes. */
 internal object PlatoonProfileSelector {
-    fun controls(activity: Activity, compact: Boolean = false): LinearLayout =
+    fun controls(
+        activity: Activity,
+        compact: Boolean = false,
+        showManageButton: Boolean = true,
+    ): LinearLayout =
         LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -36,12 +39,14 @@ internal object PlatoonProfileSelector {
                 selectorButton(activity, compact),
                 LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
             )
-            addView(
-                manageButton(activity),
-                LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 48)).apply {
-                    marginStart = dp(activity, 8)
-                },
-            )
+            if (showManageButton) {
+                addView(
+                    manageButton(activity),
+                    LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 48)).apply {
+                        marginStart = dp(activity, 8)
+                    },
+                )
+            }
         }
 
     private fun selectorButton(activity: Activity, compact: Boolean): Button {
@@ -56,9 +61,7 @@ internal object PlatoonProfileSelector {
                 textSize = 11f
                 maxWidth = dp(activity, 210)
                 setPadding(dp(activity, 10), 0, dp(activity, 10), 0)
-                background = ModernUi.panelBackground(activity).apply {
-                    setStroke(dp(activity, 1), activity.getColor(R.color.outline))
-                }
+                useSelectorActionStyle()
             } else {
                 useNavigationActionStyle()
             }
@@ -199,8 +202,7 @@ internal object PlatoonProfileSelector {
 
     private fun chooseProfileRegion(activity: Activity, profile: PlatoonProfile) {
         if (CaptureStatus.isRunning) {
-            Toast.makeText(activity, R.string.stop_capture_before_profile_change, Toast.LENGTH_LONG)
-                .show()
+            TransientMessage.show(activity, R.string.stop_capture_before_profile_change, android.widget.Toast.LENGTH_LONG)
             return
         }
         val regions = ClientServerRegionPreferences.allowedFor(profile.client.packageName)
@@ -232,8 +234,7 @@ internal object PlatoonProfileSelector {
 
     private fun confirmDeleteFirst(activity: Activity, profile: PlatoonProfile) {
         if (CaptureStatus.isRunning) {
-            Toast.makeText(activity, R.string.stop_capture_before_profile_change, Toast.LENGTH_LONG)
-                .show()
+            TransientMessage.show(activity, R.string.stop_capture_before_profile_change, android.widget.Toast.LENGTH_LONG)
             return
         }
         val warning = AlertDialog.Builder(activity)
@@ -327,17 +328,14 @@ internal object PlatoonProfileSelector {
                 if (result.isSuccess) {
                     activity.recreate()
                 } else {
-                    Toast.makeText(activity, failureMessage, Toast.LENGTH_LONG).show()
+                    TransientMessage.show(activity, failureMessage, android.widget.Toast.LENGTH_LONG)
                 }
             }
         }
     }
 
     private fun showNoPlatoonMessage(activity: Activity) {
-        AlertDialog.Builder(activity)
-            .setMessage(R.string.no_platoon_detected_detail)
-            .setPositiveButton(android.R.string.ok, null)
-            .show()
+        TransientMessage.show(activity, R.string.no_platoon_detected_detail, android.widget.Toast.LENGTH_LONG)
     }
 
     private fun Activity.serverRegionLabel(region: GameServerRegion): String = getString(

@@ -6,8 +6,9 @@ import dev.gf2log.app.management.PlatoonStorageScope
 
 /** Pins one Activity instance to the profile scope used to construct its repositories and views. */
 internal class ActivePlatoonScopeBinding(context: Context) {
-    val scope: PlatoonStorageScope = PlatoonProfileRegistry(context).activeScope()
+    val scope: PlatoonStorageScope? = PlatoonProfileRegistry(context).active()
+        ?.let { PlatoonStorageScope(it.storageId) }
 
     fun isCurrent(context: Context): Boolean =
-        PlatoonProfileRegistry(context).activeScope().storageId == scope.storageId
+        PlatoonProfileRegistry(context).active()?.storageId == scope?.storageId
 }

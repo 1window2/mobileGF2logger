@@ -390,7 +390,9 @@
     <string name="evidence_fact_sparse">A long gap prevents a unique daily allocation.</string>
     <string name="evidence_fact_ambiguous">More than one valid allocation remains, so the app does not guess.</string>
     <string name="csv_import_preview_title">Review CSV import</string>
+    <string name="csv_import_destination">Destination: %1$s (ID %2$d)\n%3$s · %4$s\n\nPayload 21917 cannot verify this destination. Confirm that the selected Platoon is correct.</string>
     <string name="csv_import_preview_summary">Validated files: %1$d\nAlready present: %2$d\nHistorical captures: %3$d\nMembers represented: %4$d\nNew member UIDs: %5$d\nName differences: %6$d\nPotential joins: %7$d\nPotential withdrawals: %8$d\nSelected size: %9$d KiB\nCapture range: %10$s\n\nNo data has been changed. Importing creates an automatic checkpoint first.</string>
+    <string name="csv_import_target_changed">The selected Platoon changed or is no longer available. No CSV data was imported. Select the destination Platoon and try again.</string>
     <string name="csv_import_capture_range">%1$s — %2$s</string>
     <string name="csv_import_preparing_preview">Validating CSV files and preparing preview…</string>
     <string name="csv_import_applying">Creating checkpoint and importing CSV files…</string>
@@ -442,13 +444,20 @@
     <string name="weekly_table_history_restore_failed">This table history entry is no longer available.</string>
     <string name="weekly_table_history_live_notice">Showing a restored table history entry. New evidence will return this week to the live table.</string>
     <string name="select_platoon">Select platoon</string>
+    <string name="select">Select</string>
+    <string name="add_new_platoon_profile">Add a new Platoon profile</string>
+    <string name="enter_new_platoon_profile">Enter New Platoon Information</string>
+    <string name="new_platoon_entry_message">Enter the identity of the Platoon that will receive this CSV.</string>
+    <string name="platoon_client">Client</string>
+    <string name="platoon_name">Platoon name</string>
+    <string name="platoon_id">Platoon ID</string>
+    <string name="unable_to_add_platoon_profile">Check every field. This client, server, and Platoon ID may already be registered.</string>
     <string name="forget_platoon_profile">Forget profile</string>
     <string name="forget_platoon_profile_message">Remove this platoon from the selectors to recover profile capacity? Its private data is retained and returns if the platoon is detected or restored again.</string>
     <string name="forget">Forget</string>
     <string name="unable_to_forget_platoon">Unable to forget this platoon profile</string>
     <string name="no_platoon_detected">No platoon detected</string>
-    <string name="no_platoon_detected_detail">Capture a supported client until the platoon profile arrives.</string>
-    <string name="existing_platoon_data">Existing platoon data</string>
+    <string name="no_platoon_detected_detail">No Platoon information has been collected yet.</string>
     <string name="haoplay_capture_region">HaoPlay capture server</string>
     <string name="darkwinter_capture_region">Darkwinter capture server</string>
 </resources>

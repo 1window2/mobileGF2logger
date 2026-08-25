@@ -49,10 +49,12 @@ original connection tuple and maps that UID only to the fixed supported package
 IDs. Remote IP addresses and DNS/SNI labels are diagnostic hints, not trusted
 client or server identities. Android 8–9 falls back only when exactly one
 supported client is installed; ambiguous flows remain quarantined. Payload
-`21905` supplies a bounded Platoon identity for its own decoded flow. Only a
-confirmed profile composed from the verified client, user-selected compatible
-server region, and Platoon ID may receive an immutable isolated management
-database, retained CSV directory, checkpoint, weekly settings, or backup scope.
+`21905` supplies a bounded Platoon identity for its own decoded flow. Captured
+packets may enter an immutable isolated management scope only after that profile
+combines the Android-verified client, user-selected compatible server region,
+and Platoon ID. An identity-free `21917` document can enter a scope only through
+the explicit user-driven CSV flow, where the preview names either an existing
+profile or a newly declared client/server/name/ID destination before mutation.
 Pre-identity payloads, admission candidates, registered profiles, and profile
 metadata are independently bounded. A flow is permanently
 quarantined until closure if its identity changes or profile admission fails.
@@ -68,6 +70,13 @@ of that client's compatible server regions. Before confirmation, decoded data
 is absent from parsed-packet history, SQLite, retained CSV, and preferences;
 explicit discard, overflow, force-stop, or process death removes it. Selecting
 an existing profile safely restores that profile's saved capture region.
+
+Roster CSV payload `21917` has no Platoon identity. Import never infers a target
+from member overlap. It requires an explicitly selected existing profile or a
+new profile whose client, compatible server, name, and ID the user declares,
+displays that destination before mutation, and aborts if the scope is no longer
+available. This prevents an identity-free roster from silently crossing Platoon
+storage boundaries.
 
 Profile metadata, capture-region routing, active selection, SQLite state,
 scoped settings, and retained CSV retirement share one durable restore journal.

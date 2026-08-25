@@ -20,6 +20,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -36,7 +37,7 @@ class PlatoonProfileRegistryIntegrationTest {
 
     @Test
     fun emptyDatabaseIsNotRegisteredAsLegacyData() {
-        PlatoonDatabase(context).use { database ->
+        PlatoonDatabase(context, PlatoonSchema.DATABASE_NAME).use { database ->
             database.recordWeeklyReportHistory(
                 periodStartEpochDay = 0L,
                 recordedAt = Instant.EPOCH,
@@ -49,24 +50,53 @@ class PlatoonProfileRegistryIntegrationTest {
         val registry = PlatoonProfileRegistry(context)
 
         assertTrue(registry.ensureInitialized().isEmpty())
-        assertEquals(PlatoonProfileIdentity.LEGACY_STORAGE_ID, registry.activeScope().storageId)
+        assertNull(registry.active())
+        assertThrows(IllegalArgumentException::class.java) { registry.activeScope() }
     }
 
     @Test
-    fun existingDatabaseWithManagementDataIsRegisteredWithoutMovingIt() {
+    fun existingUnscopedDatabaseIsNeverRegisteredAsAProfile() {
         val legacyDatabase = context.getDatabasePath(PlatoonSchema.DATABASE_NAME)
-        PlatoonRepository(context).ingest(
+        PlatoonRepository(
+            context,
+            PlatoonStorageScope(PlatoonProfileIdentity.LEGACY_STORAGE_ID),
+        ).ingest(
             Instant.parse("2026-08-24T00:00:00Z"),
             listOf(member(1u, "Legacy member")),
             "legacy.csv",
         )
 
         val registry = PlatoonProfileRegistry(context)
-        val profile = registry.ensureInitialized().single()
 
-        assertTrue(profile.legacy)
-        assertEquals(PlatoonSchema.DATABASE_NAME, registry.activeScope().databaseName)
+        assertTrue(registry.ensureInitialized().isEmpty())
+        assertNull(registry.active())
         assertTrue(legacyDatabase.isFile)
+    }
+
+    @Test
+    fun staleLegacySelectorMetadataIsRetiredInsteadOfRecreated() {
+        context.getSharedPreferences("platoon_profiles", android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putStringSet("profile_ids", setOf(PlatoonProfileIdentity.LEGACY_STORAGE_ID))
+            .putString("active_profile", PlatoonProfileIdentity.LEGACY_STORAGE_ID)
+            .putString("profile.legacy.client", PlatoonClient.LEGACY.name)
+            .putString("profile.legacy.region", GameServerRegion.MANUAL.storedValue)
+            .putLong("profile.legacy.platoon_id", 0L)
+            .putString("profile.legacy.name", "Existing platoon data")
+            .putLong("profile.legacy.last_seen", 0L)
+            .putBoolean("profile.legacy.legacy", true)
+            .commit()
+
+        val registry = PlatoonProfileRegistry(context)
+
+        assertTrue(registry.list().isEmpty())
+        assertNull(registry.active())
+        val stored = context.getSharedPreferences(
+            "platoon_profiles",
+            android.content.Context.MODE_PRIVATE,
+        )
+        assertTrue(stored.getStringSet("profile_ids", emptySet()).orEmpty().isEmpty())
+        assertNull(stored.getString("active_profile", null))
     }
 
     @Test
@@ -96,6 +126,41 @@ class PlatoonProfileRegistryIntegrationTest {
         assertTrue(registry.setActive(darkwinter.storageId))
         assertEquals(darkwinter.storageId, registry.activeScope().storageId)
         assertFalse(registry.setActive("0".repeat(32)))
+    }
+
+    @Test
+    fun declaredCsvDestinationIsIsolatedAndLaterMatchingCaptureReusesItsScope() {
+        val registry = PlatoonProfileRegistry(context)
+        val declared = registry.createDeclared(
+            PlatoonClient.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            101817L,
+            "Declared Owls",
+            Instant.parse("2026-08-25T00:00:00Z"),
+        )
+
+        assertTrue(registry.setActive(declared.storageId))
+        assertEquals(declared.storageId, registry.activeScope().storageId)
+        assertThrows(IllegalArgumentException::class.java) {
+            registry.createDeclared(
+                PlatoonClient.HAOPLAY,
+                GameServerRegion.HAOPLAY_KOREA,
+                101817L,
+                "Duplicate",
+            )
+        }
+
+        val captured = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            PlatoonProfileData(101817u, "Captured Owls", listOf(7u), listOf(8u)),
+            Instant.parse("2026-08-25T01:00:00Z"),
+        )
+
+        assertEquals(declared.storageId, captured.storageId)
+        assertEquals("Captured Owls", captured.platoonName)
+        assertEquals(listOf(7L), captured.emblemPrimary)
+        assertEquals(listOf(8L), captured.emblemSecondary)
     }
 
     @Test
@@ -394,7 +459,11 @@ class PlatoonProfileRegistryIntegrationTest {
             .edit().clear().commit()
         File(context.filesDir, "platoons").deleteRecursively()
 
-        PlatoonBackupManager(context).restoreFull(ByteArrayInputStream(archive))
+        PlatoonBackupManager.restoreSelected(
+            context,
+            ByteArrayInputStream(archive),
+            complete = true,
+        )
 
         val restoredRegistry = PlatoonProfileRegistry(context)
         assertEquals(profile.storageId, restoredRegistry.activeScope().storageId)

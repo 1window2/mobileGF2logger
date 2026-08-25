@@ -386,7 +386,9 @@
     <string name="evidence_fact_sparse">긴 공백 때문에 일일 배치를 하나로 확정할 수 없습니다.</string>
     <string name="evidence_fact_ambiguous">가능한 배치가 둘 이상이므로 애플리케이션은 임의로 추측하지 않습니다.</string>
     <string name="csv_import_preview_title">CSV 가져오기 검토</string>
+    <string name="csv_import_destination">적용 대상: %1$s (ID %2$d)\n%3$s · %4$s\n\n21917만으로는 적용 대상을 확인할 수 없습니다. 선택한 서클이 맞는지 확인하세요.</string>
     <string name="csv_import_preview_summary">검증된 파일: %1$d\n이미 존재함: %2$d\n과거 캡처: %3$d\n포함된 멤버: %4$d\n새 UID: %5$d\n이름 차이: %6$d\n예상 가입: %7$d\n예상 탈퇴: %8$d\n선택 용량: %9$d KiB\n캡처 범위: %10$s\n\n아직 데이터는 변경되지 않았습니다. 가져오기 전에 자동 체크포인트를 생성합니다.</string>
+    <string name="csv_import_target_changed">선택한 서클이 변경되었거나 더 이상 존재하지 않습니다. CSV 데이터는 가져오지 않았습니다. 적용할 서클을 다시 선택한 뒤 시도하세요.</string>
     <string name="csv_import_capture_range">%1$s — %2$s</string>
     <string name="csv_import_preparing_preview">CSV 파일을 검증하고 미리보기를 준비하는 중…</string>
     <string name="csv_import_applying">체크포인트를 만들고 CSV 파일을 가져오는 중…</string>
@@ -438,13 +440,20 @@
     <string name="weekly_table_history_restore_failed">이 표 히스토리 항목을 더 이상 사용할 수 없습니다.</string>
     <string name="weekly_table_history_live_notice">복원한 과거 주간 표를 표시하고 있습니다. 새 근거가 들어오면 최신 표로 돌아갑니다.</string>
     <string name="select_platoon">서클 선택</string>
+    <string name="select">선택</string>
+    <string name="add_new_platoon_profile">새 서클 프로필 추가</string>
+    <string name="enter_new_platoon_profile">신규 서클 정보 입력</string>
+    <string name="new_platoon_entry_message">새롭게 등록할 서클의 정보를 입력해 주세요.</string>
+    <string name="platoon_client">클라이언트</string>
+    <string name="platoon_name">서클 이름</string>
+    <string name="platoon_id">서클 ID</string>
+    <string name="unable_to_add_platoon_profile">모든 항목을 확인하세요. 같은 클라이언트, 서버 및 서클 ID가 이미 등록되어 있을 수 있습니다.</string>
     <string name="forget_platoon_profile">프로필 잊기</string>
     <string name="forget_platoon_profile_message">프로필 수용량을 확보하기 위해 이 서클을 선택 목록에서 제거할까요? 비공개 데이터는 유지되며, 해당 서클을 다시 감지하거나 복원하면 돌아옵니다.</string>
     <string name="forget">잊기</string>
     <string name="unable_to_forget_platoon">이 서클 프로필을 제거할 수 없습니다</string>
     <string name="no_platoon_detected">감지된 서클 없음</string>
-    <string name="no_platoon_detected_detail">지원 클라이언트에서 서클 프로필 패킷이 도착할 때까지 캡처하세요.</string>
-    <string name="existing_platoon_data">기존 서클 데이터</string>
+    <string name="no_platoon_detected_detail">아직 수집된 서클 정보가 없습니다.</string>
     <string name="haoplay_capture_region">HaoPlay 캡처 서버</string>
     <string name="darkwinter_capture_region">Darkwinter 캡처 서버</string>
 </resources>

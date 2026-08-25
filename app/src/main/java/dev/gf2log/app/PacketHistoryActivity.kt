@@ -28,6 +28,8 @@ import dev.gf2log.app.discord.OriginalCsvPayload
 import java.util.concurrent.Executors
 import dev.gf2log.protocol.ParsedPacketTableParser
 import java.io.File
+import dev.gf2log.app.management.PlatoonProfileRegistry
+import dev.gf2log.app.management.PlatoonStorageScope
 
 class PacketHistoryActivity : LocalizedActivity() {
     private lateinit var actionButton: Button
@@ -46,13 +48,20 @@ class PacketHistoryActivity : LocalizedActivity() {
 
         val entryId = intent.getStringExtra(EXTRA_ENTRY_ID).orEmpty()
         val title = intent.getStringExtra(EXTRA_ENTRY_TITLE).orEmpty()
+        val storageId = intent.getStringExtra(EXTRA_STORAGE_ID)
+        val active = PlatoonProfileRegistry(this).active()
+        if (storageId == null || active?.storageId != storageId) {
+            finish()
+            return
+        }
+        val historyRoot = PlatoonStorageScope(storageId).rootDirectory(this)
         rawContent = if (intent.getBooleanExtra(EXTRA_SAVED_ENTRY, false)) {
             SavedHistoryStore(
-                File(filesDir, SavedHistoryStore.SAVED_HISTORY_DIRECTORY),
+                File(historyRoot, SavedHistoryStore.SAVED_HISTORY_DIRECTORY),
             ).read(entryId)
         } else {
             CaptureHistoryStore(
-                File(filesDir, CaptureHistoryStore.HISTORY_DIRECTORY),
+                File(historyRoot, CaptureHistoryStore.HISTORY_DIRECTORY),
             ).read(entryId)
         } ?: run {
             finish()
@@ -278,5 +287,6 @@ class PacketHistoryActivity : LocalizedActivity() {
         const val EXTRA_ENTRY_ID = "entry_id"
         const val EXTRA_ENTRY_TITLE = "entry_title"
         const val EXTRA_SAVED_ENTRY = "saved_entry"
+        const val EXTRA_STORAGE_ID = "storage_id"
     }
 }

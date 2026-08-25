@@ -60,7 +60,7 @@ class CaptureVpnService : VpnService() {
     private val captureChecklist = ScopedCaptureChecklist(REQUIRED_CAPTURE_TYPES)
     private val profileAdmissionGate = PlatoonProfilePolicy.AdmissionGate()
     private val mainHandler = Handler(Looper.getMainLooper())
-    private lateinit var historyStore: CaptureHistoryStore
+    private val historyStores = ConcurrentHashMap<String, CaptureHistoryStore>()
     private lateinit var profileRegistry: PlatoonProfileRegistry
     private lateinit var clientServerRegions: ClientServerRegionPreferences
     private lateinit var payloadHistoryPreferences: PayloadHistoryPreferences
@@ -92,9 +92,6 @@ class CaptureVpnService : VpnService() {
         super.onCreate()
         profileRegistry = PlatoonProfileRegistry(this)
         clientServerRegions = ClientServerRegionPreferences(this)
-        historyStore = CaptureHistoryStore(
-            File(filesDir, CaptureHistoryStore.HISTORY_DIRECTORY),
-        )
         payloadHistoryPreferences = PayloadHistoryPreferences(this)
         capturePreferences = CapturePreferences(this)
         diagnosticsStore = CaptureDiagnosticsStore(this)
@@ -373,12 +370,6 @@ class CaptureVpnService : VpnService() {
                         metadata = metadata,
                         flowEnded = true,
                     )
-                }
-                if (
-                    !pendingAdmissionByFlow.containsKey(flowId) &&
-                    !flowSessions.containsKey(flowId)
-                ) {
-                    pendingFlowPayloads.take(flowId).forEach(::saveHistoryOnly)
                 }
                 closeFlowSession(flowId)
             }
@@ -740,7 +731,7 @@ class CaptureVpnService : VpnService() {
         payload: ParsedPayload,
         flowEnded: Boolean = false,
     ) {
-        saveHistoryOnly(payload)
+        saveHistoryOnly(session.profile.storageId, payload)
         routePayload(session, payload, flowEnded)
         if (payload.payloadType == Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE) {
             markRequiredPayloadCaptured(
@@ -750,8 +741,14 @@ class CaptureVpnService : VpnService() {
         }
     }
 
-    private fun saveHistoryOnly(payload: ParsedPayload) {
+    private fun saveHistoryOnly(storageId: String, payload: ParsedPayload) {
         if (!payloadHistoryPreferences.isEnabled(payload.payloadType)) return
+        val historyStore = historyStores.computeIfAbsent(storageId) {
+            val scope = PlatoonStorageScope(storageId)
+            CaptureHistoryStore(
+                File(scope.rootDirectory(this), CaptureHistoryStore.HISTORY_DIRECTORY),
+            )
+        }
         runCatching { historyStore.save(payload) }
             .onFailure { CaptureStatus.update("Unable to save parsed-packet history") }
     }

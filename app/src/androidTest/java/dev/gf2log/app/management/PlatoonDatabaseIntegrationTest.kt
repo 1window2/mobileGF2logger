@@ -25,7 +25,7 @@ class PlatoonDatabaseIntegrationTest {
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         context.deleteDatabase(TEST_DATABASE)
-        database = PlatoonDatabase(context, TEST_DATABASE)
+        database = PlatoonDatabase(context, TEST_DATABASE, TEST_SCOPE)
     }
 
     @After
@@ -487,7 +487,7 @@ class PlatoonDatabaseIntegrationTest {
             context.deleteDatabase(databaseName)
             try {
                 createLegacyActivityDatabase(databaseName, legacyVersion)
-                PlatoonDatabase(context, databaseName).use { upgraded ->
+                PlatoonDatabase(context, databaseName, TEST_SCOPE).use { upgraded ->
                     val writable = upgraded.writableDatabase
                     assertEquals(PlatoonSchema.CURRENT_VERSION, writable.version)
                     assertEquals(
@@ -526,7 +526,7 @@ class PlatoonDatabaseIntegrationTest {
         val databaseName = "platoon-v10-upgrade-test.db"
         context.deleteDatabase(databaseName)
         try {
-            PlatoonDatabase(context, databaseName).use { helper -> helper.writableDatabase }
+            PlatoonDatabase(context, databaseName, TEST_SCOPE).use { helper -> helper.writableDatabase }
             context.openOrCreateDatabase(databaseName, Context.MODE_PRIVATE, null).use { legacy ->
                 legacy.execSQL("DROP INDEX platoon_activity_resolution_retention")
                 legacy.execSQL("DROP INDEX platoon_activity_retention_order")
@@ -534,7 +534,7 @@ class PlatoonDatabaseIntegrationTest {
                 legacy.version = 10
             }
 
-            PlatoonDatabase(context, databaseName).use { upgraded ->
+            PlatoonDatabase(context, databaseName, TEST_SCOPE).use { upgraded ->
                 val writable = upgraded.writableDatabase
                 assertEquals(PlatoonSchema.CURRENT_VERSION, writable.version)
                 assertEquals(
@@ -573,7 +573,7 @@ class PlatoonDatabaseIntegrationTest {
         val databaseName = "platoon-v12-membership-state-test.db"
         context.deleteDatabase(databaseName)
         try {
-            PlatoonDatabase(context, databaseName).use { helper ->
+            PlatoonDatabase(context, databaseName, TEST_SCOPE).use { helper ->
                 val writable = helper.writableDatabase
                 writable.execSQL(
                     "INSERT INTO members(" +
@@ -597,7 +597,7 @@ class PlatoonDatabaseIntegrationTest {
                 legacy.version = 12
             }
 
-            PlatoonDatabase(context, databaseName).use { upgraded ->
+            PlatoonDatabase(context, databaseName, TEST_SCOPE).use { upgraded ->
                 assertEquals(PlatoonSchema.CURRENT_VERSION, upgraded.writableDatabase.version)
                 assertTrue(upgraded.listMemberStatuses().single().isActive)
             }
@@ -774,7 +774,7 @@ class PlatoonDatabaseIntegrationTest {
         }
         database.close()
 
-        database = PlatoonDatabase(context, TEST_DATABASE)
+        database = PlatoonDatabase(context, TEST_DATABASE, TEST_SCOPE)
         database.writableDatabase
 
         assertEquals(
@@ -1252,6 +1252,7 @@ class PlatoonDatabaseIntegrationTest {
 
     private companion object {
         const val TEST_DATABASE = "platoon-integration-test.db"
+        val TEST_SCOPE = PlatoonStorageScope("0".repeat(32))
         const val TARGET_UID = 1001L
         const val OTHER_UID = 2002L
     }

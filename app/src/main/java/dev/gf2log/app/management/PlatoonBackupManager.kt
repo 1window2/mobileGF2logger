@@ -24,7 +24,7 @@ class PlatoonBackupManager internal constructor(
     private val storageScope: PlatoonStorageScope =
         PlatoonProfileRegistry(context).activeScope(),
 ) {
-    private constructor(context: Context, storageScope: PlatoonStorageScope) : this(
+    internal constructor(context: Context, storageScope: PlatoonStorageScope) : this(
         context = context,
         settingsStore = ScopedAppSettingsStore(
             context.applicationContext,
@@ -187,17 +187,16 @@ class PlatoonBackupManager internal constructor(
 
     private fun managerFor(staged: BackupArchive.StagedArchive): RestoreTarget {
         val registry = PlatoonProfileRegistry(appContext)
-        val restoredProfile = staged.profile?.toProfile()
-        restoredProfile?.let(registry::requireRestoreCapacity)
-        val scope = restoredProfile?.storageId
-            ?.let(::PlatoonStorageScope)
-            ?: PlatoonStorageScope(PlatoonProfileIdentity.LEGACY_STORAGE_ID)
+        val restoredProfile = requireNotNull(staged.profile) {
+            "Unscoped legacy backups are no longer supported"
+        }.toProfile()
+        require(!restoredProfile.legacy) { "Unscoped legacy backups are no longer supported" }
+        registry.requireRestoreCapacity(restoredProfile)
+        val scope = PlatoonStorageScope(restoredProfile.storageId)
         val previousProfile = registry.find(scope.storageId)
         val previousActiveStorageId = registry.active()?.storageId
         val clientRegions = ClientServerRegionPreferences(appContext)
-        val previousCaptureRegion = restoredProfile
-            ?.takeUnless(PlatoonProfile::legacy)
-            ?.let { clientRegions.stored(it.client.packageName) }
+        val previousCaptureRegion = clientRegions.stored(restoredProfile.client.packageName)
         val manager = if (scope == storageScope) {
             this
         } else {
@@ -230,16 +229,14 @@ class PlatoonBackupManager internal constructor(
                 targetStorageId = manager.storageScope.storageId,
                 previousProfile = previousProfile,
                 previousActiveStorageId = previousActiveStorageId,
-                ownerPackage = restoredProfile
-                    ?.takeUnless(PlatoonProfile::legacy)
-                    ?.client
-                    ?.packageName,
+                ownerPackage = restoredProfile?.client?.packageName,
                 previousCaptureRegion = previousCaptureRegion,
             )
 
         fun installProfileMetadataAndActivate() {
-            val storageId = restoredProfile?.let(registry::upsertRestored)?.storageId
-                ?: registry.ensureLegacyProfile().storageId
+            val storageId = requireNotNull(restoredProfile)
+                .let(registry::upsertRestored)
+                .storageId
             check(registry.setActive(storageId)) {
                 "Unable to select the restored Platoon"
             }
@@ -247,19 +244,18 @@ class PlatoonBackupManager internal constructor(
     }
 
     private fun requireArchiveMatchesScope(staged: BackupArchive.StagedArchive) {
-        val archivedId = staged.profile?.storageId
-        if (archivedId == null) {
-            require(storageScope.isLegacy) { "Legacy backup must be restored to existing data" }
-        } else {
-            require(archivedId == storageScope.storageId) {
-                "Backup belongs to a different Platoon"
-            }
+        val archivedProfile = requireNotNull(staged.profile) {
+            "Unscoped legacy backups are no longer supported"
+        }
+        require(!archivedProfile.legacy) { "Unscoped legacy backups are no longer supported" }
+        require(archivedProfile.storageId == storageScope.storageId) {
+            "Backup belongs to a different Platoon"
         }
     }
 
     private fun backupProfile(): PlatoonProfile {
         val registry = PlatoonProfileRegistry(appContext)
-        if (storageScope.isLegacy) registry.ensureLegacyProfile() else registry.ensureInitialized()
+        registry.ensureInitialized()
         return requireNotNull(registry.find(storageScope.storageId)) {
             "The selected Platoon profile is unavailable"
         }
@@ -411,7 +407,7 @@ class PlatoonBackupManager internal constructor(
     private fun validateCurrentSchema(database: SQLiteDatabase) {
         appContext.deleteDatabase(SCHEMA_REFERENCE_DATABASE)
         try {
-            PlatoonDatabase(appContext, SCHEMA_REFERENCE_DATABASE).use { helper ->
+            PlatoonDatabase(appContext, SCHEMA_REFERENCE_DATABASE, storageScope).use { helper ->
                 val expected = DatabaseSchemaContract.read(helper.readableDatabase)
                 val actual = DatabaseSchemaContract.read(database)
                 require(actual == expected) {
@@ -551,6 +547,52 @@ class PlatoonBackupManager internal constructor(
         private const val RESTORE_DATABASE_WAS_MISSING_FILE = "database.was_missing"
         private const val RESTORE_PROFILE_FILE = "profile.pre_restore"
         private val SQLITE_HEADER = "SQLite format 3\u0000".toByteArray(Charsets.US_ASCII)
+
+        /** Restores a scoped archive even when a fresh installation has no active profile. */
+        fun restoreSelected(
+            context: Context,
+            input: InputStream,
+            complete: Boolean,
+        ) {
+            val appContext = context.applicationContext
+            val stagingDirectory = File(appContext.cacheDir, "platoon-restore-selected").apply {
+                check(mkdirs() || isDirectory) { "Unable to create the restore staging directory" }
+            }
+            val stagedDatabase = File.createTempFile("selected-", ".db", stagingDirectory)
+            try {
+                val staged = try {
+                    BackupArchive.stage(input, stagedDatabase)
+                } catch (error: IllegalArgumentException) {
+                    throw InvalidBackupException(error)
+                } catch (error: ZipException) {
+                    throw InvalidBackupException(error)
+                } catch (error: EOFException) {
+                    throw InvalidBackupException(error)
+                }
+                val profile = try {
+                    requireNotNull(staged.profile) {
+                        "Unscoped legacy backups are no longer supported"
+                    }.toProfile().also {
+                        require(!it.legacy) { "Unscoped legacy backups are no longer supported" }
+                    }
+                } catch (error: IllegalArgumentException) {
+                    throw InvalidBackupException(error)
+                }
+                val manager = PlatoonBackupManager(
+                    appContext,
+                    PlatoonStorageScope(profile.storageId),
+                )
+                val target = manager.managerFor(staged)
+                if (complete) {
+                    manager.restoreStagedComplete(stagedDatabase, staged, target)
+                } else {
+                    manager.restoreStagedPlatoon(stagedDatabase, staged, target)
+                }
+            } finally {
+                stagedDatabase.delete()
+                stagingDirectory.delete()
+            }
+        }
 
         internal fun recoverInterruptedFullRestore(
             context: Context,

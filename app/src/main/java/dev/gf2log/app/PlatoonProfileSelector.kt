@@ -74,17 +74,14 @@ internal object PlatoonProfileSelector {
         setOnClickListener { showManagement(activity, PlatoonProfileRegistry(activity)) }
     }
 
-    private fun label(activity: Activity, profile: PlatoonProfile): String = if (profile.legacy) {
-        activity.getString(R.string.existing_platoon_data)
-    } else {
+    private fun label(activity: Activity, profile: PlatoonProfile): String =
         "${profile.client.displayName} / ${regionCode(profile.serverRegion)} / " +
             "${profile.platoonName} / ${profile.platoonId}"
-    }
 
     private fun showSelector(activity: Activity, registry: PlatoonProfileRegistry) {
         val profiles = registry.list()
         if (profiles.isEmpty()) {
-            Toast.makeText(activity, R.string.no_platoon_detected_detail, Toast.LENGTH_SHORT).show()
+            showNoPlatoonMessage(activity)
             return
         }
         val activeId = registry.active()?.storageId
@@ -107,7 +104,7 @@ internal object PlatoonProfileSelector {
     private fun showManagement(activity: Activity, registry: PlatoonProfileRegistry) {
         val profiles = registry.list()
         if (profiles.isEmpty()) {
-            Toast.makeText(activity, R.string.no_platoon_detected_detail, Toast.LENGTH_SHORT).show()
+            showNoPlatoonMessage(activity)
             return
         }
         val activeId = registry.active()?.storageId
@@ -160,16 +157,12 @@ internal object PlatoonProfileSelector {
                     ellipsize = TextUtils.TruncateAt.END
                 }, matchWidth())
                 addView(TextView(context).apply {
-                    text = if (profile.legacy) {
-                        activity.getString(R.string.existing_platoon_data)
-                    } else {
-                        activity.getString(
-                            R.string.profile_management_identity,
-                            profile.client.displayName,
-                            regionCode(profile.serverRegion),
-                            profile.platoonId,
-                        )
-                    } + if (active) " · ${activity.getString(R.string.active_platoon)}" else ""
+                    text = activity.getString(
+                        R.string.profile_management_identity,
+                        profile.client.displayName,
+                        regionCode(profile.serverRegion),
+                        profile.platoonId,
+                    ) + if (active) " · ${activity.getString(R.string.active_platoon)}" else ""
                     textSize = 12f
                     setTextColor(context.getColor(R.color.text_secondary))
                     maxLines = 2
@@ -178,8 +171,7 @@ internal object PlatoonProfileSelector {
             },
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
         )
-        if (!profile.legacy) {
-            addView(ImageButton(context).apply {
+        addView(ImageButton(context).apply {
                 setImageResource(R.drawable.ic_edit)
                 contentDescription = activity.getString(
                     R.string.edit_platoon_server_description,
@@ -190,7 +182,7 @@ internal object PlatoonProfileSelector {
             }, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 48)).apply {
                 marginStart = dp(activity, 4)
             })
-            addView(ImageButton(context).apply {
+        addView(ImageButton(context).apply {
                 setImageResource(R.drawable.ic_delete)
                 imageTintList = ColorStateList.valueOf(context.getColor(R.color.destructive_action))
                 contentDescription = activity.getString(
@@ -203,7 +195,6 @@ internal object PlatoonProfileSelector {
             }, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 48)).apply {
                 marginStart = dp(activity, 4)
             })
-        }
     }
 
     private fun chooseProfileRegion(activity: Activity, profile: PlatoonProfile) {
@@ -340,6 +331,13 @@ internal object PlatoonProfileSelector {
                 }
             }
         }
+    }
+
+    private fun showNoPlatoonMessage(activity: Activity) {
+        AlertDialog.Builder(activity)
+            .setMessage(R.string.no_platoon_detected_detail)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
     }
 
     private fun Activity.serverRegionLabel(region: GameServerRegion): String = getString(

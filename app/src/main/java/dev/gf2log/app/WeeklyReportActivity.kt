@@ -123,7 +123,12 @@ class WeeklyReportActivity : LocalizedActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         profileBinding = ActivePlatoonScopeBinding(this)
-        repository = PlatoonRepository(this, profileBinding.scope)
+        val scope = profileBinding.scope ?: run {
+            Toast.makeText(this, R.string.no_platoon_detected_detail, Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+        repository = PlatoonRepository(this, scope)
         pendingPng = WeeklyPngPendingState.restore(
             cacheDir,
             savedInstanceState?.getString(STATE_PENDING_PNG_NAME),
@@ -134,7 +139,7 @@ class WeeklyReportActivity : LocalizedActivity() {
                 ?.let(LocalDate::ofEpochDay)
                 ?: PlatoonPeriods.gameDay(
                     Instant.now(),
-                    GameTimeZonePreferences.get(this, profileBinding.scope.storageId),
+                    GameTimeZonePreferences.get(this, scope.storageId),
                 ),
         )
         body = LinearLayout(this).apply {

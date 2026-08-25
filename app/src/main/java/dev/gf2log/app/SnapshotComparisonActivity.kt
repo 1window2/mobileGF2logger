@@ -49,11 +49,11 @@ class SnapshotComparisonActivity : LocalizedActivity() {
                                     SnapshotComparisonCsv.format(result),
                                 ),
                             )
-                            Toast.makeText(
+                            TransientMessage.show(
                                 this@SnapshotComparisonActivity,
                                 R.string.snapshot_csv_copied,
                                 Toast.LENGTH_SHORT,
-                            ).show()
+                            )
                         }
                     })
                     addSection(

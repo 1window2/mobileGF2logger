@@ -151,15 +151,15 @@ class WeeklyTableHistoryPreviewActivity : LocalizedActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 if (restored) {
-                    Toast.makeText(this, R.string.weekly_table_history_restored, Toast.LENGTH_SHORT).show()
+                    TransientMessage.show(this, R.string.weekly_table_history_restored)
                     setResult(Activity.RESULT_OK)
                     finish()
                 } else {
-                    Toast.makeText(
+                    TransientMessage.show(
                         this,
                         R.string.weekly_table_history_restore_failed,
                         Toast.LENGTH_LONG,
-                    ).show()
+                    )
                 }
             }
         }

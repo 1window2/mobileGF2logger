@@ -53,7 +53,7 @@ internal class DateTimePickerInput(
     }
     private val timeInput = pickerField(context.getString(R.string.time_optional)) {
         if (selection.date == null) {
-            Toast.makeText(context, R.string.select_date_first, Toast.LENGTH_SHORT).show()
+            TransientMessage.show(context, R.string.select_date_first)
         } else {
             showTimePicker()
         }

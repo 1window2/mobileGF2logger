@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
 import android.text.InputType
+import android.view.View
 import android.view.ViewGroup
 import android.view.Gravity
 import android.widget.Button
@@ -208,11 +209,7 @@ class OptionsActivity : LocalizedActivity() {
                 icon = R.drawable.ic_calendar,
                 onClick = {
                     if (resetScope == null) {
-                        Toast.makeText(
-                            context,
-                            R.string.no_platoon_detected_detail,
-                            Toast.LENGTH_SHORT,
-                        ).show()
+                        TransientMessage.show(context, R.string.no_platoon_detected_detail)
                     } else {
                         chooseGameServerRegion()
                     }
@@ -324,7 +321,7 @@ class OptionsActivity : LocalizedActivity() {
                     val saved = runCatching {
                         webhookStore.save(webhookInput.text.toString())
                     }.isSuccess
-                    Toast.makeText(
+                    TransientMessage.show(
                         this@OptionsActivity,
                         if (saved) {
                             R.string.discord_webhook_saved
@@ -332,7 +329,7 @@ class OptionsActivity : LocalizedActivity() {
                             R.string.discord_webhook_invalid
                         },
                         Toast.LENGTH_LONG,
-                    ).show()
+                    )
                     if (saved) recreate()
                 }
             }, matchWidth())
@@ -342,11 +339,11 @@ class OptionsActivity : LocalizedActivity() {
                 isEnabled = webhookConfigured
                 setOnClickListener {
                     val cleared = runCatching(webhookStore::clear).isSuccess
-                    Toast.makeText(
+                    TransientMessage.show(
                         this@OptionsActivity,
                         if (cleared) R.string.discord_webhook_cleared else R.string.discord_webhook_clear_failed,
                         Toast.LENGTH_LONG,
-                    ).show()
+                    )
                     if (cleared) recreate()
                 }
             }, matchWidth())
@@ -355,55 +352,37 @@ class OptionsActivity : LocalizedActivity() {
                 text = getString(R.string.payload_history)
                 textSize = 15f
                 setTypeface(typeface, Typeface.BOLD)
-                setPadding(0, spacing, 0, dp(4))
+                setPadding(0, spacing, 0, dp(2))
             }, matchWidth())
 
             val capturePreferences = CapturePreferences(context)
-            addView(CheckBox(context).apply {
-                text = getString(R.string.detailed_notifications)
-                isChecked = capturePreferences.detailedNotifications
-                setOnCheckedChangeListener { _, enabled ->
-                    capturePreferences.detailedNotifications = enabled
-                }
-            }, matchWidth())
-            addView(TextView(context).apply {
-                text = getString(R.string.notification_required_explanation)
-                textSize = 13f
-                setPadding(dp(48), 0, 0, spacing)
-            }, matchWidth())
+            addView(packetHistoryOptionRow(
+                title = getString(R.string.detailed_notifications),
+                detail = getString(R.string.notification_required_explanation),
+                checked = capturePreferences.detailedNotifications,
+                enabled = true,
+                onChanged = { capturePreferences.detailedNotifications = it },
+            ), matchWidth())
 
             PayloadCatalog.categories.forEach { category ->
-                addView(CheckBox(context).apply {
-                    text = getString(
+                addView(packetHistoryOptionRow(
+                    title = getString(
                         R.string.payload_option_label,
                         payloadName(category.payloadType),
                         category.payloadType,
-                    )
-                    textSize = 14f
-                    isChecked = preferences.isEnabled(category.payloadType)
-                    isEnabled = !category.isRequired
-                    if (category.isRequired) {
-                        buttonTintList = ColorStateList(
-                            arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
-                            intArrayOf(getColor(R.color.primary), getColor(R.color.primary)),
-                        )
-                    }
-                    setOnCheckedChangeListener { _, enabled ->
-                        preferences.setEnabled(category.payloadType, enabled)
-                    }
-                }, matchWidth())
-                addView(TextView(context).apply {
-                    text = if (category.isRequired) {
+                    ),
+                    detail = if (category.isRequired) {
                         getString(
                             R.string.required_payload_description,
                             payloadDescription(category.payloadType),
                         )
                     } else {
                         payloadDescription(category.payloadType)
-                    }
-                    textSize = 14f
-                    setPadding(dp(48), 0, 0, spacing)
-                }, matchWidth())
+                    },
+                    checked = preferences.isEnabled(category.payloadType),
+                    enabled = !category.isRequired,
+                    onChanged = { preferences.setEnabled(category.payloadType, it) },
+                ), matchWidth())
             }
 
             addView(TextView(context).apply {
@@ -432,6 +411,50 @@ class OptionsActivity : LocalizedActivity() {
             }, matchWidth())
         }
         return ScrollView(this).apply { addView(container, matchWidth()) }
+    }
+
+    /** Keeps a packet-history choice and its explanation in one compact visual group. */
+    private fun packetHistoryOptionRow(
+        title: CharSequence,
+        detail: CharSequence,
+        checked: Boolean,
+        enabled: Boolean,
+        onChanged: (Boolean) -> Unit,
+    ): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.TOP
+        minimumHeight = dp(52)
+        setPadding(0, dp(2), 0, dp(2))
+        addView(CheckBox(context).apply {
+            contentDescription = title
+            isChecked = checked
+            isEnabled = enabled
+            if (!enabled) {
+                buttonTintList = ColorStateList(
+                    arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
+                    intArrayOf(getColor(R.color.primary), getColor(R.color.primary)),
+                )
+            }
+            setOnCheckedChangeListener { _, value -> onChanged(value) }
+        }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        addView(LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            addView(TextView(context).apply {
+                text = title
+                textSize = 14f
+                setTextColor(getColor(if (enabled) R.color.text_primary else R.color.text_secondary))
+            }, matchWidth())
+            addView(TextView(context).apply {
+                text = detail
+                textSize = 12f
+                setTextColor(getColor(R.color.text_secondary))
+                setLineSpacing(0f, 1.08f)
+                setPadding(0, dp(2), 0, 0)
+            }, matchWidth())
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            topMargin = dp(4)
+        })
     }
 
     private fun confirmFullRestore() {
@@ -505,7 +528,7 @@ class OptionsActivity : LocalizedActivity() {
     }
 
     private fun showBackupMessage(message: Int) {
-        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
+        TransientMessage.show(this, message, android.widget.Toast.LENGTH_LONG)
     }
 
     private fun requireActiveScope(): dev.gf2log.app.management.PlatoonStorageScope? =
@@ -610,12 +633,12 @@ class OptionsActivity : LocalizedActivity() {
             }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                Toast.makeText(
+                TransientMessage.show(
                     this,
                     if (result.isSuccess) R.string.game_timezone_updated
                     else R.string.game_timezone_update_failed,
                     Toast.LENGTH_SHORT,
-                ).show()
+                )
                 recreate()
             }
         }

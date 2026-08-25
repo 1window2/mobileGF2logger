@@ -1,7 +1,6 @@
 package dev.gf2log.app
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Typeface
@@ -115,10 +114,11 @@ internal object PrimaryNavigation {
                     if (destination != Destination.HOME &&
                         PlatoonProfileRegistry(activity).active() == null
                     ) {
-                        AlertDialog.Builder(activity)
-                            .setMessage(R.string.no_platoon_detected_detail)
-                            .setPositiveButton(android.R.string.ok, null)
-                            .show()
+                        TransientMessage.show(
+                            activity,
+                            R.string.no_platoon_detected_detail,
+                            android.widget.Toast.LENGTH_LONG,
+                        )
                     } else {
                         activity.startActivity(
                             Intent(activity, activityClass).addFlags(

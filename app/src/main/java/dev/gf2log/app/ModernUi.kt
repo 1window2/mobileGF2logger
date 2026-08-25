@@ -35,6 +35,7 @@ object ModernUi {
         SECONDARY,
         TERTIARY,
         NAVIGATION,
+        SELECTOR,
         DESTRUCTIVE,
         DESTRUCTIVE_TEXT,
     }
@@ -50,6 +51,13 @@ object ModernUi {
             setColor(context.getColor(if (emphasized) R.color.accent_surface else R.color.surface))
             cornerRadius = context.dp(16).toFloat()
         }
+
+    /** Theme-aware surface used by app-owned dialogs without replacing native semantics. */
+    fun dialogBackground(context: Context): GradientDrawable = GradientDrawable().apply {
+        setColor(context.getColor(R.color.surface))
+        cornerRadius = context.dp(20).toFloat()
+        setStroke(context.dp(1), context.getColor(R.color.outline))
+    }
 
     /** Flat list navigation used by dashboard utilities and grouped Settings rows. */
     fun listRow(
@@ -410,6 +418,16 @@ object ModernUi {
                 disabled = R.color.surface_variant,
                 stroke = android.R.color.transparent,
                 pressedStroke = R.color.outline_strong,
+                text = R.color.text_primary,
+                insetVertical = 4,
+                radiusDp = 12,
+            )
+            ControlRole.SELECTOR -> ButtonColors(
+                normal = R.color.surface,
+                pressed = R.color.surface_pressed,
+                disabled = R.color.surface_variant,
+                stroke = R.color.outline_strong,
+                pressedStroke = R.color.accent,
                 text = R.color.text_primary,
                 insetVertical = 4,
                 radiusDp = 12,

@@ -177,7 +177,7 @@ class PacketHistoryActivity : LocalizedActivity() {
 
     private fun confirmSendOriginalCsv() {
         val csv = runCatching { OriginalCsvPayload.extract(rawContent) }.getOrElse {
-            Toast.makeText(this, R.string.discord_csv_invalid, Toast.LENGTH_LONG).show()
+            TransientMessage.show(this, R.string.discord_csv_invalid, Toast.LENGTH_LONG)
             return
         }
         val webhook = DiscordWebhookSecretStore(this).read() ?: run {
@@ -206,17 +206,17 @@ class PacketHistoryActivity : LocalizedActivity() {
     private fun sendOriginalCsv(webhook: String, csv: String) {
         sendButton.alpha = 0.5f
         sendButton.isEnabled = false
-        Toast.makeText(this, R.string.discord_csv_sending, Toast.LENGTH_SHORT).show()
+        TransientMessage.show(this, R.string.discord_csv_sending)
         sendExecutor.execute {
             val sent = runCatching { DiscordWebhookSender().send(webhook, csv) }.isSuccess
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 refreshSendAvailability()
-                Toast.makeText(
+                TransientMessage.show(
                     this,
                     if (sent) R.string.discord_csv_sent else R.string.discord_csv_send_failed,
                     Toast.LENGTH_LONG,
-                ).show()
+                )
             }
         }
     }
@@ -273,7 +273,7 @@ class PacketHistoryActivity : LocalizedActivity() {
     private fun copyToClipboard(content: String) {
         getSystemService(ClipboardManager::class.java)
             .setPrimaryClip(ClipData.newPlainText(getString(R.string.clipboard_label), content))
-        Toast.makeText(this, getString(R.string.status_packet_copied), Toast.LENGTH_SHORT).show()
+        TransientMessage.show(this, R.string.status_packet_copied)
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

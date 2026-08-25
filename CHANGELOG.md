@@ -21,6 +21,9 @@ All notable changes to mobileGF2logger are documented here.
 
 ### Changed
 
+- Refine the Home capture card and active-Platoon selector, use cohesive
+  rounded dialogs, compact packet-history settings, and replace queued transient
+  messages so repeated actions do not leave stale feedback behind.
 - Quarantine up to 32 decoded payloads per TCP flow until both its supported
   Android client and valid Platoon identity are known; unverified flows never
   enter management storage.
@@ -42,6 +45,8 @@ All notable changes to mobileGF2logger are documented here.
 
 ### Fixed
 
+- Improve weekly evidence guidance and restore consistent spacing around weekly
+  notes and member-detail fields in both light and dark themes.
 - Resolve all six review findings from v2.3.3: clean flow metadata without a
   parser, order known same-day joins by instant, bound manual weekly notes,
   preserve captured member names, replace timezone-derived history atomically,

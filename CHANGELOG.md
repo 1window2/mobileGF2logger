@@ -51,9 +51,10 @@ All notable changes to mobileGF2logger are documented here.
   parser, order known same-day joins by instant, bound manual weekly notes,
   preserve captured member names, replace timezone-derived history atomically,
   and accept `21905` checklist evidence only after identity validation.
-- Bound the profile registry, profile metadata, and pre-identity flow buffer;
-  reject invalid restores before metadata changes, preserve the selected import
-  scope through preview/apply, and restore the matching client-region routing.
+- Bound the profile registry, profile metadata, and pre-identity quarantine with
+  both per-flow and aggregate decoded-payload caps; reject invalid restores before
+  metadata changes, preserve the selected import scope through preview/apply, and
+  restore the matching client-region routing.
 - Quarantine identity-changing or admission-failed flows, admit at most one new
   profile per client per user-started capture, and let users forget selector
   metadata without deleting the isolated Platoon data.

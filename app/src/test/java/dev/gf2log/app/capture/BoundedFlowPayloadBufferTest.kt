@@ -1,5 +1,6 @@
 package dev.gf2log.app.capture
 
+import java.lang.reflect.Modifier
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -59,5 +60,20 @@ class BoundedFlowPayloadBufferTest {
         buffer.clear()
         assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(4, "four"))
         assertEquals(listOf("four"), buffer.take(4))
+    }
+
+    @Test
+    fun everyStatefulOperationIsSerializedAcrossParserAndCloseThreads() {
+        val synchronizedMethods = setOf("offer", "take", "isRejected", "reject", "remove", "clear")
+        val methodsByName = BoundedFlowPayloadBuffer::class.java.declaredMethods
+            .filter { it.name in synchronizedMethods }
+            .associateBy { it.name }
+
+        assertEquals(synchronizedMethods, methodsByName.keys)
+        synchronizedMethods.forEach { name ->
+            assertTrue("$name must synchronize quarantine bookkeeping", Modifier.isSynchronized(
+                requireNotNull(methodsByName[name]).modifiers,
+            ))
+        }
     }
 }

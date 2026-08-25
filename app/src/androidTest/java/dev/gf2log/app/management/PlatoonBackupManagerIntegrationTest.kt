@@ -17,6 +17,7 @@ import dev.gf2log.app.settings.AppSettingsStore
 import dev.gf2log.app.settings.BackupSettingsStore
 import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.app.settings.GameServerRegion
+import dev.gf2log.app.settings.ScopedAppSettingsStore
 import dev.gf2log.app.settings.WeeklyCutlines
 import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.PayloadCatalog
@@ -41,13 +42,26 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PlatoonBackupManagerIntegrationTest {
     private lateinit var context: Context
-    private lateinit var settingsStore: AppSettingsStore
+    private lateinit var settingsStore: BackupSettingsStore
+    private lateinit var storageScope: PlatoonStorageScope
 
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         clearState()
-        settingsStore = AppSettingsStore(context)
+        val profile = PlatoonProfileRegistry(context).upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            dev.gf2log.protocol.model.PlatoonProfileData(
+                101817u,
+                "Backup test Platoon",
+                emptyList(),
+                emptyList(),
+            ),
+        )
+        check(PlatoonProfileRegistry(context).setActive(profile.storageId))
+        storageScope = PlatoonStorageScope(profile.storageId)
+        settingsStore = ScopedAppSettingsStore(context, storageScope.storageId)
     }
 
     @After
@@ -93,7 +107,7 @@ class PlatoonBackupManagerIntegrationTest {
     fun schemaTenCompleteBackupMigratesBeforeCurrentContractValidation() {
         seedDatabase(ARCHIVED_UID, "Archived member", "archived-source.csv")
         settingsStore.replace(archivedSettings())
-        val databaseFile = context.getDatabasePath(PlatoonSchema.DATABASE_NAME)
+        val databaseFile = context.getDatabasePath(storageScope.databaseName)
         SQLiteDatabase.openDatabase(databaseFile.path, null, SQLiteDatabase.OPEN_READWRITE).use { legacy ->
             legacy.execSQL("DROP INDEX platoon_activity_resolution_retention")
             legacy.execSQL("DROP INDEX platoon_activity_retention_order")
@@ -105,6 +119,7 @@ class PlatoonBackupManagerIntegrationTest {
                 output,
                 databaseFile,
                 AppBackupSettingsCodec.encode(archivedSettings()),
+                PlatoonProfileRegistry(context).active(),
             )
         }.toByteArray()
 
@@ -286,8 +301,8 @@ class PlatoonBackupManagerIntegrationTest {
             PlatoonBackupManager(context).exportFull(it)
         }.toByteArray()
 
-        PlatoonRepository.withExclusiveDatabase {
-            assertTrue(context.deleteDatabase(PlatoonSchema.DATABASE_NAME))
+        PlatoonRepository.withExclusiveDatabase(storageScope) {
+            assertTrue(context.deleteDatabase(storageScope.databaseName))
         }
         settingsStore.replace(currentSettings())
 
@@ -304,7 +319,7 @@ class PlatoonBackupManagerIntegrationTest {
         }
 
         assertEquals(currentSettings(), settingsStore.read())
-        assertFalse(context.getDatabasePath(PlatoonSchema.DATABASE_NAME).exists())
+        assertFalse(context.getDatabasePath(storageScope.databaseName).exists())
         assertFalse(FilePaths.preRestoreDatabase(context).exists())
         assertFalse(FilePaths.restoreTransactionDirectory(context).exists())
     }
@@ -436,12 +451,12 @@ class PlatoonBackupManagerIntegrationTest {
     @Test
     fun failedCsvImportPreservesThePreviousSuccessfulUndoCheckpoint() {
         seedDatabase(ARCHIVED_UID, "Before first import", "before-first-import.csv")
-        val firstImport = CsvImportCheckpointManager(context)
+        val firstImport = CsvImportCheckpointManager(context, storageScope)
         firstImport.create(emptySet())
         replaceDatabaseForCheckpoint(CURRENT_UID, "After first import", "after-first-import.csv")
         firstImport.seal()
 
-        val failedImport = CsvImportCheckpointManager(context)
+        val failedImport = CsvImportCheckpointManager(context, storageScope)
         failedImport.create(emptySet())
         replaceDatabaseForCheckpoint(THIRD_UID, "Failed second import", "failed-import.csv")
         failedImport.rollbackFailedImport()
@@ -452,7 +467,7 @@ class PlatoonBackupManagerIntegrationTest {
             assertEquals(0L, count(db, "members", "uid = ?", THIRD_UID))
         }
 
-        val previousUndo = CsvImportCheckpointManager(context)
+        val previousUndo = CsvImportCheckpointManager(context, storageScope)
         assertTrue(previousUndo.canUndo())
         previousUndo.restore()
 
@@ -461,13 +476,13 @@ class PlatoonBackupManagerIntegrationTest {
             assertEquals(1L, count(db, "members", "uid = ?", ARCHIVED_UID))
             assertEquals(0L, count(db, "members", "uid = ?", CURRENT_UID))
         }
-        assertFalse(CsvImportCheckpointManager(context).canUndo())
+        assertFalse(CsvImportCheckpointManager(context, storageScope).canUndo())
     }
 
     @Test
     fun interruptedCsvUndoCompletesAfterDatabaseInstallationOnRestart() {
         seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
-        val manager = CsvImportCheckpointManager(context) { checkpoint ->
+        val manager = CsvImportCheckpointManager(context, storageScope) { checkpoint ->
             if (checkpoint == PlatoonBackupManager.RestoreCheckpoint.DATABASE_INSTALLED) {
                 throw SimulatedProcessDeath()
             }
@@ -480,7 +495,7 @@ class PlatoonBackupManagerIntegrationTest {
             manager.restore()
         }
 
-        val recovered = CsvImportCheckpointManager(context)
+        val recovered = CsvImportCheckpointManager(context, storageScope)
 
         assertFalse(recovered.canUndo())
         PlatoonDatabase(context).use { database ->
@@ -509,7 +524,7 @@ class PlatoonBackupManagerIntegrationTest {
         )
         replaceDatabaseForCheckpoint(CURRENT_UID, "Interrupted import", plannedFileName)
         val retained = java.io.File(
-            context.filesDir,
+            storageScope.rootDirectory(context),
             PlatoonRepository.RETAINED_CSV_DIRECTORY,
         ).apply { mkdirs() }
         java.io.File(retained, plannedFileName).writeText(
@@ -517,7 +532,7 @@ class PlatoonBackupManagerIntegrationTest {
             Charsets.UTF_8,
         )
 
-        CsvImportCheckpointManager(context)
+        CsvImportCheckpointManager(context, storageScope)
 
         val members = PlatoonRepository(context).listMemberStatuses()
         assertTrue(members.any { it.uid == ARCHIVED_UID })
@@ -635,8 +650,8 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     private fun replaceDatabaseForCheckpoint(uid: Long, name: String, sourceFile: String) {
-        PlatoonRepository.withExclusiveDatabase {
-            context.deleteDatabase(PlatoonSchema.DATABASE_NAME)
+        PlatoonRepository.withExclusiveDatabase(storageScope) {
+            context.deleteDatabase(storageScope.databaseName)
         }
         seedDatabase(uid, name, sourceFile)
     }
@@ -835,6 +850,17 @@ class PlatoonBackupManagerIntegrationTest {
                     }
                 }
             }
+        java.io.File(context.cacheDir, "platoon-restore").deleteRecursively()
+        java.io.File(context.filesDir, "platoon-full-restore").deleteRecursively()
+        java.io.File(context.filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY).deleteRecursively()
+        java.io.File(
+            context.filesDir,
+            "${PlatoonRepository.RETAINED_CSV_DIRECTORY}.pre_restore",
+        ).deleteRecursively()
+        java.io.File(context.filesDir, "csv-import-checkpoint").deleteRecursively()
+        java.io.File(context.filesDir, "csv-import-checkpoint.staging").deleteRecursively()
+        java.io.File(context.filesDir, "csv-import-checkpoint.previous").deleteRecursively()
+        java.io.File(context.filesDir, "platoons").deleteRecursively()
         context.getSharedPreferences(USER_SETTINGS, Context.MODE_PRIVATE).edit().clear().commit()
         listOf(
             "platoon_profiles",
@@ -844,21 +870,18 @@ class PlatoonBackupManagerIntegrationTest {
         ).forEach { preferences ->
             context.getSharedPreferences(preferences, Context.MODE_PRIVATE).edit().clear().commit()
         }
-        FilePaths.restoreDirectory(context).deleteRecursively()
-        FilePaths.restoreTransactionDirectory(context).deleteRecursively()
-        FilePaths.retainedCsvDirectory(context).deleteRecursively()
-        FilePaths.previousRetainedCsvDirectory(context).deleteRecursively()
-        FilePaths.csvCheckpointDirectory(context).deleteRecursively()
-        FilePaths.csvCheckpointStagingDirectory(context).deleteRecursively()
-        FilePaths.csvCheckpointPreviousDirectory(context).deleteRecursively()
-        java.io.File(context.filesDir, "platoons").deleteRecursively()
     }
 
     private object FilePaths {
-        fun restoreDirectory(context: Context) = java.io.File(context.cacheDir, "platoon-restore")
+        private fun scope(context: Context) = PlatoonProfileRegistry(context).activeScope()
+
+        fun restoreDirectory(context: Context) = java.io.File(
+            context.cacheDir,
+            "platoon-restore/${scope(context).storageId}",
+        )
 
         fun restoreTransactionDirectory(context: Context) =
-            java.io.File(context.filesDir, "platoon-full-restore")
+            java.io.File(scope(context).rootDirectory(context), "platoon-full-restore")
 
         fun restoreSettingsFile(context: Context) =
             java.io.File(restoreTransactionDirectory(context), "settings.pre_restore")
@@ -872,28 +895,28 @@ class PlatoonBackupManagerIntegrationTest {
                 .filter { it.name.startsWith("guild-members.retired-") }
 
         fun retainedCsvDirectory(context: Context) = java.io.File(
-            context.filesDir,
+            scope(context).rootDirectory(context),
             PlatoonRepository.RETAINED_CSV_DIRECTORY,
         )
 
         fun previousRetainedCsvDirectory(context: Context) = java.io.File(
-            context.filesDir,
+            scope(context).rootDirectory(context),
             "${PlatoonRepository.RETAINED_CSV_DIRECTORY}.pre_restore",
         )
 
         fun preRestoreDatabase(context: Context) = java.io.File(
-            context.getDatabasePath(PlatoonSchema.DATABASE_NAME).parentFile,
-            "${PlatoonSchema.DATABASE_NAME}.pre_restore",
+            context.getDatabasePath(scope(context).databaseName).parentFile,
+            "${scope(context).databaseName}.pre_restore",
         )
 
         fun csvCheckpointDirectory(context: Context) =
-            java.io.File(context.filesDir, "csv-import-checkpoint")
+            java.io.File(scope(context).rootDirectory(context), "csv-import-checkpoint")
 
         fun csvCheckpointStagingDirectory(context: Context) =
-            java.io.File(context.filesDir, "csv-import-checkpoint.staging")
+            java.io.File(scope(context).rootDirectory(context), "csv-import-checkpoint.staging")
 
         fun csvCheckpointPreviousDirectory(context: Context) =
-            java.io.File(context.filesDir, "csv-import-checkpoint.previous")
+            java.io.File(scope(context).rootDirectory(context), "csv-import-checkpoint.previous")
     }
 
     private class SimulatedProcessDeath : Error()
@@ -910,9 +933,34 @@ class PlatoonBackupManagerIntegrationTest {
 }
 @RunWith(AndroidJUnit4::class)
 class WeeklyReportActivityStateTest {
+    private val context = ApplicationProvider.getApplicationContext<Context>()
+
+    @Before
+    fun setUpProfile() {
+        context.getSharedPreferences("platoon_profiles", Context.MODE_PRIVATE)
+            .edit().clear().commit()
+        val profile = PlatoonProfileRegistry(context).upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            dev.gf2log.protocol.model.PlatoonProfileData(
+                101817u,
+                "Weekly UI test",
+                emptyList(),
+                emptyList(),
+            ),
+        )
+        check(PlatoonProfileRegistry(context).setActive(profile.storageId))
+    }
+
+    @After
+    fun clearProfile() {
+        context.getSharedPreferences("platoon_profiles", Context.MODE_PRIVATE)
+            .edit().clear().commit()
+        java.io.File(context.filesDir, "platoons").deleteRecursively()
+    }
+
     @Test
     fun repeatedWeeklyPngRendersUseDifferentProviderUris() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
         val periodStart = LocalDate.of(2026, 8, 9)
         val document = WeeklyShareProjection.Document(
             title = "GF2logger",
@@ -970,7 +1018,6 @@ class WeeklyReportActivityStateTest {
 
     @Test
     fun pendingWeeklyPngSurvivesActivityRecreation() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
         WeeklyPngPendingState.directory(context.cacheDir).mkdirs()
         val target = WeeklyPngPendingState
             .newRenderTarget(context.cacheDir, LocalDate.of(2026, 8, 9))

@@ -119,11 +119,9 @@ internal data class PlatoonStorageScope(val storageId: String) {
             PlatoonSchema.DATABASE_NAME -> PlatoonStorageScope(
                 PlatoonProfileIdentity.LEGACY_STORAGE_ID,
             )
-            else -> SCOPED_DATABASE.matchEntire(databaseName)
-                ?.groupValues
-                ?.get(1)
-                ?.let(::PlatoonStorageScope)
-                ?: PlatoonStorageScope(PlatoonProfileIdentity.LEGACY_STORAGE_ID)
+            else -> requireNotNull(SCOPED_DATABASE.matchEntire(databaseName)) {
+                "Database name is not a recognized Platoon scope"
+            }.groupValues[1].let(::PlatoonStorageScope)
         }
     }
 }
@@ -135,35 +133,13 @@ internal class PlatoonProfileRegistry(context: Context) {
 
     fun ensureInitialized(): List<PlatoonProfile> = synchronized(lock) {
         PlatoonProfileAdministration.recoverPending(appContext)
-        val current = readAllLocked()
-        if (current.isNotEmpty()) return@synchronized current
-        val legacyDatabase = appContext.getDatabasePath(PlatoonSchema.DATABASE_NAME)
-        val hasLegacyDatabaseData = legacyDatabase.isFile && runCatching {
-            PlatoonDatabase(appContext).use(PlatoonDatabase::hasManagementData)
-        }.getOrDefault(false)
-        val hasRetainedCsvData = File(
-            appContext.filesDir,
-            PlatoonRepository.RETAINED_CSV_DIRECTORY,
-        ).listFiles { file ->
-            file.isFile && file.length() > 0L && file.extension.equals("csv", ignoreCase = true)
-        }.orEmpty().isNotEmpty()
-        val hasLegacyData = hasLegacyDatabaseData || hasRetainedCsvData
-        if (!hasLegacyData) return@synchronized emptyList()
-        val legacy = legacyProfile()
-        writeLocked(legacy, setActive = true)
-        listOf(legacy)
-    }
-
-    fun ensureLegacyProfile(): PlatoonProfile = synchronized(lock) {
-        readLocked(PlatoonProfileIdentity.LEGACY_STORAGE_ID)?.let { return@synchronized it }
-        val legacy = legacyProfile()
-        writeLocked(legacy, setActive = preferences.getString(KEY_ACTIVE, null) == null)
-        legacy
+        retireLegacyMetadataLocked()
+        readAllLocked().filterNot(PlatoonProfile::legacy)
     }
 
     fun list(): List<PlatoonProfile> = synchronized(lock) {
         ensureInitialized()
-        readAllLocked().sortedWith(
+        readAllLocked().filterNot(PlatoonProfile::legacy).sortedWith(
             compareByDescending<PlatoonProfile> { it.lastSeenAt }.thenBy { it.storageId },
         )
     }
@@ -171,13 +147,14 @@ internal class PlatoonProfileRegistry(context: Context) {
     fun active(): PlatoonProfile? = synchronized(lock) {
         ensureInitialized()
         val activeId = preferences.getString(KEY_ACTIVE, null)
-        readAllLocked().firstOrNull { it.storageId == activeId }
-            ?: readAllLocked().maxByOrNull(PlatoonProfile::lastSeenAt)
+        val current = readAllLocked().filterNot(PlatoonProfile::legacy)
+        current.firstOrNull { it.storageId == activeId }
+            ?: current.maxByOrNull(PlatoonProfile::lastSeenAt)
     }
 
     fun find(storageId: String): PlatoonProfile? = synchronized(lock) {
         ensureInitialized()
-        readLocked(storageId)
+        readLocked(storageId)?.takeUnless(PlatoonProfile::legacy)
     }
 
     fun findByIdentity(
@@ -204,15 +181,14 @@ internal class PlatoonProfileRegistry(context: Context) {
         }
     }
 
-    fun activeScope(): PlatoonStorageScope =
-        PlatoonStorageScope(active()?.storageId ?: PlatoonProfileIdentity.LEGACY_STORAGE_ID)
+    fun activeScope(): PlatoonStorageScope = PlatoonStorageScope(
+        requireNotNull(active()) { "No confirmed Platoon profile is selected" }.storageId,
+    )
 
     fun setActive(storageId: String): Boolean = synchronized(lock) {
         require(PlatoonProfileIdentity.isValidStorageId(storageId))
         val selected = readLocked(storageId) ?: return@synchronized false
-        if (selected.legacy) {
-            return@synchronized preferences.edit().putString(KEY_ACTIVE, storageId).commit()
-        }
+        if (selected.legacy) return@synchronized false
         val clientRegions = ClientServerRegionPreferences(appContext)
         val ownerPackage = selected.client.packageName
         val previousRegion = clientRegions.stored(ownerPackage)
@@ -267,6 +243,45 @@ internal class PlatoonProfileRegistry(context: Context) {
             lastSeenAt = observedAt,
         )
         writeLocked(profile, setActive = preferences.getString(KEY_ACTIVE, null) == null)
+        profile
+    }
+
+    /**
+     * Creates an isolated profile from identity fields explicitly supplied by the user.
+     * This is the only safe destination for a roster CSV that contains no 21905 identity.
+     */
+    fun createDeclared(
+        client: PlatoonClient,
+        region: GameServerRegion,
+        platoonId: Long,
+        platoonName: String,
+        createdAt: Instant = Instant.now(),
+    ): PlatoonProfile = synchronized(lock) {
+        require(client != PlatoonClient.LEGACY) { "A supported client is required" }
+        require(region in ClientServerRegionPreferences.allowedFor(client.packageName)) {
+            "The server region does not belong to this client"
+        }
+        require(platoonId in 1L..UInt.MAX_VALUE.toLong()) { "Platoon ID is invalid" }
+        require(readAllLocked().none {
+            !it.legacy &&
+                it.client == client &&
+                it.serverRegion == region &&
+                it.platoonId == platoonId
+        }) { "That client/server Platoon profile already exists" }
+        require(readAllLocked().size < MAX_PROFILES) {
+            "Too many Platoon profiles are already registered"
+        }
+        val profile = PlatoonProfile(
+            storageId = allocateStorageIdLocked(client, region, platoonId),
+            client = client,
+            serverRegion = region,
+            platoonId = platoonId,
+            platoonName = normalizeName(platoonName),
+            emblemPrimary = emptyList(),
+            emblemSecondary = emptyList(),
+            lastSeenAt = createdAt,
+        )
+        writeLocked(profile, setActive = false)
         profile
     }
 
@@ -326,6 +341,7 @@ internal class PlatoonProfileRegistry(context: Context) {
         }
 
     fun upsertRestored(profile: PlatoonProfile): PlatoonProfile = synchronized(lock) {
+        require(!profile.legacy) { "Legacy unscoped Platoon data cannot be restored" }
         requireCompatibleRestoreTargetLocked(profile)
         require(readLocked(profile.storageId) != null || readAllLocked().size < MAX_PROFILES) {
             "Too many Platoon profiles are already registered"
@@ -336,6 +352,7 @@ internal class PlatoonProfileRegistry(context: Context) {
 
     /** Rejects a new restore scope before any database or filesystem state is replaced. */
     fun requireRestoreCapacity(profile: PlatoonProfile) = synchronized(lock) {
+        require(!profile.legacy) { "Legacy unscoped Platoon data cannot be restored" }
         requireCompatibleRestoreTargetLocked(profile)
         require(readLocked(profile.storageId) != null || readAllLocked().size < MAX_PROFILES) {
             "Too many Platoon profiles are already registered"
@@ -443,6 +460,29 @@ internal class PlatoonProfileRegistry(context: Context) {
         .orEmpty()
         .mapNotNull(::readLocked)
 
+    /** Removes the pre-isolation selector only; its files remain quarantined for recovery. */
+    private fun retireLegacyMetadataLocked() {
+        val ids = preferences.getStringSet(KEY_IDS, emptySet()).orEmpty().toMutableSet()
+        if (!ids.remove(PlatoonProfileIdentity.LEGACY_STORAGE_ID) &&
+            preferences.getString(KEY_ACTIVE, null) != PlatoonProfileIdentity.LEGACY_STORAGE_ID
+        ) return
+        val prefix = "$KEY_PROFILE.${PlatoonProfileIdentity.LEGACY_STORAGE_ID}."
+        val editor = preferences.edit()
+            .putStringSet(KEY_IDS, ids)
+            .remove(prefix + CLIENT)
+            .remove(prefix + REGION)
+            .remove(prefix + PLATOON_ID)
+            .remove(prefix + NAME)
+            .remove(prefix + EMBLEM_PRIMARY)
+            .remove(prefix + EMBLEM_SECONDARY)
+            .remove(prefix + LAST_SEEN)
+            .remove(prefix + LEGACY)
+        if (preferences.getString(KEY_ACTIVE, null) == PlatoonProfileIdentity.LEGACY_STORAGE_ID) {
+            editor.remove(KEY_ACTIVE)
+        }
+        check(editor.commit()) { "Unable to retire legacy Platoon metadata" }
+    }
+
     private fun readLocked(storageId: String): PlatoonProfile? = runCatching {
         if (!PlatoonProfileIdentity.isValidStorageId(storageId)) return@runCatching null
         val prefix = "$KEY_PROFILE.$storageId."
@@ -478,6 +518,7 @@ internal class PlatoonProfileRegistry(context: Context) {
     }
 
     private fun requireCompatibleRestoreTargetLocked(profile: PlatoonProfile) {
+        require(!profile.legacy) { "Legacy unscoped Platoon data cannot be restored" }
         val profiles = readAllLocked()
         profiles.firstOrNull { it.storageId == profile.storageId }?.let { existing ->
             require(
@@ -530,18 +571,6 @@ internal class PlatoonProfileRegistry(context: Context) {
         .mapNotNull(String::toLongOrNull)
         .take(PlatoonProfile.MAX_EMBLEM_PARTS)
 
-    private fun legacyProfile() = PlatoonProfile(
-        storageId = PlatoonProfileIdentity.LEGACY_STORAGE_ID,
-        client = PlatoonClient.LEGACY,
-        serverRegion = GameServerRegion.MANUAL,
-        platoonId = 0L,
-        platoonName = LEGACY_NAME,
-        emblemPrimary = emptyList(),
-        emblemSecondary = emptyList(),
-        lastSeenAt = Instant.EPOCH,
-        legacy = true,
-    )
-
     internal companion object {
         internal const val MAX_PROFILES = 16
         private const val PREFERENCES = "platoon_profiles"
@@ -556,7 +585,6 @@ internal class PlatoonProfileRegistry(context: Context) {
         private const val EMBLEM_SECONDARY = "emblem_secondary"
         private const val LAST_SEEN = "last_seen"
         private const val LEGACY = "legacy"
-        private const val LEGACY_NAME = "Existing platoon data"
         private val lock = Any()
     }
 }

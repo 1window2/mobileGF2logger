@@ -26,6 +26,10 @@ never stored.
 - Explains every weekly cell on tap and summarizes missing or uncertain evidence in an Evidence Health panel.
 - Keeps up to 15 complete automatic revisions per weekly table so an earlier projection and its displayed member context can be previewed and restored after an accidental import.
 - Recovers interrupted imports before previewing roster CSV impact and keeps an automatic one-level checkpoint for undo.
+- Imports a roster CSV only into an explicitly selected, already confirmed
+  Platoon or a profile whose client, server, name, and ID the user explicitly
+  enters. Because `21917` contains no Platoon identity, the preview always
+  names the target and asks the user to verify it.
 - Saves or shares a weekly PNG with opt-in controls for names, UIDs, and private notes.
 - Can send a validated original CSV to an optional user-owned Discord incoming webhook after confirmation.
 - Stores the latest 100 parsed packets and up to 50 saved packets, with table and raw views, copy, export, selection, and deletion.
@@ -59,7 +63,11 @@ unattributed management payloads are deliberately not imported. Because the
 plaintext protocol does not expose a trustworthy server identifier, select the
 correct HaoPlay and Darkwinter server in Settings before first capture.
 
-The app keeps parsed history, management data, and generated CSV files in private on-device storage. It does not bypass TLS, certificate pinning, or anti-cheat systems, and it does not modify game traffic. Server responses may contain only recent incremental history, so older missing membership records can be entered manually.
+The app keeps each confirmed Platoon's parsed history, management data, and
+generated CSV files in separate private on-device storage. It does not bypass
+TLS, certificate pinning, or anti-cheat systems, and it does not modify game
+traffic. Server responses may contain only recent incremental history, so older
+missing membership records can be entered manually.
 
 ## Reference
 

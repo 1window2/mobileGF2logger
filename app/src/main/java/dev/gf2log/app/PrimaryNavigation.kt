@@ -1,6 +1,7 @@
 package dev.gf2log.app
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Typeface
@@ -12,6 +13,7 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import dev.gf2log.app.management.PlatoonProfileRegistry
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 
@@ -110,11 +112,20 @@ internal object PrimaryNavigation {
             ).apply { topMargin = activity.dp(2) })
             if (!active) {
                 setOnClickListener {
-                    activity.startActivity(
-                        Intent(activity, activityClass).addFlags(
-                            Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP,
-                        ),
-                    )
+                    if (destination != Destination.HOME &&
+                        PlatoonProfileRegistry(activity).active() == null
+                    ) {
+                        AlertDialog.Builder(activity)
+                            .setMessage(R.string.no_platoon_detected_detail)
+                            .setPositiveButton(android.R.string.ok, null)
+                            .show()
+                    } else {
+                        activity.startActivity(
+                            Intent(activity, activityClass).addFlags(
+                                Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                            ),
+                        )
+                    }
                 }
             }
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))

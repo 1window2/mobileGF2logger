@@ -36,10 +36,12 @@ import dev.gf2log.app.management.PlatoonBackupManager
 import dev.gf2log.app.management.CsvImportCheckpointManager
 import dev.gf2log.app.management.CsvImportPreviewAnalyzer
 import dev.gf2log.app.management.PlatoonCsvImportStore
+import dev.gf2log.app.management.PlatoonProfile
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.management.BackupFileName
+import dev.gf2log.app.settings.GameServerRegion
 import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.Gfl2PayloadDecoder
 import dev.gf2log.protocol.PayloadCatalog
@@ -79,23 +81,35 @@ class MainActivity : LocalizedActivity() {
     private var pendingExport: File? = null
     private var captureOnceRequested = false
     private var pendingCsvImport: PendingCsvImport? = null
+    private var pendingCsvPickerStorageId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingCsvPickerStorageId = savedInstanceState?.getString(STATE_CSV_TARGET)
         profileBinding = ActivePlatoonScopeBinding(this)
         if (!OnboardingPreferences.isCompleted(this)) {
             startActivity(Intent(this, OnboardingActivity::class.java))
             finish()
             return
         }
-        historyStore = CaptureHistoryStore(
-            File(filesDir, CaptureHistoryStore.HISTORY_DIRECTORY),
-        )
-        savedHistoryStore = SavedHistoryStore(
-            File(filesDir, SavedHistoryStore.SAVED_HISTORY_DIRECTORY),
-        )
+        val historyRoot = profileBinding.scope?.rootDirectory(this)
+            ?: File(cacheDir, "no-profile-history")
+        historyStore = CaptureHistoryStore(File(historyRoot, CaptureHistoryStore.HISTORY_DIRECTORY))
+        savedHistoryStore = SavedHistoryStore(File(historyRoot, SavedHistoryStore.SAVED_HISTORY_DIRECTORY))
         setContentView(buildContentView())
         requestNotificationPermissionIfNeeded()
+        intent.getStringExtra(EXTRA_LAUNCH_CSV_PICKER)
+            ?.takeIf { it == profileBinding.scope?.storageId }
+            ?.let { storageId ->
+                intent.removeExtra(EXTRA_LAUNCH_CSV_PICKER)
+                pendingCsvPickerStorageId = storageId
+                window.decorView.post(::selectPlatoonCsvFiles)
+            }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        pendingCsvPickerStorageId?.let { outState.putString(STATE_CSV_TARGET, it) }
+        super.onSaveInstanceState(outState)
     }
 
     override fun onResume() {
@@ -150,6 +164,7 @@ class MainActivity : LocalizedActivity() {
             requestCode == REQUEST_BACKUP_EXPORT -> {
                 val destination = data?.data
                 if (resultCode != RESULT_OK || destination == null) return
+                val scope = profileBinding.scope ?: return
                 runFileOperation(
                     successMessage = { getString(R.string.status_backup_exported) },
                     failureMessage = { getString(R.string.status_backup_failed) },
@@ -158,7 +173,7 @@ class MainActivity : LocalizedActivity() {
                         contentResolver,
                         destination,
                     ) ?: error("Document provider did not open an output stream")
-                    output.use { PlatoonBackupManager(this).export(it) }
+                    output.use { PlatoonBackupManager(this, scope).export(it) }
                 }
             }
             requestCode == REQUEST_BACKUP_IMPORT -> {
@@ -171,21 +186,35 @@ class MainActivity : LocalizedActivity() {
                 runFileOperation(
                     successMessage = { getString(R.string.status_backup_restored) },
                     failureMessage = { getString(R.string.status_backup_failed) },
+                    onSuccess = { recreate() },
                 ) {
                     val input = TrustedImportSource.openInputStream(contentResolver, source)
                         ?: error("Document provider did not open an input stream")
-                    input.use { PlatoonBackupManager(this).restore(it) }
+                    input.use { PlatoonBackupManager.restoreSelected(this, it, complete = false) }
                 }
             }
             requestCode == REQUEST_CSV_IMPORT -> {
-                if (resultCode != RESULT_OK) return
+                if (resultCode != RESULT_OK) {
+                    pendingCsvPickerStorageId = null
+                    return
+                }
                 val sources = buildList {
                     data?.clipData?.let { clip ->
                         repeat(clip.itemCount) { index -> add(clip.getItemAt(index).uri) }
                     }
                     data?.data?.let(::add)
                 }.distinct()
-                if (sources.isNotEmpty()) preparePlatoonCsvSources(sources)
+                if (sources.isNotEmpty()) {
+                    val target = resolveCsvImportTarget(pendingCsvPickerStorageId)
+                    if (target == null) {
+                        pendingCsvPickerStorageId = null
+                        statusText.text = getString(R.string.csv_import_target_changed)
+                    } else {
+                        preparePlatoonCsvSources(sources, target)
+                    }
+                } else {
+                    pendingCsvPickerStorageId = null
+                }
             }
         }
     }
@@ -193,6 +222,7 @@ class MainActivity : LocalizedActivity() {
     private fun runFileOperation(
         successMessage: () -> String,
         failureMessage: () -> String,
+        onSuccess: () -> Unit = {},
         operation: () -> Unit,
     ) {
         fileIoExecutor.execute {
@@ -200,6 +230,7 @@ class MainActivity : LocalizedActivity() {
             statusHandler.post {
                 if (!isFinishing && !isDestroyed) {
                     statusText.text = if (succeeded) successMessage() else failureMessage()
+                    if (succeeded) onSuccess()
                 }
             }
         }
@@ -244,18 +275,41 @@ class MainActivity : LocalizedActivity() {
                 }
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    addView(View(context).apply {
-                        background = GradientDrawable().apply {
-                            shape = GradientDrawable.OVAL
-                            setColor(getColor(R.color.accent))
+                    gravity = Gravity.TOP
+                    addView(LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        addView(LinearLayout(context).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.CENTER_VERTICAL
+                            addView(View(context).apply {
+                                background = GradientDrawable().apply {
+                                    shape = GradientDrawable.OVAL
+                                    setColor(getColor(R.color.accent))
+                                }
+                            }, LinearLayout.LayoutParams(dp(8), dp(8)).apply {
+                                marginEnd = dp(8)
+                            })
+                            addView(TextView(context).apply {
+                                text = getString(R.string.capture_status_label)
+                                textSize = 13f
+                                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                            })
+                        }, matchWidth())
+                        captureStateText = TextView(context).apply {
+                            textSize = 22f
+                            setTextColor(getColor(R.color.success_text))
+                            setTypeface(typeface, Typeface.BOLD)
+                            setPadding(0, dp(2), 0, 0)
                         }
-                    }, LinearLayout.LayoutParams(dp(8), dp(8)).apply { marginEnd = dp(8) })
-                    addView(TextView(context).apply {
-                        text = getString(R.string.capture_status_label)
-                        textSize = 13f
-                        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                        addView(captureStateText, matchWidth())
+                        captureStatusText = TextView(context).apply {
+                            textSize = 13f
+                            setTextColor(getColor(R.color.text_secondary))
+                        }
+                        addView(captureStatusText, matchWidth())
+                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        marginEnd = dp(8)
+                    })
                     addView(
                         PlatoonProfileSelector.controls(this@MainActivity, compact = true),
                         LinearLayout.LayoutParams(
@@ -264,26 +318,14 @@ class MainActivity : LocalizedActivity() {
                         ),
                     )
                 }, matchWidth())
-                captureStateText = TextView(context).apply {
-                    textSize = 22f
-                    setTextColor(getColor(R.color.success_text))
-                    setTypeface(typeface, Typeface.BOLD)
-                    setPadding(0, dp(8), 0, 0)
-                }
-                addView(captureStateText, matchWidth())
-                captureStatusText = TextView(context).apply {
-                    textSize = 13f
-                    setTextColor(getColor(R.color.text_secondary))
-                    setPadding(0, dp(1), 0, dp(8))
-                }
-                addView(captureStatusText, matchWidth())
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
+                    gravity = Gravity.TOP
                     addView(TextView(context).apply {
                         text = getString(R.string.capture_target)
                         textSize = 12f
                         setTextColor(getColor(R.color.text_secondary))
+                        setPadding(0, dp(4), 0, 0)
                     }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                     addView(ImageButton(context).apply {
                         setImageResource(R.drawable.ic_info_outline)
@@ -359,13 +401,13 @@ class MainActivity : LocalizedActivity() {
                     title = getString(R.string.platoon_management),
                     detail = getString(R.string.platoon_shortcut_detail),
                     icon = R.drawable.ic_group,
-                ) { startActivity(Intent(this@MainActivity, PlatoonActivity::class.java)) },
+                ) { openScopedActivity(PlatoonActivity::class.java) },
                     LinearLayout.LayoutParams(0, dp(76), 1f).apply { marginEnd = dp(5) })
                 addView(featureShortcut(
                     title = getString(R.string.weekly_table),
                     detail = getString(R.string.weekly_shortcut_detail),
                     icon = R.drawable.ic_calendar,
-                ) { startActivity(Intent(this@MainActivity, WeeklyReportActivity::class.java)) },
+                ) { openScopedActivity(WeeklyReportActivity::class.java) },
                     LinearLayout.LayoutParams(0, dp(76), 1f).apply { marginStart = dp(5) })
             }, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -375,13 +417,13 @@ class MainActivity : LocalizedActivity() {
             addView(sectionLabel(getString(R.string.data_tools)), matchWidth())
             listOf(
                 ModernUi.listRow(context, getString(R.string.import_platoon_csv), icon = R.drawable.ic_edit) {
-                    selectPlatoonCsvFiles()
+                    showCsvImportSelector()
                 },
                 ModernUi.listRow(context, getString(R.string.export_platoon_backup), icon = R.drawable.ic_save) {
-                    exportPlatoonBackup()
+                    if (requireActiveScope() != null) exportPlatoonBackup()
                 },
                 ModernUi.listRow(context, getString(R.string.undo_last_csv_import), icon = R.drawable.ic_arrow_back) {
-                    confirmUndoLastCsvImport()
+                    if (requireActiveScope() != null) confirmUndoLastCsvImport()
                 },
                 ModernUi.listRow(context, getString(R.string.import_platoon_backup), icon = R.drawable.ic_save) {
                     confirmImportPlatoonBackup()
@@ -389,7 +431,6 @@ class MainActivity : LocalizedActivity() {
             ).forEach { row ->
                 addView(row, matchWidth())
             }
-
             addView(sectionLabel(getString(R.string.recent_packets, CaptureHistoryStore.MAX_ENTRIES)), matchWidth())
             historyContainer = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
@@ -590,6 +631,62 @@ class MainActivity : LocalizedActivity() {
         }
     }
 
+    private fun requireActiveScope(): PlatoonStorageScope? = profileBinding.scope.also { scope ->
+        if (scope == null) {
+            showNoPlatoonMessage()
+        }
+    }
+
+    private fun showNoPlatoonMessage() {
+        AlertDialog.Builder(this)
+            .setMessage(R.string.no_platoon_detected_detail)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun showCsvImportSelector() {
+        if (CaptureStatus.isRunning) {
+            statusText.text = getString(R.string.stop_capture_before_csv_import)
+            return
+        }
+        PlatoonCsvImportPrompt.show(this, ::beginCsvImport)
+    }
+
+    private fun beginCsvImport(profile: PlatoonProfile) {
+        val registry = PlatoonProfileRegistry(this)
+        if (!registry.setActive(profile.storageId)) {
+            statusText.text = getString(R.string.csv_import_target_changed)
+            return
+        }
+        pendingCsvPickerStorageId = profile.storageId
+        if (profileBinding.scope?.storageId == profile.storageId) {
+            selectPlatoonCsvFiles()
+        } else {
+            intent.putExtra(EXTRA_LAUNCH_CSV_PICKER, profile.storageId)
+            recreate()
+        }
+    }
+
+    private fun resolveCsvImportTarget(storageId: String?): CsvImportTarget? {
+        val scope = storageId?.let(::PlatoonStorageScope) ?: return null
+        val registry = PlatoonProfileRegistry(this)
+        val activeProfile = registry.active()
+        if (
+            activeProfile == null ||
+            activeProfile.storageId != scope.storageId ||
+            activeProfile.legacy ||
+            profileBinding.scope != scope
+        ) {
+            statusText.text = getString(R.string.csv_import_target_changed)
+            return null
+        }
+        return CsvImportTarget(scope, activeProfile)
+    }
+
+    private fun openScopedActivity(activityClass: Class<out Activity>) {
+        if (requireActiveScope() != null) startActivity(Intent(this, activityClass))
+    }
+
     @Suppress("DEPRECATION")
     private fun exportPlatoonBackup() {
         if (CaptureStatus.isRunning) {
@@ -627,6 +724,10 @@ class MainActivity : LocalizedActivity() {
     // Returns:
     // - Unit after dispatching the picker activity.
     private fun selectPlatoonCsvFiles() {
+        if (resolveCsvImportTarget(pendingCsvPickerStorageId) == null) {
+            pendingCsvPickerStorageId = null
+            return
+        }
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
             .setType("text/csv")
@@ -645,12 +746,12 @@ class MainActivity : LocalizedActivity() {
     // - sources: Distinct document-provider URIs returned by the picker.
     // Returns:
     // - Unit after scheduling validation and preview display.
-    private fun preparePlatoonCsvSources(sources: List<Uri>) {
+    private fun preparePlatoonCsvSources(sources: List<Uri>, target: CsvImportTarget) {
         if (CaptureStatus.isRunning) {
             statusText.text = getString(R.string.stop_capture_before_csv_import)
             return
         }
-        val storageScope = PlatoonProfileRegistry(this).activeScope()
+        val storageScope = target.storageScope
         statusText.text = getString(R.string.csv_import_preparing_preview)
         fileIoExecutor.execute {
             val result = runCatching {
@@ -691,7 +792,13 @@ class MainActivity : LocalizedActivity() {
                     duplicateFiles = analyzed.duplicateFiles + selected.size - unique.size,
                     totalBytes = selectedBytes,
                 )
-                PendingCsvImport(storageScope, unique, duplicateNames, preview)
+                PendingCsvImport(
+                    storageScope = storageScope,
+                    destinationProfile = target.profile,
+                    prepared = unique,
+                    duplicateFileNames = duplicateNames,
+                    preview = preview,
+                )
             }
             statusHandler.post {
                 if (isFinishing || isDestroyed) return@post
@@ -702,6 +809,7 @@ class MainActivity : LocalizedActivity() {
                     },
                     onFailure = {
                         pendingCsvImport = null
+                        pendingCsvPickerStorageId = null
                         statusText.text = getString(R.string.status_platoon_csv_import_failed)
                     },
                 )
@@ -725,6 +833,12 @@ class MainActivity : LocalizedActivity() {
             .setTitle(R.string.csv_import_preview_title)
             .setMessage(
                 getString(
+                    R.string.csv_import_destination,
+                    pending.destinationProfile.platoonName,
+                    pending.destinationProfile.platoonId,
+                    pending.destinationProfile.client.displayName,
+                    csvImportRegionLabel(pending.destinationProfile.serverRegion),
+                ) + "\n\n" + getString(
                     R.string.csv_import_preview_summary,
                     preview.validatedFiles,
                     preview.duplicateFiles,
@@ -738,18 +852,57 @@ class MainActivity : LocalizedActivity() {
                     range,
                 ),
             )
-            .setNegativeButton(android.R.string.cancel) { _, _ -> pendingCsvImport = null }
+            .setNegativeButton(android.R.string.cancel) { _, _ ->
+                pendingCsvImport = null
+                pendingCsvPickerStorageId = null
+            }
             .setPositiveButton(R.string.import_platoon_csv) { _, _ ->
                 applyPreparedCsvImport(pending)
             }
-            .setOnCancelListener { pendingCsvImport = null }
+            .setOnCancelListener {
+                pendingCsvImport = null
+                pendingCsvPickerStorageId = null
+            }
             .show()
     }
 
+    private fun csvImportRegionLabel(region: GameServerRegion): String = getString(
+        when (region) {
+            GameServerRegion.MANUAL -> R.string.server_region_manual
+            GameServerRegion.DARKWINTER_GLOBAL -> R.string.server_region_darkwinter_global
+            GameServerRegion.DARKWINTER_CHINA -> R.string.server_region_darkwinter_china
+            GameServerRegion.HAOPLAY_GLOBAL -> R.string.server_region_haoplay_global
+            GameServerRegion.HAOPLAY_JAPAN -> R.string.server_region_haoplay_japan
+            GameServerRegion.HAOPLAY_KOREA -> R.string.server_region_haoplay_korea
+            GameServerRegion.HAOPLAY_ASIA -> R.string.server_region_haoplay_asia
+        },
+    )
+
     private fun applyPreparedCsvImport(pending: PendingCsvImport) {
-        if (pendingCsvImport !== pending || CaptureStatus.isRunning) {
+        val registry = PlatoonProfileRegistry(this)
+        val targetStillExists = registry.find(pending.storageScope.storageId)
+            ?.let {
+                it.client == pending.destinationProfile.client &&
+                    it.platoonId == pending.destinationProfile.platoonId
+            }
+            ?: false
+        val targetStillSelected = registry.active()?.storageId == pending.storageScope.storageId
+        if (
+            pendingCsvImport !== pending ||
+            CaptureStatus.isRunning ||
+            profileBinding.scope != pending.storageScope ||
+            !targetStillExists ||
+            !targetStillSelected
+        ) {
             pendingCsvImport = null
-            statusText.text = getString(R.string.stop_capture_before_csv_import)
+            pendingCsvPickerStorageId = null
+            statusText.text = getString(
+                if (CaptureStatus.isRunning) {
+                    R.string.stop_capture_before_csv_import
+                } else {
+                    R.string.csv_import_target_changed
+                },
+            )
             return
         }
         pendingCsvImport = null
@@ -784,6 +937,7 @@ class MainActivity : LocalizedActivity() {
             }
             statusHandler.post {
                 if (isFinishing || isDestroyed) return@post
+                pendingCsvPickerStorageId = null
                 statusText.text = result.fold(
                     onSuccess = { summary ->
                         getString(
@@ -805,7 +959,8 @@ class MainActivity : LocalizedActivity() {
             statusText.text = getString(R.string.stop_capture_before_csv_import)
             return
         }
-        if (!CsvImportCheckpointManager(this).canUndo()) {
+        val scope = requireActiveScope() ?: return
+        if (!CsvImportCheckpointManager(this, scope).canUndo()) {
             statusText.text = getString(R.string.no_csv_import_checkpoint)
             return
         }
@@ -818,9 +973,10 @@ class MainActivity : LocalizedActivity() {
     }
 
     private fun undoLastCsvImport() {
+        val scope = requireActiveScope() ?: return
         statusText.text = getString(R.string.csv_import_undoing)
         fileIoExecutor.execute {
-            val succeeded = runCatching { CsvImportCheckpointManager(this).restore() }.isSuccess
+            val succeeded = runCatching { CsvImportCheckpointManager(this, scope).restore() }.isSuccess
             statusHandler.post {
                 if (isFinishing || isDestroyed) return@post
                 statusText.text = getString(
@@ -853,8 +1009,7 @@ class MainActivity : LocalizedActivity() {
 
     @Suppress("DEPRECATION")
     private fun exportLatestPlatoonCsv() {
-        val directory = PlatoonProfileRegistry(this).activeScope()
-            .retainedCsvDirectory(this)
+        val directory = (requireActiveScope() ?: return).retainedCsvDirectory(this)
         val latest = PlatoonCsvImportStore.latestRetainedFile(directory)
         if (latest == null) {
             statusText.text = getString(R.string.status_no_platoon_csv)
@@ -932,7 +1087,11 @@ class MainActivity : LocalizedActivity() {
                             Intent(this@MainActivity, PacketHistoryActivity::class.java)
                                 .putExtra(PacketHistoryActivity.EXTRA_ENTRY_ID, entry.id)
                                 .putExtra(PacketHistoryActivity.EXTRA_ENTRY_TITLE, entry.title)
-                                .putExtra(PacketHistoryActivity.EXTRA_SAVED_ENTRY, saved),
+                                .putExtra(PacketHistoryActivity.EXTRA_SAVED_ENTRY, saved)
+                                .putExtra(
+                                    PacketHistoryActivity.EXTRA_STORAGE_ID,
+                                    profileBinding.scope?.storageId,
+                                ),
                         )
                     }
                 }, LinearLayout.LayoutParams(0, rowHeight, 1f))
@@ -1055,6 +1214,8 @@ class MainActivity : LocalizedActivity() {
         const val MAX_CSV_IMPORT_FILES = 64
         const val MAX_CSV_IMPORT_BYTES = 16L * 1024 * 1024
         const val STATUS_REFRESH_MILLIS = 1_000L
+        const val EXTRA_LAUNCH_CSV_PICKER = "launch_csv_picker_for_storage_id"
+        const val STATE_CSV_TARGET = "pending_csv_target"
         val BACKUP_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
         val BACKUP_MIME_TYPES = arrayOf(
             PlatoonBackupManager.MIME_TYPE,
@@ -1071,8 +1232,14 @@ class MainActivity : LocalizedActivity() {
 
     private data class PendingCsvImport(
         val storageScope: PlatoonStorageScope,
+        val destinationProfile: PlatoonProfile,
         val prepared: List<PlatoonCsvImportStore.PreparedImport>,
         val duplicateFileNames: Set<String>,
         val preview: CsvImportPreviewAnalyzer.Preview,
+    )
+
+    private data class CsvImportTarget(
+        val storageScope: PlatoonStorageScope,
+        val profile: PlatoonProfile,
     )
 }

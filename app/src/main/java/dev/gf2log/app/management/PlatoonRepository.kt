@@ -548,9 +548,7 @@ internal class PlatoonRepository(
         }
 
         internal fun <T> withExclusiveDatabase(
-            scope: PlatoonStorageScope = PlatoonStorageScope(
-                PlatoonProfileIdentity.LEGACY_STORAGE_ID,
-            ),
+            scope: PlatoonStorageScope,
             block: () -> T,
         ): T =
             maintenanceLock.writeLock().withLock {

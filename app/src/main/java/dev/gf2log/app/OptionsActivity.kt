@@ -77,13 +77,16 @@ class OptionsActivity : LocalizedActivity() {
         val uri = data?.data
         if (resultCode != Activity.RESULT_OK || uri == null) return
         when (requestCode) {
-            REQUEST_FULL_BACKUP_EXPORT -> runBackupOperation(
-                successMessage = R.string.full_backup_exported,
-                failureMessage = { R.string.full_backup_export_failed },
-            ) {
-                val output = TrustedExportDestination.openOutputStream(contentResolver, uri)
-                    ?: error("Document provider did not open an output stream")
-                output.use { PlatoonBackupManager(this).exportFull(it) }
+            REQUEST_FULL_BACKUP_EXPORT -> {
+                val scope = requireActiveScope() ?: return
+                runBackupOperation(
+                    successMessage = R.string.full_backup_exported,
+                    failureMessage = { R.string.full_backup_export_failed },
+                ) {
+                    val output = TrustedExportDestination.openOutputStream(contentResolver, uri)
+                        ?: error("Document provider did not open an output stream")
+                    output.use { PlatoonBackupManager(this, scope).exportFull(it) }
+                }
             }
             REQUEST_FULL_BACKUP_RESTORE -> {
                 if (!hasBackupExtension(uri)) {
@@ -96,7 +99,7 @@ class OptionsActivity : LocalizedActivity() {
                 ) {
                     val input = TrustedImportSource.openInputStream(contentResolver, uri)
                         ?: error("Document provider did not open an input stream")
-                    input.use { PlatoonBackupManager(this).restoreFull(it) }
+                    input.use { PlatoonBackupManager.restoreSelected(this, it, complete = true) }
                 }
             }
         }
@@ -190,16 +193,30 @@ class OptionsActivity : LocalizedActivity() {
                 setPadding(0, 0, 0, dp(6))
             }, matchWidth())
             val resetScope = profileBinding.scope
-            val resetRegion = GameTimeZonePreferences.region(context, resetScope.storageId)
+            val resetRegion = resetScope?.let { GameTimeZonePreferences.region(context, it.storageId) }
             addView(ModernUi.listRow(
                 context = context,
                 title = getString(R.string.server_region),
-                detail = resetSummary(
-                    resetRegion,
-                    GameTimeZonePreferences.isAutomatic(context, resetScope.storageId),
-                ),
+                detail = if (resetRegion == null) {
+                    getString(R.string.no_platoon_detected)
+                } else {
+                    resetSummary(
+                        resetRegion,
+                        GameTimeZonePreferences.isAutomatic(context, resetScope.storageId),
+                    )
+                },
                 icon = R.drawable.ic_calendar,
-                onClick = ::chooseGameServerRegion,
+                onClick = {
+                    if (resetScope == null) {
+                        Toast.makeText(
+                            context,
+                            R.string.no_platoon_detected_detail,
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    } else {
+                        chooseGameServerRegion()
+                    }
+                },
             ), matchWidth())
             addView(ModernUi.listRow(
                 context = context,
@@ -441,6 +458,7 @@ class OptionsActivity : LocalizedActivity() {
 
     @Suppress("DEPRECATION")
     private fun exportFullBackup() {
+        if (requireActiveScope() == null) return
         if (CaptureStatus.isRunning) {
             showBackupMessage(R.string.stop_capture_before_backup)
             return
@@ -490,6 +508,11 @@ class OptionsActivity : LocalizedActivity() {
         android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
     }
 
+    private fun requireActiveScope(): dev.gf2log.app.management.PlatoonStorageScope? =
+        profileBinding.scope.also { scope ->
+            if (scope == null) showBackupMessage(R.string.no_platoon_detected_detail)
+        }
+
     private fun changeLanguage(language: String) {
         if (LanguagePreferences.get(this) == language) return
         LanguagePreferences.set(this, language)
@@ -517,13 +540,7 @@ class OptionsActivity : LocalizedActivity() {
             ) { dialog, which ->
                 dialog.dismiss()
                 if (which == 0) {
-                    if (storageScope.isLegacy) {
-                        Toast.makeText(
-                            this,
-                            R.string.auto_region_requires_detected_platoon,
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                    } else if (!automatic) {
+                    if (!automatic) {
                         updateGameTimeZone(storageScope, null)
                     }
                 } else {

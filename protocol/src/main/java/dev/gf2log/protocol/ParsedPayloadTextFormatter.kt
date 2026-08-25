@@ -15,6 +15,7 @@ object ParsedPayloadTextFormatter {
         appendLine("capturedAt=$capturedAt")
         appendLine("messageId=${payload.messageId}")
         appendLine("payloadType=${payload.payloadType}")
+        appendLine("isEndOfMessage=${payload.isEndOfMessage}")
         appendLine()
 
         when (val data = payload.data) {

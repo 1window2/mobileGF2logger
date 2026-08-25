@@ -12,9 +12,11 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Locale
 
-class PlatoonDatabase(
+internal class PlatoonDatabase(
     context: Context,
-    databaseName: String = PlatoonSchema.DATABASE_NAME,
+    databaseName: String = PlatoonProfileRegistry(context).activeScope().databaseName,
+    private val storageScope: PlatoonStorageScope =
+        PlatoonStorageScope.fromDatabaseName(databaseName),
 ) :
     SQLiteOpenHelper(
         context.applicationContext,
@@ -23,8 +25,6 @@ class PlatoonDatabase(
         PlatoonSchema.CURRENT_VERSION,
     ) {
     private val appContext = context.applicationContext
-    private val storageScope = PlatoonStorageScope.fromDatabaseName(databaseName)
-
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
         db.setForeignKeyConstraintsEnabled(true)

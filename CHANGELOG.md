@@ -26,8 +26,17 @@ All notable changes to mobileGF2logger are documented here.
   enter management storage.
 - Keep one-time-capture completion evidence isolated per detected Platoon so
   two clients cannot accidentally complete one checklist.
-- Preserve v2.3.x data as an unmoved legacy profile while new Platoons use
-  immutable private databases and retained-evidence directories.
+- Leave unscoped v2.3.x files untouched but remove them from selectable
+  production profiles; captured packets require a confirmed `21905` identity
+  before they can create or enter an immutable data scope.
+- Require roster CSV imports to target an explicitly selected existing
+  profile or a newly user-declared client/server/name/ID profile, name that
+  destination in the preview, and explain that `21917` cannot identify or
+  verify a Platoon by itself.
+- Scope recent and saved parsed-packet history to the admitted profile and
+  keep unconfirmed flow payloads out of history as well as management storage.
+- Allow a scoped v3 backup to recreate its embedded Platoon profile on an empty
+  installation, while continuing to reject identity-free legacy archives.
 - Replace the arbitrary timezone list with the six supported server presets;
   an unconfigured client must be selected once before its first profile is admitted.
 

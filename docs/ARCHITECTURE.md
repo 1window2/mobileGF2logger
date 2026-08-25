@@ -90,9 +90,12 @@ when available, with a random collision-safe fallback, but later server edits do
 not rename or move the scope. Every database, import, retained CSV, checkpoint,
 weekly setting, and backup path remains bound to that opaque ID. Client identity
 is read-only because it comes from Android's VPN owner API; server metadata can
-be corrected only within that client's compatible regions. Existing v2.3.x
-storage remains in place as a legacy profile instead of being copied or
-destructively migrated.
+be corrected only within that client's compatible regions. Unscoped v2.3.x
+files remain untouched for forensic safety but are not registered, selectable,
+or reachable through production management paths. Captured packets require a
+confirmed `21905` identity before a scope can be admitted. An identity-free
+roster CSV can instead target an existing scope or a new profile whose complete
+client/server/name/ID identity the user explicitly declares in the import flow.
 
 Choosing an existing profile synchronizes that client's capture preset to the
 profile's saved region; the report reset follows it automatically. Reliable
@@ -178,6 +181,16 @@ chronological order. When a file predates the current structured snapshot, the
 repository batches a conservative roster replay after ingestion: it derives
 only snapshot-supported presence spans, creates inactive historical identities,
 and preserves manual or exact Updates boundaries.
+
+Payload `21917` and its roster CSV projection do not contain a Platoon ID, name,
+client, or server region. CSV import therefore cannot discover or guess a
+profile. The user must explicitly select an existing profile or declare the
+client, compatible server, Platoon name, and Platoon ID for a new isolated
+profile. A later matching `21905` observation reuses that same immutable scope
+and refreshes its observed name and emblem. The preview names the destination
+and warns that the roster itself cannot verify the choice. If the target
+disappears or changes before confirmation, the import aborts without retaining
+evidence or mutating SQLite.
 
 Roster CSV input is capped at 2 MiB, 256 members, 258 records, 9 columns, and
 512 characters per field; UIDs must be unique and names are capped at 256
@@ -285,26 +298,31 @@ let Activities issue SQL directly.
 
 ## Parsed-packet history
 
-Every completed recognized payload is formatted in protocol order and written atomically to the app's private `files/capture-history` directory. `CaptureHistoryStore` returns entries newest-first, trims the oldest files once the count exceeds 100, rejects path-like identifiers, and supports explicit deletion of user-selected entries. `SavedHistoryStore` atomically copies selected entries into `files/saved-history`, rejects duplicates, caps the collection at 50 without FIFO deletion, and keeps saved entries independent from recent-history rotation.
+Every completed recognized payload is formatted in protocol order and written
+atomically below the admitted profile's private
+`files/platoons/<storage-id>/capture-history` directory. Unconfirmed payloads
+never enter history. `CaptureHistoryStore` returns entries newest-first, trims
+the oldest files once the count exceeds 100, rejects path-like identifiers, and
+supports explicit deletion of user-selected entries. `SavedHistoryStore`
+atomically copies selected entries into the same profile's `saved-history`
+directory, rejects duplicates, caps the collection at 50 without FIFO deletion,
+and keeps saved entries independent from recent-history rotation.
 
 The main activity renders both collections with timestamp-only titles in `yy/MM/dd HH:mm:ss` using the Android device timezone. Selecting a title opens a cleaned table parsed from the stored CSV body; the same screen can reveal the complete raw stored text and copy it to the clipboard. Android backup rules exclude all private files, including recent history, saved history, generated Platoon CSV files, and the structured management database. A user can separately invoke the explicit Platoon backup export, which contains parsed management data but never raw traffic.
 
 ## Explicit backup boundary
 
 The canonical `.gf2backup` container is a bounded ZIP with a checksummed
-manifest and SQLite management database. Legacy format v1 remains a
-Platoon-only compatibility backup; restoring it atomically retires unrelated
-target-device roster CSV evidence so later reconciliation cannot mutate the
-selected state without reading, validating, or replacing app settings. Format
-v2 adds a checksummed, strictly
-typed settings payload containing only user-owned configuration; capture
-diagnostics, raw packet history, signing material, and internal migration flags
-are excluded. Format v3 binds an archive to its immutable storage scope and its
+manifest and SQLite management database. Formats v1 and v2 predate immutable
+Platoon identity and are now rejected because choosing a destination for them
+could cross profile boundaries. Format v3 binds an archive to its immutable storage scope and its
 verified client, server-region, and Platoon metadata. Restoring v3 creates or
 replaces only that compatible profile and then selects it; another storage scope
 cannot claim the same full identity, and other profile databases and evidence
-directories are untouched. Older v1/v2 archives restore into the unmoved legacy
-profile.
+directories are untouched. Unscoped v1/v2 archives are rejected because they
+cannot prove a destination profile and would violate cross-profile isolation.
+Because the manifest carries the scoped identity, a v3 archive can restore its
+profile on an installation that does not yet have any registered profiles.
 
 Complete restore validates the filename, archive entries and identity,
 checksums, settings completeness and ranges, current database schema, SQLite

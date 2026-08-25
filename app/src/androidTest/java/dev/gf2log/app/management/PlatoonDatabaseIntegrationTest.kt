@@ -11,6 +11,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -1158,6 +1159,56 @@ class PlatoonDatabaseIntegrationTest {
         assertFalse(database.activateWeeklyReportHistory(latestId, period + 7))
         assertTrue(database.clearActiveWeeklyReportHistory(period))
         assertFalse(database.listWeeklyReportHistory(period).any { it.active })
+    }
+
+    @Test
+    fun failedAtomicHistoryReplacementPreservesEveryPreviousRevision() {
+        val originalPeriod = LocalDate.of(2026, 8, 16).toEpochDay()
+        database.recordWeeklyReportHistory(
+            periodStartEpochDay = originalPeriod,
+            recordedAt = Instant.ofEpochMilli(1L),
+            fingerprint = "1".padStart(64, '0'),
+            payload = byteArrayOf(1),
+            clearActiveOnChange = true,
+        )
+        val rejectedPeriod = originalPeriod + 7
+        database.writableDatabase.execSQL(
+            "CREATE TRIGGER reject_history BEFORE INSERT ON weekly_report_history " +
+                "WHEN NEW.period_start = $rejectedPeriod " +
+                "BEGIN SELECT RAISE(ABORT, 'test rejection'); END",
+        )
+
+        assertThrows(android.database.SQLException::class.java) {
+            database.replaceWeeklyReportHistory(
+                listOf(
+                    WeeklyReportHistoryReplacement(
+                        periodStartEpochDay = rejectedPeriod,
+                        recordedAt = Instant.ofEpochMilli(2L),
+                        fingerprint = "2".padStart(64, '0'),
+                        payload = byteArrayOf(2),
+                    ),
+                ),
+            )
+        }
+
+        assertEquals(1, database.listWeeklyReportHistory(originalPeriod).size)
+        assertTrue(database.listWeeklyReportHistory(rejectedPeriod).isEmpty())
+    }
+
+    @Test
+    fun weeklyNoteLimitRejectsDataThatHistoryCannotRepresent() {
+        val period = LocalDate.of(2026, 8, 16).toEpochDay()
+        repeat(WeeklyNotePolicy.MAX_MANUAL_NOTES_PER_WEEK) { index ->
+            database.addWeeklyNote(period, period + index % 7, "Note $index")
+        }
+
+        assertThrows(IllegalArgumentException::class.java) {
+            database.addWeeklyNote(period, period, "One too many")
+        }
+        assertEquals(
+            WeeklyNotePolicy.MAX_MANUAL_NOTES_PER_WEEK,
+            database.listWeeklyNotes(period).count { !it.isAutomatic },
+        )
     }
 
     private fun update(kind: Long, at: Instant, uid: Long, name: String) =

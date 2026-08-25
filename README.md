@@ -17,8 +17,11 @@ never stored.
 ## Features
 
 - Captures the mandatory Platoon Profile (`21905`), Members (`21917`), Activity (`21935`), and Updates (`21960`) responses without a computer or root access.
+- Automatically separates detected Platoons by supported Android client,
+  selected server region, and authoritative Platoon ID; switch the active
+  isolated profile from Home, Platoon, Weekly, or Settings.
 - Tracks active and withdrawn members, non-overlapping repeat membership periods, exact Updates timestamps, editable nicknames, and private notes.
-- Builds Sunday-to-Saturday Standard or Gunsmoke Frontline weekly tables around the 05:00 game reset, with cut-off points and manual correction for missing data.
+- Builds Sunday-to-Saturday Standard or Gunsmoke Frontline weekly tables around the selected server's daily reset, with cut-off points and manual correction for missing data.
 - Offers One-time Capture that tracks the four useful Platoon payloads and stops automatically when the checklist is complete.
 - Explains every weekly cell on tap and summarizes missing or uncertain evidence in an Evidence Health panel.
 - Keeps up to 15 complete automatic revisions per weekly table so an earlier projection and its displayed member context can be previewed and restored after an accidental import.
@@ -26,9 +29,13 @@ never stored.
 - Saves or shares a weekly PNG with opt-in controls for names, UIDs, and private notes.
 - Can send a validated original CSV to an optional user-owned Discord incoming webhook after confirmation.
 - Stores the latest 100 parsed packets and up to 50 saved packets, with table and raw views, copy, export, selection, and deletion.
-- Supports member sorting, persistent drag ordering, snapshot comparison, single-week and all-week CSV export, and complete `.gf2backup` export/restore.
+- Supports member sorting, persistent drag ordering, snapshot comparison, single-week and all-week CSV export, and profile-aware `.gf2backup` export/restore that leaves other Platoons unchanged.
+- Keeps a newly detected Platoon's packets in bounded memory until the user confirms one of the verified client's compatible servers; unconfirmed data is discarded on force-stop or process death.
+- Provides profile management for correcting server metadata without moving data and for deleting one isolated Platoon behind two confirmations and an exact-name check.
 - Guides first-time users through Main, Settings, Platoon management, weekly controls, and parsed-packet pages, with a persistent English/Korean selector and Skip action.
-- Supports English and Korean, System/Light/Dark themes, explicit Darkwinter/HaoPlay server-region reset presets converted to the phone timezone, and a persistent manual game-timezone fallback.
+- Supports English and Korean, System/Light/Dark themes, and the six known
+  Darkwinter/HaoPlay server-region reset presets converted to the phone timezone.
+  Selecting a detected Platoon automatically follows that profile's saved region.
 - Registers the HaoPlay (`com.haoplay.game.and.exilium`) and Darkwinter
   (`com.Sunborn.SnqxExilium.Glo`) Android clients as separate VPN targets.
 - Creates UTF-8 Platoon-member CSV files with this column order:
@@ -44,6 +51,13 @@ uid,name,level,weeklyMerit,totalMerit,highScore,totalScore,lastLogin,logTime
 3. Approve Android's VPN prompt, then open the game.
 4. Enter **Platoon(서클)** and open **Updates(동향)** and **Members(멤버)**.
 5. Return to GF2logger to review the captured packets and Platoon data.
+
+On Android 10 and newer, Android identifies which supported game owns each
+captured connection. Android 8–9 can safely attribute management data only when
+exactly one supported client is installed; with both clients installed,
+unattributed management payloads are deliberately not imported. Because the
+plaintext protocol does not expose a trustworthy server identifier, select the
+correct HaoPlay and Darkwinter server in Settings before first capture.
 
 The app keeps parsed history, management data, and generated CSV files in private on-device storage. It does not bypass TLS, certificate pinning, or anti-cheat systems, and it does not modify game traffic. Server responses may contain only recent incremental history, so older missing membership records can be entered manually.
 

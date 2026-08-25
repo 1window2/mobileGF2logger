@@ -1,5 +1,6 @@
 package dev.gf2log.app.management
 
+import dev.gf2log.app.settings.GameServerRegion
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -14,6 +15,68 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class BackupArchiveTest {
+    @Test
+    fun `round trips a scoped profile with an immutable storage identity`() {
+        val database = temporaryFile("platoon.db", realisticDatabaseBytes())
+        val profile = PlatoonProfile(
+            storageId = PlatoonProfileIdentity.storageId(
+                PlatoonClient.HAOPLAY,
+                GameServerRegion.HAOPLAY_KOREA,
+                101817L,
+            ),
+            client = PlatoonClient.HAOPLAY,
+            serverRegion = GameServerRegion.HAOPLAY_KOREA,
+            platoonId = 101817L,
+            platoonName = "Owls 서클",
+            emblemPrimary = listOf(1, 2),
+            emblemSecondary = listOf(3),
+            lastSeenAt = java.time.Instant.EPOCH,
+        )
+        val archive = ByteArrayOutputStream().also {
+            BackupArchive.write(it, database, realisticSettingsBytes(), profile)
+        }
+
+        val result = BackupArchive.stage(
+            ByteArrayInputStream(archive.toByteArray()),
+            temporaryPath("scoped.db"),
+        )
+
+        assertEquals(BackupFormatPolicy.SCOPED_VERSION, result.formatVersion)
+        assertEquals(profile.storageId, result.profile?.storageId)
+        assertEquals(profile.platoonName, result.profile?.platoonName)
+    }
+
+    @Test
+    fun `round trips a profile after its server metadata changes without moving storage`() {
+        val database = temporaryFile("platoon.db", realisticDatabaseBytes())
+        val originalStorage = PlatoonProfileIdentity.storageId(
+            PlatoonClient.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            101817L,
+        )
+        val edited = PlatoonProfile(
+            storageId = originalStorage,
+            client = PlatoonClient.HAOPLAY,
+            serverRegion = GameServerRegion.HAOPLAY_JAPAN,
+            platoonId = 101817L,
+            platoonName = "Owls",
+            emblemPrimary = emptyList(),
+            emblemSecondary = emptyList(),
+            lastSeenAt = java.time.Instant.EPOCH,
+        )
+        val archive = ByteArrayOutputStream().also {
+            BackupArchive.write(it, database, realisticSettingsBytes(), edited)
+        }
+
+        val restored = BackupArchive.stage(
+            ByteArrayInputStream(archive.toByteArray()),
+            temporaryPath("edited-scope.db"),
+        ).profile
+
+        assertEquals(originalStorage, restored?.storageId)
+        assertEquals(GameServerRegion.HAOPLAY_JAPAN, restored?.serverRegion)
+    }
+
     @Test
     fun `round trips a realistic complete archive without changing payload bytes`() {
         val database = temporaryFile("platoon.db", realisticDatabaseBytes())

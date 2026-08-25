@@ -44,11 +44,13 @@ import dev.gf2log.app.management.MetricCertainty
 import dev.gf2log.app.management.WeeklyCellOverride
 import dev.gf2log.app.management.WeeklyEvidenceAnalyzer
 import dev.gf2log.app.management.WeeklyNote
+import dev.gf2log.app.management.WeeklyNoteLimitException
 import dev.gf2log.app.management.WeeklyReportBuilder
 import dev.gf2log.app.management.WeeklyReportCsv
 import dev.gf2log.app.management.WeeklyReportStateHolder
 import dev.gf2log.app.management.WeeklyShareProjection
 import dev.gf2log.app.management.WeeklyMetricPresentation
+import dev.gf2log.app.management.WeeklyMemberNameProjection
 import dev.gf2log.app.settings.MemberOrderPreferences
 import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.WeeklyCutlinePreferences
@@ -107,6 +109,7 @@ internal object WeeklyPngPendingState {
 
 class WeeklyReportActivity : LocalizedActivity() {
     private lateinit var repository: PlatoonRepository
+    private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var body: LinearLayout
     private lateinit var reportState: WeeklyReportStateHolder
     private var pendingCsv: String? = null
@@ -119,7 +122,8 @@ class WeeklyReportActivity : LocalizedActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        repository = PlatoonRepository(this)
+        profileBinding = ActivePlatoonScopeBinding(this)
+        repository = PlatoonRepository(this, profileBinding.scope)
         pendingPng = WeeklyPngPendingState.restore(
             cacheDir,
             savedInstanceState?.getString(STATE_PENDING_PNG_NAME),
@@ -128,7 +132,10 @@ class WeeklyReportActivity : LocalizedActivity() {
             savedInstanceState?.takeIf { it.containsKey(STATE_REFERENCE_DAY) }
                 ?.getLong(STATE_REFERENCE_DAY)
                 ?.let(LocalDate::ofEpochDay)
-                ?: PlatoonPeriods.gameDay(Instant.now(), GameTimeZonePreferences.get(this)),
+                ?: PlatoonPeriods.gameDay(
+                    Instant.now(),
+                    GameTimeZonePreferences.get(this, profileBinding.scope.storageId),
+                ),
         )
         body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -145,6 +152,10 @@ class WeeklyReportActivity : LocalizedActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!profileBinding.isCurrent(this)) {
+            recreate()
+            return
+        }
         reportState.onResume()
         requestRender(reconcileRetainedCsv = true)
     }
@@ -212,7 +223,10 @@ class WeeklyReportActivity : LocalizedActivity() {
             report = report,
             notes = revision.notes,
             events = revision.membershipEvents,
-            namesByUid = revision.memberNamesByUid + report.members.associate { it.uid to it.name },
+            namesByUid = WeeklyMemberNameProjection.merge(
+                reportNamesByUid = report.members.associate { it.uid to it.name },
+                capturedNamesByUid = revision.memberNamesByUid,
+            ),
             cutlines = WeeklyCutlinePreferences(this).read(),
             memberNotesByUid = revision.memberPrivateNotesByUid,
             displayedMembers = MemberOrderPreferences(this).apply(report.members) { it.uid },
@@ -328,6 +342,13 @@ class WeeklyReportActivity : LocalizedActivity() {
                 }
             }, LinearLayout.LayoutParams(dp(48), dp(48)))
         }, matchWidth())
+        body.addView(
+            PlatoonProfileSelector.controls(this),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(6) },
+        )
         body.addView(TextView(this).apply {
             text = getString(
                 R.string.week_period,
@@ -1665,17 +1686,35 @@ class WeeklyReportActivity : LocalizedActivity() {
                 val text = note.text.toString().trim()
                 if (text.isBlank()) return@setOnClickListener
                 val gameDay = report.days[day.selectedItemPosition]
-                repository.addWeeklyNote(
-                    report.periodStart.toEpochDay(),
-                    gameDay.toEpochDay(),
-                    text,
+                runCatching {
+                    repository.addWeeklyNote(
+                        report.periodStart.toEpochDay(),
+                        gameDay.toEpochDay(),
+                        text,
+                    )
+                }.fold(
+                    onSuccess = {
+                        Toast.makeText(
+                            this@WeeklyReportActivity,
+                            getString(R.string.saved),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                        requestRender()
+                    },
+                    onFailure = { error ->
+                        Toast.makeText(
+                            this@WeeklyReportActivity,
+                            getString(
+                                if (error is WeeklyNoteLimitException) {
+                                    R.string.weekly_note_limit_reached
+                                } else {
+                                    R.string.save_failed
+                                },
+                            ),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    },
                 )
-                Toast.makeText(
-                    this@WeeklyReportActivity,
-                    getString(R.string.saved),
-                    Toast.LENGTH_SHORT,
-                ).show()
-                requestRender()
             }
         }, matchWidth())
     }

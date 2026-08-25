@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <queries>
+        <!-- Required for per-flow UID attribution on Android 11+; no broad package access. -->
+        <package android:name="com.haoplay.game.and.exilium" />
+        <package android:name="com.Sunborn.SnqxExilium.Glo" />
+    </queries>
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

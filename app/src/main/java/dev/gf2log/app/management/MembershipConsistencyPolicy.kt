@@ -2,6 +2,7 @@ package dev.gf2log.app.management
 
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 
 /** One persisted membership interval used by the deterministic consistency audit. */
 internal data class MembershipInterval(
@@ -54,12 +55,20 @@ internal object MembershipConsistencyPolicy {
     }
 
     private fun compareStarts(first: MembershipInterval, second: MembershipInterval): Int {
-        val dateOrder = if (first.joinedDate != null && second.joinedDate != null) {
-            first.joinedDate.compareTo(second.joinedDate)
-        } else {
-            requireNotNull(first.joinedAt).compareTo(requireNotNull(second.joinedAt))
+        val firstInstant = requireNotNull(first.joinedAt)
+        val secondInstant = requireNotNull(second.joinedAt)
+        val firstDate = first.joinedDate ?: firstInstant.atZone(ZoneOffset.UTC).toLocalDate()
+        val secondDate = second.joinedDate ?: secondInstant.atZone(ZoneOffset.UTC).toLocalDate()
+        val dateOrder = firstDate.compareTo(secondDate)
+        if (dateOrder != 0) return dateOrder
+        // Keep known instants contiguous and ordered before date-only boundaries.
+        // This fixed tuple is transitive even when both precisions share one day.
+        val precisionOrder = second.joinedTimeKnown.compareTo(first.joinedTimeKnown)
+        if (precisionOrder != 0) return precisionOrder
+        if (first.joinedTimeKnown) firstInstant.compareTo(secondInstant).takeIf { it != 0 }?.let {
+            return it
         }
-        return if (dateOrder != 0) dateOrder else first.id.compareTo(second.id)
+        return first.id.compareTo(second.id)
     }
 
     private fun periodsProvablyOverlap(

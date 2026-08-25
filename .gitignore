@@ -62,6 +62,7 @@ Thumbs.db
 .DS_Store
 
 # Local device and UI verification artifacts (repository root only)
+/artifacts/
 /*.xml
 /*.db
 /*.db-*

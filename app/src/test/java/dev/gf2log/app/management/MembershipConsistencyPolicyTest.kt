@@ -96,6 +96,59 @@ class MembershipConsistencyPolicyTest {
         assertNull(MembershipConsistencyPolicy.violation(listOf(first, second)))
     }
 
+    @Test
+    fun sameDayKnownStartsAreOrderedByInstantInsteadOfInsertionId() {
+        val laterInsertedFirst = MembershipInterval(
+            id = 1,
+            joinedAt = Instant.parse("2026-05-04T18:00:00Z"),
+            leftAt = Instant.parse("2026-05-04T20:00:00Z"),
+            joinedDate = LocalDate.of(2026, 5, 4),
+            leftDate = LocalDate.of(2026, 5, 4),
+        )
+        val earlierInsertedSecond = MembershipInterval(
+            id = 2,
+            joinedAt = Instant.parse("2026-05-04T08:00:00Z"),
+            leftAt = Instant.parse("2026-05-04T10:00:00Z"),
+            joinedDate = LocalDate.of(2026, 5, 4),
+            leftDate = LocalDate.of(2026, 5, 4),
+        )
+
+        assertNull(
+            MembershipConsistencyPolicy.violation(
+                listOf(laterInsertedFirst, earlierInsertedSecond),
+            ),
+        )
+    }
+
+    @Test
+    fun mixedSameDayStartPrecisionUsesATransitiveOrder() {
+        val knownLate = MembershipInterval(
+            id = 1,
+            joinedAt = Instant.parse("2026-05-04T18:00:00Z"),
+            leftAt = Instant.parse("2026-05-04T20:00:00Z"),
+            joinedDate = LocalDate.of(2026, 5, 4),
+            leftDate = LocalDate.of(2026, 5, 4),
+        )
+        val dateOnly = MembershipInterval(
+            id = 2,
+            joinedAt = Instant.parse("2026-07-31T00:00:00Z"),
+            leftAt = Instant.parse("2026-08-01T00:00:00Z"),
+            joinedDate = LocalDate.of(2026, 5, 4),
+            leftDate = LocalDate.of(2026, 5, 5),
+            joinedTimeKnown = false,
+            leftTimeKnown = false,
+        )
+        val knownEarly = MembershipInterval(
+            id = 3,
+            joinedAt = Instant.parse("2026-05-04T08:00:00Z"),
+            leftAt = Instant.parse("2026-05-04T10:00:00Z"),
+            joinedDate = LocalDate.of(2026, 5, 4),
+            leftDate = LocalDate.of(2026, 5, 4),
+        )
+
+        assertNull(MembershipConsistencyPolicy.violation(listOf(knownLate, dateOnly, knownEarly)))
+    }
+
     private fun interval(id: Long, joined: String?, left: String?) = MembershipInterval(
         id = id,
         joinedAt = joined?.let(Instant::parse),

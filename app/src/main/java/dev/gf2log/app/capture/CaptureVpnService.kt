@@ -49,6 +49,7 @@ class CaptureVpnService : VpnService() {
     private val pendingAdmissionByFlow = ConcurrentHashMap<Long, String>()
     private val pendingFlowPayloads = BoundedFlowPayloadBuffer<ParsedPayload>(
         MAX_PENDING_PAYLOADS_PER_FLOW,
+        MAX_PENDING_PAYLOADS_TOTAL,
     )
     private val decodedPayloadCount = AtomicLong()
     private val observedPayloadBytes = AtomicLong()
@@ -968,6 +969,7 @@ class CaptureVpnService : VpnService() {
         private const val TRAFFIC_REPORT_BYTES = 64 * 1024
         private const val CAPTURE_ONCE_GRACE_MILLIS = 60_000L
         private const val MAX_PENDING_PAYLOADS_PER_FLOW = 32
+        private const val MAX_PENDING_PAYLOADS_TOTAL = 128
         private val REQUIRED_CAPTURE_TYPES = setOf(
             Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE,
             Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,

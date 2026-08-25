@@ -1106,7 +1106,13 @@ class WeeklyReportActivity : LocalizedActivity() {
                     setTextColor(getColor(R.color.accent_text))
                     background = ModernUi.panelBackground(context, emphasized = true)
                     setPadding(dp(8), dp(8), dp(8), dp(8))
-                }, LinearLayout.LayoutParams(dp(76), dp(48)).apply {
+                    minWidth = dp(76)
+                    minHeight = dp(48)
+                    maxLines = 1
+                }, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply {
                     marginEnd = dp(12)
                 })
                 addView(TextView(context).apply {

@@ -7,7 +7,7 @@ import org.junit.Test
 class BoundedFlowPayloadBufferTest {
     @Test
     fun overflowDiscardsAndRejectsUntilFlowRemoval() {
-        val buffer = BoundedFlowPayloadBuffer<String>(2)
+        val buffer = BoundedFlowPayloadBuffer<String>(2, 4)
         assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(7, "a"))
         assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(7, "b"))
         assertEquals(BoundedFlowPayloadBuffer.OfferResult.OVERFLOW, buffer.offer(7, "c"))
@@ -24,11 +24,40 @@ class BoundedFlowPayloadBufferTest {
 
     @Test
     fun identityTakesOneFlowWithoutTouchingAnother() {
-        val buffer = BoundedFlowPayloadBuffer<String>(2)
+        val buffer = BoundedFlowPayloadBuffer<String>(2, 4)
         buffer.offer(1, "one")
         buffer.offer(2, "two")
 
         assertEquals(listOf("one"), buffer.take(1))
         assertEquals(listOf("two"), buffer.take(2))
+    }
+
+    @Test
+    fun aggregateOverflowRejectsOnlyTheFlowThatExceededTheGlobalBudget() {
+        val buffer = BoundedFlowPayloadBuffer<String>(4, 3)
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(1, "one-a"))
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(1, "one-b"))
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(2, "two"))
+
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.OVERFLOW, buffer.offer(1, "one-c"))
+        assertTrue(buffer.isRejected(1))
+        assertTrue(buffer.take(1).isEmpty())
+        assertEquals(listOf("two"), buffer.take(2))
+
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(3, "three"))
+        assertEquals(listOf("three"), buffer.take(3))
+    }
+
+    @Test
+    fun removalAndClearReleaseAggregateCapacity() {
+        val buffer = BoundedFlowPayloadBuffer<String>(2, 2)
+        buffer.offer(1, "one")
+        buffer.offer(2, "two")
+        buffer.remove(1)
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(3, "three"))
+
+        buffer.clear()
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(4, "four"))
+        assertEquals(listOf("four"), buffer.take(4))
     }
 }

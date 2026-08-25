@@ -2,6 +2,28 @@
 
 All notable changes to mobileGF2logger are documented here.
 
+## 2.4.1 - 2026-08-25
+
+### Changed
+
+- Require captured packets, roster imports, parsed-packet history, and backups
+  to enter an explicit identity-backed Platoon scope; legacy unscoped data is
+  no longer exposed as a selectable production profile.
+- Refine the Home selector and capture card, use cohesive rounded dialogs,
+  compact packet-history settings, and prevent repeated transient messages
+  from accumulating in the interface.
+
+### Fixed
+
+- Keep profile registration, active selection, reset routing, backup restore,
+  and retained Activity state consistent across isolated Platoons.
+- Remove metadata for non-parsed VPN flows on every close path and prevent a
+  delayed open callback from restoring metadata after a rejected close.
+- Make packet-history option rows fully tappable and let weekly evidence badges
+  expand safely with the user's system font size.
+- Cap the pre-identity quarantine at 32 decoded payloads per flow and 128 in
+  total, with synchronized accounting across parser and native-close threads.
+
 ## 2.4.0 - 2026-08-25
 
 ### Added
@@ -21,40 +43,25 @@ All notable changes to mobileGF2logger are documented here.
 
 ### Changed
 
-- Refine the Home capture card and active-Platoon selector, use cohesive
-  rounded dialogs, compact packet-history settings, and replace queued transient
-  messages so repeated actions do not leave stale feedback behind.
 - Quarantine up to 32 decoded payloads per TCP flow until both its supported
   Android client and valid Platoon identity are known; unverified flows never
   enter management storage.
 - Keep one-time-capture completion evidence isolated per detected Platoon so
   two clients cannot accidentally complete one checklist.
-- Leave unscoped v2.3.x files untouched but remove them from selectable
-  production profiles; captured packets require a confirmed `21905` identity
-  before they can create or enter an immutable data scope.
-- Require roster CSV imports to target an explicitly selected existing
-  profile or a newly user-declared client/server/name/ID profile, name that
-  destination in the preview, and explain that `21917` cannot identify or
-  verify a Platoon by itself.
-- Scope recent and saved parsed-packet history to the admitted profile and
-  keep unconfirmed flow payloads out of history as well as management storage.
-- Allow a scoped v3 backup to recreate its embedded Platoon profile on an empty
-  installation, while continuing to reject identity-free legacy archives.
+- Preserve v2.3.x data as an unmoved legacy profile while new Platoons use
+  immutable private databases and retained-evidence directories.
 - Replace the arbitrary timezone list with the six supported server presets;
   an unconfigured client must be selected once before its first profile is admitted.
 
 ### Fixed
 
-- Improve weekly evidence guidance and restore consistent spacing around weekly
-  notes and member-detail fields in both light and dark themes.
 - Resolve all six review findings from v2.3.3: clean flow metadata without a
   parser, order known same-day joins by instant, bound manual weekly notes,
   preserve captured member names, replace timezone-derived history atomically,
   and accept `21905` checklist evidence only after identity validation.
-- Bound the profile registry, profile metadata, and pre-identity quarantine with
-  both per-flow and aggregate decoded-payload caps; reject invalid restores before
-  metadata changes, preserve the selected import scope through preview/apply, and
-  restore the matching client-region routing.
+- Bound the profile registry, profile metadata, and pre-identity flow buffer;
+  reject invalid restores before metadata changes, preserve the selected import
+  scope through preview/apply, and restore the matching client-region routing.
 - Quarantine identity-changing or admission-failed flows, admit at most one new
   profile per client per user-started capture, and let users forget selector
   metadata without deleting the isolated Platoon data.

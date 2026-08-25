@@ -18,6 +18,8 @@ abstract class LocalizedActivity : Activity() {
     /** Allows a purpose-built surface to use a stable presentation theme. */
     protected open fun preferredTheme(context: Context): String = ThemePreferences.get(context)
 
+    protected open fun supportsPendingPlatoonAdmission(): Boolean = true
+
     override fun onResume() {
         super.onResume()
         if (
@@ -25,6 +27,10 @@ abstract class LocalizedActivity : Activity() {
             preferredTheme(this) != attachedTheme
         ) {
             recreate()
+            return
+        }
+        if (supportsPendingPlatoonAdmission() && OnboardingPreferences.isCompleted(this)) {
+            PendingPlatoonAdmissionPrompt.showIfNeeded(this)
         }
     }
 

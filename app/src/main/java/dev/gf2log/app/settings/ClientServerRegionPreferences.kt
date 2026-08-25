@@ -10,17 +10,34 @@ internal class ClientServerRegionPreferences(context: Context) {
 
     fun get(packageName: String): GameServerRegion {
         require(packageName in SupportedGamePackages.all)
-        val stored = GameServerRegion.fromStored(preferences.getString(packageName, null))
-        if (stored in allowed(packageName)) return stored
+        return configured(packageName) ?: default(packageName)
+    }
 
+    /** Returns only a persisted or migrated operator choice, never a guessed default. */
+    fun configured(packageName: String): GameServerRegion? {
+        require(packageName in SupportedGamePackages.all)
+        stored(packageName)?.let { return it }
         val legacy = GameTimeZonePreferences.legacyRegion(appContext)
-        return legacy.takeIf { it in allowed(packageName) } ?: default(packageName)
+        return legacy.takeIf { it in allowed(packageName) }
     }
 
     fun set(packageName: String, region: GameServerRegion) {
         require(region in allowed(packageName))
         check(preferences.edit().putString(packageName, region.storedValue).commit()) {
             "Unable to persist the client server region"
+        }
+    }
+
+    fun stored(packageName: String): GameServerRegion? {
+        require(packageName in SupportedGamePackages.all)
+        val value = preferences.getString(packageName, null) ?: return null
+        return GameServerRegion.fromStored(value).takeIf { it in allowed(packageName) }
+    }
+
+    fun clear(packageName: String) {
+        require(packageName in SupportedGamePackages.all)
+        check(preferences.edit().remove(packageName).commit()) {
+            "Unable to clear the client server region"
         }
     }
 

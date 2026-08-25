@@ -2,10 +2,12 @@ package dev.gf2log.app.management
 
 import android.content.Context
 import dev.gf2log.app.SupportedGamePackages
+import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.app.settings.GameServerRegion
 import dev.gf2log.protocol.model.PlatoonProfileData
 import java.io.File
 import java.security.MessageDigest
+import java.security.SecureRandom
 import java.time.Instant
 
 /** Publisher identity resolved from Android's original VPN flow ownership. */
@@ -54,8 +56,8 @@ internal data class PlatoonProfile(
         } else {
             require(client != PlatoonClient.LEGACY)
             require(serverRegion != GameServerRegion.MANUAL)
+            require(serverRegion in ClientServerRegionPreferences.allowedFor(client.packageName))
             require(platoonId > 0L)
-            require(storageId == PlatoonProfileIdentity.storageId(client, serverRegion, platoonId))
         }
     }
 
@@ -65,7 +67,7 @@ internal data class PlatoonProfile(
     }
 }
 
-/** Deterministically maps an authoritative composite identity to a safe storage identifier. */
+/** Creates and validates immutable private storage identifiers for isolated Platoon data. */
 internal object PlatoonProfileIdentity {
     const val LEGACY_STORAGE_ID = "legacy"
     private val STORAGE_ID = Regex("(?:legacy|[0-9a-f]{32})")
@@ -83,6 +85,10 @@ internal object PlatoonProfileIdentity {
     }
 
     fun isValidStorageId(value: String): Boolean = STORAGE_ID.matches(value)
+
+    fun randomStorageId(): String = ByteArray(16)
+        .also(SecureRandom()::nextBytes)
+        .joinToString("") { value -> "%02x".format(value) }
 }
 
 /** Resolves every database and retained-evidence path from one validated profile ID. */
@@ -128,6 +134,7 @@ internal class PlatoonProfileRegistry(context: Context) {
     private val preferences = appContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
     fun ensureInitialized(): List<PlatoonProfile> = synchronized(lock) {
+        PlatoonProfileAdministration.recoverPending(appContext)
         val current = readAllLocked()
         if (current.isNotEmpty()) return@synchronized current
         val legacyDatabase = appContext.getDatabasePath(PlatoonSchema.DATABASE_NAME)
@@ -173,13 +180,52 @@ internal class PlatoonProfileRegistry(context: Context) {
         readLocked(storageId)
     }
 
+    fun findByIdentity(
+        client: PlatoonClient,
+        region: GameServerRegion,
+        platoonId: Long,
+    ): PlatoonProfile? = synchronized(lock) {
+        ensureInitialized()
+        readAllLocked().firstOrNull {
+            !it.legacy &&
+                it.client == client &&
+                it.serverRegion == region &&
+                it.platoonId == platoonId
+        }
+    }
+
+    fun findByClientAndPlatoonId(
+        client: PlatoonClient,
+        platoonId: Long,
+    ): List<PlatoonProfile> = synchronized(lock) {
+        ensureInitialized()
+        readAllLocked().filter {
+            !it.legacy && it.client == client && it.platoonId == platoonId
+        }
+    }
+
     fun activeScope(): PlatoonStorageScope =
         PlatoonStorageScope(active()?.storageId ?: PlatoonProfileIdentity.LEGACY_STORAGE_ID)
 
     fun setActive(storageId: String): Boolean = synchronized(lock) {
         require(PlatoonProfileIdentity.isValidStorageId(storageId))
-        if (readLocked(storageId) == null) return@synchronized false
-        preferences.edit().putString(KEY_ACTIVE, storageId).commit()
+        val selected = readLocked(storageId) ?: return@synchronized false
+        if (selected.legacy) {
+            return@synchronized preferences.edit().putString(KEY_ACTIVE, storageId).commit()
+        }
+        val clientRegions = ClientServerRegionPreferences(appContext)
+        val ownerPackage = selected.client.packageName
+        val previousRegion = clientRegions.stored(ownerPackage)
+        clientRegions.set(ownerPackage, selected.serverRegion)
+        if (preferences.edit().putString(KEY_ACTIVE, storageId).commit()) {
+            return@synchronized true
+        }
+        if (previousRegion == null) {
+            clientRegions.clear(ownerPackage)
+        } else {
+            clientRegions.set(ownerPackage, previousRegion)
+        }
+        false
     }
 
     fun upsertDetected(
@@ -194,7 +240,13 @@ internal class PlatoonProfileRegistry(context: Context) {
         require(region != GameServerRegion.MANUAL) { "A server region is required" }
         require(data.platoonId != 0u && data.platoonName.isNotBlank())
         val platoonId = data.platoonId.toLong()
-        val storageId = PlatoonProfileIdentity.storageId(client, region, platoonId)
+        val existing = readAllLocked().firstOrNull {
+            !it.legacy &&
+                it.client == client &&
+                it.serverRegion == region &&
+                it.platoonId == platoonId
+        }
+        val storageId = existing?.storageId ?: allocateStorageIdLocked(client, region, platoonId)
         require(readLocked(storageId) != null || readAllLocked().size < MAX_PROFILES) {
             "Too many Platoon profiles are already registered"
         }
@@ -218,16 +270,63 @@ internal class PlatoonProfileRegistry(context: Context) {
         profile
     }
 
-    fun upsertRestored(profile: PlatoonProfile): PlatoonProfile = synchronized(lock) {
-        if (!profile.legacy) {
-            require(
-                profile.storageId == PlatoonProfileIdentity.storageId(
-                    profile.client,
-                    profile.serverRegion,
-                    profile.platoonId,
-                ),
-            ) { "Restored Platoon identity is inconsistent" }
+    /** Updates only mutable observed profile fields while retaining the isolated storage scope. */
+    fun updateObserved(
+        storageId: String,
+        data: PlatoonProfileData,
+        observedAt: Instant = Instant.now(),
+    ): PlatoonProfile = synchronized(lock) {
+        require(PlatoonProfilePolicyAdapter.isValid(data))
+        val current = requireNotNull(readLocked(storageId)) { "Unknown Platoon profile" }
+        require(!current.legacy && current.platoonId == data.platoonId.toLong()) {
+            "Observed Platoon identity does not match the storage scope"
         }
+        val updated = current.copy(
+            platoonName = normalizeName(data.platoonName),
+            emblemPrimary = data.emblemPrimary
+                .take(PlatoonProfile.MAX_EMBLEM_PARTS)
+                .map(UInt::toLong),
+            emblemSecondary = data.emblemSecondary
+                .take(PlatoonProfile.MAX_EMBLEM_PARTS)
+                .map(UInt::toLong),
+            lastSeenAt = observedAt,
+        )
+        writeLocked(updated, setActive = false)
+        updated
+    }
+
+    /** Changes server metadata without moving or merging the profile's immutable data scope. */
+    fun updateServerRegion(storageId: String, region: GameServerRegion): PlatoonProfile =
+        synchronized(lock) {
+            val current = requireNotNull(readLocked(storageId)) { "Unknown Platoon profile" }
+            require(!current.legacy) { "Legacy data has no verified client/server identity" }
+            require(region in ClientServerRegionPreferences.allowedFor(current.client.packageName)) {
+                "The server region does not belong to this client"
+            }
+            require(
+                readAllLocked().none {
+                    it.storageId != storageId &&
+                        !it.legacy &&
+                        it.client == current.client &&
+                        it.serverRegion == region &&
+                        it.platoonId == current.platoonId
+                },
+            ) { "That client/server Platoon profile already exists" }
+            val updated = current.copy(serverRegion = region)
+            writeLocked(updated, setActive = false)
+            if (preferences.getString(KEY_ACTIVE, null) == storageId) {
+                runCatching {
+                    ClientServerRegionPreferences(appContext).set(current.client.packageName, region)
+                }.getOrElse { error ->
+                    writeLocked(current, setActive = false)
+                    throw error
+                }
+            }
+            updated
+        }
+
+    fun upsertRestored(profile: PlatoonProfile): PlatoonProfile = synchronized(lock) {
+        requireCompatibleRestoreTargetLocked(profile)
         require(readLocked(profile.storageId) != null || readAllLocked().size < MAX_PROFILES) {
             "Too many Platoon profiles are already registered"
         }
@@ -237,6 +336,7 @@ internal class PlatoonProfileRegistry(context: Context) {
 
     /** Rejects a new restore scope before any database or filesystem state is replaced. */
     fun requireRestoreCapacity(profile: PlatoonProfile) = synchronized(lock) {
+        requireCompatibleRestoreTargetLocked(profile)
         require(readLocked(profile.storageId) != null || readAllLocked().size < MAX_PROFILES) {
             "Too many Platoon profiles are already registered"
         }
@@ -261,6 +361,51 @@ internal class PlatoonProfileRegistry(context: Context) {
             .remove(prefix + LAST_SEEN)
             .remove(prefix + LEGACY)
             .commit()
+    }
+
+    /** Atomically restores only the registry entry and active pointer touched by a failed restore. */
+    fun restoreTargetState(
+        targetStorageId: String,
+        previousProfile: PlatoonProfile?,
+        previousActiveStorageId: String?,
+    ) = synchronized(lock) {
+        require(PlatoonProfileIdentity.isValidStorageId(targetStorageId))
+        require(previousProfile == null || previousProfile.storageId == targetStorageId)
+        require(
+            previousActiveStorageId == null ||
+                PlatoonProfileIdentity.isValidStorageId(previousActiveStorageId),
+        )
+        val ids = preferences.getStringSet(KEY_IDS, emptySet()).orEmpty().toMutableSet()
+        val prefix = "$KEY_PROFILE.$targetStorageId."
+        val editor = preferences.edit()
+        if (previousProfile == null) {
+            ids.remove(targetStorageId)
+            editor.remove(prefix + CLIENT)
+                .remove(prefix + REGION)
+                .remove(prefix + PLATOON_ID)
+                .remove(prefix + NAME)
+                .remove(prefix + EMBLEM_PRIMARY)
+                .remove(prefix + EMBLEM_SECONDARY)
+                .remove(prefix + LAST_SEEN)
+                .remove(prefix + LEGACY)
+        } else {
+            ids += targetStorageId
+            editor.putString(prefix + CLIENT, previousProfile.client.name)
+                .putString(prefix + REGION, previousProfile.serverRegion.storedValue)
+                .putLong(prefix + PLATOON_ID, previousProfile.platoonId)
+                .putString(prefix + NAME, previousProfile.platoonName)
+                .putString(prefix + EMBLEM_PRIMARY, previousProfile.emblemPrimary.joinToString(","))
+                .putString(prefix + EMBLEM_SECONDARY, previousProfile.emblemSecondary.joinToString(","))
+                .putLong(prefix + LAST_SEEN, previousProfile.lastSeenAt.toEpochMilli())
+                .putBoolean(prefix + LEGACY, previousProfile.legacy)
+        }
+        editor.putStringSet(KEY_IDS, ids)
+        if (previousActiveStorageId != null && previousActiveStorageId in ids) {
+            editor.putString(KEY_ACTIVE, previousActiveStorageId)
+        } else {
+            editor.remove(KEY_ACTIVE)
+        }
+        check(editor.commit()) { "Unable to restore the Platoon profile registry" }
     }
 
     /** Forgets selector metadata without deleting the isolated database or retained evidence. */
@@ -332,6 +477,53 @@ internal class PlatoonProfileRegistry(context: Context) {
         check(editor.commit()) { "Unable to persist the Platoon profile registry" }
     }
 
+    private fun requireCompatibleRestoreTargetLocked(profile: PlatoonProfile) {
+        val profiles = readAllLocked()
+        profiles.firstOrNull { it.storageId == profile.storageId }?.let { existing ->
+            require(
+                existing.legacy == profile.legacy &&
+                    (
+                        existing.legacy ||
+                            (
+                                existing.client == profile.client &&
+                                    existing.platoonId == profile.platoonId
+                                )
+                        ),
+            ) { "Backup storage scope belongs to a different Platoon identity" }
+        }
+        require(
+            profiles.none {
+                it.storageId != profile.storageId &&
+                    !it.legacy &&
+                    !profile.legacy &&
+                    it.client == profile.client &&
+                    it.serverRegion == profile.serverRegion &&
+                    it.platoonId == profile.platoonId
+            },
+        ) { "Backup Platoon identity already belongs to another storage scope" }
+    }
+
+    private fun allocateStorageIdLocked(
+        client: PlatoonClient,
+        region: GameServerRegion,
+        platoonId: Long,
+    ): String {
+        val preferred = PlatoonProfileIdentity.storageId(client, region, platoonId)
+        if (readLocked(preferred) == null) return preferred
+        repeat(32) {
+            val random = PlatoonProfileIdentity.randomStorageId()
+            if (readLocked(random) == null) return random
+        }
+        error("Unable to allocate an isolated Platoon storage scope")
+    }
+
+    private fun normalizeName(value: String): String = value
+        .replace(Regex("\\s+"), " ")
+        .filterNot(Char::isISOControl)
+        .trim()
+        .take(PlatoonProfile.MAX_NAME_LENGTH)
+        .also { require(it.isNotBlank()) { "Platoon name is empty after normalization" } }
+
     private fun parseLongList(value: String?): List<Long> = value.orEmpty()
         .split(',')
         .filter(String::isNotBlank)
@@ -367,4 +559,13 @@ internal class PlatoonProfileRegistry(context: Context) {
         private const val LEGACY_NAME = "Existing platoon data"
         private val lock = Any()
     }
+}
+
+/** Keeps management independent from the capture package's validation helper. */
+private object PlatoonProfilePolicyAdapter {
+    fun isValid(profile: PlatoonProfileData): Boolean =
+        profile.platoonId != 0u &&
+            profile.platoonName.isNotBlank() &&
+            profile.platoonName.length <= PlatoonProfile.MAX_NAME_LENGTH &&
+            profile.platoonName.none(Char::isISOControl)
 }

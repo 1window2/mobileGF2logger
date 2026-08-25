@@ -237,11 +237,6 @@ internal object BackupArchive {
             legacy = legacy,
         )
         result.toProfile()
-        if (!legacy) {
-            require(
-                result.storageId == PlatoonProfileIdentity.storageId(client, region, id),
-            ) { "Backup Platoon identity does not match its storage scope" }
-        }
         return result
     }
 

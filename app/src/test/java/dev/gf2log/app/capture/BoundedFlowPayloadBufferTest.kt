@@ -11,10 +11,13 @@ class BoundedFlowPayloadBufferTest {
         assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(7, "a"))
         assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(7, "b"))
         assertEquals(BoundedFlowPayloadBuffer.OfferResult.OVERFLOW, buffer.offer(7, "c"))
+        assertTrue(buffer.isRejected(7))
         assertTrue(buffer.take(7).isEmpty())
+        assertTrue(buffer.isRejected(7))
         assertEquals(BoundedFlowPayloadBuffer.OfferResult.REJECTED, buffer.offer(7, "d"))
 
         buffer.remove(7)
+        assertTrue(!buffer.isRejected(7))
         assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(7, "e"))
         assertEquals(listOf("e"), buffer.take(7))
     }

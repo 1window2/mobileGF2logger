@@ -23,6 +23,8 @@ internal class BoundedFlowPayloadBuffer<T>(private val maxItemsPerFlow: Int) {
 
     fun take(flowId: Long): List<T> = pending.remove(flowId)?.toList().orEmpty()
 
+    fun isRejected(flowId: Long): Boolean = flowId in rejected
+
     fun reject(flowId: Long) {
         pending.remove(flowId)
         rejected += flowId

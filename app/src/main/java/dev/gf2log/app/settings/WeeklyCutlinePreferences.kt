@@ -78,6 +78,25 @@ class WeeklyCutlinePreferences(
         check(editor.commit()) { "Unable to persist weekly cutlines" }
     }
 
+    fun clear() {
+        if (isLegacy) {
+            write(WeeklyCutlines())
+            return
+        }
+        val editor = scoped.edit()
+        listOf(
+            DAILY_MERIT,
+            DAILY_SCORE,
+            DAILY_ATTEMPTS,
+            WEEKLY_MERIT,
+            WEEKLY_SCORE,
+            WEEKLY_ATTEMPTS,
+            WEEKLY_LOGIN,
+            WEEKLY_PATROL,
+        ).forEach { editor.remove(key(it)) }
+        check(editor.commit()) { "Unable to clear weekly cutlines" }
+    }
+
     private val isLegacy: Boolean
         get() = storageId == PlatoonProfileIdentity.LEGACY_STORAGE_ID
 

@@ -102,16 +102,7 @@ class PlatoonBackupManager internal constructor(
         }
         try {
             val target = managerFor(staged)
-            try {
-                target.manager.restoreStagedPlatoon(stagedDatabase, staged)
-                target.installProfileMetadata()
-                activateRestoredProfile(target.manager.storageScope)
-            } catch (error: Exception) {
-                runCatching(target::rollbackProfileMetadata)
-                    .exceptionOrNull()
-                    ?.let(error::addSuppressed)
-                throw error
-            }
+            target.manager.restoreStagedPlatoon(stagedDatabase, staged, target)
         } finally {
             stagedDatabase.delete()
         }
@@ -160,16 +151,7 @@ class PlatoonBackupManager internal constructor(
         }
         try {
             val target = managerFor(staged)
-            try {
-                target.manager.restoreStagedComplete(stagedDatabase, staged)
-                target.installProfileMetadata()
-                activateRestoredProfile(target.manager.storageScope)
-            } catch (error: Exception) {
-                runCatching(target::rollbackProfileMetadata)
-                    .exceptionOrNull()
-                    ?.let(error::addSuppressed)
-                throw error
-            }
+            target.manager.restoreStagedComplete(stagedDatabase, staged, target)
         } finally {
             stagedDatabase.delete()
         }
@@ -178,18 +160,20 @@ class PlatoonBackupManager internal constructor(
     private fun restoreStagedPlatoon(
         stagedDatabase: File,
         staged: BackupArchive.StagedArchive,
+        target: RestoreTarget,
     ) {
         validateSelectedBackup {
             BackupFormatPolicy.requirePlatoonOnly(staged.formatVersion, staged.settings != null)
             requireArchiveMatchesScope(staged)
             validateDatabase(stagedDatabase, requireCurrentSchema = false)
         }
-        replaceRestoredState(stagedDatabase, restoredSettings = null)
+        replaceRestoredState(stagedDatabase, restoredSettings = null, restoreTarget = target)
     }
 
     private fun restoreStagedComplete(
         stagedDatabase: File,
         staged: BackupArchive.StagedArchive,
+        target: RestoreTarget,
     ) {
         val restoredSettings = validateSelectedBackup {
             BackupFormatPolicy.requireComplete(staged.formatVersion, staged.settings != null)
@@ -198,27 +182,29 @@ class PlatoonBackupManager internal constructor(
                 validateDatabase(stagedDatabase, requireCurrentSchema = false)
             }
         }
-        replaceRestoredState(stagedDatabase, restoredSettings)
+        replaceRestoredState(stagedDatabase, restoredSettings, restoreTarget = target)
     }
 
     private fun managerFor(staged: BackupArchive.StagedArchive): RestoreTarget {
         val registry = PlatoonProfileRegistry(appContext)
         val restoredProfile = staged.profile?.toProfile()
         restoredProfile?.let(registry::requireRestoreCapacity)
-        val previousProfile = restoredProfile?.let { registry.find(it.storageId) }
-        val clientRegions = ClientServerRegionPreferences(appContext)
-        val previousCaptureRegion = restoredProfile
-            ?.takeUnless(PlatoonProfile::legacy)
-            ?.let { clientRegions.get(it.client.packageName) }
         val scope = restoredProfile?.storageId
             ?.let(::PlatoonStorageScope)
             ?: PlatoonStorageScope(PlatoonProfileIdentity.LEGACY_STORAGE_ID)
+        val previousProfile = registry.find(scope.storageId)
+        val previousActiveStorageId = registry.active()?.storageId
+        val clientRegions = ClientServerRegionPreferences(appContext)
+        val previousCaptureRegion = restoredProfile
+            ?.takeUnless(PlatoonProfile::legacy)
+            ?.let { clientRegions.stored(it.client.packageName) }
         val manager = if (scope == storageScope) {
             this
         } else {
             PlatoonBackupManager(
                 context = appContext,
                 settingsStore = ScopedAppSettingsStore(appContext, scope.storageId),
+                restoreObserver = restoreObserver,
                 storageScope = scope,
             )
         }
@@ -226,8 +212,8 @@ class PlatoonBackupManager internal constructor(
             manager = manager,
             restoredProfile = restoredProfile,
             previousProfile = previousProfile,
+            previousActiveStorageId = previousActiveStorageId,
             registry = registry,
-            clientRegions = clientRegions,
             previousCaptureRegion = previousCaptureRegion,
         )
     }
@@ -236,37 +222,26 @@ class PlatoonBackupManager internal constructor(
         val manager: PlatoonBackupManager,
         val restoredProfile: PlatoonProfile?,
         val previousProfile: PlatoonProfile?,
+        val previousActiveStorageId: String?,
         val registry: PlatoonProfileRegistry,
-        val clientRegions: ClientServerRegionPreferences,
         val previousCaptureRegion: GameServerRegion?,
     ) {
-        private var metadataInstalled = false
-        private var captureRegionInstalled = false
+        fun rollbackJournal(): PlatoonProfileRestoreJournal = PlatoonProfileRestoreJournal(
+                targetStorageId = manager.storageScope.storageId,
+                previousProfile = previousProfile,
+                previousActiveStorageId = previousActiveStorageId,
+                ownerPackage = restoredProfile
+                    ?.takeUnless(PlatoonProfile::legacy)
+                    ?.client
+                    ?.packageName,
+                previousCaptureRegion = previousCaptureRegion,
+            )
 
-        fun installProfileMetadata() {
-            restoredProfile ?: return
-            registry.upsertRestored(restoredProfile)
-            metadataInstalled = true
-            if (!restoredProfile.legacy) {
-                clientRegions.set(restoredProfile.client.packageName, restoredProfile.serverRegion)
-                captureRegionInstalled = true
-            }
-        }
-
-        fun rollbackProfileMetadata() {
-            val restored = restoredProfile ?: return
-            if (captureRegionInstalled) {
-                clientRegions.set(
-                    restored.client.packageName,
-                    requireNotNull(previousCaptureRegion),
-                )
-            }
-            if (metadataInstalled) {
-                if (previousProfile == null) {
-                    registry.removeIfInactive(restored.storageId)
-                } else {
-                    registry.upsertRestored(previousProfile)
-                }
+        fun installProfileMetadataAndActivate() {
+            val storageId = restoredProfile?.let(registry::upsertRestored)?.storageId
+                ?: registry.ensureLegacyProfile().storageId
+            check(registry.setActive(storageId)) {
+                "Unable to select the restored Platoon"
             }
         }
     }
@@ -280,12 +255,6 @@ class PlatoonBackupManager internal constructor(
                 "Backup belongs to a different Platoon"
             }
         }
-    }
-
-    private fun activateRestoredProfile(scope: PlatoonStorageScope) {
-        val registry = PlatoonProfileRegistry(appContext)
-        if (scope.isLegacy) registry.ensureLegacyProfile() else registry.ensureInitialized()
-        check(registry.setActive(scope.storageId)) { "Unable to select the restored Platoon" }
     }
 
     private fun backupProfile(): PlatoonProfile {
@@ -330,6 +299,7 @@ class PlatoonBackupManager internal constructor(
         stagedDatabase: File,
         restoredSettings: AppBackupSettings?,
         retireRetainedCsv: Boolean = true,
+        restoreTarget: RestoreTarget? = null,
     ) {
         val retainedCsvDirectory = File(
             storageScope.rootDirectory(appContext),
@@ -348,6 +318,7 @@ class PlatoonBackupManager internal constructor(
                         settingsStore.read()
                     },
                     databaseExisted = databaseFile.isFile,
+                    profileRollback = restoreTarget?.rollbackJournal(),
                 )
                 replaceDatabase(stagedDatabase, preservePrevious = true)
                 restoreObserver(RestoreCheckpoint.DATABASE_INSTALLED)
@@ -361,6 +332,10 @@ class PlatoonBackupManager internal constructor(
                         previousRetainedCsvDirectory,
                     )
                     restoreObserver(RestoreCheckpoint.RETAINED_CSV_RETIRED)
+                }
+                restoreTarget?.installProfileMetadataAndActivate()
+                if (restoreTarget != null) {
+                    restoreObserver(RestoreCheckpoint.PROFILE_METADATA_INSTALLED)
                 }
                 writeRestoreState(RestoreState.COMMITTED)
                 restoreObserver(RestoreCheckpoint.COMMITTED)
@@ -526,6 +501,7 @@ class PlatoonBackupManager internal constructor(
     private fun beginRestoreTransaction(
         previousSettings: AppBackupSettings?,
         databaseExisted: Boolean,
+        profileRollback: PlatoonProfileRestoreJournal?,
     ) {
         val transactionDirectory = restoreTransactionDirectory(appContext, storageScope)
         require(!transactionDirectory.exists()) { "A previous backup restore is still pending" }
@@ -539,6 +515,12 @@ class PlatoonBackupManager internal constructor(
         }
         if (!databaseExisted) {
             writeAtomic(restoreDatabaseWasMissingFile(appContext, storageScope), ByteArray(0))
+        }
+        if (profileRollback != null) {
+            writeAtomic(
+                restoreProfileFile(appContext, storageScope),
+                PlatoonProfileRestoreJournalCodec.encode(profileRollback),
+            )
         }
         writeRestoreState(RestoreState.PREPARED)
     }
@@ -567,6 +549,7 @@ class PlatoonBackupManager internal constructor(
         private const val RESTORE_SETTINGS_FILE = "settings.pre_restore"
         private const val RESTORE_SETTINGS_ROLLBACK_FILE = "settings.rollback_required"
         private const val RESTORE_DATABASE_WAS_MISSING_FILE = "database.was_missing"
+        private const val RESTORE_PROFILE_FILE = "profile.pre_restore"
         private val SQLITE_HEADER = "SQLite format 3\u0000".toByteArray(Charsets.US_ASCII)
 
         internal fun recoverInterruptedFullRestore(
@@ -704,6 +687,27 @@ class PlatoonBackupManager internal constructor(
                     error("Unable to recover retained CSV files")
                 }
             }
+            val profileFile = restoreProfileFile(context, scope)
+            if (profileFile.isFile) {
+                val rollback = PlatoonProfileRestoreJournalCodec.decode(profileFile.readBytes())
+                require(rollback.targetStorageId == scope.storageId) {
+                    "Profile restore journal belongs to a different Platoon"
+                }
+                rollback.ownerPackage?.let { ownerPackage ->
+                    val preferences = ClientServerRegionPreferences(context)
+                    val previousRegion = rollback.previousCaptureRegion
+                    if (previousRegion == null) {
+                        preferences.clear(ownerPackage)
+                    } else {
+                        preferences.set(ownerPackage, previousRegion)
+                    }
+                }
+                PlatoonProfileRegistry(context).restoreTargetState(
+                    targetStorageId = rollback.targetStorageId,
+                    previousProfile = rollback.previousProfile,
+                    previousActiveStorageId = rollback.previousActiveStorageId,
+                )
+            }
             cleanupRestoreTransaction(context, scope)
         }
 
@@ -776,10 +780,12 @@ class PlatoonBackupManager internal constructor(
             val settingsRollback = restoreSettingsRollbackFile(context, scope)
             val state = restoreStateFile(context, scope)
             val databaseWasMissing = restoreDatabaseWasMissingFile(context, scope)
+            val profile = restoreProfileFile(context, scope)
             settings.delete()
             settingsRollback.delete()
             state.delete()
             databaseWasMissing.delete()
+            profile.delete()
             directory.delete()
         }
 
@@ -798,6 +804,9 @@ class PlatoonBackupManager internal constructor(
         private fun restoreDatabaseWasMissingFile(context: Context, scope: PlatoonStorageScope) =
             File(restoreTransactionDirectory(context, scope), RESTORE_DATABASE_WAS_MISSING_FILE)
 
+        private fun restoreProfileFile(context: Context, scope: PlatoonStorageScope) =
+            File(restoreTransactionDirectory(context, scope), RESTORE_PROFILE_FILE)
+
         private fun databaseSidecars(database: File): List<File> =
             listOf("", "-wal", "-shm", "-journal").map { suffix -> File(database.path + suffix) }
     }
@@ -806,6 +815,7 @@ class PlatoonBackupManager internal constructor(
         DATABASE_INSTALLED,
         SETTINGS_REPLACED,
         RETAINED_CSV_RETIRED,
+        PROFILE_METADATA_INSTALLED,
         COMMITTED,
     }
 

@@ -49,17 +49,32 @@ original connection tuple and maps that UID only to the fixed supported package
 IDs. Remote IP addresses and DNS/SNI labels are diagnostic hints, not trusted
 client or server identities. Android 8–9 falls back only when exactly one
 supported client is installed; ambiguous flows remain quarantined. Payload
-`21905` supplies a bounded Platoon identity for its own decoded flow. Only the
-composite of verified client, user-selected server region, and Platoon ID may
-select an isolated management database, retained CSV directory, checkpoint,
-weekly settings, or backup scope. Pre-identity payloads, registered profiles,
-and profile metadata are independently bounded. A flow is permanently
+`21905` supplies a bounded Platoon identity for its own decoded flow. Only a
+confirmed profile composed from the verified client, user-selected compatible
+server region, and Platoon ID may receive an immutable isolated management
+database, retained CSV directory, checkpoint, weekly settings, or backup scope.
+Pre-identity payloads, admission candidates, registered profiles, and profile
+metadata are independently bounded. A flow is permanently
 quarantined until closure if its identity changes or profile admission fails.
 Each user-started capture may admit at most one new profile per supported
-client; existing profiles remain usable, and a confirmed selector action can
-forget registry metadata to recover capacity without deleting isolated data.
+client; existing profiles remain usable. Full profile removal is an explicit
+destructive workflow and cannot intentionally orphan a selectable scope.
 Closed flows discard address and owner metadata even when no parser was created;
 queue-rejected closes quarantine the flow so delayed open work cannot restore it.
+The app does not turn an IP address, publisher default, or unverified hostname
+into a persistent server-identity guess. A new supported-client/Platoon pair is
+held only in a bounded process-memory admission queue until the user chooses one
+of that client's compatible server regions. Before confirmation, decoded data
+is absent from parsed-packet history, SQLite, retained CSV, and preferences;
+explicit discard, overflow, force-stop, or process death removes it. Selecting
+an existing profile safely restores that profile's saved capture region.
+
+Profile metadata, capture-region routing, active selection, SQLite state,
+scoped settings, and retained CSV retirement share one durable restore journal.
+A process death before the commit marker restores the previous values together.
+Destructive profile deletion requires two confirmations including an exact-name
+match, then uses a durable deletion queue so interrupted scoped cleanup resumes
+before profiles are listed again.
 
 Exports and Discord sends are explicit user actions that move selected data out
 of Android private storage. Backups are checksummed and strictly validated but

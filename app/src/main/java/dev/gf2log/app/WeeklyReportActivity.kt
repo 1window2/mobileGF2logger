@@ -109,6 +109,7 @@ internal object WeeklyPngPendingState {
 
 class WeeklyReportActivity : LocalizedActivity() {
     private lateinit var repository: PlatoonRepository
+    private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var body: LinearLayout
     private lateinit var reportState: WeeklyReportStateHolder
     private var pendingCsv: String? = null
@@ -121,7 +122,8 @@ class WeeklyReportActivity : LocalizedActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        repository = PlatoonRepository(this)
+        profileBinding = ActivePlatoonScopeBinding(this)
+        repository = PlatoonRepository(this, profileBinding.scope)
         pendingPng = WeeklyPngPendingState.restore(
             cacheDir,
             savedInstanceState?.getString(STATE_PENDING_PNG_NAME),
@@ -130,7 +132,10 @@ class WeeklyReportActivity : LocalizedActivity() {
             savedInstanceState?.takeIf { it.containsKey(STATE_REFERENCE_DAY) }
                 ?.getLong(STATE_REFERENCE_DAY)
                 ?.let(LocalDate::ofEpochDay)
-                ?: PlatoonPeriods.gameDay(Instant.now(), GameTimeZonePreferences.get(this)),
+                ?: PlatoonPeriods.gameDay(
+                    Instant.now(),
+                    GameTimeZonePreferences.get(this, profileBinding.scope.storageId),
+                ),
         )
         body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -147,6 +152,10 @@ class WeeklyReportActivity : LocalizedActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!profileBinding.isCurrent(this)) {
+            recreate()
+            return
+        }
         reportState.onResume()
         requestRender(reconcileRetainedCsv = true)
     }
@@ -334,7 +343,7 @@ class WeeklyReportActivity : LocalizedActivity() {
             }, LinearLayout.LayoutParams(dp(48), dp(48)))
         }, matchWidth())
         body.addView(
-            PlatoonProfileSelector.button(this),
+            PlatoonProfileSelector.controls(this),
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,

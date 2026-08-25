@@ -35,8 +35,15 @@ rules below take precedence over stale copied dates in archived templates.
 - Period calculations use the selected server region's fixed reset-zone offset.
   The known Darkwinter Global/China and HaoPlay Global/Japan/Korea/Asia presets
   all reset at 05:00 server time, and Settings converts the next reset to the
-  Android device timezone for display. Manual mode uses the selected game
-  timezone, initially the phone timezone. Stored capture instants remain UTC.
+  Android device timezone for display. Selecting an existing Platoon follows
+  its saved preset automatically; stored capture instants remain UTC.
+- A newly observed Platoon is not assigned a guessed region. Its decoded packets
+  remain in a bounded in-memory candidate until the user selects one of the six
+  supported regions compatible with the VPN-owner-verified client. Only then is
+  its immutable scoped repository created and the buffered evidence ingested.
+- Changing a profile's server rebuilds its weekly history without changing its
+  storage scope. Deleting a profile removes only that scope after two warnings
+  and an exact Platoon-name confirmation; interrupted cleanup resumes later.
 
 ## Merit calculation
 

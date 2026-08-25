@@ -16,7 +16,7 @@ import org.junit.Test
 
 class BackupArchiveTest {
     @Test
-    fun `round trips a scoped profile and verifies its deterministic identity`() {
+    fun `round trips a scoped profile with an immutable storage identity`() {
         val database = temporaryFile("platoon.db", realisticDatabaseBytes())
         val profile = PlatoonProfile(
             storageId = PlatoonProfileIdentity.storageId(
@@ -44,6 +44,37 @@ class BackupArchiveTest {
         assertEquals(BackupFormatPolicy.SCOPED_VERSION, result.formatVersion)
         assertEquals(profile.storageId, result.profile?.storageId)
         assertEquals(profile.platoonName, result.profile?.platoonName)
+    }
+
+    @Test
+    fun `round trips a profile after its server metadata changes without moving storage`() {
+        val database = temporaryFile("platoon.db", realisticDatabaseBytes())
+        val originalStorage = PlatoonProfileIdentity.storageId(
+            PlatoonClient.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            101817L,
+        )
+        val edited = PlatoonProfile(
+            storageId = originalStorage,
+            client = PlatoonClient.HAOPLAY,
+            serverRegion = GameServerRegion.HAOPLAY_JAPAN,
+            platoonId = 101817L,
+            platoonName = "Owls",
+            emblemPrimary = emptyList(),
+            emblemSecondary = emptyList(),
+            lastSeenAt = java.time.Instant.EPOCH,
+        )
+        val archive = ByteArrayOutputStream().also {
+            BackupArchive.write(it, database, realisticSettingsBytes(), edited)
+        }
+
+        val restored = BackupArchive.stage(
+            ByteArrayInputStream(archive.toByteArray()),
+            temporaryPath("edited-scope.db"),
+        ).profile
+
+        assertEquals(originalStorage, restored?.storageId)
+        assertEquals(GameServerRegion.HAOPLAY_JAPAN, restored?.serverRegion)
     }
 
     @Test

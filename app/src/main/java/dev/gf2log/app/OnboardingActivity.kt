@@ -22,6 +22,8 @@ import androidx.annotation.StringRes
 
 /** One-time, bilingual walkthrough of the app's five user-facing workflows. */
 class OnboardingActivity : LocalizedActivity() {
+    override fun supportsPendingPlatoonAdmission(): Boolean = false
+
     private lateinit var pageHost: FrameLayout
     private lateinit var stepLabel: TextView
     private lateinit var backButton: Button

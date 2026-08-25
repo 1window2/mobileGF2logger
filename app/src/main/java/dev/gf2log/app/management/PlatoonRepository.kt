@@ -390,21 +390,23 @@ internal class PlatoonRepository(
         access { it.clearActiveWeeklyReportHistory(periodStart.toEpochDay()) }
 
     fun rebuildWeeklyHistoryForTimeZoneChange(zoneId: ZoneId) {
-        val recordedAt = Instant.now()
-        val replacements = WeeklyReportRange
-            .periodStarts(access { it.listWeeklyEvidenceDays(zoneId) })
-            .map { periodStart ->
-                val encoded = WeeklyReportHistoryCodec.encode(
-                    buildLiveWeeklyRevision(periodStart, zoneId, recordedAt),
-                )
-                WeeklyReportHistoryReplacement(
-                    periodStartEpochDay = periodStart.toEpochDay(),
-                    recordedAt = recordedAt,
-                    fingerprint = encoded.fingerprint,
-                    payload = encoded.payload,
-                )
-            }
-        access { it.replaceWeeklyReportHistory(replacements) }
+        withExclusiveDatabase(storageScope) {
+            val recordedAt = Instant.now()
+            val replacements = WeeklyReportRange
+                .periodStarts(access { it.listWeeklyEvidenceDays(zoneId) })
+                .map { periodStart ->
+                    val encoded = WeeklyReportHistoryCodec.encode(
+                        buildLiveWeeklyRevision(periodStart, zoneId, recordedAt),
+                    )
+                    WeeklyReportHistoryReplacement(
+                        periodStartEpochDay = periodStart.toEpochDay(),
+                        recordedAt = recordedAt,
+                        fingerprint = encoded.fingerprint,
+                        payload = encoded.payload,
+                    )
+                }
+            access { it.replaceWeeklyReportHistory(replacements) }
+        }
     }
 
     private fun recordChangedWeeks(instants: Iterable<Instant>) =

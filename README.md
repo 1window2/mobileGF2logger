@@ -30,8 +30,12 @@ never stored.
 - Can send a validated original CSV to an optional user-owned Discord incoming webhook after confirmation.
 - Stores the latest 100 parsed packets and up to 50 saved packets, with table and raw views, copy, export, selection, and deletion.
 - Supports member sorting, persistent drag ordering, snapshot comparison, single-week and all-week CSV export, and profile-aware `.gf2backup` export/restore that leaves other Platoons unchanged.
+- Keeps a newly detected Platoon's packets in bounded memory until the user confirms one of the verified client's compatible servers; unconfirmed data is discarded on force-stop or process death.
+- Provides profile management for correcting server metadata without moving data and for deleting one isolated Platoon behind two confirmations and an exact-name check.
 - Guides first-time users through Main, Settings, Platoon management, weekly controls, and parsed-packet pages, with a persistent English/Korean selector and Skip action.
-- Supports English and Korean, System/Light/Dark themes, explicit Darkwinter/HaoPlay server-region reset presets converted to the phone timezone, and a persistent manual game-timezone fallback.
+- Supports English and Korean, System/Light/Dark themes, and the six known
+  Darkwinter/HaoPlay server-region reset presets converted to the phone timezone.
+  Selecting a detected Platoon automatically follows that profile's saved region.
 - Registers the HaoPlay (`com.haoplay.game.and.exilium`) and Darkwinter
   (`com.Sunborn.SnqxExilium.Glo`) Android clients as separate VPN targets.
 - Creates UTF-8 Platoon-member CSV files with this column order:

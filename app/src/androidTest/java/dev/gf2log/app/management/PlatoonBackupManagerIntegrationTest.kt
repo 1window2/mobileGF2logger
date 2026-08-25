@@ -8,12 +8,15 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.gf2log.app.TargetPackagePreferences
+import dev.gf2log.app.SupportedGamePackages
 import dev.gf2log.app.WeeklyPngPendingState
 import dev.gf2log.app.WeeklyReportActivity
 import dev.gf2log.app.settings.AppBackupSettings
 import dev.gf2log.app.settings.AppBackupSettingsCodec
 import dev.gf2log.app.settings.AppSettingsStore
 import dev.gf2log.app.settings.BackupSettingsStore
+import dev.gf2log.app.settings.ClientServerRegionPreferences
+import dev.gf2log.app.settings.GameServerRegion
 import dev.gf2log.app.settings.WeeklyCutlines
 import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.PayloadCatalog
@@ -541,6 +544,90 @@ class PlatoonBackupManagerIntegrationTest {
                 count(database.readableDatabase, "members", "uid = ?", CURRENT_UID),
             )
         }
+    }
+
+    @Test
+    fun interruptedScopedRestoreRollsBackProfileSelectionAndCaptureRegion() {
+        val registry = PlatoonProfileRegistry(context)
+        val original = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            dev.gf2log.protocol.model.PlatoonProfileData(
+                100u,
+                "Original",
+                emptyList(),
+                emptyList(),
+            ),
+        )
+        val restored = registry.upsertDetected(
+            SupportedGamePackages.DARKWINTER,
+            GameServerRegion.DARKWINTER_GLOBAL,
+            dev.gf2log.protocol.model.PlatoonProfileData(
+                200u,
+                "Restored",
+                listOf(1u),
+                listOf(2u),
+            ),
+        )
+        assertTrue(registry.setActive(restored.storageId))
+        PlatoonRepository(context, PlatoonStorageScope(restored.storageId)).ingest(
+            Instant.parse("2026-08-24T03:00:00Z"),
+            listOf(
+                GuildMember(
+                    uid = THIRD_UID.toUInt(),
+                    name = "Restored member",
+                    level = 1u,
+                    weeklyMerit = 0u,
+                    totalMerit = 0u,
+                    highScore = 0u,
+                    totalScore = 0u,
+                    lastLogin = 0u,
+                ),
+            ),
+            "restored.csv",
+        )
+        val archive = ByteArrayOutputStream().also { output ->
+            PlatoonBackupManager(context).exportFull(output)
+        }.toByteArray()
+
+        assertTrue(registry.setActive(original.storageId))
+        assertTrue(registry.forget(restored.storageId))
+        val restoredScope = PlatoonStorageScope(restored.storageId)
+        PlatoonRepository.withExclusiveDatabase(restoredScope) {
+            assertTrue(context.deleteDatabase(restoredScope.databaseName))
+        }
+        ClientServerRegionPreferences(context).set(
+            SupportedGamePackages.DARKWINTER,
+            GameServerRegion.DARKWINTER_CHINA,
+        )
+
+        assertThrows(SimulatedProcessDeath::class.java) {
+            PlatoonBackupManager(
+                context = context,
+                settingsStore = dev.gf2log.app.settings.ScopedAppSettingsStore(
+                    context,
+                    original.storageId,
+                ),
+                restoreObserver = { checkpoint ->
+                    if (checkpoint == PlatoonBackupManager.RestoreCheckpoint.PROFILE_METADATA_INSTALLED) {
+                        throw SimulatedProcessDeath()
+                    }
+                },
+                storageScope = PlatoonStorageScope(original.storageId),
+            ).restoreFull(ByteArrayInputStream(archive))
+        }
+
+        assertEquals(restored.storageId, registry.activeScope().storageId)
+        assertEquals("Restored", registry.find(restored.storageId)?.platoonName)
+        PlatoonBackupManager.recoverInterruptedFullRestore(context)
+
+        assertEquals(original.storageId, registry.activeScope().storageId)
+        assertEquals(null, registry.find(restored.storageId))
+        assertEquals(
+            GameServerRegion.DARKWINTER_CHINA,
+            ClientServerRegionPreferences(context).get(SupportedGamePackages.DARKWINTER),
+        )
+        assertFalse(context.getDatabasePath(restoredScope.databaseName).exists())
     }
 
     private fun replaceDatabaseWithCurrentState() {

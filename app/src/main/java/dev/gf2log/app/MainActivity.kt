@@ -49,6 +49,7 @@ import java.time.format.DateTimeFormatter
 import java.util.concurrent.Executors
 
 class MainActivity : LocalizedActivity() {
+    private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var statusText: TextView
     private lateinit var captureStateText: TextView
     private lateinit var captureStatusText: TextView
@@ -81,6 +82,7 @@ class MainActivity : LocalizedActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        profileBinding = ActivePlatoonScopeBinding(this)
         if (!OnboardingPreferences.isCompleted(this)) {
             startActivity(Intent(this, OnboardingActivity::class.java))
             finish()
@@ -98,6 +100,10 @@ class MainActivity : LocalizedActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!profileBinding.isCurrent(this)) {
+            recreate()
+            return
+        }
         if (!::captureStatusText.isInitialized) return
         renderCaptureStatus()
         refreshHistory()
@@ -251,9 +257,9 @@ class MainActivity : LocalizedActivity() {
                         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                     }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                     addView(
-                        PlatoonProfileSelector.button(this@MainActivity, compact = true),
+                        PlatoonProfileSelector.controls(this@MainActivity, compact = true),
                         LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            dp(200),
                             ViewGroup.LayoutParams.WRAP_CONTENT,
                         ),
                     )

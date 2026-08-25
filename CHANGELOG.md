@@ -2,7 +2,7 @@
 
 All notable changes to mobileGF2logger are documented here.
 
-## 2.4.0 - 2026-08-24
+## 2.4.0 - 2026-08-25
 
 ### Added
 
@@ -12,6 +12,12 @@ All notable changes to mobileGF2logger are documented here.
 - Add independently configurable HaoPlay and Darkwinter capture-server
   presets, scoped database/CSV/checkpoint/report settings, and profile-aware
   format-v3 `.gf2backup` archives.
+- Add profile-following automatic reset selection; choosing a Platoon also
+  aligns future capture routing with that profile's saved client and region.
+- Add a bounded memory-only admission prompt for a newly detected Platoon and
+  require a compatible server choice before any packet or management data is saved.
+- Add profile management with read-only verified clients, editable compatible
+  servers, and exact-name-confirmed deletion of one isolated Platoon.
 
 ### Changed
 
@@ -21,7 +27,9 @@ All notable changes to mobileGF2logger are documented here.
 - Keep one-time-capture completion evidence isolated per detected Platoon so
   two clients cannot accidentally complete one checklist.
 - Preserve v2.3.x data as an unmoved legacy profile while new Platoons use
-  deterministic private databases and retained-evidence directories.
+  immutable private databases and retained-evidence directories.
+- Replace the arbitrary timezone list with the six supported server presets;
+  an unconfigured client must be selected once before its first profile is admitted.
 
 ### Fixed
 
@@ -37,6 +45,10 @@ All notable changes to mobileGF2logger are documented here.
   metadata without deleting the isolated Platoon data.
 - Remove metadata for non-parsed VPN flows on every close path and prevent a
   delayed open callback from restoring metadata after a rejected close.
+- Keep backup profile registration and active selection inside the durable
+  restore journal, serialize timezone history rebuilds with ingestion, reject
+  overflowed flows before session creation, use transitive membership ordering,
+  and refresh every retained Activity after a profile switch.
 
 ## 2.3.3 - 2026-08-24
 

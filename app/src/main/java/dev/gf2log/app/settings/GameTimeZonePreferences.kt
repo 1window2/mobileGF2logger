@@ -30,6 +30,30 @@ internal object GameTimeZonePreferences {
         return PlatoonProfileRegistry(context).find(storageId)?.serverRegion ?: GameServerRegion.MANUAL
     }
 
+    fun isAutomatic(context: Context, storageId: String): Boolean =
+        storageId != PlatoonProfileIdentity.LEGACY_STORAGE_ID &&
+            !scoped(context).contains(regionKey(storageId))
+
+    fun clearRegionOverride(context: Context, storageId: String) {
+        require(storageId != PlatoonProfileIdentity.LEGACY_STORAGE_ID)
+        check(
+            scoped(context).edit()
+                .remove(regionKey(storageId))
+                .remove(zoneKey(storageId))
+                .commit(),
+        ) { "Unable to restore automatic server selection" }
+    }
+
+    fun clearScope(context: Context, storageId: String) {
+        require(storageId != PlatoonProfileIdentity.LEGACY_STORAGE_ID)
+        check(
+            scoped(context).edit()
+                .remove(regionKey(storageId))
+                .remove(zoneKey(storageId))
+                .commit(),
+        ) { "Unable to clear Platoon timezone settings" }
+    }
+
     fun setRegion(
         context: Context,
         region: GameServerRegion,

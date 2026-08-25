@@ -1,19 +1,26 @@
 package dev.gf2log.app.management
 
 import androidx.test.core.app.ApplicationProvider
+import dev.gf2log.app.ActivePlatoonScopeBinding
 import dev.gf2log.app.SupportedGamePackages
 import dev.gf2log.app.settings.GameServerRegion
 import dev.gf2log.app.settings.ClientServerRegionPreferences
+import dev.gf2log.app.settings.MemberOrderPreferences
+import dev.gf2log.app.settings.WeeklyCutlinePreferences
+import dev.gf2log.app.settings.WeeklyCutlines
 import dev.gf2log.protocol.model.PlatoonProfileData
 import dev.gf2log.protocol.model.GuildMember
 import java.io.File
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -92,6 +99,34 @@ class PlatoonProfileRegistryIntegrationTest {
     }
 
     @Test
+    fun clientRegionRequiresARealSelectionAndBindingsDetectProfileChanges() {
+        val regions = ClientServerRegionPreferences(context)
+        assertEquals(null, regions.configured(SupportedGamePackages.HAOPLAY))
+        regions.set(SupportedGamePackages.HAOPLAY, GameServerRegion.HAOPLAY_JAPAN)
+        assertEquals(
+            GameServerRegion.HAOPLAY_JAPAN,
+            regions.configured(SupportedGamePackages.HAOPLAY),
+        )
+
+        val registry = PlatoonProfileRegistry(context)
+        val first = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_JAPAN,
+            PlatoonProfileData(1u, "First", emptyList(), emptyList()),
+        )
+        val second = registry.upsertDetected(
+            SupportedGamePackages.DARKWINTER,
+            GameServerRegion.DARKWINTER_GLOBAL,
+            PlatoonProfileData(2u, "Second", emptyList(), emptyList()),
+        )
+        assertTrue(registry.setActive(first.storageId))
+        val binding = ActivePlatoonScopeBinding(context)
+        assertTrue(binding.isCurrent(context))
+        assertTrue(registry.setActive(second.storageId))
+        assertFalse(binding.isCurrent(context))
+    }
+
+    @Test
     fun equalMemberUidsRemainIsolatedAcrossProfileDatabases() {
         val registry = PlatoonProfileRegistry(context)
         val identity = PlatoonProfileData(77u, "First", emptyList(), emptyList())
@@ -121,6 +156,173 @@ class PlatoonProfileRegistryIntegrationTest {
 
         assertEquals("HaoPlay member", firstRepository.listMemberStatuses().single().name)
         assertEquals("Darkwinter member", secondRepository.listMemberStatuses().single().name)
+    }
+
+    @Test
+    fun switchingProfilesKeepsMembersReportsHistorySettingsAndFilesIndependent() {
+        val registry = PlatoonProfileRegistry(context)
+        val first = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            PlatoonProfileData(101817u, "Owls", listOf(1u), listOf(2u)),
+        )
+        val second = registry.upsertDetected(
+            SupportedGamePackages.DARKWINTER,
+            GameServerRegion.DARKWINTER_GLOBAL,
+            PlatoonProfileData(101817u, "Ravens", listOf(3u), listOf(4u)),
+        )
+        val firstScope = PlatoonStorageScope(first.storageId)
+        val secondScope = PlatoonStorageScope(second.storageId)
+        val firstRepository = PlatoonRepository(context, firstScope)
+        val secondRepository = PlatoonRepository(context, secondScope)
+        val observedAt = Instant.parse("2026-08-24T12:00:00Z")
+        val periodStart = LocalDate.of(2026, 8, 23)
+
+        firstRepository.ingest(observedAt, listOf(member(9u, "HaoPlay member")), "same.csv")
+        secondRepository.ingest(observedAt, listOf(member(9u, "Darkwinter member")), "same.csv")
+        MemberOrderPreferences(context, first.storageId).write(listOf(9L, 10L))
+        MemberOrderPreferences(context, second.storageId).write(listOf(10L, 9L))
+        WeeklyCutlinePreferences(context, first.storageId).write(WeeklyCutlines(dailyMerit = 90L))
+        WeeklyCutlinePreferences(context, second.storageId).write(WeeklyCutlines(dailyMerit = 150L))
+        val firstEvidence = File(firstScope.retainedCsvDirectory(context), "same.csv").apply {
+            parentFile?.mkdirs()
+            writeText("first")
+        }
+        val secondEvidence = File(secondScope.retainedCsvDirectory(context), "same.csv").apply {
+            parentFile?.mkdirs()
+            writeText("second")
+        }
+
+        assertEquals(
+            "HaoPlay member",
+            firstRepository.buildWeeklyReport(periodStart, ZoneOffset.UTC, observedAt.plusSeconds(1))
+                .members.single().name,
+        )
+        assertEquals(
+            "Darkwinter member",
+            secondRepository.buildWeeklyReport(periodStart, ZoneOffset.UTC, observedAt.plusSeconds(1))
+                .members.single().name,
+        )
+        assertTrue(firstRepository.listWeeklyReportHistory(periodStart).isNotEmpty())
+        assertTrue(secondRepository.listWeeklyReportHistory(periodStart).isNotEmpty())
+        assertEquals(listOf(9L, 10L), MemberOrderPreferences(context, first.storageId).read())
+        assertEquals(listOf(10L, 9L), MemberOrderPreferences(context, second.storageId).read())
+        assertEquals(90L, WeeklyCutlinePreferences(context, first.storageId).read().dailyMerit)
+        assertEquals(150L, WeeklyCutlinePreferences(context, second.storageId).read().dailyMerit)
+        assertNotEquals(firstEvidence.canonicalPath, secondEvidence.canonicalPath)
+        assertEquals("first", firstEvidence.readText())
+        assertEquals("second", secondEvidence.readText())
+
+        assertTrue(registry.setActive(first.storageId))
+        assertEquals("HaoPlay member", PlatoonRepository(context).listMemberStatuses().single().name)
+        assertEquals(
+            GameServerRegion.HAOPLAY_KOREA,
+            ClientServerRegionPreferences(context).configured(SupportedGamePackages.HAOPLAY),
+        )
+        assertTrue(registry.setActive(second.storageId))
+        assertEquals("Darkwinter member", PlatoonRepository(context).listMemberStatuses().single().name)
+        assertEquals(
+            GameServerRegion.DARKWINTER_GLOBAL,
+            ClientServerRegionPreferences(context).configured(SupportedGamePackages.DARKWINTER),
+        )
+    }
+
+    @Test
+    fun changingServerRegionKeepsTheSameIsolatedDataScope() {
+        val registry = PlatoonProfileRegistry(context)
+        val profile = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            PlatoonProfileData(101817u, "Owls", emptyList(), emptyList()),
+        )
+        val scope = PlatoonStorageScope(profile.storageId)
+        val repository = PlatoonRepository(context, scope)
+        repository.ingest(
+            Instant.parse("2026-08-24T12:00:00Z"),
+            listOf(member(9u, "Preserved member")),
+            "preserved.csv",
+        )
+        MemberOrderPreferences(context, profile.storageId).write(listOf(9L))
+        assertTrue(registry.setActive(profile.storageId))
+
+        val updated = PlatoonProfileAdministration(context).changeServerRegion(
+            profile.storageId,
+            GameServerRegion.HAOPLAY_JAPAN,
+        )
+
+        assertEquals(profile.storageId, updated.storageId)
+        assertEquals(GameServerRegion.HAOPLAY_JAPAN, updated.serverRegion)
+        assertEquals(
+            "Preserved member",
+            PlatoonRepository(context, scope).listMemberStatuses().single().name,
+        )
+        assertEquals(listOf(9L), MemberOrderPreferences(context, profile.storageId).read())
+        assertEquals(
+            GameServerRegion.HAOPLAY_JAPAN,
+            ClientServerRegionPreferences(context).configured(SupportedGamePackages.HAOPLAY),
+        )
+    }
+
+    @Test
+    fun restoreCannotRegisterOneFullIdentityUnderTwoStorageScopes() {
+        val registry = PlatoonProfileRegistry(context)
+        val existing = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            PlatoonProfileData(101817u, "Owls", emptyList(), emptyList()),
+        )
+        val duplicate = existing.copy(storageId = PlatoonProfileIdentity.randomStorageId())
+
+        assertThrows(IllegalArgumentException::class.java) {
+            registry.requireRestoreCapacity(duplicate)
+        }
+        assertEquals(listOf(existing.storageId), registry.list().map(PlatoonProfile::storageId))
+    }
+
+    @Test
+    fun confirmedDeletionRemovesOnlyTheSelectedProfileAndItsScopedPreferences() {
+        val registry = PlatoonProfileRegistry(context)
+        val deleted = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            PlatoonProfileData(1u, "Delete me", emptyList(), emptyList()),
+        )
+        val retained = registry.upsertDetected(
+            SupportedGamePackages.DARKWINTER,
+            GameServerRegion.DARKWINTER_GLOBAL,
+            PlatoonProfileData(2u, "Keep me", emptyList(), emptyList()),
+        )
+        val deletedScope = PlatoonStorageScope(deleted.storageId)
+        val retainedScope = PlatoonStorageScope(retained.storageId)
+        PlatoonRepository(context, deletedScope).ingest(
+            Instant.parse("2026-08-24T12:00:00Z"),
+            listOf(member(1u, "Deleted member")),
+            "delete.csv",
+        )
+        PlatoonRepository(context, retainedScope).ingest(
+            Instant.parse("2026-08-24T12:00:00Z"),
+            listOf(member(2u, "Retained member")),
+            "keep.csv",
+        )
+        MemberOrderPreferences(context, deleted.storageId).write(listOf(1L))
+        WeeklyCutlinePreferences(context, deleted.storageId).write(
+            WeeklyCutlines(dailyMerit = 90L),
+        )
+        assertTrue(registry.setActive(deleted.storageId))
+
+        assertTrue(PlatoonProfileAdministration(context).deleteProfile(deleted.storageId))
+
+        assertEquals(null, registry.find(deleted.storageId))
+        assertEquals(retained.storageId, registry.activeScope().storageId)
+        assertFalse(context.getDatabasePath(deletedScope.databaseName).exists())
+        assertFalse(deletedScope.rootDirectory(context).exists())
+        assertTrue(context.getDatabasePath(retainedScope.databaseName).exists())
+        assertEquals(
+            "Retained member",
+            PlatoonRepository(context, retainedScope).listMemberStatuses().single().name,
+        )
+        assertTrue(MemberOrderPreferences(context, deleted.storageId).read().isEmpty())
+        assertEquals(null, WeeklyCutlinePreferences(context, deleted.storageId).read().dailyMerit)
     }
 
     @Test
@@ -187,6 +389,8 @@ class PlatoonProfileRegistryIntegrationTest {
             context.deleteDatabase(PlatoonStorageScope(profile.storageId).databaseName)
         }
         context.getSharedPreferences("platoon_profiles", android.content.Context.MODE_PRIVATE)
+            .edit().clear().commit()
+        context.getSharedPreferences("user_settings", android.content.Context.MODE_PRIVATE)
             .edit().clear().commit()
         File(context.filesDir, "platoons").deleteRecursively()
 
@@ -263,6 +467,15 @@ class PlatoonProfileRegistryIntegrationTest {
             ClientServerRegionPreferences.PREFERENCES,
             android.content.Context.MODE_PRIVATE,
         ).edit().clear().commit()
+        listOf(
+            "platoon_member_order",
+            "platoon_weekly_cutlines",
+            "platoon_timezones",
+            "platoon_profile_deletions",
+        ).forEach { name ->
+            context.getSharedPreferences(name, android.content.Context.MODE_PRIVATE)
+                .edit().clear().commit()
+        }
         File(context.filesDir, PlatoonRepository.RETAINED_CSV_DIRECTORY).deleteRecursively()
         File(context.filesDir, "platoons").deleteRecursively()
     }

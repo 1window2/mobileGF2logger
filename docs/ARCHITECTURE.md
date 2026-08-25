@@ -69,13 +69,36 @@ Payload `21905` is the authoritative Platoon identity for the decoded flow. On
 Android 10 and newer, the capture service also resolves the original connection
 tuple to the owning supported package through Android's VPN owner API. Remote
 IP addresses and DNS/SNI labels are diagnostic endpoint metadata only; they are
-not persistence keys. Android 8–9 falls back only when exactly one supported
-client is installed. Management payloads are quarantined until a flow has both
-a verified supported owner and valid `21905`. The composite
-`(client package, selected server region, Platoon ID)` is hashed into a stable
-private storage ID used by every database, import, retained CSV, checkpoint,
-weekly setting, and backup path. Existing v2.3.x storage remains in place as a
-legacy profile instead of being copied or destructively migrated.
+not currently collected as server identity and are not persistence keys.
+Android 8–9 falls back only when exactly one supported client is installed.
+Management payloads are not persisted until a flow has both a verified
+supported owner and valid `21905`.
+
+For a previously unknown `(client package, Platoon ID)`, decoded payloads enter
+a bounded process-memory admission queue. Returning to the app presents the
+observed Platoon name, ID, and verified client, then requires one compatible
+server choice. Confirmation creates the profile and replays its buffered
+payloads through the normal scoped ingestion pipeline. Explicit discard,
+candidate overflow, force-stop, or process death removes the unconfirmed data;
+it never enters parsed-packet history, SQLite, retained CSV, or preferences.
+HaoPlay candidates expose only its four known regions and Darkwinter candidates
+only its two known regions.
+
+The first confirmed identity receives an immutable private storage ID. The ID
+is initially derived from `(client package, selected server region, Platoon ID)`
+when available, with a random collision-safe fallback, but later server edits do
+not rename or move the scope. Every database, import, retained CSV, checkpoint,
+weekly setting, and backup path remains bound to that opaque ID. Client identity
+is read-only because it comes from Android's VPN owner API; server metadata can
+be corrected only within that client's compatible regions. Existing v2.3.x
+storage remains in place as a legacy profile instead of being copied or
+destructively migrated.
+
+Choosing an existing profile synchronizes that client's capture preset to the
+profile's saved region; the report reset follows it automatically. Reliable
+future first-capture inference would require bounded DNS/SNI/Host correlation
+and an allowlisted, independently verified hostname-to-region map. Reverse DNS,
+IP geolocation, and CDN addresses are not accepted as identity evidence.
 
 ## Memory and concurrency limits
 
@@ -90,11 +113,13 @@ legacy profile instead of being copied or destructively migrated.
 - Before identity is established, each flow retains at most 32 decoded payload
   objects. Overflow rejects that flow until closure. The profile registry holds
   at most 16 bounded identities.
+- Unconfirmed profile admission is capped at 4 candidates, 64 decoded payloads
+  per candidate, and 128 payloads total. Overflow rejects every flow belonging
+  to that candidate rather than partially persisting it.
 - A bound flow cannot change its Platoon identity. Admission failure clears its
   session and quarantines the flow until native closure. One user-started
-  capture may admit at most one new profile per supported client; users can
-  forget a detected profile from the selector to recover registry capacity
-  without deleting its isolated database or retained evidence.
+  capture may admit at most one new profile per supported client. Explicit
+  profile deletion removes one immutable scope behind two confirmations.
 - TLS, HTTP, and UDP payloads remain native and are excluded from the parser.
 - Outgoing plaintext chunks are used only for native flow classification.
 - Flow-close callbacks finalize any pending recognized payload before removing parser state and
@@ -219,8 +244,9 @@ non-exported `OnboardingActivity`. The five-page guide may be finished or
 skipped, and writes completion only at that explicit exit. Its English/Korean
 segmented control persists the same language preference used by Settings.
 Complete backup settings schema v4 includes language, theme, onboarding
-completion, the server-region reset preset, and the persisted manual game
-timezone. Schema-v1 through schema-v3 backups remain accepted with safe
+completion, and the server-region reset preset. Historical manual timezone
+values remain decodable for backup compatibility but are no longer offered in
+the UI. Schema-v1 through schema-v3 backups remain accepted with safe
 defaults and completed onboarding defaults so an experienced restoring user is
 not trapped in the guide.
 
@@ -232,9 +258,17 @@ capture maintains its required-payload checklist per scope so observations
 from two clients cannot be combined into a false completion.
 
 CSV preview and apply retain the same immutable scope even if an Activity is
-recreated. A scoped backup is validated before profile metadata changes; after
-the database transaction commits, restore selects the archived profile and
-aligns that publisher's future capture-region routing with the archived server.
+recreated. A scoped backup is validated before profile metadata changes. Its
+database, settings, retained CSV retirement, registry metadata, active profile,
+and client-region routing then commit under one durable journal; interrupted
+restores roll all of those resources back together.
+
+Profile server edits retain the immutable scope and rebuild weekly history under
+the repository's exclusive database gate. Full profile deletion uses a durable
+pending-deletion set: selector metadata is removed first, then the scoped SQLite
+database, retained evidence, member ordering, weekly cutlines, and reset setting
+are deleted. If the process stops mid-cleanup, registry initialization resumes
+the remaining bounded deletion before showing profiles.
 
 The design deliberately favors composition over deep inheritance. Abstraction
 and polymorphism appear at real variation points (`GameData`, `ParseEvent`, and
@@ -265,10 +299,12 @@ selected state without reading, validating, or replacing app settings. Format
 v2 adds a checksummed, strictly
 typed settings payload containing only user-owned configuration; capture
 diagnostics, raw packet history, signing material, and internal migration flags
-are excluded. Format v3 binds either archive scope to the deterministic client,
-server-region, and Platoon identity. Restoring v3 creates or replaces only that
-profile and then selects it; other profile databases and evidence directories
-are untouched. Older v1/v2 archives restore into the unmoved legacy profile.
+are excluded. Format v3 binds an archive to its immutable storage scope and its
+verified client, server-region, and Platoon metadata. Restoring v3 creates or
+replaces only that compatible profile and then selects it; another storage scope
+cannot claim the same full identity, and other profile databases and evidence
+directories are untouched. Older v1/v2 archives restore into the unmoved legacy
+profile.
 
 Complete restore validates the filename, archive entries and identity,
 checksums, settings completeness and ranges, current database schema, SQLite

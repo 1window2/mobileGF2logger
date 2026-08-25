@@ -29,6 +29,7 @@ import java.util.concurrent.Executors
 
 class PlatoonActivity : LocalizedActivity() {
     private lateinit var repository: PlatoonRepository
+    private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var summary: TextView
     private lateinit var memberContainer: LinearLayout
     private lateinit var searchInput: EditText
@@ -46,7 +47,8 @@ class PlatoonActivity : LocalizedActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        repository = PlatoonRepository(this)
+        profileBinding = ActivePlatoonScopeBinding(this)
+        repository = PlatoonRepository(this, profileBinding.scope)
         setContentView(
             PrimaryNavigation.wrap(
                 this,
@@ -58,6 +60,10 @@ class PlatoonActivity : LocalizedActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (!profileBinding.isCurrent(this)) {
+            recreate()
+            return
+        }
         screenResumed = true
         val generation = ++reconciliationGeneration
         reconciliationExecutor.execute {
@@ -101,7 +107,7 @@ class PlatoonActivity : LocalizedActivity() {
                 setTypeface(typeface, Typeface.BOLD)
             }, matchWidth())
             addView(
-                PlatoonProfileSelector.button(this@PlatoonActivity),
+                PlatoonProfileSelector.controls(this@PlatoonActivity),
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,

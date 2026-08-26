@@ -6,28 +6,40 @@ data class WeaponsData(val weapons: List<Weapon>) : GameData
 
 data class Weapon(
     val id: UInt,
+    val stcId: UInt,
     val level: UInt,
-    val rank: UInt,
-    val uid: ULong,
+    val exp: UInt,
+    val gunId: UInt,
+    val breakTimes: UInt,
+    val rawFlags: UInt,
+    val weaponMods: List<WeaponModBinding>,
 )
 
-data class AttachmentsData(val attachments: List<Attachment>) : GameData
-
-data class Attachment(
-    val uid: ULong,
-    val partId: UInt,
-    val isLocked: Boolean,
-    val weaponUid: ULong,
-    val effectId: UInt?,
-    val calibrationBoosts: List<UInt>,
-    val attributes: ULong,
+data class WeaponModBinding(
+    val id: UInt,
+    val gunId: UInt,
 )
 
-data class CommonKeysData(val keys: List<CommonKey>) : GameData
+data class WeaponModsData(val mods: List<WeaponMod>) : GameData
 
-data class CommonKey(
-    val uid: ULong,
-    val keyId: UInt,
+data class WeaponMod(
+    val id: UInt,
+    val stcId: UInt,
+    val lockedFlags: ULong,
+    val modSuitPowerId: UInt,
+    val level: UInt,
+    val exp: UInt,
+    val suitFlags: ULong,
+)
+
+data class PublicSkillItemsData(val items: List<PublicSkillItem>) : GameData
+
+data class PublicSkillItem(
+    val id: ULong,
+    val stcId: UInt,
+    val gunId: UInt,
+    val lockedFlags: ULong,
+    val isNew: Boolean,
 )
 
 data class GuildMembersData(val members: List<GuildMember>) : GameData
@@ -36,8 +48,15 @@ data class GuildMembersData(val members: List<GuildMember>) : GameData
 data class PlatoonProfileData(
     val platoonId: UInt,
     val platoonName: String,
-    val emblemPrimary: List<UInt>,
-    val emblemSecondary: List<UInt>,
+    val bannerFrameId: UInt,
+    val bannerMarkId: UInt,
+    val level: UInt = 0u,
+    val exp: UInt = 0u,
+    val announcement: String = "",
+    val declaration: String = "",
+    val joinPolicyFlag: Boolean = false,
+    val questId: UInt = 0u,
+    val seasonId: UInt = 0u,
 ) : GameData
 
 data class GuildMember(

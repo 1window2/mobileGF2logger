@@ -5,7 +5,6 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.ColorStateList
 import android.database.Cursor
 import android.graphics.Color
 import android.graphics.Typeface
@@ -403,26 +402,7 @@ class MainActivity : LocalizedActivity() {
             }
             addView(statusText, matchWidth())
 
-            addView(LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                addView(featureShortcut(
-                    title = getString(R.string.platoon_management),
-                    detail = getString(R.string.platoon_shortcut_detail),
-                    icon = R.drawable.ic_group,
-                ) { openScopedActivity(PlatoonActivity::class.java) },
-                    LinearLayout.LayoutParams(0, dp(76), 1f).apply { marginEnd = dp(5) })
-                addView(featureShortcut(
-                    title = getString(R.string.weekly_table),
-                    detail = getString(R.string.weekly_shortcut_detail),
-                    icon = R.drawable.ic_calendar,
-                ) { openScopedActivity(WeeklyReportActivity::class.java) },
-                    LinearLayout.LayoutParams(0, dp(76), 1f).apply { marginStart = dp(5) })
-            }, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(10) })
-
-            addView(sectionLabel(getString(R.string.data_tools)), matchWidth())
+            addView(sectionLabel(getString(R.string.data_tools), topPadding = dp(12)), matchWidth())
             listOf(
                 ModernUi.listRow(context, getString(R.string.import_platoon_csv), icon = R.drawable.ic_edit) {
                     showCsvImportSelector()
@@ -488,21 +468,6 @@ class MainActivity : LocalizedActivity() {
         textSize = 15f
         setTypeface(typeface, Typeface.BOLD)
         setPadding(dp(2), topPadding, 0, dp(7))
-    }
-
-    private fun featureShortcut(
-        title: CharSequence,
-        detail: CharSequence,
-        icon: Int,
-        onClick: () -> Unit,
-    ) = Button(this).apply {
-        text = "$title\n$detail"
-        contentDescription = "$title. $detail"
-        setCompoundDrawablesRelativeWithIntrinsicBounds(icon, 0, 0, 0)
-        compoundDrawablePadding = dp(8)
-        compoundDrawableTintList = ColorStateList.valueOf(getColor(R.color.accent_text))
-        useFeatureActionStyle()
-        setOnClickListener { onClick() }
     }
 
     private fun renderCaptureStatus() {
@@ -1136,8 +1101,8 @@ class MainActivity : LocalizedActivity() {
         Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY -> getString(R.string.payload_tag_activity)
         Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES -> getString(R.string.payload_tag_updates)
         Gfl2PayloadDecoder.TYPE_WEAPONS -> getString(R.string.payload_tag_weapons)
-        Gfl2PayloadDecoder.TYPE_ATTACHMENTS -> getString(R.string.payload_tag_attachments)
-        Gfl2PayloadDecoder.TYPE_COMMON_KEYS -> getString(R.string.payload_tag_common_keys)
+        Gfl2PayloadDecoder.TYPE_WEAPON_MODS -> getString(R.string.payload_tag_attachments)
+        Gfl2PayloadDecoder.TYPE_PUBLIC_SKILL_ITEMS -> getString(R.string.payload_tag_common_keys)
         Gfl2PayloadDecoder.TYPE_FORMATIONS -> getString(R.string.payload_tag_formations)
         else -> PayloadCatalog.tag(payloadType)
     }

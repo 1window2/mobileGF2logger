@@ -693,8 +693,8 @@ class OptionsActivity : LocalizedActivity() {
             Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY -> R.string.payload_name_platoon_activity
             Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES -> R.string.payload_name_platoon_updates
             Gfl2PayloadDecoder.TYPE_WEAPONS -> R.string.payload_name_weapons
-            Gfl2PayloadDecoder.TYPE_ATTACHMENTS -> R.string.payload_name_attachments
-            Gfl2PayloadDecoder.TYPE_COMMON_KEYS -> R.string.payload_name_common_keys
+            Gfl2PayloadDecoder.TYPE_WEAPON_MODS -> R.string.payload_name_attachments
+            Gfl2PayloadDecoder.TYPE_PUBLIC_SKILL_ITEMS -> R.string.payload_name_common_keys
             Gfl2PayloadDecoder.TYPE_FORMATIONS -> R.string.payload_name_formations
             else -> R.string.unknown_payload_type
         },
@@ -710,8 +710,8 @@ class OptionsActivity : LocalizedActivity() {
             Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES ->
                 R.string.payload_description_platoon_updates
             Gfl2PayloadDecoder.TYPE_WEAPONS -> R.string.payload_description_weapons
-            Gfl2PayloadDecoder.TYPE_ATTACHMENTS -> R.string.payload_description_attachments
-            Gfl2PayloadDecoder.TYPE_COMMON_KEYS -> R.string.payload_description_common_keys
+            Gfl2PayloadDecoder.TYPE_WEAPON_MODS -> R.string.payload_description_attachments
+            Gfl2PayloadDecoder.TYPE_PUBLIC_SKILL_ITEMS -> R.string.payload_description_common_keys
             Gfl2PayloadDecoder.TYPE_FORMATIONS -> R.string.payload_description_formations
             else -> R.string.unknown_payload_type
         },

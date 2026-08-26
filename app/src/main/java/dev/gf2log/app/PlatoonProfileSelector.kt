@@ -14,7 +14,10 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 import dev.gf2log.app.capture.CaptureStatus
@@ -51,12 +54,21 @@ internal object PlatoonProfileSelector {
 
     private fun selectorButton(activity: Activity, compact: Boolean): Button {
         val registry = PlatoonProfileRegistry(activity)
+        val activeProfile = registry.active()
         return Button(activity).apply {
-            text = (registry.active()?.let { label(activity, it) }
+            text = (activeProfile?.let { label(activity, it) }
                 ?: activity.getString(R.string.no_platoon_detected)) + "  ▾"
             contentDescription = activity.getString(R.string.select_platoon)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
+            activeProfile?.let { profile ->
+                PlatoonBannerArtwork.drawable(context, profile)?.let { artwork ->
+                    val iconSize = dp(activity, if (compact) 28 else 34)
+                    artwork.setBounds(0, 0, iconSize, iconSize)
+                    setCompoundDrawablesRelative(artwork, null, null, null)
+                    compoundDrawablePadding = dp(activity, 8)
+                }
+            }
             if (compact) {
                 textSize = 11f
                 maxWidth = dp(activity, 210)
@@ -88,20 +100,42 @@ internal object PlatoonProfileSelector {
             return
         }
         val activeId = registry.active()?.storageId
-        AlertDialog.Builder(activity)
-            .setTitle(R.string.select_platoon)
-            .setSingleChoiceItems(
-                profiles.map { label(activity, it) }.toTypedArray(),
-                profiles.indexOfFirst { it.storageId == activeId },
-            ) { dialog, which ->
-                val selected = profiles[which]
-                dialog.dismiss()
-                if (selected.storageId != activeId && registry.setActive(selected.storageId)) {
-                    activity.recreate()
-                }
+        lateinit var selectorDialog: AlertDialog
+        val choices = RadioGroup(activity).apply {
+            orientation = RadioGroup.VERTICAL
+            setPadding(dp(activity, 12), dp(activity, 4), dp(activity, 12), dp(activity, 4))
+            profiles.forEach { profile ->
+                addView(RadioButton(context).apply {
+                    text = label(activity, profile)
+                    textSize = 14f
+                    gravity = Gravity.CENTER_VERTICAL
+                    minimumHeight = dp(activity, 56)
+                    isChecked = profile.storageId == activeId
+                    setPadding(dp(activity, 8), dp(activity, 4), dp(activity, 8), dp(activity, 4))
+                    PlatoonBannerArtwork.drawable(context, profile)?.let { artwork ->
+                        val iconSize = dp(activity, 40)
+                        artwork.setBounds(0, 0, iconSize, iconSize)
+                        setCompoundDrawablesRelative(artwork, null, null, null)
+                        compoundDrawablePadding = dp(activity, 10)
+                    }
+                    setOnClickListener {
+                        selectorDialog.dismiss()
+                        if (profile.storageId != activeId && registry.setActive(profile.storageId)) {
+                            activity.recreate()
+                        }
+                    }
+                }, RadioGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ))
             }
+        }
+        selectorDialog = AlertDialog.Builder(activity)
+            .setTitle(R.string.select_platoon)
+            .setView(ScrollView(activity).apply { addView(choices) })
             .setNegativeButton(android.R.string.cancel, null)
-            .show()
+            .create()
+        selectorDialog.show()
     }
 
     private fun showManagement(activity: Activity, registry: PlatoonProfileRegistry) {
@@ -149,6 +183,15 @@ internal object PlatoonProfileSelector {
         gravity = Gravity.CENTER_VERTICAL
         minimumHeight = dp(activity, 64)
         setPadding(dp(activity, 10), dp(activity, 8), dp(activity, 4), dp(activity, 8))
+        PlatoonBannerArtwork.drawable(context, profile)?.let { artwork ->
+            addView(ImageView(context).apply {
+                setImageDrawable(artwork)
+                contentDescription = null
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(dp(activity, 44), dp(activity, 44)).apply {
+                marginEnd = dp(activity, 10)
+            })
+        }
         addView(
             LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL

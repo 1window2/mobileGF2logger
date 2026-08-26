@@ -52,8 +52,8 @@ class PlatoonProfileIdentityTest {
                 serverRegion = GameServerRegion.HAOPLAY_KOREA,
                 platoonId = 101817L,
                 platoonName = "Invalid legacy identity",
-                emblemPrimary = emptyList(),
-                emblemSecondary = emptyList(),
+                bannerFrameId = 0,
+                bannerMarkId = 0,
                 lastSeenAt = java.time.Instant.EPOCH,
                 legacy = true,
             )

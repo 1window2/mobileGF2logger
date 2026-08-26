@@ -2,6 +2,36 @@
 
 All notable changes to mobileGF2logger are documented here.
 
+## 2.4.2 - 2026-08-27
+
+### Added
+
+- Display the game's original six banner frames and six banner marks as the
+  exact 36 possible Platoon emblems in selectors and profile management.
+- Preserve additional grounded `21905` profile metadata in decoded packet
+  output, including level, experience, notice, declaration, join-policy flag,
+  quest ID, and season ID.
+
+### Changed
+
+- Correct the decoded schemas and labels for weapon, weapon-mod, and public
+  skill-item payloads after checking every supported payload against the
+  protocol definitions.
+- Remove duplicate Home shortcuts for Platoon and Weekly screens and move Data
+  Tools closer to the capture panel while retaining clear visual separation.
+- Keep every GF2logger screen in portrait when returning from either
+  landscape-oriented game client.
+
+### Fixed
+
+- Decode `21905` field 9 as the scalar banner-mark ID and field 10 as the
+  scalar banner-frame ID; previously stored repeated fields 15 and 16 were
+  unrelated guild metadata.
+- Refresh an open screen when a background profile packet changes its Platoon
+  name or banner, instead of retaining stale selector artwork until restart.
+- Migrate profile backup and restore formats without treating v2.4.1's
+  misidentified repeated values as trustworthy emblem artwork.
+
 ## 2.4.1 - 2026-08-25
 
 ### Changed

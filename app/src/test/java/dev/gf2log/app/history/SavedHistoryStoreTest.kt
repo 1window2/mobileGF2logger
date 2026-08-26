@@ -1,7 +1,7 @@
 package dev.gf2log.app.history
 
-import dev.gf2log.protocol.model.CommonKey
-import dev.gf2log.protocol.model.CommonKeysData
+import dev.gf2log.protocol.model.PublicSkillItem
+import dev.gf2log.protocol.model.PublicSkillItemsData
 import dev.gf2log.protocol.model.ParsedPayload
 import java.nio.file.Files
 import java.time.Clock
@@ -55,8 +55,16 @@ class SavedHistoryStoreTest {
     private fun payload(index: Int): ParsedPayload = ParsedPayload(
         messageId = index,
         payloadType = 11138,
-        data = CommonKeysData(
-            keys = listOf(CommonKey(uid = index.toULong(), keyId = index.toUInt())),
+        data = PublicSkillItemsData(
+            items = listOf(
+                PublicSkillItem(
+                    id = index.toULong(),
+                    stcId = index.toUInt(),
+                    gunId = 0u,
+                    lockedFlags = 0uL,
+                    isNew = false,
+                ),
+            ),
         ),
         isEndOfMessage = true,
     )

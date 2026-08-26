@@ -28,8 +28,8 @@ class BackupArchiveTest {
             serverRegion = GameServerRegion.HAOPLAY_KOREA,
             platoonId = 101817L,
             platoonName = "Owls 서클",
-            emblemPrimary = listOf(1, 2),
-            emblemSecondary = listOf(3),
+            bannerFrameId = 2,
+            bannerMarkId = 3,
             lastSeenAt = java.time.Instant.EPOCH,
         )
         val archive = ByteArrayOutputStream().also {
@@ -44,6 +44,8 @@ class BackupArchiveTest {
         assertEquals(BackupFormatPolicy.SCOPED_VERSION, result.formatVersion)
         assertEquals(profile.storageId, result.profile?.storageId)
         assertEquals(profile.platoonName, result.profile?.platoonName)
+        assertEquals(2L, result.profile?.bannerFrameId)
+        assertEquals(3L, result.profile?.bannerMarkId)
     }
 
     @Test
@@ -60,8 +62,8 @@ class BackupArchiveTest {
             serverRegion = GameServerRegion.HAOPLAY_JAPAN,
             platoonId = 101817L,
             platoonName = "Owls",
-            emblemPrimary = emptyList(),
-            emblemSecondary = emptyList(),
+            bannerFrameId = 0,
+            bannerMarkId = 0,
             lastSeenAt = java.time.Instant.EPOCH,
         )
         val archive = ByteArrayOutputStream().also {
@@ -75,6 +77,46 @@ class BackupArchiveTest {
 
         assertEquals(originalStorage, restored?.storageId)
         assertEquals(GameServerRegion.HAOPLAY_JAPAN, restored?.serverRegion)
+    }
+
+    @Test
+    fun `reads version 3 scoped backups without treating legacy lists as banner IDs`() {
+        val database = realisticDatabaseBytes()
+        val settings = realisticSettingsBytes()
+        val storageId = PlatoonProfileIdentity.storageId(
+            PlatoonClient.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            101817L,
+        )
+        val manifest = Properties().apply {
+            setProperty("formatVersion", BackupFormatPolicy.LEGACY_SCOPED_VERSION.toString())
+            setProperty("databaseSha256", database.sha256())
+            setProperty("applicationId", "dev.gf2log")
+            setProperty("backupScope", "complete")
+            setProperty("settingsSha256", settings.sha256())
+            setProperty("profile.storageId", storageId)
+            setProperty("profile.client", PlatoonClient.HAOPLAY.name)
+            setProperty("profile.region", GameServerRegion.HAOPLAY_KOREA.storedValue)
+            setProperty("profile.platoonId", "101817")
+            setProperty("profile.name", "Owls")
+            setProperty("profile.emblemPrimary", "3,2,10")
+            setProperty("profile.emblemSecondary", "20,11,14,17")
+            setProperty("profile.legacy", "false")
+        }
+        val archive = archiveOf(
+            "manifest.properties" to manifest.toBytes(),
+            "platoon.db" to database,
+            "settings.properties" to settings,
+        )
+
+        val result = BackupArchive.stage(
+            ByteArrayInputStream(archive),
+            temporaryPath("legacy-scoped.db"),
+        )
+
+        assertEquals(BackupFormatPolicy.LEGACY_SCOPED_VERSION, result.formatVersion)
+        assertEquals(0L, result.profile?.bannerFrameId)
+        assertEquals(0L, result.profile?.bannerMarkId)
     }
 
     @Test

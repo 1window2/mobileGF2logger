@@ -124,8 +124,8 @@ class PendingPlatoonAdmissionStoreTest {
     private fun profile(id: UInt, name: String) = PlatoonProfileData(
         platoonId = id,
         platoonName = name,
-        emblemPrimary = listOf(1u),
-        emblemSecondary = listOf(2u),
+        bannerFrameId = 1u,
+        bannerMarkId = 2u,
     )
 
     private fun payload(profile: PlatoonProfileData) = ParsedPayload(

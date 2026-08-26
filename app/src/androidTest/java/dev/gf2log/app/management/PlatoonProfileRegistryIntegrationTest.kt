@@ -100,9 +100,64 @@ class PlatoonProfileRegistryIntegrationTest {
     }
 
     @Test
+    fun upgradedProfileDoesNotInterpretRetiredEmblemListsAsBannerIds() {
+        val storageId = "0123456789abcdef0123456789abcdef"
+        val prefix = "profile.$storageId."
+        val preferences = context.getSharedPreferences(
+            "platoon_profiles",
+            android.content.Context.MODE_PRIVATE,
+        )
+        preferences.edit()
+            .putStringSet("profile_ids", setOf(storageId))
+            .putString("active_profile", storageId)
+            .putString(prefix + "client", PlatoonClient.HAOPLAY.name)
+            .putString(prefix + "region", GameServerRegion.HAOPLAY_KOREA.storedValue)
+            .putLong(prefix + "platoon_id", 101817L)
+            .putString(prefix + "name", "Upgraded Owls")
+            .putString(prefix + "emblem_primary", "3,2,10")
+            .putString(prefix + "emblem_secondary", "20,11,14")
+            .putLong(prefix + "last_seen", 1_000L)
+            .putBoolean(prefix + "legacy", false)
+            .commit()
+
+        val registry = PlatoonProfileRegistry(context)
+        val upgraded = requireNotNull(registry.find(storageId))
+
+        assertEquals(0L, upgraded.bannerFrameId)
+        assertEquals(0L, upgraded.bannerMarkId)
+        val observed = registry.updateObserved(
+            storageId,
+            PlatoonProfileData(101817u, "Upgraded Owls", 2u, 2u),
+            Instant.parse("2026-08-26T00:00:00Z"),
+        )
+        assertEquals(2L, observed.bannerFrameId)
+        assertEquals(2L, observed.bannerMarkId)
+        assertFalse(preferences.contains(prefix + "emblem_primary"))
+        assertFalse(preferences.contains(prefix + "emblem_secondary"))
+    }
+
+    @Test
+    fun partialOrOutOfRangeBannerDataDoesNotEraseTheLastVerifiedCombination() {
+        val registry = PlatoonProfileRegistry(context)
+        val profile = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            PlatoonProfileData(101817u, "Owls", 2u, 3u),
+        )
+
+        val partial = registry.updateObserved(
+            profile.storageId,
+            PlatoonProfileData(101817u, "Owls", 7u, 0u),
+        )
+
+        assertEquals(2L, partial.bannerFrameId)
+        assertEquals(3L, partial.bannerMarkId)
+    }
+
+    @Test
     fun publisherAndRegionKeepEqualPlatoonIdsInDifferentScopes() {
         val registry = PlatoonProfileRegistry(context)
-        val data = PlatoonProfileData(101817u, "Owls", listOf(1u), listOf(2u))
+        val data = PlatoonProfileData(101817u, "Owls", 1u, 2u)
 
         val haoPlay = registry.upsertDetected(
             SupportedGamePackages.HAOPLAY,
@@ -153,14 +208,14 @@ class PlatoonProfileRegistryIntegrationTest {
         val captured = registry.upsertDetected(
             SupportedGamePackages.HAOPLAY,
             GameServerRegion.HAOPLAY_KOREA,
-            PlatoonProfileData(101817u, "Captured Owls", listOf(7u), listOf(8u)),
+            PlatoonProfileData(101817u, "Captured Owls", 2u, 3u),
             Instant.parse("2026-08-25T01:00:00Z"),
         )
 
         assertEquals(declared.storageId, captured.storageId)
         assertEquals("Captured Owls", captured.platoonName)
-        assertEquals(listOf(7L), captured.emblemPrimary)
-        assertEquals(listOf(8L), captured.emblemSecondary)
+        assertEquals(2L, captured.bannerFrameId)
+        assertEquals(3L, captured.bannerMarkId)
     }
 
     @Test
@@ -177,24 +232,31 @@ class PlatoonProfileRegistryIntegrationTest {
         val first = registry.upsertDetected(
             SupportedGamePackages.HAOPLAY,
             GameServerRegion.HAOPLAY_JAPAN,
-            PlatoonProfileData(1u, "First", emptyList(), emptyList()),
+            PlatoonProfileData(1u, "First", 0u, 0u),
         )
         val second = registry.upsertDetected(
             SupportedGamePackages.DARKWINTER,
             GameServerRegion.DARKWINTER_GLOBAL,
-            PlatoonProfileData(2u, "Second", emptyList(), emptyList()),
+            PlatoonProfileData(2u, "Second", 0u, 0u),
         )
         assertTrue(registry.setActive(first.storageId))
         val binding = ActivePlatoonScopeBinding(context)
         assertTrue(binding.isCurrent(context))
-        assertTrue(registry.setActive(second.storageId))
+        registry.updateObserved(
+            first.storageId,
+            PlatoonProfileData(1u, "First renamed", 3u, 1u),
+        )
         assertFalse(binding.isCurrent(context))
+        val refreshedBinding = ActivePlatoonScopeBinding(context)
+        assertTrue(refreshedBinding.isCurrent(context))
+        assertTrue(registry.setActive(second.storageId))
+        assertFalse(refreshedBinding.isCurrent(context))
     }
 
     @Test
     fun equalMemberUidsRemainIsolatedAcrossProfileDatabases() {
         val registry = PlatoonProfileRegistry(context)
-        val identity = PlatoonProfileData(77u, "First", emptyList(), emptyList())
+        val identity = PlatoonProfileData(77u, "First", 0u, 0u)
         val first = registry.upsertDetected(
             SupportedGamePackages.HAOPLAY,
             GameServerRegion.HAOPLAY_KOREA,
@@ -229,12 +291,12 @@ class PlatoonProfileRegistryIntegrationTest {
         val first = registry.upsertDetected(
             SupportedGamePackages.HAOPLAY,
             GameServerRegion.HAOPLAY_KOREA,
-            PlatoonProfileData(101817u, "Owls", listOf(1u), listOf(2u)),
+            PlatoonProfileData(101817u, "Owls", 1u, 2u),
         )
         val second = registry.upsertDetected(
             SupportedGamePackages.DARKWINTER,
             GameServerRegion.DARKWINTER_GLOBAL,
-            PlatoonProfileData(101817u, "Ravens", listOf(3u), listOf(4u)),
+            PlatoonProfileData(101817u, "Ravens", 3u, 4u),
         )
         val firstScope = PlatoonStorageScope(first.storageId)
         val secondScope = PlatoonStorageScope(second.storageId)
@@ -298,7 +360,7 @@ class PlatoonProfileRegistryIntegrationTest {
         val profile = registry.upsertDetected(
             SupportedGamePackages.HAOPLAY,
             GameServerRegion.HAOPLAY_KOREA,
-            PlatoonProfileData(101817u, "Owls", emptyList(), emptyList()),
+            PlatoonProfileData(101817u, "Owls", 0u, 0u),
         )
         val scope = PlatoonStorageScope(profile.storageId)
         val repository = PlatoonRepository(context, scope)
@@ -334,7 +396,7 @@ class PlatoonProfileRegistryIntegrationTest {
         val existing = registry.upsertDetected(
             SupportedGamePackages.HAOPLAY,
             GameServerRegion.HAOPLAY_KOREA,
-            PlatoonProfileData(101817u, "Owls", emptyList(), emptyList()),
+            PlatoonProfileData(101817u, "Owls", 0u, 0u),
         )
         val duplicate = existing.copy(storageId = PlatoonProfileIdentity.randomStorageId())
 
@@ -350,12 +412,12 @@ class PlatoonProfileRegistryIntegrationTest {
         val deleted = registry.upsertDetected(
             SupportedGamePackages.HAOPLAY,
             GameServerRegion.HAOPLAY_KOREA,
-            PlatoonProfileData(1u, "Delete me", emptyList(), emptyList()),
+            PlatoonProfileData(1u, "Delete me", 0u, 0u),
         )
         val retained = registry.upsertDetected(
             SupportedGamePackages.DARKWINTER,
             GameServerRegion.DARKWINTER_GLOBAL,
-            PlatoonProfileData(2u, "Keep me", emptyList(), emptyList()),
+            PlatoonProfileData(2u, "Keep me", 0u, 0u),
         )
         val deletedScope = PlatoonStorageScope(deleted.storageId)
         val retainedScope = PlatoonStorageScope(retained.storageId)
@@ -397,7 +459,7 @@ class PlatoonProfileRegistryIntegrationTest {
             registry.upsertDetected(
                 SupportedGamePackages.HAOPLAY,
                 GameServerRegion.HAOPLAY_KOREA,
-                PlatoonProfileData(id.toUInt(), "Platoon $id", emptyList(), emptyList()),
+                PlatoonProfileData(id.toUInt(), "Platoon $id", 0u, 0u),
             )
         }
 
@@ -405,7 +467,7 @@ class PlatoonProfileRegistryIntegrationTest {
             registry.upsertDetected(
                 SupportedGamePackages.HAOPLAY,
                 GameServerRegion.HAOPLAY_KOREA,
-                PlatoonProfileData(999u, "Overflow", emptyList(), emptyList()),
+                PlatoonProfileData(999u, "Overflow", 0u, 0u),
             )
         }
 
@@ -427,7 +489,7 @@ class PlatoonProfileRegistryIntegrationTest {
         val recovered = registry.upsertDetected(
             SupportedGamePackages.HAOPLAY,
             GameServerRegion.HAOPLAY_KOREA,
-            PlatoonProfileData(999u, "Recovered capacity", emptyList(), emptyList()),
+            PlatoonProfileData(999u, "Recovered capacity", 0u, 0u),
         )
         assertEquals(999L, recovered.platoonId)
     }
@@ -438,7 +500,7 @@ class PlatoonProfileRegistryIntegrationTest {
         val profile = registry.upsertDetected(
             SupportedGamePackages.HAOPLAY,
             GameServerRegion.HAOPLAY_JAPAN,
-            PlatoonProfileData(101817u, "Owls", emptyList(), emptyList()),
+            PlatoonProfileData(101817u, "Owls", 0u, 0u),
         )
         registry.setActive(profile.storageId)
         PlatoonRepository(context, PlatoonStorageScope(profile.storageId)).ingest(
@@ -486,7 +548,7 @@ class PlatoonProfileRegistryIntegrationTest {
         val existing = registry.upsertDetected(
             SupportedGamePackages.HAOPLAY,
             GameServerRegion.HAOPLAY_KOREA,
-            PlatoonProfileData(101817u, "Original name", emptyList(), emptyList()),
+            PlatoonProfileData(101817u, "Original name", 0u, 0u),
         )
         assertTrue(registry.setActive(existing.storageId))
         val invalidDatabase = File(context.cacheDir, "invalid-profile-restore.db").apply {

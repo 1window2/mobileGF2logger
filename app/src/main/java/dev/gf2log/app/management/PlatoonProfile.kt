@@ -30,8 +30,8 @@ internal data class PlatoonProfile(
     val serverRegion: GameServerRegion,
     val platoonId: Long,
     val platoonName: String,
-    val emblemPrimary: List<Long>,
-    val emblemSecondary: List<Long>,
+    val bannerFrameId: Long,
+    val bannerMarkId: Long,
     val lastSeenAt: Instant,
     val legacy: Boolean = false,
 ) {
@@ -43,16 +43,17 @@ internal data class PlatoonProfile(
                 platoonName.length <= MAX_NAME_LENGTH &&
                 platoonName.none(Char::isISOControl),
         )
-        require(emblemPrimary.size <= MAX_EMBLEM_PARTS)
-        require(emblemSecondary.size <= MAX_EMBLEM_PARTS)
-        require(emblemPrimary.all { it in 0L..UInt.MAX_VALUE.toLong() })
-        require(emblemSecondary.all { it in 0L..UInt.MAX_VALUE.toLong() })
+        require(bannerFrameId in 0L..MAX_BANNER_ID)
+        require(bannerMarkId in 0L..MAX_BANNER_ID)
+        require((bannerFrameId == 0L) == (bannerMarkId == 0L)) {
+            "A Platoon banner must contain both a frame and a mark"
+        }
         require(legacy == (storageId == PlatoonProfileIdentity.LEGACY_STORAGE_ID))
         if (legacy) {
             require(client == PlatoonClient.LEGACY)
             require(serverRegion == GameServerRegion.MANUAL)
             require(platoonId == 0L)
-            require(emblemPrimary.isEmpty() && emblemSecondary.isEmpty())
+            require(bannerFrameId == 0L && bannerMarkId == 0L)
         } else {
             require(client != PlatoonClient.LEGACY)
             require(serverRegion != GameServerRegion.MANUAL)
@@ -62,7 +63,7 @@ internal data class PlatoonProfile(
     }
 
     companion object {
-        const val MAX_EMBLEM_PARTS = 32
+        const val MAX_BANNER_ID = 6L
         const val MAX_NAME_LENGTH = 128
     }
 }
@@ -232,14 +233,19 @@ internal class PlatoonProfileRegistry(context: Context) {
             .trim()
             .take(PlatoonProfile.MAX_NAME_LENGTH)
         require(normalizedName.isNotBlank()) { "Platoon name is empty after normalization" }
+        val bannerIds = normalizedBannerIds(
+            data = data,
+            fallbackFrameId = existing?.bannerFrameId ?: 0L,
+            fallbackMarkId = existing?.bannerMarkId ?: 0L,
+        )
         val profile = PlatoonProfile(
             storageId = storageId,
             client = client,
             serverRegion = region,
             platoonId = platoonId,
             platoonName = normalizedName,
-            emblemPrimary = data.emblemPrimary.take(PlatoonProfile.MAX_EMBLEM_PARTS).map(UInt::toLong),
-            emblemSecondary = data.emblemSecondary.take(PlatoonProfile.MAX_EMBLEM_PARTS).map(UInt::toLong),
+            bannerFrameId = bannerIds.first,
+            bannerMarkId = bannerIds.second,
             lastSeenAt = observedAt,
         )
         writeLocked(profile, setActive = preferences.getString(KEY_ACTIVE, null) == null)
@@ -277,8 +283,8 @@ internal class PlatoonProfileRegistry(context: Context) {
             serverRegion = region,
             platoonId = platoonId,
             platoonName = normalizeName(platoonName),
-            emblemPrimary = emptyList(),
-            emblemSecondary = emptyList(),
+            bannerFrameId = 0L,
+            bannerMarkId = 0L,
             lastSeenAt = createdAt,
         )
         writeLocked(profile, setActive = false)
@@ -296,14 +302,15 @@ internal class PlatoonProfileRegistry(context: Context) {
         require(!current.legacy && current.platoonId == data.platoonId.toLong()) {
             "Observed Platoon identity does not match the storage scope"
         }
+        val bannerIds = normalizedBannerIds(
+            data = data,
+            fallbackFrameId = current.bannerFrameId,
+            fallbackMarkId = current.bannerMarkId,
+        )
         val updated = current.copy(
             platoonName = normalizeName(data.platoonName),
-            emblemPrimary = data.emblemPrimary
-                .take(PlatoonProfile.MAX_EMBLEM_PARTS)
-                .map(UInt::toLong),
-            emblemSecondary = data.emblemSecondary
-                .take(PlatoonProfile.MAX_EMBLEM_PARTS)
-                .map(UInt::toLong),
+            bannerFrameId = bannerIds.first,
+            bannerMarkId = bannerIds.second,
             lastSeenAt = observedAt,
         )
         writeLocked(updated, setActive = false)
@@ -373,6 +380,8 @@ internal class PlatoonProfileRegistry(context: Context) {
             .remove(prefix + REGION)
             .remove(prefix + PLATOON_ID)
             .remove(prefix + NAME)
+            .remove(prefix + BANNER_FRAME_ID)
+            .remove(prefix + BANNER_MARK_ID)
             .remove(prefix + EMBLEM_PRIMARY)
             .remove(prefix + EMBLEM_SECONDARY)
             .remove(prefix + LAST_SEEN)
@@ -401,6 +410,8 @@ internal class PlatoonProfileRegistry(context: Context) {
                 .remove(prefix + REGION)
                 .remove(prefix + PLATOON_ID)
                 .remove(prefix + NAME)
+                .remove(prefix + BANNER_FRAME_ID)
+                .remove(prefix + BANNER_MARK_ID)
                 .remove(prefix + EMBLEM_PRIMARY)
                 .remove(prefix + EMBLEM_SECONDARY)
                 .remove(prefix + LAST_SEEN)
@@ -411,8 +422,10 @@ internal class PlatoonProfileRegistry(context: Context) {
                 .putString(prefix + REGION, previousProfile.serverRegion.storedValue)
                 .putLong(prefix + PLATOON_ID, previousProfile.platoonId)
                 .putString(prefix + NAME, previousProfile.platoonName)
-                .putString(prefix + EMBLEM_PRIMARY, previousProfile.emblemPrimary.joinToString(","))
-                .putString(prefix + EMBLEM_SECONDARY, previousProfile.emblemSecondary.joinToString(","))
+                .putLong(prefix + BANNER_FRAME_ID, previousProfile.bannerFrameId)
+                .putLong(prefix + BANNER_MARK_ID, previousProfile.bannerMarkId)
+                .remove(prefix + EMBLEM_PRIMARY)
+                .remove(prefix + EMBLEM_SECONDARY)
                 .putLong(prefix + LAST_SEEN, previousProfile.lastSeenAt.toEpochMilli())
                 .putBoolean(prefix + LEGACY, previousProfile.legacy)
         }
@@ -440,6 +453,8 @@ internal class PlatoonProfileRegistry(context: Context) {
             .remove(prefix + REGION)
             .remove(prefix + PLATOON_ID)
             .remove(prefix + NAME)
+            .remove(prefix + BANNER_FRAME_ID)
+            .remove(prefix + BANNER_MARK_ID)
             .remove(prefix + EMBLEM_PRIMARY)
             .remove(prefix + EMBLEM_SECONDARY)
             .remove(prefix + LAST_SEEN)
@@ -473,6 +488,8 @@ internal class PlatoonProfileRegistry(context: Context) {
             .remove(prefix + REGION)
             .remove(prefix + PLATOON_ID)
             .remove(prefix + NAME)
+            .remove(prefix + BANNER_FRAME_ID)
+            .remove(prefix + BANNER_MARK_ID)
             .remove(prefix + EMBLEM_PRIMARY)
             .remove(prefix + EMBLEM_SECONDARY)
             .remove(prefix + LAST_SEEN)
@@ -492,8 +509,8 @@ internal class PlatoonProfileRegistry(context: Context) {
             serverRegion = GameServerRegion.fromStored(preferences.getString(prefix + REGION, null)),
             platoonId = preferences.getLong(prefix + PLATOON_ID, -1L),
             platoonName = requireNotNull(preferences.getString(prefix + NAME, null)),
-            emblemPrimary = parseLongList(preferences.getString(prefix + EMBLEM_PRIMARY, null)),
-            emblemSecondary = parseLongList(preferences.getString(prefix + EMBLEM_SECONDARY, null)),
+            bannerFrameId = preferences.getLong(prefix + BANNER_FRAME_ID, 0L),
+            bannerMarkId = preferences.getLong(prefix + BANNER_MARK_ID, 0L),
             lastSeenAt = Instant.ofEpochMilli(preferences.getLong(prefix + LAST_SEEN, 0L)),
             legacy = preferences.getBoolean(prefix + LEGACY, false),
         )
@@ -509,8 +526,10 @@ internal class PlatoonProfileRegistry(context: Context) {
             .putString(prefix + REGION, profile.serverRegion.storedValue)
             .putLong(prefix + PLATOON_ID, profile.platoonId)
             .putString(prefix + NAME, profile.platoonName)
-            .putString(prefix + EMBLEM_PRIMARY, profile.emblemPrimary.joinToString(","))
-            .putString(prefix + EMBLEM_SECONDARY, profile.emblemSecondary.joinToString(","))
+            .putLong(prefix + BANNER_FRAME_ID, profile.bannerFrameId)
+            .putLong(prefix + BANNER_MARK_ID, profile.bannerMarkId)
+            .remove(prefix + EMBLEM_PRIMARY)
+            .remove(prefix + EMBLEM_SECONDARY)
             .putLong(prefix + LAST_SEEN, profile.lastSeenAt.toEpochMilli())
             .putBoolean(prefix + LEGACY, profile.legacy)
         if (setActive) editor.putString(KEY_ACTIVE, profile.storageId)
@@ -565,11 +584,24 @@ internal class PlatoonProfileRegistry(context: Context) {
         .take(PlatoonProfile.MAX_NAME_LENGTH)
         .also { require(it.isNotBlank()) { "Platoon name is empty after normalization" } }
 
-    private fun parseLongList(value: String?): List<Long> = value.orEmpty()
-        .split(',')
-        .filter(String::isNotBlank)
-        .mapNotNull(String::toLongOrNull)
-        .take(PlatoonProfile.MAX_EMBLEM_PARTS)
+    private fun normalizeBannerId(value: UInt): Long = value.toLong()
+        .takeIf { it in 1L..PlatoonProfile.MAX_BANNER_ID }
+        ?: 0L
+
+    /** Accepts only complete game-defined combinations and never erases a verified pair with partial data. */
+    private fun normalizedBannerIds(
+        data: PlatoonProfileData,
+        fallbackFrameId: Long,
+        fallbackMarkId: Long,
+    ): Pair<Long, Long> {
+        val frameId = normalizeBannerId(data.bannerFrameId)
+        val markId = normalizeBannerId(data.bannerMarkId)
+        return if (frameId != 0L && markId != 0L) {
+            frameId to markId
+        } else {
+            fallbackFrameId to fallbackMarkId
+        }
+    }
 
     internal companion object {
         internal const val MAX_PROFILES = 16
@@ -581,6 +613,9 @@ internal class PlatoonProfileRegistry(context: Context) {
         private const val REGION = "region"
         private const val PLATOON_ID = "platoon_id"
         private const val NAME = "name"
+        private const val BANNER_FRAME_ID = "banner_frame_id"
+        private const val BANNER_MARK_ID = "banner_mark_id"
+        // Retired v2.4.1 keys. Their repeated values were unrelated guild metadata, not artwork.
         private const val EMBLEM_PRIMARY = "emblem_primary"
         private const val EMBLEM_SECONDARY = "emblem_secondary"
         private const val LAST_SEEN = "last_seen"

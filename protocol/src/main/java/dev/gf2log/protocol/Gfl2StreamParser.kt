@@ -1,8 +1,6 @@
 package dev.gf2log.protocol
 
 import dev.gf2log.protocol.internal.ByteAccumulator
-import dev.gf2log.protocol.model.AttachmentsData
-import dev.gf2log.protocol.model.CommonKeysData
 import dev.gf2log.protocol.model.FormationsData
 import dev.gf2log.protocol.model.GameData
 import dev.gf2log.protocol.model.GuildMembersData
@@ -10,6 +8,8 @@ import dev.gf2log.protocol.model.ParseEvent
 import dev.gf2log.protocol.model.ParsedPayload
 import dev.gf2log.protocol.model.PlatoonActivityData
 import dev.gf2log.protocol.model.PlatoonUpdatesData
+import dev.gf2log.protocol.model.PublicSkillItemsData
+import dev.gf2log.protocol.model.WeaponModsData
 import dev.gf2log.protocol.model.WeaponsData
 
 class Gfl2StreamParser(
@@ -231,9 +231,10 @@ class Gfl2StreamParser(
 
     private fun merge(first: GameData, second: GameData): GameData = when {
         first is WeaponsData && second is WeaponsData -> WeaponsData(first.weapons + second.weapons)
-        first is AttachmentsData && second is AttachmentsData ->
-            AttachmentsData(first.attachments + second.attachments)
-        first is CommonKeysData && second is CommonKeysData -> CommonKeysData(first.keys + second.keys)
+        first is WeaponModsData && second is WeaponModsData ->
+            WeaponModsData(first.mods + second.mods)
+        first is PublicSkillItemsData && second is PublicSkillItemsData ->
+            PublicSkillItemsData(first.items + second.items)
         first is GuildMembersData && second is GuildMembersData ->
             GuildMembersData(first.members + second.members)
         first is PlatoonActivityData && second is PlatoonActivityData ->

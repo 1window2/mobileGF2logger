@@ -116,12 +116,20 @@ internal object BackupArchive {
                 formatVersion in setOf(
                     BackupFormatPolicy.PLATOON_ONLY_VERSION,
                     BackupFormatPolicy.COMPLETE_VERSION,
+                    BackupFormatPolicy.LEGACY_SCOPED_VERSION,
                     BackupFormatPolicy.SCOPED_VERSION,
                 ),
             ) { "Unsupported backup version" }
             val expectedManifestKeys = when (formatVersion) {
                 BackupFormatPolicy.PLATOON_ONLY_VERSION -> LEGACY_MANIFEST_KEYS
                 BackupFormatPolicy.COMPLETE_VERSION -> COMPLETE_MANIFEST_KEYS
+                BackupFormatPolicy.LEGACY_SCOPED_VERSION -> LEGACY_SCOPED_MANIFEST_KEYS + if (
+                    metadata.getProperty(KEY_BACKUP_SCOPE) == COMPLETE_SCOPE
+                ) {
+                    setOf(KEY_SETTINGS_SHA256)
+                } else {
+                    emptySet()
+                }
                 else -> SCOPED_MANIFEST_KEYS + if (
                     metadata.getProperty(KEY_BACKUP_SCOPE) == COMPLETE_SCOPE
                 ) {
@@ -138,14 +146,19 @@ internal object BackupArchive {
                     .equals(stagedDatabase.sha256(), ignoreCase = true),
             ) { "Backup database checksum does not match" }
 
-            val profile = if (formatVersion == BackupFormatPolicy.SCOPED_VERSION) {
+            val profile = if (
+                formatVersion in setOf(
+                    BackupFormatPolicy.LEGACY_SCOPED_VERSION,
+                    BackupFormatPolicy.SCOPED_VERSION,
+                )
+            ) {
                 require(metadata.getProperty(KEY_APPLICATION_ID) == APPLICATION_ID) {
                     "Backup belongs to another application"
                 }
                 require(metadata.getProperty(KEY_BACKUP_SCOPE) in setOf(PLATOON_SCOPE, COMPLETE_SCOPE)) {
                     "Backup scope is invalid"
                 }
-                metadata.profile()
+                metadata.profile(formatVersion)
             } else {
                 null
             }
@@ -187,8 +200,8 @@ internal object BackupArchive {
         val serverRegion: dev.gf2log.app.settings.GameServerRegion,
         val platoonId: Long,
         val platoonName: String,
-        val emblemPrimary: List<Long>,
-        val emblemSecondary: List<Long>,
+        val bannerFrameId: Long,
+        val bannerMarkId: Long,
         val legacy: Boolean,
     ) {
         fun toProfile() = PlatoonProfile(
@@ -197,8 +210,8 @@ internal object BackupArchive {
             serverRegion = serverRegion,
             platoonId = platoonId,
             platoonName = platoonName,
-            emblemPrimary = emblemPrimary,
-            emblemSecondary = emblemSecondary,
+            bannerFrameId = bannerFrameId,
+            bannerMarkId = bannerMarkId,
             lastSeenAt = java.time.Instant.now(),
             legacy = legacy,
         )
@@ -210,12 +223,12 @@ internal object BackupArchive {
         setProperty(KEY_PROFILE_REGION, profile.serverRegion.storedValue)
         setProperty(KEY_PROFILE_PLATOON_ID, profile.platoonId.toString())
         setProperty(KEY_PROFILE_NAME, profile.platoonName)
-        setProperty(KEY_PROFILE_EMBLEM_PRIMARY, profile.emblemPrimary.joinToString(","))
-        setProperty(KEY_PROFILE_EMBLEM_SECONDARY, profile.emblemSecondary.joinToString(","))
+        setProperty(KEY_PROFILE_BANNER_FRAME_ID, profile.bannerFrameId.toString())
+        setProperty(KEY_PROFILE_BANNER_MARK_ID, profile.bannerMarkId.toString())
         setProperty(KEY_PROFILE_LEGACY, profile.legacy.toString())
     }
 
-    private fun Properties.profile(): BackupPlatoonProfile {
+    private fun Properties.profile(formatVersion: Int): BackupPlatoonProfile {
         val client = PlatoonClient.valueOf(required(KEY_PROFILE_CLIENT))
         val region = dev.gf2log.app.settings.GameServerRegion.fromStored(required(KEY_PROFILE_REGION))
         require(region.storedValue == required(KEY_PROFILE_REGION)) { "Backup server region is invalid" }
@@ -226,14 +239,19 @@ internal object BackupArchive {
             require(value in setOf("true", "false")) { "Backup legacy marker is invalid" }
             value.toBooleanStrict()
         }
+        val legacyBannerData = formatVersion == BackupFormatPolicy.LEGACY_SCOPED_VERSION
+        if (legacyBannerData) {
+            longList(required(KEY_PROFILE_EMBLEM_PRIMARY))
+            longList(required(KEY_PROFILE_EMBLEM_SECONDARY))
+        }
         val result = BackupPlatoonProfile(
             storageId = required(KEY_PROFILE_STORAGE_ID),
             client = client,
             serverRegion = region,
             platoonId = id,
             platoonName = required(KEY_PROFILE_NAME),
-            emblemPrimary = longList(required(KEY_PROFILE_EMBLEM_PRIMARY)),
-            emblemSecondary = longList(required(KEY_PROFILE_EMBLEM_SECONDARY)),
+            bannerFrameId = if (legacyBannerData) 0L else bannerId(KEY_PROFILE_BANNER_FRAME_ID),
+            bannerMarkId = if (legacyBannerData) 0L else bannerId(KEY_PROFILE_BANNER_MARK_ID),
             legacy = legacy,
         )
         result.toProfile()
@@ -243,12 +261,16 @@ internal object BackupArchive {
     private fun Properties.required(key: String): String =
         requireNotNull(getProperty(key)) { "Backup manifest is missing $key" }
 
+    private fun Properties.bannerId(key: String): Long =
+        requireNotNull(required(key).toLongOrNull()) { "Backup banner ID is invalid" }
+            .also { require(it in 0L..PlatoonProfile.MAX_BANNER_ID) { "Backup banner ID is invalid" } }
+
     private fun longList(value: String): List<Long> = if (value.isBlank()) {
         emptyList()
     } else {
         value.split(',').map { item ->
             requireNotNull(item.toLongOrNull()) { "Backup emblem data is invalid" }
-        }.also { require(it.size <= PlatoonProfile.MAX_EMBLEM_PARTS) }
+        }.also { require(it.size <= LEGACY_MAX_EMBLEM_PARTS) }
     }
 
     private fun InputStream.copyBoundedTo(output: OutputStream, maximum: Long) {
@@ -300,6 +322,8 @@ internal object BackupArchive {
     private const val KEY_PROFILE_REGION = "profile.region"
     private const val KEY_PROFILE_PLATOON_ID = "profile.platoonId"
     private const val KEY_PROFILE_NAME = "profile.name"
+    private const val KEY_PROFILE_BANNER_FRAME_ID = "profile.bannerFrameId"
+    private const val KEY_PROFILE_BANNER_MARK_ID = "profile.bannerMarkId"
     private const val KEY_PROFILE_EMBLEM_PRIMARY = "profile.emblemPrimary"
     private const val KEY_PROFILE_EMBLEM_SECONDARY = "profile.emblemSecondary"
     private const val KEY_PROFILE_LEGACY = "profile.legacy"
@@ -316,7 +340,19 @@ internal object BackupArchive {
         KEY_BACKUP_SCOPE,
         KEY_SETTINGS_SHA256,
     )
-    private val SCOPED_MANIFEST_KEYS = LEGACY_MANIFEST_KEYS + setOf(
+    private val SCOPED_PROFILE_KEYS = setOf(
+        KEY_APPLICATION_ID,
+        KEY_BACKUP_SCOPE,
+        KEY_PROFILE_STORAGE_ID,
+        KEY_PROFILE_CLIENT,
+        KEY_PROFILE_REGION,
+        KEY_PROFILE_PLATOON_ID,
+        KEY_PROFILE_NAME,
+        KEY_PROFILE_BANNER_FRAME_ID,
+        KEY_PROFILE_BANNER_MARK_ID,
+        KEY_PROFILE_LEGACY,
+    )
+    private val LEGACY_SCOPED_MANIFEST_KEYS = LEGACY_MANIFEST_KEYS + setOf(
         KEY_APPLICATION_ID,
         KEY_BACKUP_SCOPE,
         KEY_PROFILE_STORAGE_ID,
@@ -328,4 +364,6 @@ internal object BackupArchive {
         KEY_PROFILE_EMBLEM_SECONDARY,
         KEY_PROFILE_LEGACY,
     )
+    private val SCOPED_MANIFEST_KEYS = LEGACY_MANIFEST_KEYS + SCOPED_PROFILE_KEYS
+    private const val LEGACY_MAX_EMBLEM_PARTS = 32
 }

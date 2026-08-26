@@ -55,8 +55,8 @@ class PlatoonBackupManagerIntegrationTest {
             dev.gf2log.protocol.model.PlatoonProfileData(
                 101817u,
                 "Backup test Platoon",
-                emptyList(),
-                emptyList(),
+                0u,
+                0u,
             ),
         )
         check(PlatoonProfileRegistry(context).setActive(profile.storageId))
@@ -570,8 +570,8 @@ class PlatoonBackupManagerIntegrationTest {
             dev.gf2log.protocol.model.PlatoonProfileData(
                 100u,
                 "Original",
-                emptyList(),
-                emptyList(),
+                0u,
+                0u,
             ),
         )
         val restored = registry.upsertDetected(
@@ -580,8 +580,8 @@ class PlatoonBackupManagerIntegrationTest {
             dev.gf2log.protocol.model.PlatoonProfileData(
                 200u,
                 "Restored",
-                listOf(1u),
-                listOf(2u),
+                1u,
+                2u,
             ),
         )
         assertTrue(registry.setActive(restored.storageId))
@@ -945,8 +945,8 @@ class WeeklyReportActivityStateTest {
             dev.gf2log.protocol.model.PlatoonProfileData(
                 101817u,
                 "Weekly UI test",
-                emptyList(),
-                emptyList(),
+                0u,
+                0u,
             ),
         )
         check(PlatoonProfileRegistry(context).setActive(profile.storageId))

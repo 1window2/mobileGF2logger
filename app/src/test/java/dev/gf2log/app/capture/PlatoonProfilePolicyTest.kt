@@ -31,5 +31,5 @@ class PlatoonProfilePolicyTest {
     }
 
     private fun profile(id: UInt, name: String) =
-        PlatoonProfileData(id, name, emptyList(), emptyList())
+        PlatoonProfileData(id, name, 0u, 0u)
 }

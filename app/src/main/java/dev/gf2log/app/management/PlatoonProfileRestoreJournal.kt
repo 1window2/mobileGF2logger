@@ -31,8 +31,8 @@ internal object PlatoonProfileRestoreJournalCodec {
                 output.writeUTF(profile.serverRegion.storedValue)
                 output.writeLong(profile.platoonId)
                 output.writeUTF(profile.platoonName)
-                output.writeLongList(profile.emblemPrimary)
-                output.writeLongList(profile.emblemSecondary)
+                output.writeLong(profile.bannerFrameId)
+                output.writeLong(profile.bannerMarkId)
                 output.writeLong(profile.lastSeenAt.toEpochMilli())
                 output.writeBoolean(profile.legacy)
             }
@@ -42,7 +42,10 @@ internal object PlatoonProfileRestoreJournalCodec {
 
     fun decode(bytes: ByteArray): PlatoonProfileRestoreJournal =
         DataInputStream(ByteArrayInputStream(bytes)).use { input ->
-            require(input.readInt() == VERSION) { "Unsupported profile restore journal" }
+            val version = input.readInt()
+            require(version in setOf(LEGACY_VERSION, VERSION)) {
+                "Unsupported profile restore journal"
+            }
             val targetStorageId = input.readUTF()
             require(PlatoonProfileIdentity.isValidStorageId(targetStorageId))
             val previousActive = input.readNullable()?.also {
@@ -51,14 +54,30 @@ internal object PlatoonProfileRestoreJournalCodec {
             val ownerPackage = input.readNullable()
             val previousRegion = input.readNullable()?.let(GameServerRegion::fromStored)
             val previousProfile = if (input.readBoolean()) {
+                val storageId = input.readUTF()
+                val client = PlatoonClient.valueOf(input.readUTF())
+                val serverRegion = GameServerRegion.fromStored(input.readUTF())
+                val platoonId = input.readLong()
+                val platoonName = input.readUTF()
+                val bannerFrameId: Long
+                val bannerMarkId: Long
+                if (version == LEGACY_VERSION) {
+                    input.readLegacyLongList()
+                    input.readLegacyLongList()
+                    bannerFrameId = 0L
+                    bannerMarkId = 0L
+                } else {
+                    bannerFrameId = input.readLong()
+                    bannerMarkId = input.readLong()
+                }
                 PlatoonProfile(
-                    storageId = input.readUTF(),
-                    client = PlatoonClient.valueOf(input.readUTF()),
-                    serverRegion = GameServerRegion.fromStored(input.readUTF()),
-                    platoonId = input.readLong(),
-                    platoonName = input.readUTF(),
-                    emblemPrimary = input.readLongList(),
-                    emblemSecondary = input.readLongList(),
+                    storageId = storageId,
+                    client = client,
+                    serverRegion = serverRegion,
+                    platoonId = platoonId,
+                    platoonName = platoonName,
+                    bannerFrameId = bannerFrameId,
+                    bannerMarkId = bannerMarkId,
                     lastSeenAt = Instant.ofEpochMilli(input.readLong()),
                     legacy = input.readBoolean(),
                 )
@@ -82,16 +101,13 @@ internal object PlatoonProfileRestoreJournalCodec {
 
     private fun DataInputStream.readNullable(): String? = if (readBoolean()) readUTF() else null
 
-    private fun DataOutputStream.writeLongList(values: List<Long>) {
-        writeInt(values.size)
-        values.forEach(::writeLong)
-    }
-
-    private fun DataInputStream.readLongList(): List<Long> {
+    private fun DataInputStream.readLegacyLongList() {
         val size = readInt()
-        require(size in 0..PlatoonProfile.MAX_EMBLEM_PARTS)
-        return List(size) { readLong() }
+        require(size in 0..LEGACY_MAX_EMBLEM_PARTS)
+        repeat(size) { readLong() }
     }
 
-    private const val VERSION = 1
+    private const val LEGACY_VERSION = 1
+    private const val VERSION = 2
+    private const val LEGACY_MAX_EMBLEM_PARTS = 32
 }

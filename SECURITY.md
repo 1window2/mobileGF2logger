@@ -49,7 +49,10 @@ original connection tuple and maps that UID only to the fixed supported package
 IDs. Remote IP addresses and DNS/SNI labels are diagnostic hints, not trusted
 client or server identities. Android 8–9 falls back only when exactly one
 supported client is installed; ambiguous flows remain quarantined. Payload
-`21905` supplies a bounded Platoon identity for its own decoded flow. Captured
+`21905` supplies a bounded Platoon identity for its own decoded flow. Its banner
+frame and mark are accepted only as scalar IDs in the closed game-defined range
+`1..6`; unknown values remain undisplayed rather than selecting arbitrary local
+resources. Captured
 packets may enter an immutable isolated management scope only after that profile
 combines the Android-verified client, user-selected compatible server region,
 and Platoon ID. An identity-free `21917` document can enter a scope only through

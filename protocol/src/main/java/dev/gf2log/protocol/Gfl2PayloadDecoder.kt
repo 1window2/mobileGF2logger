@@ -1,10 +1,6 @@
 package dev.gf2log.protocol
 
 import dev.gf2log.protocol.internal.ProtoReader
-import dev.gf2log.protocol.model.Attachment
-import dev.gf2log.protocol.model.AttachmentsData
-import dev.gf2log.protocol.model.CommonKey
-import dev.gf2log.protocol.model.CommonKeysData
 import dev.gf2log.protocol.model.Doll
 import dev.gf2log.protocol.model.Formation
 import dev.gf2log.protocol.model.FormationsData
@@ -18,13 +14,18 @@ import dev.gf2log.protocol.model.PlatoonProfileData
 import dev.gf2log.protocol.model.PlatoonUpdateEntry
 import dev.gf2log.protocol.model.PlatoonUpdateMember
 import dev.gf2log.protocol.model.PlatoonUpdatesData
+import dev.gf2log.protocol.model.PublicSkillItem
+import dev.gf2log.protocol.model.PublicSkillItemsData
 import dev.gf2log.protocol.model.Weapon
+import dev.gf2log.protocol.model.WeaponMod
+import dev.gf2log.protocol.model.WeaponModBinding
+import dev.gf2log.protocol.model.WeaponModsData
 import dev.gf2log.protocol.model.WeaponsData
 
 object Gfl2PayloadDecoder {
     const val TYPE_WEAPONS = 11021
-    const val TYPE_ATTACHMENTS = 11061
-    const val TYPE_COMMON_KEYS = 11138
+    const val TYPE_WEAPON_MODS = 11061
+    const val TYPE_PUBLIC_SKILL_ITEMS = 11138
     const val TYPE_PLATOON_PROFILE = 21905
     const val TYPE_GUILD_MEMBERS = 21917
     const val TYPE_PLATOON_ACTIVITY = 21935
@@ -33,8 +34,8 @@ object Gfl2PayloadDecoder {
 
     val supportedTypes: Set<Int> = setOf(
         TYPE_WEAPONS,
-        TYPE_ATTACHMENTS,
-        TYPE_COMMON_KEYS,
+        TYPE_WEAPON_MODS,
+        TYPE_PUBLIC_SKILL_ITEMS,
         TYPE_PLATOON_PROFILE,
         TYPE_GUILD_MEMBERS,
         TYPE_PLATOON_ACTIVITY,
@@ -45,8 +46,8 @@ object Gfl2PayloadDecoder {
     @Throws(ProtocolException::class)
     fun decode(type: Int, bytes: ByteArray): GameData? = when (type) {
         TYPE_WEAPONS -> decodeWeapons(ProtoReader(bytes))
-        TYPE_ATTACHMENTS -> decodeAttachments(ProtoReader(bytes))
-        TYPE_COMMON_KEYS -> decodeCommonKeys(ProtoReader(bytes))
+        TYPE_WEAPON_MODS -> decodeWeaponMods(ProtoReader(bytes))
+        TYPE_PUBLIC_SKILL_ITEMS -> decodePublicSkillItems(ProtoReader(bytes))
         TYPE_PLATOON_PROFILE -> decodePlatoonProfile(ProtoReader(bytes))
         TYPE_GUILD_MEMBERS -> decodeGuildMembers(ProtoReader(bytes))
         TYPE_PLATOON_ACTIVITY -> decodePlatoonActivity(ProtoReader(bytes))
@@ -66,151 +67,178 @@ object Gfl2PayloadDecoder {
 
     private fun decodeWeapon(reader: ProtoReader): Weapon {
         var id = 0u
+        var stcId = 0u
         var level = 0u
-        var rank = 0u
-        var uid = 0uL
+        var exp = 0u
+        var gunId = 0u
+        var breakTimes = 0u
+        var rawFlags = 0u
+        val weaponMods = mutableListOf<WeaponModBinding>()
         while (!reader.exhausted) {
             val field = reader.nextField() ?: break
             when (field.number) {
-                2 -> id = reader.readUInt(field).toUInt()
-                6 -> level = reader.readUInt(field).toUInt()
-                8 -> rank = reader.readUInt(field).toUInt()
-                11 -> uid = reader.readUInt(field)
+                1 -> id = reader.readUInt(field).toUInt()
+                2 -> stcId = reader.readUInt(field).toUInt()
+                3 -> level = reader.readUInt(field).toUInt()
+                4 -> exp = reader.readUInt(field).toUInt()
+                5 -> gunId = reader.readUInt(field).toUInt()
+                6 -> breakTimes = reader.readUInt(field).toUInt()
+                7 -> rawFlags = reader.readUInt(field).toUInt()
+                8 -> weaponMods += decodeWeaponModBinding(reader.readMessage(field))
                 else -> reader.skip(field)
             }
         }
-        return Weapon(id, level, rank, uid)
+        return Weapon(id, stcId, level, exp, gunId, breakTimes, rawFlags, weaponMods)
     }
 
-    private fun decodeAttachments(reader: ProtoReader): AttachmentsData {
-        val attachments = mutableListOf<Attachment>()
+    private fun decodeWeaponModBinding(reader: ProtoReader): WeaponModBinding {
+        var id = 0u
+        var gunId = 0u
+        while (!reader.exhausted) {
+            val field = reader.nextField() ?: break
+            when (field.number) {
+                1 -> id = reader.readUInt(field).toUInt()
+                2 -> gunId = reader.readUInt(field).toUInt()
+                else -> reader.skip(field)
+            }
+        }
+        return WeaponModBinding(id, gunId)
+    }
+
+    private fun decodeWeaponMods(reader: ProtoReader): WeaponModsData {
+        val mods = mutableListOf<WeaponMod>()
         while (!reader.exhausted) {
             val field = reader.nextField() ?: break
             if (field.number == 1) {
-                attachments += decodeAttachment(reader.readMessage(field))
+                mods += decodeWeaponMod(reader.readMessage(field))
             } else {
                 reader.skip(field)
             }
         }
-        return AttachmentsData(attachments)
+        return WeaponModsData(mods)
     }
 
-    private fun decodeAttachment(reader: ProtoReader): Attachment {
-        var uid = 0uL
-        var partId = 0u
-        var isLocked = false
-        var weaponUid = 0uL
-        var effectId: UInt? = null
-        val calibrationBoosts = mutableListOf<UInt>()
-        var attributes = 0uL
+    private fun decodeWeaponMod(reader: ProtoReader): WeaponMod {
+        var id = 0u
+        var stcId = 0u
+        var lockedFlags = 0uL
+        var modSuitPowerId = 0u
+        var level = 0u
+        var exp = 0u
+        var suitFlags = 0uL
 
         while (!reader.exhausted) {
             val field = reader.nextField() ?: break
             when (field.number) {
-                1 -> uid = reader.readUInt(field)
-                2 -> partId = reader.readUInt(field).toUInt()
-                3 -> isLocked = reader.readBoolean(field)
-                4 -> weaponUid = reader.readUInt(field)
-                14 -> effectId = decodeEffect(reader.readMessage(field))
-                18 -> calibrationBoosts += decodeCalibration(reader.readMessage(field))
-                20 -> attributes = reader.readUInt(field)
+                1 -> id = reader.readUInt(field).toUInt()
+                2 -> stcId = reader.readUInt(field).toUInt()
+                3 -> lockedFlags = reader.readUInt(field)
+                4 -> modSuitPowerId = reader.readUInt(field).toUInt()
+                5 -> level = reader.readUInt(field).toUInt()
+                6 -> exp = reader.readUInt(field).toUInt()
+                7 -> suitFlags = reader.readUInt(field)
                 else -> reader.skip(field)
             }
         }
 
-        return Attachment(
-            uid = uid,
-            partId = partId,
-            isLocked = isLocked,
-            weaponUid = weaponUid,
-            effectId = effectId,
-            calibrationBoosts = calibrationBoosts,
-            attributes = attributes,
+        return WeaponMod(
+            id = id,
+            stcId = stcId,
+            lockedFlags = lockedFlags,
+            modSuitPowerId = modSuitPowerId,
+            level = level,
+            exp = exp,
+            suitFlags = suitFlags,
         )
     }
 
-    private fun decodeEffect(reader: ProtoReader): UInt? {
-        var id: UInt? = null
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
-            if (field.number == 1) id = reader.readUInt(field).toUInt() else reader.skip(field)
-        }
-        return id
-    }
-
-    private fun decodeCalibration(reader: ProtoReader): UInt {
-        var boost = 0u
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
-            if (field.number == 4) boost = reader.readUInt(field).toUInt() else reader.skip(field)
-        }
-        return boost
-    }
-
-    private fun decodeCommonKeys(reader: ProtoReader): CommonKeysData {
-        val keys = mutableListOf<CommonKey>()
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
-            if (field.number == 1) keys += decodeCommonKey(reader.readMessage(field)) else reader.skip(field)
-        }
-        return CommonKeysData(keys)
-    }
-
-    private fun decodeCommonKey(reader: ProtoReader): CommonKey {
-        var uid = 0uL
-        var keyId = 0u
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
-            when (field.number) {
-                1 -> uid = reader.readUInt(field)
-                2 -> keyId = reader.readUInt(field).toUInt()
-                else -> reader.skip(field)
-            }
-        }
-        return CommonKey(uid, keyId)
-    }
-
-    /**
-     * Decodes only stable identity and compact emblem fields from payload 21905.
-     * Free-form notices are skipped because they are not needed for routing.
-     */
-    private fun decodePlatoonProfile(reader: ProtoReader): PlatoonProfileData {
-        var profile = PlatoonProfileData(0u, "", emptyList(), emptyList())
+    private fun decodePublicSkillItems(reader: ProtoReader): PublicSkillItemsData {
+        val items = mutableListOf<PublicSkillItem>()
         while (!reader.exhausted) {
             val field = reader.nextField() ?: break
             if (field.number == 1) {
-                profile = decodePlatoonProfileBody(reader.readMessage(field))
+                items += decodePublicSkillItem(reader.readMessage(field))
             } else {
                 reader.skip(field)
             }
         }
-        return profile
+        return PublicSkillItemsData(items)
+    }
+
+    private fun decodePublicSkillItem(reader: ProtoReader): PublicSkillItem {
+        var id = 0uL
+        var stcId = 0u
+        var gunId = 0u
+        var lockedFlags = 0uL
+        var isNew = false
+        while (!reader.exhausted) {
+            val field = reader.nextField() ?: break
+            when (field.number) {
+                1 -> id = reader.readUInt(field)
+                2 -> stcId = reader.readUInt(field).toUInt()
+                3 -> gunId = reader.readUInt(field).toUInt()
+                4 -> lockedFlags = reader.readUInt(field)
+                5 -> isNew = reader.readBoolean(field)
+                else -> reader.skip(field)
+            }
+        }
+        return PublicSkillItem(id, stcId, gunId, lockedFlags, isNew)
+    }
+
+    /** Decodes the grounded identity, banner, progression, policy, and bounded text fields in 21905. */
+    private fun decodePlatoonProfile(reader: ProtoReader): PlatoonProfileData {
+        var profile = PlatoonProfileData(0u, "", 0u, 0u)
+        var questId = 0u
+        var seasonId = 0u
+        while (!reader.exhausted) {
+            val field = reader.nextField() ?: break
+            when (field.number) {
+                1 -> profile = decodePlatoonProfileBody(reader.readMessage(field))
+                2 -> questId = reader.readUInt(field).toUInt()
+                4 -> seasonId = reader.readUInt(field).toUInt()
+                else -> reader.skip(field)
+            }
+        }
+        return profile.copy(questId = questId, seasonId = seasonId)
     }
 
     private fun decodePlatoonProfileBody(reader: ProtoReader): PlatoonProfileData {
         var platoonId = 0u
         var platoonName = ""
-        val emblemPrimary = mutableListOf<UInt>()
-        val emblemSecondary = mutableListOf<UInt>()
+        var level = 0u
+        var exp = 0u
+        var announcement = ""
+        var bannerFrameId = 0u
+        var bannerMarkId = 0u
+        var declaration = ""
+        var joinPolicyFlag = false
         while (!reader.exhausted) {
             val field = reader.nextField() ?: break
             when (field.number) {
                 1 -> platoonId = reader.readUInt(field).toUInt()
                 2 -> platoonName = reader.readString(field).take(MAX_PLATOON_NAME_CHARS)
-                15 -> emblemPrimary += reader.readRepeatedUInt(field)
-                    .take(MAX_EMBLEM_PARTS)
-                    .map(ULong::toUInt)
-                16 -> emblemSecondary += reader.readRepeatedUInt(field)
-                    .take(MAX_EMBLEM_PARTS)
-                    .map(ULong::toUInt)
+                3 -> level = reader.readUInt(field).toUInt()
+                4 -> exp = reader.readUInt(field).toUInt()
+                6 -> announcement = reader.readString(field).take(MAX_PLATOON_TEXT_CHARS)
+                // CS_ChangeGuildFlag and asymmetric live profiles establish that field 9 is
+                // the mark/design selector while field 10 is the colored frame selector.
+                9 -> bannerMarkId = reader.readUInt(field).toUInt()
+                10 -> bannerFrameId = reader.readUInt(field).toUInt()
+                12 -> declaration = reader.readString(field).take(MAX_PLATOON_TEXT_CHARS)
+                13 -> joinPolicyFlag = reader.readBoolean(field)
                 else -> reader.skip(field)
             }
         }
         return PlatoonProfileData(
             platoonId = platoonId,
             platoonName = platoonName,
-            emblemPrimary = emblemPrimary.take(MAX_EMBLEM_PARTS),
-            emblemSecondary = emblemSecondary.take(MAX_EMBLEM_PARTS),
+            bannerFrameId = bannerFrameId,
+            bannerMarkId = bannerMarkId,
+            level = level,
+            exp = exp,
+            announcement = announcement,
+            declaration = declaration,
+            joinPolicyFlag = joinPolicyFlag,
         )
     }
 
@@ -437,5 +465,5 @@ object Gfl2PayloadDecoder {
     }
 
     private const val MAX_PLATOON_NAME_CHARS = 128
-    private const val MAX_EMBLEM_PARTS = 16
+    private const val MAX_PLATOON_TEXT_CHARS = 4_096
 }

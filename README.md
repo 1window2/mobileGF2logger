@@ -20,6 +20,8 @@ never stored.
 - Automatically separates detected Platoons by supported Android client,
   selected server region, and authoritative Platoon ID; switch the active
   isolated profile from Home, Platoon, Weekly, or Settings.
+- Decodes each Platoon's banner frame and mark from `21905` and displays the
+  matching original in-game emblem in profile selectors.
 - Tracks active and withdrawn members, non-overlapping repeat membership periods, exact Updates timestamps, editable nicknames, and private notes.
 - Builds Sunday-to-Saturday Standard or Gunsmoke Frontline weekly tables around the selected server's daily reset, with cut-off points and manual correction for missing data.
 - Offers One-time Capture that tracks the four useful Platoon payloads and stops automatically when the checklist is complete.
@@ -74,3 +76,7 @@ missing membership records can be entered manually.
 mobileGF2logger was inspired by [blead/gfl2logger](https://github.com/blead/gfl2logger),
 a GF2 logger for the Windows client. This project is an independent Android
 implementation tailored to on-device Platoon management.
+
+The bundled Platoon banner frame and mark sprites are original GF2 interface
+artwork used only to reproduce a Platoon's user-selected in-game emblem. All
+rights to that artwork remain with the game's respective rights holders.

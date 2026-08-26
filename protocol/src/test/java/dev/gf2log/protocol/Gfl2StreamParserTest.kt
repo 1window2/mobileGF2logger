@@ -1,14 +1,14 @@
 package dev.gf2log.protocol
 
-import dev.gf2log.protocol.model.AttachmentsData
-import dev.gf2log.protocol.model.CommonKeysData
 import dev.gf2log.protocol.model.FormationsData
 import dev.gf2log.protocol.model.GuildMembersData
 import dev.gf2log.protocol.model.ParseEvent
 import dev.gf2log.protocol.model.PlatoonActivityData
 import dev.gf2log.protocol.model.PlatoonProfileData
 import dev.gf2log.protocol.model.PlatoonUpdatesData
+import dev.gf2log.protocol.model.PublicSkillItemsData
 import dev.gf2log.protocol.model.WeaponsData
+import dev.gf2log.protocol.model.WeaponModsData
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -31,24 +31,34 @@ class Gfl2StreamParserTest {
         val data = parsed.value.data as WeaponsData
         assertEquals(1, data.weapons.size)
         assertEquals(42u, data.weapons.single().id)
+        assertEquals(7001u, data.weapons.single().stcId)
         assertEquals(70u, data.weapons.single().level)
-        assertEquals(5u, data.weapons.single().rank)
-        assertEquals(9_007_199_254_740_993uL, data.weapons.single().uid)
+        assertEquals(125u, data.weapons.single().exp)
+        assertEquals(17u, data.weapons.single().gunId)
+        assertEquals(5u, data.weapons.single().breakTimes)
+        assertEquals(3u, data.weapons.single().rawFlags)
+        assertEquals(91u, data.weapons.single().weaponMods.single().id)
     }
 
     @Test
     fun coalescedMessagesAreParsedIndependently() {
         val parser = Gfl2StreamParser()
         val first = outerMessage(1, payload(Gfl2PayloadDecoder.TYPE_WEAPONS, weaponsPayload()))
-        val second = outerMessage(2, payload(Gfl2PayloadDecoder.TYPE_COMMON_KEYS, commonKeysPayload()))
+        val second = outerMessage(
+            2,
+            payload(Gfl2PayloadDecoder.TYPE_PUBLIC_SKILL_ITEMS, publicSkillItemsPayload()),
+        )
 
         val payloads = parser.accept(first + second).filterIsInstance<ParseEvent.Payload>()
 
         assertEquals(2, payloads.size)
         assertTrue(payloads[0].value.data is WeaponsData)
-        val keys = payloads[1].value.data as CommonKeysData
-        assertEquals(123uL, keys.keys.single().uid)
-        assertEquals(456u, keys.keys.single().keyId)
+        val items = payloads[1].value.data as PublicSkillItemsData
+        assertEquals(123uL, items.items.single().id)
+        assertEquals(456u, items.items.single().stcId)
+        assertEquals(12u, items.items.single().gunId)
+        assertEquals(3uL, items.items.single().lockedFlags)
+        assertTrue(items.items.single().isNew)
     }
 
     @Test
@@ -70,19 +80,21 @@ class Gfl2StreamParserTest {
         val parser = Gfl2StreamParser()
         val message = outerMessage(
             99,
-            payload(Gfl2PayloadDecoder.TYPE_ATTACHMENTS, attachmentsPayload()),
+            payload(Gfl2PayloadDecoder.TYPE_WEAPON_MODS, weaponModsPayload()),
             payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, guildMembersPayload()),
             payload(Gfl2PayloadDecoder.TYPE_FORMATIONS, formationsPayload()),
         )
 
         val payloads = parser.accept(message).filterIsInstance<ParseEvent.Payload>()
 
-        val attachment = (payloads[0].value.data as AttachmentsData).attachments.single()
-        assertEquals(1000uL, attachment.uid)
-        assertEquals(17u, attachment.partId)
-        assertTrue(attachment.isLocked)
-        assertEquals(8u, attachment.effectId)
-        assertEquals(listOf(15u), attachment.calibrationBoosts)
+        val mod = (payloads[0].value.data as WeaponModsData).mods.single()
+        assertEquals(1000u, mod.id)
+        assertEquals(17u, mod.stcId)
+        assertEquals(3uL, mod.lockedFlags)
+        assertEquals(8u, mod.modSuitPowerId)
+        assertEquals(15u, mod.level)
+        assertEquals(29u, mod.exp)
+        assertEquals(0x0102uL, mod.suitFlags)
 
         val member = (payloads[1].value.data as GuildMembersData).members.single()
         assertEquals("Commander", member.name)
@@ -134,7 +146,7 @@ class Gfl2StreamParserTest {
     }
 
     @Test
-    fun capturedPlatoonProfilePreservesStableIdentityAndEmblemParts() {
+    fun capturedPlatoonProfilePreservesStableIdentityAndBannerIds() {
         val bytes = hex(
             "0aa30208b99a061205486f726e79181920e4de20325d72656a6563742073616e6974792c" +
                 "20656d627261636520686f726e792e0a0a446f6e277420666f7267657420746f20646f20" +
@@ -154,8 +166,13 @@ class Gfl2StreamParserTest {
 
         assertEquals(101_689u, profile.platoonId)
         assertEquals("Horny", profile.platoonName)
-        assertEquals(listOf(2u, 1u, 10u), profile.emblemPrimary)
-        assertEquals(listOf(20u, 14u, 11u, 17u, 15u, 18u), profile.emblemSecondary)
+        assertEquals(25u, profile.level)
+        assertTrue(profile.announcement.startsWith("reject sanity"))
+        assertTrue(profile.declaration.startsWith("Aiming for Top 5%"))
+        assertTrue(profile.joinPolicyFlag)
+        // This live profile visibly uses the purple pentagonal frame (3) and first mark (1).
+        assertEquals(3u, profile.bannerFrameId)
+        assertEquals(1u, profile.bannerMarkId)
     }
 
     @Test
@@ -166,7 +183,10 @@ class Gfl2StreamParserTest {
 
         assertEquals(1, events.filterIsInstance<ParseEvent.Warning>().size)
         val recovered = parser.accept(
-            outerMessage(7, payload(Gfl2PayloadDecoder.TYPE_COMMON_KEYS, commonKeysPayload())),
+            outerMessage(
+                7,
+                payload(Gfl2PayloadDecoder.TYPE_PUBLIC_SKILL_ITEMS, publicSkillItemsPayload()),
+            ),
         )
         assertEquals(1, recovered.filterIsInstance<ParseEvent.Payload>().size)
     }
@@ -349,28 +369,35 @@ class Gfl2StreamParserTest {
     }
 
     private fun weaponsPayload(): ByteArray {
-        val weapon = uintField(2, 42uL) +
-            uintField(6, 70uL) +
-            uintField(8, 5uL) +
-            uintField(11, 9_007_199_254_740_993uL)
+        val weaponMod = uintField(1, 91uL) + uintField(2, 17uL)
+        val weapon = uintField(1, 42uL) +
+            uintField(2, 7001uL) +
+            uintField(3, 70uL) +
+            uintField(4, 125uL) +
+            uintField(5, 17uL) +
+            uintField(6, 5uL) +
+            uintField(7, 3uL) +
+            messageField(8, weaponMod)
         return messageField(1, weapon)
     }
 
-    private fun commonKeysPayload(): ByteArray {
-        val key = uintField(1, 123uL) + uintField(2, 456uL)
+    private fun publicSkillItemsPayload(): ByteArray {
+        val key = uintField(1, 123uL) +
+            uintField(2, 456uL) +
+            uintField(3, 12uL) +
+            uintField(4, 3uL) +
+            uintField(5, 1uL)
         return messageField(1, key)
     }
 
-    private fun attachmentsPayload(): ByteArray {
-        val effect = uintField(1, 8uL)
-        val calibration = uintField(4, 15uL)
+    private fun weaponModsPayload(): ByteArray {
         val attachment = uintField(1, 1000uL) +
             uintField(2, 17uL) +
-            uintField(3, 1uL) +
-            uintField(4, 2000uL) +
-            messageField(14, effect) +
-            messageField(18, calibration) +
-            uintField(20, 0x0102uL)
+            uintField(3, 3uL) +
+            uintField(4, 8uL) +
+            uintField(5, 15uL) +
+            uintField(6, 29uL) +
+            uintField(7, 0x0102uL)
         return messageField(1, attachment)
     }
 

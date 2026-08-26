@@ -1,13 +1,13 @@
 package dev.gf2log.protocol
 
-import dev.gf2log.protocol.model.AttachmentsData
-import dev.gf2log.protocol.model.CommonKeysData
 import dev.gf2log.protocol.model.FormationsData
 import dev.gf2log.protocol.model.GuildMembersData
 import dev.gf2log.protocol.model.ParsedPayload
 import dev.gf2log.protocol.model.PlatoonActivityData
 import dev.gf2log.protocol.model.PlatoonProfileData
 import dev.gf2log.protocol.model.PlatoonUpdatesData
+import dev.gf2log.protocol.model.PublicSkillItemsData
+import dev.gf2log.protocol.model.WeaponModsData
 import dev.gf2log.protocol.model.WeaponsData
 
 object ParsedPayloadTextFormatter {
@@ -20,13 +20,23 @@ object ParsedPayloadTextFormatter {
 
         when (val data = payload.data) {
             is PlatoonProfileData -> {
-                appendLine("platoonId,platoonName,emblemPrimary,emblemSecondary")
+                appendLine(
+                    "platoonId,platoonName,level,exp,bannerFrameId,bannerMarkId," +
+                        "questId,seasonId,joinPolicyFlag,announcement,declaration",
+                )
                 appendLine(
                     listOf(
                         data.platoonId,
                         CsvCell.escape(data.platoonName),
-                        data.emblemPrimary.joinToString("|"),
-                        data.emblemSecondary.joinToString("|"),
+                        data.level,
+                        data.exp,
+                        data.bannerFrameId,
+                        data.bannerMarkId,
+                        data.questId,
+                        data.seasonId,
+                        data.joinPolicyFlag,
+                        CsvCell.escape(data.announcement),
+                        CsvCell.escape(data.declaration),
                     ).joinToString(","),
                 )
             }
@@ -60,28 +70,45 @@ object ParsedPayloadTextFormatter {
                 }
             }
             is WeaponsData -> {
-                appendLine("id,level,rank,uid")
-                data.weapons.forEach { appendLine("${it.id},${it.level},${it.rank},${it.uid}") }
-            }
-            is AttachmentsData -> {
-                appendLine("uid,partId,isLocked,weaponUid,effectId,calibrationBoosts,attributes")
-                data.attachments.forEach {
+                appendLine("id,stcId,level,exp,gunId,breakTimes,rawFlags,weaponMods")
+                data.weapons.forEach {
                     appendLine(
                         listOf(
-                            it.uid,
-                            it.partId,
-                            it.isLocked,
-                            it.weaponUid,
-                            it.effectId ?: "",
-                            it.calibrationBoosts.joinToString("|"),
-                            it.attributes,
+                            it.id,
+                            it.stcId,
+                            it.level,
+                            it.exp,
+                            it.gunId,
+                            it.breakTimes,
+                            it.rawFlags,
+                            it.weaponMods.joinToString("|") { binding ->
+                                "${binding.id}:${binding.gunId}"
+                            },
                         ).joinToString(","),
                     )
                 }
             }
-            is CommonKeysData -> {
-                appendLine("uid,keyId")
-                data.keys.forEach { appendLine("${it.uid},${it.keyId}") }
+            is WeaponModsData -> {
+                appendLine("id,stcId,lockedFlags,modSuitPowerId,level,exp,suitFlags")
+                data.mods.forEach {
+                    appendLine(
+                        listOf(
+                            it.id,
+                            it.stcId,
+                            it.lockedFlags,
+                            it.modSuitPowerId,
+                            it.level,
+                            it.exp,
+                            it.suitFlags,
+                        ).joinToString(","),
+                    )
+                }
+            }
+            is PublicSkillItemsData -> {
+                appendLine("id,stcId,gunId,lockedFlags,isNew")
+                data.items.forEach {
+                    appendLine("${it.id},${it.stcId},${it.gunId},${it.lockedFlags},${it.isNew}")
+                }
             }
             is FormationsData -> {
                 appendLine("formation,dollId,weaponUid,attachmentUids,fixedKeyIds,expansionKeyIds,commonKeyUids")

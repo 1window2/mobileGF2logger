@@ -11,6 +11,10 @@ class BackupFormatPolicyTest {
             hasSettings = false,
         )
         BackupFormatPolicy.requirePlatoonOnly(
+            BackupFormatPolicy.LEGACY_SCOPED_VERSION,
+            hasSettings = false,
+        )
+        BackupFormatPolicy.requirePlatoonOnly(
             BackupFormatPolicy.SCOPED_VERSION,
             hasSettings = false,
         )
@@ -27,6 +31,10 @@ class BackupFormatPolicyTest {
     fun `complete restore rejects legacy and incomplete backups`() {
         BackupFormatPolicy.requireComplete(
             BackupFormatPolicy.COMPLETE_VERSION,
+            hasSettings = true,
+        )
+        BackupFormatPolicy.requireComplete(
+            BackupFormatPolicy.LEGACY_SCOPED_VERSION,
             hasSettings = true,
         )
         BackupFormatPolicy.requireComplete(

@@ -376,7 +376,10 @@ the repository maintenance lock. The previous database and a settings snapshot
 are retained until both resources commit, so any failure restores the prior
 state instead of leaving a partial import. A fresh install records that no
 database existed so rollback removes the staged replacement rather than
-mistaking it for prior state. Schema introspection uses the extended SQLite
+mistaking it for prior state. Cleanup deletes the transaction state file
+first, so a process death during cleanup leaves only leftovers to delete
+rather than a half-cleaned PREPARED transaction that recovery would reject on
+every start. Schema introspection uses the extended SQLite
 column metadata where available and the equivalent ordinary-column metadata on
 the older SQLite engine shipped with the supported Android 8 minimum.
 

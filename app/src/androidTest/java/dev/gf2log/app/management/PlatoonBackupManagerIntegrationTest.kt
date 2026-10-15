@@ -256,6 +256,24 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     @Test
+    fun rollbackInterruptedWhileCleaningUpFinishesOnTheNextStart() {
+        settingsStore.replace(currentSettings())
+        // Older cleanup deleted the settings snapshot before the state, so an interruption there
+        // left a PREPARED state with only the rollback marker of an already completed rollback.
+        FilePaths.restoreStateFile(context).apply {
+            parentFile?.mkdirs()
+            writeText("PREPARED", Charsets.US_ASCII)
+        }
+        java.io.File(FilePaths.restoreTransactionDirectory(context), "settings.rollback_required")
+            .writeBytes(ByteArray(0))
+
+        PlatoonBackupManager.recoverInterruptedFullRestore(context)
+
+        assertEquals(currentSettings(), settingsStore.read())
+        assertFalse(FilePaths.restoreTransactionDirectory(context).exists())
+    }
+
+    @Test
     fun settingsFailureRollsBackDatabaseAndSettingsTogether() {
         seedDatabase(ARCHIVED_UID, "Archived member", "archived-source.csv")
         settingsStore.replace(archivedSettings())

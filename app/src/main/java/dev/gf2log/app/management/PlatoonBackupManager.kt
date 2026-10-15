@@ -439,7 +439,6 @@ class PlatoonBackupManager internal constructor(
                 restoreSettingsFile(appContext, storageScope),
                 AppBackupSettingsCodec.encode(previousSettings),
             )
-            writeAtomic(restoreSettingsRollbackFile(appContext, storageScope), ByteArray(0))
         }
         if (!databaseExisted) {
             writeAtomic(restoreDatabaseWasMissingFile(appContext, storageScope), ByteArray(0))
@@ -474,6 +473,7 @@ class PlatoonBackupManager internal constructor(
         private const val RESTORE_TRANSACTION_DIRECTORY = "platoon-full-restore"
         private const val RESTORE_STATE_FILE = "state"
         private const val RESTORE_SETTINGS_FILE = "settings.pre_restore"
+        /** Written by older versions after the snapshot; now only removed during cleanup. */
         private const val RESTORE_SETTINGS_ROLLBACK_FILE = "settings.rollback_required"
         private const val RESTORE_DATABASE_WAS_MISSING_FILE = "database.was_missing"
         private const val RESTORE_PROFILE_FILE = "profile.pre_restore"
@@ -659,10 +659,10 @@ class PlatoonBackupManager internal constructor(
                     }
                 }
             }
+            // A missing snapshot means nothing to replay: it is written before the restore can
+            // touch settings, and is deleted only by cleanup after a completed rollback.
             val settingsFile = restoreSettingsFile(context, scope)
-            val settingsRollback = restoreSettingsRollbackFile(context, scope)
-            if (settingsRollback.isFile || settingsFile.isFile) {
-                require(settingsFile.isFile) { "Previous app settings are missing" }
+            if (settingsFile.isFile) {
                 settingsStore.replace(AppBackupSettingsCodec.decode(settingsFile.readBytes()))
             }
             if (previousCsv.exists()) {
@@ -769,9 +769,10 @@ class PlatoonBackupManager internal constructor(
             val state = restoreStateFile(context, scope)
             val databaseWasMissing = restoreDatabaseWasMissingFile(context, scope)
             val profile = restoreProfileFile(context, scope)
+            // The state goes first: without it, an interrupted cleanup only finishes deleting.
+            state.delete()
             settings.delete()
             settingsRollback.delete()
-            state.delete()
             databaseWasMissing.delete()
             profile.delete()
             directory.delete()

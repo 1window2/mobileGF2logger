@@ -9,6 +9,7 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 import dev.gf2log.app.management.MembershipBoundaryValue
+import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.TextRole
 import dev.gf2log.app.ui.dp
@@ -97,30 +98,34 @@ internal class DateTimePickerInput(
 
     private fun showDatePicker() {
         val seed = selection.date ?: LocalDate.now(zone)
-        DatePickerDialog(
-            context,
-            { _, year, month, day ->
-                selection.selectDate(LocalDate.of(year, month + 1, day))
-                renderValue()
-            },
-            seed.year,
-            seed.monthValue - 1,
-            seed.dayOfMonth,
-        ).show()
+        Dialogs.showTracked(
+            DatePickerDialog(
+                context,
+                { _, year, month, day ->
+                    selection.selectDate(LocalDate.of(year, month + 1, day))
+                    renderValue()
+                },
+                seed.year,
+                seed.monthValue - 1,
+                seed.dayOfMonth,
+            ),
+        )
     }
 
     private fun showTimePicker() {
         val seed = selection.time ?: LocalTime.now(zone).withSecond(0).withNano(0)
-        TimePickerDialog(
-            context,
-            { _, hour, minute ->
-                selection.selectTime(LocalTime.of(hour, minute))
-                renderValue()
-            },
-            seed.hour,
-            seed.minute,
-            android.text.format.DateFormat.is24HourFormat(context),
-        ).show()
+        Dialogs.showTracked(
+            TimePickerDialog(
+                context,
+                { _, hour, minute ->
+                    selection.selectTime(LocalTime.of(hour, minute))
+                    renderValue()
+                },
+                seed.hour,
+                seed.minute,
+                android.text.format.DateFormat.is24HourFormat(context),
+            ),
+        )
     }
 
     private fun renderValue() {

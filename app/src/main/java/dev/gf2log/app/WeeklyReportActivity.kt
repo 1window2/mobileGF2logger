@@ -645,16 +645,18 @@ class WeeklyReportActivity : BaseActivity() {
 
     private fun showDatePicker() {
         val day = reportState.referenceDay
-        DatePickerDialog(
-            this,
-            { _, year, month, dayOfMonth ->
-                reportState.selectDate(LocalDate.of(year, month + 1, dayOfMonth))
-                requestRender()
-            },
-            day.year,
-            day.monthValue - 1,
-            day.dayOfMonth,
-        ).show()
+        Dialogs.showTracked(
+            DatePickerDialog(
+                this,
+                { _, year, month, dayOfMonth ->
+                    reportState.selectDate(LocalDate.of(year, month + 1, dayOfMonth))
+                    requestRender()
+                },
+                day.year,
+                day.monthValue - 1,
+                day.dayOfMonth,
+            ),
+        )
     }
 
     private fun onCellTapped(member: WeeklyReportBuilder.MemberRow, cell: WeeklyReportBuilder.DayCell?) {

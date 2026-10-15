@@ -34,14 +34,22 @@ internal object Dialogs {
             }
             onShown(dialog)
         }
+        return showTracked(dialog)
+    }
+
+    /**
+     * Shows a platform dialog that is not built through [builder], such as a date or time picker,
+     * and registers it with its screen so [dismissAll] closes it on recreation.
+     */
+    fun <D : android.app.Dialog> showTracked(dialog: D): D {
         dialog.show()
-        owner(builder.context)?.let { owner ->
+        owner(dialog.context)?.let { owner ->
             open.getOrPut(owner) { mutableListOf() }.add(java.lang.ref.WeakReference(dialog))
         }
         return dialog
     }
 
-    private val open = java.util.WeakHashMap<android.app.Activity, MutableList<java.lang.ref.WeakReference<AlertDialog>>>()
+    private val open = java.util.WeakHashMap<android.app.Activity, MutableList<java.lang.ref.WeakReference<android.app.Dialog>>>()
 
     private tailrec fun owner(context: Context): android.app.Activity? = when (context) {
         is android.app.Activity -> context
@@ -51,7 +59,7 @@ internal object Dialogs {
 
     /** Closes every dialog a screen opened so a recreated screen never leaks its windows. */
     fun dismissAll(owner: android.app.Activity) {
-        open.remove(owner)?.forEach { it.get()?.takeIf(AlertDialog::isShowing)?.dismiss() }
+        open.remove(owner)?.forEach { it.get()?.takeIf(android.app.Dialog::isShowing)?.dismiss() }
     }
 
     fun confirm(

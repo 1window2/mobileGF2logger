@@ -9,6 +9,7 @@ import dev.gf2log.app.settings.AppBackupSettingsCodec
 import dev.gf2log.app.settings.BackupSettingsStore
 import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.app.settings.GameServerRegion
+import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.ScopedAppSettingsStore
 import java.io.EOFException
 import java.io.File
@@ -161,6 +162,7 @@ class PlatoonBackupManager internal constructor(
         val previousActiveStorageId = registry.active()?.storageId
         val clientRegions = ClientServerRegionPreferences(appContext)
         val previousCaptureRegion = clientRegions.stored(restoredProfile.client.packageName)
+        val previousTimeZone = GameTimeZonePreferences.scopedStateOrNull(appContext, scope.storageId)
         val manager = if (scope == storageScope) {
             this
         } else {
@@ -178,6 +180,7 @@ class PlatoonBackupManager internal constructor(
             previousActiveStorageId = previousActiveStorageId,
             registry = registry,
             previousCaptureRegion = previousCaptureRegion,
+            previousTimeZone = previousTimeZone,
         )
     }
 
@@ -188,6 +191,7 @@ class PlatoonBackupManager internal constructor(
         val previousActiveStorageId: String?,
         val registry: PlatoonProfileRegistry,
         val previousCaptureRegion: GameServerRegion?,
+        val previousTimeZone: GameTimeZonePreferences.ScopedZoneState?,
     ) {
         fun rollbackJournal(): PlatoonProfileRestoreJournal = PlatoonProfileRestoreJournal(
                 targetStorageId = manager.storageScope.storageId,
@@ -195,14 +199,27 @@ class PlatoonBackupManager internal constructor(
                 previousActiveStorageId = previousActiveStorageId,
                 ownerPackage = restoredProfile?.client?.packageName,
                 previousCaptureRegion = previousCaptureRegion,
+                previousTimeZone = previousTimeZone,
             )
 
-        fun installProfileMetadataAndActivate() {
-            val storageId = requireNotNull(restoredProfile)
-                .let(registry::upsertRestored)
-                .storageId
+        /** Installs the archived profile, then reconciles its reset-zone override with it. */
+        fun installProfileMetadataAndActivate(restoredSettings: Boolean) {
+            val profile = requireNotNull(restoredProfile)
+            val storageId = registry.upsertRestored(profile).storageId
             check(registry.setActive(storageId)) {
                 "Unable to select the restored Platoon"
+            }
+            val context = manager.appContext
+            val zoneState = GameTimeZonePreferences.scopedState(context, storageId)
+            if (
+                RestoredTimeZonePolicy.clearsOverride(
+                    state = zoneState,
+                    previousRegion = previousProfile?.serverRegion,
+                    restoredRegion = profile.serverRegion,
+                    restoredSettings = restoredSettings,
+                )
+            ) {
+                GameTimeZonePreferences.clearRegionOverride(context, storageId)
             }
         }
     }
@@ -258,7 +275,7 @@ class PlatoonBackupManager internal constructor(
                     )
                     restoreObserver(RestoreCheckpoint.RETAINED_CSV_RETIRED)
                 }
-                restoreTarget?.installProfileMetadataAndActivate()
+                restoreTarget?.installProfileMetadataAndActivate(restoredSettings != null)
                 if (restoreTarget != null) {
                     restoreObserver(RestoreCheckpoint.PROFILE_METADATA_INSTALLED)
                 }
@@ -676,6 +693,10 @@ class PlatoonBackupManager internal constructor(
                     previousProfile = rollback.previousProfile,
                     previousActiveStorageId = rollback.previousActiveStorageId,
                 )
+                // Runs after the settings replay above, which can only write effective values.
+                rollback.previousTimeZone?.let { state ->
+                    GameTimeZonePreferences.restoreScopedState(context, rollback.targetStorageId, state)
+                }
             }
             cleanupRestoreTransaction(context, scope)
         }

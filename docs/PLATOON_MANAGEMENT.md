@@ -44,7 +44,13 @@ rules below take precedence over stale copied dates in archived templates.
   When Settings holds an explicit capture server for that client, the dialog
   preselects it; the user still confirms before anything is stored.
 - Changing a profile's server rebuilds its weekly history without changing its
-  storage scope. Deleting a profile removes only that scope after two warnings
+  storage scope. A restore keeps the profile's server and its reset region
+  consistent: a complete backup stores only the effective reset region, so a
+  region equal to the archived profile's server is restored as automatic rather
+  than as an explicit override, and a Platoon-only restore that changes the
+  profile's server clears any reset-region or manual-zone override, as a server
+  change in Settings does. An interrupted restore puts the exact previous
+  timezone keys back. Deleting a profile removes only that scope after two warnings
   and an exact Platoon-name confirmation; interrupted cleanup resumes later.
 
 ## Merit calculation

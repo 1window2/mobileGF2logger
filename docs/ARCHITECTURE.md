@@ -297,8 +297,13 @@ from two clients cannot be combined into a false completion.
 CSV preview and apply retain the same immutable scope even if an Activity is
 recreated. A scoped backup is validated before profile metadata changes. Its
 database, settings, retained CSV retirement, registry metadata, active profile,
-and client-region routing then commit under one durable journal; interrupted
-restores roll all of those resources back together.
+client-region routing, and the scoped reset-zone keys then commit under one
+durable journal; interrupted restores roll all of those resources back
+together. The journal keeps the exact previous timezone keys because replaying
+effective settings would turn an automatic region into an explicit one.
+`RestoredTimeZonePolicy` decides, after the profile is installed, whether the
+restored override is redundant (complete restore) or stale (Platoon-only
+restore that changed the server region) and clears it.
 
 Profile server edits retain the immutable scope and rebuild weekly history under
 the repository's exclusive database gate. Full profile deletion uses a durable

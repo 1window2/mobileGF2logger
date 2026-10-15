@@ -83,12 +83,27 @@ internal class PlatoonAdmissionCoordinator(
     }
 
     fun confirm(token: String, region: GameServerRegion) {
-        val claim = PendingPlatoonAdmissionStore.claim(token) ?: return
+        var admitted: PlatoonProfile? = null
+        val completedFlows = PendingPlatoonAdmissionStore.withClaim(token) { claim ->
+            admitted = admit(claim, region)
+            admitted != null
+        } ?: return
+        completedFlows.forEach { tokenByFlow.remove(it, token) }
+        val profile = admitted ?: return
+        CaptureStatus.report(
+            CaptureNotice.PLATOON_CONFIRMED,
+            profile.platoonName.take(MAX_STATUS_NAME_CHARS),
+            profile.platoonId.toString(),
+            profile.client.displayName,
+        )
+    }
+
+    /** Persists the claimed identity and replays its payloads; null after reporting a failure. */
+    private fun admit(claim: PendingPlatoonAdmissionStore.Claim, region: GameServerRegion): PlatoonProfile? {
         val ownerPackage = claim.summary.ownerPackage
         if (region !in clientServerRegions.allowed(ownerPackage)) {
-            PendingPlatoonAdmissionStore.releaseClaim(token)
             CaptureStatus.report(CaptureNotice.ADMISSION_REGION_MISMATCH)
-            return
+            return null
         }
         val client = requireNotNull(PlatoonClient.fromPackage(ownerPackage))
         val existing = profileRegistry.findByIdentity(
@@ -97,9 +112,8 @@ internal class PlatoonAdmissionCoordinator(
             claim.summary.profile.platoonId.toLong(),
         )
         if (!admissionGate.canAdmit(ownerPackage, existing != null)) {
-            PendingPlatoonAdmissionStore.releaseClaim(token)
             CaptureStatus.report(CaptureNotice.ADMISSION_LIMIT)
-            return
+            return null
         }
         val previousRegion = clientServerRegions.stored(ownerPackage)
         val profile = runCatching {
@@ -117,13 +131,20 @@ internal class PlatoonAdmissionCoordinator(
                     clientServerRegions.set(ownerPackage, previousRegion)
                 }
             }.onFailure(error::addSuppressed)
-            PendingPlatoonAdmissionStore.releaseClaim(token)
             CaptureStatus.report(CaptureNotice.ADMISSION_PROFILE_FAILED)
-            return
+            return null
         }
         if (existing == null) admissionGate.markAdmitted(ownerPackage)
         flows.profileChanged(profile.storageId)
+        if (!replay(claim, profile)) {
+            CaptureStatus.report(CaptureNotice.ADMISSION_REPLAY_FAILED)
+            return null
+        }
+        return profile
+    }
 
+    /** Binds live flows to [profile] and routes the buffered payloads in their captured order. */
+    private fun replay(claim: PendingPlatoonAdmissionStore.Claim, profile: PlatoonProfile): Boolean {
         val sessions = mutableMapOf<Long, PlatoonCaptureSession>()
         val replayed = runCatching {
             claim.flowIds.forEach { flowId -> sessions[flowId] = flows.bind(flowId, profile) }
@@ -142,20 +163,12 @@ internal class PlatoonAdmissionCoordinator(
         }
         if (replayed.isFailure) {
             sessions.forEach { (flowId, session) -> flows.unbind(flowId, session) }
-            PendingPlatoonAdmissionStore.releaseClaim(token)
-            CaptureStatus.report(CaptureNotice.ADMISSION_REPLAY_FAILED)
-            return
+            return false
         }
         claim.endedFlowIds.forEach { flowId ->
             sessions.remove(flowId)?.let { flows.unbind(flowId, it) }
         }
-        PendingPlatoonAdmissionStore.complete(token).forEach { tokenByFlow.remove(it, token) }
-        CaptureStatus.report(
-            CaptureNotice.PLATOON_CONFIRMED,
-            profile.platoonName.take(MAX_STATUS_NAME_CHARS),
-            profile.platoonId.toString(),
-            profile.client.displayName,
-        )
+        return true
     }
 
     fun discard(token: String) {

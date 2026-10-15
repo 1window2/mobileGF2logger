@@ -1,22 +1,13 @@
 package dev.gf2log.app
 
-import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.text.InputType
 import android.widget.LinearLayout
-import androidx.activity.result.contract.ActivityResultContracts
 import dev.gf2log.app.capture.CaptureDiagnosticsStore
-import dev.gf2log.app.discord.DiscordWebhookSecretStore
-import dev.gf2log.app.management.BackupFileName
-import dev.gf2log.app.management.InvalidBackupException
-import dev.gf2log.app.management.PlatoonBackupManager
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonStorageScope
-import dev.gf2log.app.management.RestoredBackupKind
 import dev.gf2log.app.settings.CapturePreferences
 import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.app.settings.GameServerRegion
@@ -25,8 +16,6 @@ import dev.gf2log.app.settings.PayloadHistoryPreferences
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Dialogs
-import dev.gf2log.app.ui.CaptureGuard
-import dev.gf2log.app.ui.DocumentAccess
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.Screen
@@ -39,12 +28,8 @@ import dev.gf2log.app.ui.navigationRow
 import dev.gf2log.app.ui.panel
 import dev.gf2log.app.ui.sectionHeader
 import dev.gf2log.app.ui.switchRow
-import dev.gf2log.app.ui.errorLine
-import dev.gf2log.app.ui.showMessage
 import dev.gf2log.app.ui.text
-import dev.gf2log.app.ui.textField
 import dev.gf2log.protocol.PayloadCatalog
-import java.time.LocalDateTime
 import java.time.ZoneId
 
 /** Settings: grouped rows for the Platoon, display, capture, backup, sharing, and about. */
@@ -52,34 +37,12 @@ class OptionsActivity : BaseActivity() {
 
     private lateinit var profileBinding: ActivePlatoonScopeBinding
     private val work = BackgroundWork(this, "GF2Settings")
-    private var pendingExportComplete = false
-
-    private val exportBackup = registerForActivityResult(
-        ActivityResultContracts.CreateDocument(PlatoonBackupManager.MIME_TYPE),
-    ) { uri ->
-        val scope = profileBinding.scope
-        if (uri == null || scope == null) return@registerForActivityResult
-        val complete = pendingExportComplete
-        runBackup(
-            progress = R.string.backup_exporting,
-            success = if (complete) R.string.full_backup_exported else R.string.status_backup_exported,
-            failure = { backupExportFailureMessage(complete) },
-        ) {
-            DocumentAccess.openOutput(contentResolver, uri).use { output ->
-                val manager = PlatoonBackupManager(this, scope)
-                if (complete) manager.exportFull(output) else manager.export(output)
-            }
-        }
-    }
-
-    private val restoreBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let(::restore)
-    }
+    private val backup = BackupFlow(this, work, MAINTENANCE) { profileBinding.scope }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         profileBinding = ActivePlatoonScopeBinding(this)
-        pendingExportComplete = savedInstanceState?.getBoolean(STATE_EXPORT_COMPLETE) == true
+        backup.restoreState(savedInstanceState)
         val screen = Screen(this)
         screen.topBar.setNavigation(::finish).setTitle(getString(R.string.payload_options))
         screen.setBody(Screen.scrollingBody(this, buildContent()))
@@ -90,7 +53,7 @@ class OptionsActivity : BaseActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        outState.putBoolean(STATE_EXPORT_COMPLETE, pendingExportComplete)
+        backup.saveState(outState)
         super.onSaveInstanceState(outState)
     }
 
@@ -187,22 +150,20 @@ class OptionsActivity : BaseActivity() {
                 getString(R.string.export_platoon_backup_detail),
                 R.drawable.ic_download,
                 enabled = scope != null,
-            ) { startExport(complete = false) },
+            ) { backup.export(complete = false) },
             navigationRow(
                 getString(R.string.back_up_all_information),
                 getString(R.string.back_up_all_information_description),
                 R.drawable.ic_save,
                 enabled = scope != null,
-            ) { startExport(complete = true) },
+            ) { backup.export(complete = true) },
             navigationRow(getString(R.string.restore_full_backup), getString(R.string.restore_backup_detail), R.drawable.ic_upload) {
-                confirmRestore()
+                backup.confirmRestore()
             },
         )), lp())
 
         addView(sectionHeader(getString(R.string.discord_webhook)), lp())
-        val webhookRow = column()
-        addView(webhookRow, lp())
-        renderWebhookRow(webhookRow)
+        addView(DiscordWebhookRow(this@OptionsActivity, work).view, lp())
 
         addView(sectionHeader(getString(R.string.settings_about)), lp())
         addView(group(listOf(
@@ -312,128 +273,7 @@ class OptionsActivity : BaseActivity() {
 
     // endregion
 
-    // region Backup
-
-    private fun startExport(complete: Boolean) = CaptureGuard.whenStopped(this, R.string.stop_capture_before_backup) {
-        pendingExportComplete = complete
-        val prefix = if (complete) "GF2logger-full" else "GF2logger-platoon"
-        exportBackup.launch("$prefix-${Labels.FILE_STAMP.format(LocalDateTime.now())}.${PlatoonBackupManager.FILE_EXTENSION}")
-    }
-
-    private fun confirmRestore() = CaptureGuard.whenStopped(this, R.string.stop_capture_before_backup) {
-        Dialogs.confirm(this, R.string.restore_full_backup, R.string.restore_backup_warning, R.string.choose_file, destructive = true) {
-            restoreBackup.launch(arrayOf(PlatoonBackupManager.MIME_TYPE, "application/zip", "application/octet-stream"))
-        }
-    }
-
-    private fun restore(uri: Uri) {
-        if (DocumentAccess.displayName(contentResolver, uri)?.let(BackupFileName::isValid) != true) {
-            Feedback.show(this, R.string.invalid_full_backup, long = true)
-            return
-        }
-        if (work.isBusy(MAINTENANCE)) return
-        Feedback.show(this, R.string.backup_restoring)
-        work.run(
-            key = MAINTENANCE,
-            task = {
-                DocumentAccess.openInput(contentResolver, uri).use { input ->
-                    PlatoonBackupManager.restoreSelected(this, input)
-                }
-            },
-        ) { result ->
-            result.fold(
-                onSuccess = { kind ->
-                    Feedback.show(
-                        this,
-                        if (kind == RestoredBackupKind.COMPLETE) R.string.full_backup_restored else R.string.status_backup_restored,
-                        long = true,
-                    )
-                    recreate()
-                },
-                onFailure = { Feedback.show(this, fullBackupRestoreFailureMessage(it), long = true) },
-            )
-        }
-    }
-
-    private fun runBackup(
-        progress: Int,
-        success: Int,
-        failure: (Throwable) -> Int,
-        operation: () -> Unit,
-    ) {
-        if (work.isBusy(MAINTENANCE)) return
-        Feedback.show(this, progress)
-        work.run(key = MAINTENANCE, task = operation) { result ->
-            Feedback.show(this, result.fold(onSuccess = { success }, onFailure = failure), long = true)
-        }
-    }
-
-    // endregion
-
-    // region Discord, diagnostics, about
-
-    private fun renderWebhookRow(container: LinearLayout) {
-        work.run(task = { DiscordWebhookSecretStore(this).read() != null }) { result ->
-            val configured = result.getOrDefault(false)
-            container.removeAllViews()
-            container.addView(group(listOf(
-                navigationRow(
-                    getString(if (configured) R.string.discord_webhook_configured else R.string.discord_webhook_not_configured),
-                    getString(R.string.discord_webhook_summary),
-                    R.drawable.ic_discord,
-                    trailing = getString(if (configured) R.string.change else R.string.set_up),
-                ) { editWebhook(container, configured) },
-            )), lp())
-        }
-    }
-
-    private fun editWebhook(container: LinearLayout, configured: Boolean) {
-        val input = textField(
-            getString(R.string.discord_webhook_hint),
-            id = R.id.webhook_input,
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI,
-        )
-        val error = errorLine()
-        val builder = Dialogs.builder(this)
-            .setTitle(R.string.discord_webhook)
-            .setView(Dialogs.content(this) {
-                addView(text(getString(R.string.discord_webhook_description), TextRole.SECONDARY), lp())
-                addView(input, lp(top = 12))
-                addView(error, lp(top = 4))
-            })
-            .setNegativeButton(R.string.cancel, null)
-            .setPositiveButton(R.string.save_discord_webhook, null)
-        if (configured) builder.setNeutralButton(R.string.clear_discord_webhook, null)
-        Dialogs.show(builder) { dialog ->
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val value = input.text.toString()
-                if (work.isBusy(WEBHOOK)) return@setOnClickListener
-                work.run(key = WEBHOOK, task = { DiscordWebhookSecretStore(this).save(value) }) { result ->
-                    if (result.isSuccess) {
-                        dialog.dismiss()
-                        Feedback.show(this, R.string.discord_webhook_saved)
-                        renderWebhookRow(container)
-                    } else {
-                        error.showMessage(getString(R.string.discord_webhook_invalid))
-                    }
-                }
-            }
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.apply {
-                setTextColor(getColor(R.color.destructive_action))
-                setOnClickListener {
-                    if (work.isBusy(WEBHOOK)) return@setOnClickListener
-                    work.run(key = WEBHOOK, task = { DiscordWebhookSecretStore(this@OptionsActivity).clear() }) { result ->
-                        dialog.dismiss()
-                        Feedback.show(
-                            this@OptionsActivity,
-                            if (result.isSuccess) R.string.discord_webhook_cleared else R.string.discord_webhook_clear_failed,
-                        )
-                        renderWebhookRow(container)
-                    }
-                }
-            }
-        }
-    }
+    // region Diagnostics and about
 
     private fun showDiagnostics() {
         work.run(task = { CaptureDiagnosticsStore(this).read() }) { result ->
@@ -477,16 +317,6 @@ class OptionsActivity : BaseActivity() {
     // endregion
 
     private companion object {
-        const val STATE_EXPORT_COMPLETE = "settings.export_complete"
         const val MAINTENANCE = "maintenance"
-        const val WEBHOOK = "webhook"
     }
 }
-
-/** Known validation failures blame the selected file; anything else is an operational failure. */
-internal fun fullBackupRestoreFailureMessage(error: Throwable): Int =
-    if (error is InvalidBackupException) R.string.invalid_full_backup else R.string.full_backup_restore_failed
-
-/** A Platoon-only export failure must not claim that the complete backup failed. */
-internal fun backupExportFailureMessage(complete: Boolean): Int =
-    if (complete) R.string.full_backup_export_failed else R.string.status_backup_export_failed

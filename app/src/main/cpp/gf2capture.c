@@ -32,7 +32,6 @@
 
 typedef struct flow_state {
     int64_t id;
-    bool tracked;
     bool classified;
     bool inspect_payload;
 } flow_state_t;
@@ -258,21 +257,20 @@ static void protect_socket_callback(zdtun_t *tunnel, socket_t socket_fd) {
 
 static int connection_open_callback(zdtun_t *tunnel, zdtun_conn_t *connection) {
     capture_context_t *context = (capture_context_t *) zdtun_userdata(tunnel);
+    const zdtun_5tuple_t *tuple = zdtun_conn_get_5tuple(connection);
+    // Only TCP streams can carry game frames, so other flows keep no state and never reach Java.
+    if (tuple->ipproto != IPPROTO_TCP) {
+        return 0;
+    }
+
     flow_state_t *flow = calloc(1, sizeof(flow_state_t));
     if (flow == NULL) {
         LOGE("Unable to allocate flow state");
         return 1;
     }
-
-    const zdtun_5tuple_t *tuple = zdtun_conn_get_5tuple(connection);
     flow->id = atomic_fetch_add(&last_flow_id, 1) + 1;
-    // Only TCP streams can carry game frames, so other flows never reach Java.
-    flow->tracked = tuple->ipproto == IPPROTO_TCP;
-    flow->inspect_payload = flow->tracked;
+    flow->inspect_payload = true;
     zdtun_conn_set_userdata(connection, flow);
-    if (!flow->tracked) {
-        return 0;
-    }
 
     const int family = tuple->ipver == 4 ? AF_INET : AF_INET6;
     char local_address[INET6_ADDRSTRLEN] = {0};
@@ -318,7 +316,7 @@ static void connection_close_callback(zdtun_t *tunnel, const zdtun_conn_t *conne
     // a no-op instead of a duplicate onFlowClosed and a double free.
     zdtun_conn_set_userdata((zdtun_conn_t *) connection, NULL);
 
-    if (flow->tracked && context->env != NULL) {
+    if (context->env != NULL) {
         (*context->env)->CallVoidMethod(
                 context->env,
                 context->listener,

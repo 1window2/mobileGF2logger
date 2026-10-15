@@ -78,6 +78,7 @@ internal object ExactBoundaryCorrelation {
         db: SQLiteDatabase,
         uid: Long,
     ) {
+        MembershipRows.synchronizeActiveState(db, listOf(uid))
         val latestSnapshotAt = SnapshotIngestion.latestSnapshotCapturedAt(db)
         val snapshotFilter = if (latestSnapshotAt == null) "" else "AND occurred_at > ?"
         val arguments = mutableListOf(
@@ -124,18 +125,6 @@ internal object ExactBoundaryCorrelation {
             "members",
             ContentValues().apply {
                 put("current_name", latestBoundary.name)
-                put(
-                    "is_active",
-                    if (latestBoundary.type in setOf(
-                            MemberEventType.JOINED,
-                            MemberEventType.REJOINED,
-                        )
-                    ) {
-                        1
-                    } else {
-                        0
-                    },
-                )
                 put("last_seen_at", latestBoundary.occurredAt.toEpochMilli())
             },
             "uid = ?",
@@ -160,7 +149,6 @@ internal object ExactBoundaryCorrelation {
             uid = member.uid,
             name = member.name,
             level = 0,
-            isActive = false,
             firstSeenAt = observedAt,
             lastSeenAt = observedAt,
         )

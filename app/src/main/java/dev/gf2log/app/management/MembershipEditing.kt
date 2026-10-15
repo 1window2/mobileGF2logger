@@ -30,7 +30,6 @@ internal object MembershipEditing {
                 uid = uid,
                 name = name.trim(),
                 level = 0,
-                isActive = false,
                 firstSeenAt = joined.instant,
                 lastSeenAt = withdrew.instant,
                 customName = name.trim(),
@@ -213,7 +212,7 @@ internal object MembershipEditing {
     }
 
     /**
-     * Derives current activity from the canonical period timeline, then verifies chronology and
+     * Verifies chronology, derives current activity from the canonical periods, and verifies
      * event ownership before the surrounding transaction may commit.
      */
     private fun synchronizeAndVerifyMembershipState(db: SQLiteDatabase, uid: Long) {
@@ -221,15 +220,9 @@ internal object MembershipEditing {
         checkNotNull(periods.takeIf { it.isNotEmpty() }) { "A member must retain a membership period" }
         val violation = MembershipConsistencyPolicy.violation(periods)
         check(violation == null) { violation.orEmpty() }
-        val updated = db.update(
-            "members",
-            ContentValues().apply {
-                put("is_active", if (MembershipConsistencyPolicy.isActive(periods)) 1 else 0)
-            },
-            "uid = ?",
-            arrayOf(uid.toString()),
-        )
-        check(updated == 1) { "Membership state has no owning member" }
+        check(MembershipRows.synchronizeActiveState(db, listOf(uid)) == 1) {
+            "Membership state has no owning member"
+        }
         val mismatchedEvent = db.rawQuery(
             "SELECT 1 FROM member_events event " +
                 "JOIN membership_periods period ON period.id = event.membership_period_id " +

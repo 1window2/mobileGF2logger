@@ -31,7 +31,7 @@ internal object PlatoonDatabaseMigrations {
             PlatoonDatabaseSchema.createPlatoonActivityRetentionIndex(db)
         }
         if (oldVersion < 12) PlatoonDatabaseSchema.createWeeklyReportHistoryTables(db)
-        if (oldVersion < 13) MembershipRows.synchronizeAllMembershipStates(db)
+        if (oldVersion < 13) MembershipRows.synchronizeAllActiveStates(db)
     }
 
     private fun renameTenuresToMembershipPeriods(db: SQLiteDatabase, oldVersion: Int) {

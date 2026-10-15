@@ -10,12 +10,12 @@ internal object MembershipRows {
     fun memberExists(db: SQLiteDatabase, uid: Long): Boolean =
         db.exists("SELECT 1 FROM members WHERE uid = ? LIMIT 1", uid)
 
+    /** Inserts an inactive member; callers derive activity with [synchronizeActiveState]. */
     fun insertMember(
         db: SQLiteDatabase,
         uid: Long,
         name: String,
         level: Long,
-        isActive: Boolean,
         firstSeenAt: Instant,
         lastSeenAt: Instant,
         customName: String? = null,
@@ -28,7 +28,7 @@ internal object MembershipRows {
                 put("current_name", name)
                 if (customName != null) put("custom_name", customName)
                 put("current_level", level)
-                put("is_active", if (isActive) 1 else 0)
+                put("is_active", 0)
                 put("first_seen_at", firstSeenAt.toEpochMilli())
                 put("last_seen_at", lastSeenAt.toEpochMilli())
                 put("note", "")
@@ -85,9 +85,7 @@ internal object MembershipRows {
         uid: Long,
         source: EvidenceSource,
     ) {
-        if (db.exists("SELECT 1 FROM membership_periods WHERE uid = ? AND left_at IS NULL LIMIT 1", uid)) {
-            return
-        }
+        if (db.exists("${effectiveOpenPeriod("?")} LIMIT 1", uid)) return
         insertMembershipPeriod(
             db = db,
             uid = uid,
@@ -221,19 +219,60 @@ internal object MembershipRows {
     }
 
     /**
-     * Repairs the derived active flag while upgrading databases created before schema v13.
-     * Leaves every evidence period intact and derives only the current-state projection.
+     * The one rule for `members.is_active`: a member is active while an effective open period
+     * remains. An open period started by an exact Updates join is superseded by later exit
+     * evidence: another period exiting after that join, or a newer authoritative roster that
+     * omits the member. When rosters and Updates agree this is simply "some period is open",
+     * the projection the schema-v13 upgrade repairs.
      */
-    fun synchronizeAllMembershipStates(db: SQLiteDatabase) {
-        db.execSQL(
-            """
-            UPDATE members
-            SET is_active = CASE WHEN EXISTS (
-                SELECT 1
-                FROM membership_periods period
-                WHERE period.uid = members.uid AND period.left_at IS NULL
-            ) THEN 1 ELSE 0 END
-            """.trimIndent(),
-        )
+    private fun effectiveOpenPeriod(uid: String): String =
+        """
+        SELECT 1 FROM membership_periods current_period
+        WHERE current_period.uid = $uid
+          AND current_period.left_at IS NULL
+          AND NOT (
+            current_period.joined_source = '${EvidenceSource.GAME_UPDATES.name}'
+            AND (
+              EXISTS (
+                SELECT 1 FROM membership_periods later_exit
+                WHERE later_exit.uid = current_period.uid
+                  AND later_exit.id != current_period.id
+                  AND later_exit.left_at > current_period.joined_at
+              )
+              OR EXISTS (
+                SELECT 1 FROM snapshots latest_roster
+                WHERE latest_roster.captured_at = (SELECT MAX(captured_at) FROM snapshots)
+                  AND latest_roster.captured_at > current_period.joined_at
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM snapshot_members roster_member
+                    JOIN snapshots roster ON roster.id = roster_member.snapshot_id
+                    WHERE roster_member.uid = current_period.uid
+                      AND roster.captured_at = latest_roster.captured_at
+                  )
+              )
+            )
+          )
+        """.trimIndent()
+
+    private val ACTIVE_STATE_UPDATE =
+        "UPDATE members SET is_active = CASE WHEN EXISTS (${effectiveOpenPeriod("members.uid")}) " +
+            "THEN 1 ELSE 0 END"
+
+    /** Re-derives the active flag of [uids] inside the caller's transaction; returns rows updated. */
+    fun synchronizeActiveState(db: SQLiteDatabase, uids: Collection<Long>): Int =
+        uids.distinct().chunked(MAX_BOUND_ARGUMENTS).sumOf { chunk ->
+            db.compileStatement(
+                "$ACTIVE_STATE_UPDATE WHERE uid IN (${chunk.joinToString { "?" }})",
+            ).use { statement ->
+                chunk.forEachIndexed { index, uid -> statement.bindLong(index + 1, uid) }
+                statement.executeUpdateDelete()
+            }
+        }
+
+    fun synchronizeAllActiveStates(db: SQLiteDatabase) {
+        db.execSQL(ACTIVE_STATE_UPDATE)
     }
+
+    private const val MAX_BOUND_ARGUMENTS = 500
 }

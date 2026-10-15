@@ -29,6 +29,7 @@ internal object RosterHistoryReplay {
                 }
             }
         }
+        MembershipRows.synchronizeAllActiveStates(db)
         ActivityIngestion.resolveUnresolvedActivityUids(db)
     }
 
@@ -68,7 +69,6 @@ internal object RosterHistoryReplay {
                     uid = uid,
                     name = latest.second.name,
                     level = latest.second.level.toLong(),
-                    isActive = uid in latestFrame.members,
                     firstSeenAt = firstSeenAt,
                     lastSeenAt = latest.third,
                 )

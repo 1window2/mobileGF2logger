@@ -72,6 +72,10 @@ internal object SnapshotIngestion {
         snapshot.members.forEach { member ->
             ensureRosterActiveMembershipPeriod(db, member.uid, source)
         }
+        MembershipRows.synchronizeActiveState(
+            db,
+            snapshot.members.map(SnapshotMember::uid) + changes.left.map { it.uid },
+        )
         ActivityIngestion.trimPlatoonActivity(db)
         ActivityIngestion.resolveUnresolvedActivityUids(db)
         return SnapshotIngestResult(
@@ -225,7 +229,7 @@ internal object SnapshotIngestion {
             precision = EvidencePrecision.INFERRED,
             source = source,
         )
-        markInactive(db, member.uid, observedAt)
+        recordLastSeen(db, member.uid, observedAt)
         if (exactMembershipPeriodId != null) return
         insertSnapshotBoundaryEvent(
             db,
@@ -289,7 +293,6 @@ internal object SnapshotIngestion {
         val existing = ContentValues().apply {
             put("current_name", member.name)
             put("current_level", member.level)
-            put("is_active", 1)
             put("last_seen_at", observedAt.toEpochMilli())
         }
         if (db.update("members", existing, "uid = ?", arrayOf(member.uid.toString())) == 0) {
@@ -298,20 +301,16 @@ internal object SnapshotIngestion {
                 uid = member.uid,
                 name = member.name,
                 level = member.level,
-                isActive = true,
                 firstSeenAt = observedAt,
                 lastSeenAt = observedAt,
             )
         }
     }
 
-    private fun markInactive(db: SQLiteDatabase, uid: Long, observedAt: Instant) {
+    private fun recordLastSeen(db: SQLiteDatabase, uid: Long, observedAt: Instant) {
         db.update(
             "members",
-            ContentValues().apply {
-                put("is_active", 0)
-                put("last_seen_at", observedAt.toEpochMilli())
-            },
+            ContentValues().apply { put("last_seen_at", observedAt.toEpochMilli()) },
             "uid = ?",
             arrayOf(uid.toString()),
         )

@@ -2,22 +2,19 @@ package dev.gf2log.app.management
 
 import java.time.Instant
 import java.time.LocalDate
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MembershipConsistencyPolicyTest {
     @Test
-    fun adjacentPeriodsAreValidAndTheOpenTailDefinesCurrentActivity() {
+    fun adjacentPeriodsAreValid() {
         val periods = listOf(
             interval(1, "2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z"),
             interval(2, "2026-02-01T00:00:00Z", null),
         )
 
         assertNull(MembershipConsistencyPolicy.violation(periods))
-        assertTrue(MembershipConsistencyPolicy.isActive(periods))
     }
 
     @Test
@@ -41,11 +38,10 @@ class MembershipConsistencyPolicyTest {
     }
 
     @Test
-    fun closedTimelineIsInactive() {
+    fun closedTimelineIsValid() {
         val periods = listOf(interval(1, "2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z"))
 
         assertNull(MembershipConsistencyPolicy.violation(periods))
-        assertFalse(MembershipConsistencyPolicy.isActive(periods))
     }
 
     @Test
@@ -56,7 +52,6 @@ class MembershipConsistencyPolicyTest {
         )
 
         assertNull(MembershipConsistencyPolicy.violation(periods))
-        assertTrue(MembershipConsistencyPolicy.isActive(periods))
     }
 
     @Test

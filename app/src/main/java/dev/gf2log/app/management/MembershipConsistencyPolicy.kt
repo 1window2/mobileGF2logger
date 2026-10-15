@@ -39,8 +39,6 @@ internal object MembershipConsistencyPolicy {
         return null
     }
 
-    fun isActive(periods: List<MembershipInterval>): Boolean = periods.any { it.leftAt == null }
-
     private fun hasValidOwnChronology(period: MembershipInterval): Boolean {
         val joinedAt = period.joinedAt ?: return true
         val leftAt = period.leftAt ?: return true

@@ -91,41 +91,17 @@ class PlatoonBackupManager internal constructor(
         }
     }
 
-    fun restore(input: InputStream) {
-        restoreDirectory.mkdirs()
-        val stagedDatabase = File(restoreDirectory, "platoon.db.staged")
-        if (stagedDatabase.exists() && !stagedDatabase.delete()) {
-            error("Unable to clear a previous staged restore")
-        }
-        val staged = validateSelectedBackup {
-            BackupArchive.stage(input, stagedDatabase)
-        }
-        try {
-            val target = managerFor(staged)
-            target.manager.restoreStagedPlatoon(stagedDatabase, staged, target)
-        } finally {
-            stagedDatabase.delete()
-        }
+    fun restore(input: InputStream) = withStagedArchive(input) { stagedDatabase, staged ->
+        val target = managerFor(staged)
+        target.manager.restoreStagedPlatoon(stagedDatabase, staged, target)
     }
 
-    // Function Name: restoreCheckpoint
-    // Description:
-    // - Restores a same-device, current-schema checkpoint without retiring retained CSV evidence.
-    // - Used only after the caller removes deterministic files planned by the reverted import.
-    // Parameters:
-    // - input: Checkpoint archive created by this application.
-    // Returns:
-    // - Unit after validated, crash-aware database replacement.
-    internal fun restoreCheckpoint(input: InputStream) {
-        restoreDirectory.mkdirs()
-        val stagedDatabase = File(restoreDirectory, "platoon.db.staged")
-        if (stagedDatabase.exists() && !stagedDatabase.delete()) {
-            error("Unable to clear a previous staged restore")
-        }
-        val staged = validateSelectedBackup {
-            BackupArchive.stage(input, stagedDatabase)
-        }
-        try {
+    /**
+     * Restores a same-device, current-schema checkpoint without retiring retained CSV evidence.
+     * Used only after the caller removes deterministic files planned by the reverted import.
+     */
+    internal fun restoreCheckpoint(input: InputStream) =
+        withStagedArchive(input) { stagedDatabase, staged ->
             validateSelectedBackup {
                 BackupFormatPolicy.requirePlatoonOnly(
                     staged.formatVersion,
@@ -135,23 +111,26 @@ class PlatoonBackupManager internal constructor(
                 validateDatabase(stagedDatabase, requireCurrentSchema = true)
             }
             replaceRestoredState(stagedDatabase, restoredSettings = null, retireRetainedCsv = false)
-        } finally {
-            stagedDatabase.delete()
         }
+
+    fun restoreFull(input: InputStream) = withStagedArchive(input) { stagedDatabase, staged ->
+        val target = managerFor(staged)
+        target.manager.restoreStagedComplete(stagedDatabase, staged, target)
     }
 
-    fun restoreFull(input: InputStream) {
-        restoreDirectory.mkdirs()
+    private inline fun withStagedArchive(
+        input: InputStream,
+        restoreStaged: (File, BackupArchive.StagedArchive) -> Unit,
+    ) {
+        check(restoreDirectory.mkdirs() || restoreDirectory.isDirectory) {
+            "Unable to create the restore staging directory"
+        }
         val stagedDatabase = File(restoreDirectory, "platoon.db.staged")
         if (stagedDatabase.exists() && !stagedDatabase.delete()) {
             error("Unable to clear a previous staged restore")
         }
-        val staged = validateSelectedBackup {
-            BackupArchive.stage(input, stagedDatabase)
-        }
         try {
-            val target = managerFor(staged)
-            target.manager.restoreStagedComplete(stagedDatabase, staged, target)
+            restoreStaged(stagedDatabase, stageSelectedArchive(input, stagedDatabase))
         } finally {
             stagedDatabase.delete()
         }
@@ -187,10 +166,7 @@ class PlatoonBackupManager internal constructor(
 
     private fun managerFor(staged: BackupArchive.StagedArchive): RestoreTarget {
         val registry = PlatoonProfileRegistry(appContext)
-        val restoredProfile = requireNotNull(staged.profile) {
-            "Unscoped legacy backups are no longer supported"
-        }.toProfile()
-        require(!restoredProfile.legacy) { "Unscoped legacy backups are no longer supported" }
+        val restoredProfile = staged.scopedProfile().toProfile()
         registry.requireRestoreCapacity(restoredProfile)
         val scope = PlatoonStorageScope(restoredProfile.storageId)
         val previousProfile = registry.find(scope.storageId)
@@ -244,11 +220,7 @@ class PlatoonBackupManager internal constructor(
     }
 
     private fun requireArchiveMatchesScope(staged: BackupArchive.StagedArchive) {
-        val archivedProfile = requireNotNull(staged.profile) {
-            "Unscoped legacy backups are no longer supported"
-        }
-        require(!archivedProfile.legacy) { "Unscoped legacy backups are no longer supported" }
-        require(archivedProfile.storageId == storageScope.storageId) {
+        require(staged.scopedProfile().storageId == storageScope.storageId) {
             "Backup belongs to a different Platoon"
         }
     }
@@ -259,26 +231,6 @@ class PlatoonBackupManager internal constructor(
         return requireNotNull(registry.find(storageScope.storageId)) {
             "The selected Platoon profile is unavailable"
         }
-    }
-
-    // Function Name: validateSelectedBackup
-    // Description:
-    // - Converts expected archive, settings, and SQLite validation failures into a typed error.
-    // - Leaves provider I/O and local restore-state failures distinct for accurate UI reporting.
-    // Parameters:
-    // - validation: Read-only validation operation for the selected backup.
-    // Returns:
-    // - Returns the validation result when the selected backup is valid.
-    private inline fun <T> validateSelectedBackup(validation: () -> T): T = try {
-        validation()
-    } catch (error: IllegalArgumentException) {
-        throw InvalidBackupException(error)
-    } catch (error: SQLiteException) {
-        throw InvalidBackupException(error)
-    } catch (error: ZipException) {
-        throw InvalidBackupException(error)
-    } catch (error: EOFException) {
-        throw InvalidBackupException(error)
     }
 
     // Function Name: replaceRestoredState
@@ -297,14 +249,8 @@ class PlatoonBackupManager internal constructor(
         retireRetainedCsv: Boolean = true,
         restoreTarget: RestoreTarget? = null,
     ) {
-        val retainedCsvDirectory = File(
-            storageScope.rootDirectory(appContext),
-            PlatoonRepository.RETAINED_CSV_DIRECTORY,
-        )
-        val previousRetainedCsvDirectory = File(
-            storageScope.rootDirectory(appContext),
-            "${PlatoonRepository.RETAINED_CSV_DIRECTORY}.pre_restore",
-        )
+        val retainedCsvDirectory = storageScope.retainedCsvDirectory(appContext)
+        val previousRetainedCsvDirectory = storageScope.previousRetainedCsvDirectory(appContext)
         try {
             PlatoonRepository.withExclusiveDatabase(storageScope) {
                 beginRestoreTransaction(
@@ -337,7 +283,7 @@ class PlatoonBackupManager internal constructor(
                 restoreObserver(RestoreCheckpoint.COMMITTED)
                 cleanupCommittedRestore(
                     previousRetainedCsvDirectory,
-                    previousDatabaseFile(),
+                    previousDatabaseFile(appContext, storageScope),
                 )
             }
         } catch (error: Exception) {
@@ -417,7 +363,7 @@ class PlatoonBackupManager internal constructor(
 
     private fun replaceDatabase(staged: File, preservePrevious: Boolean = false) {
         databaseFile.parentFile?.mkdirs()
-        val previous = previousDatabaseFile()
+        val previous = previousDatabaseFile(appContext, storageScope)
         if (previous.exists() && !previous.delete()) error("Unable to clear previous restore backup")
         listOf("-wal", "-shm", "-journal").forEach { suffix ->
             File(databaseFile.path + suffix).delete()
@@ -458,11 +404,6 @@ class PlatoonBackupManager internal constructor(
             throw error
         }
     }
-
-    private fun previousDatabaseFile() = File(
-        databaseFile.parentFile,
-        "${storageScope.databaseName}.pre_restore",
-    )
 
     private fun ensureDatabaseExists() {
         if (databaseFile.isFile) return
@@ -555,24 +496,8 @@ class PlatoonBackupManager internal constructor(
             }
             val stagedDatabase = File.createTempFile("selected-", ".db", stagingDirectory)
             try {
-                val staged = try {
-                    BackupArchive.stage(input, stagedDatabase)
-                } catch (error: IllegalArgumentException) {
-                    throw InvalidBackupException(error)
-                } catch (error: ZipException) {
-                    throw InvalidBackupException(error)
-                } catch (error: EOFException) {
-                    throw InvalidBackupException(error)
-                }
-                val profile = try {
-                    requireNotNull(staged.profile) {
-                        "Unscoped legacy backups are no longer supported"
-                    }.toProfile().also {
-                        require(!it.legacy) { "Unscoped legacy backups are no longer supported" }
-                    }
-                } catch (error: IllegalArgumentException) {
-                    throw InvalidBackupException(error)
-                }
+                val staged = stageSelectedArchive(input, stagedDatabase)
+                val profile = validateSelectedBackup { staged.scopedProfile().toProfile() }
                 val manager = PlatoonBackupManager(
                     appContext,
                     PlatoonStorageScope(profile.storageId),
@@ -588,6 +513,30 @@ class PlatoonBackupManager internal constructor(
                 stagingDirectory.delete()
             }
         }
+
+        /**
+         * Converts expected archive, settings, and SQLite validation failures into a typed error.
+         * Provider I/O and local restore-state failures stay distinct for accurate UI reporting.
+         */
+        private inline fun <T> validateSelectedBackup(validation: () -> T): T = try {
+            validation()
+        } catch (error: IllegalArgumentException) {
+            throw InvalidBackupException(error)
+        } catch (error: SQLiteException) {
+            throw InvalidBackupException(error)
+        } catch (error: ZipException) {
+            throw InvalidBackupException(error)
+        } catch (error: EOFException) {
+            throw InvalidBackupException(error)
+        }
+
+        private fun stageSelectedArchive(input: InputStream, stagedDatabase: File) =
+            validateSelectedBackup { BackupArchive.stage(input, stagedDatabase) }
+
+        private fun BackupArchive.StagedArchive.scopedProfile(): BackupArchive.BackupPlatoonProfile =
+            requireNotNull(profile) { "Unscoped legacy backups are no longer supported" }.also {
+                require(!it.legacy) { "Unscoped legacy backups are no longer supported" }
+            }
 
         internal fun recoverInterruptedFullRestore(
             context: Context,
@@ -658,18 +607,9 @@ class PlatoonBackupManager internal constructor(
                     RestoreState.valueOf(stateFile.readText(Charsets.US_ASCII))
                 }.getOrElse { throw IllegalStateException("Invalid backup-restore transaction", it) }
                 val database = appContext.getDatabasePath(scope.databaseName)
-                val previousDatabase = File(
-                    database.parentFile,
-                    "${scope.databaseName}.pre_restore",
-                )
-                val retainedCsv = File(
-                    scope.rootDirectory(appContext),
-                    PlatoonRepository.RETAINED_CSV_DIRECTORY,
-                )
-                val previousCsv = File(
-                    scope.rootDirectory(appContext),
-                    "${PlatoonRepository.RETAINED_CSV_DIRECTORY}.pre_restore",
-                )
+                val previousDatabase = previousDatabaseFile(appContext, scope)
+                val retainedCsv = scope.retainedCsvDirectory(appContext)
+                val previousCsv = scope.previousRetainedCsvDirectory(appContext)
                 when (state) {
                     RestoreState.PREPARED -> rollbackPreparedRestore(
                         appContext,
@@ -755,14 +695,8 @@ class PlatoonBackupManager internal constructor(
             context: Context,
             scope: PlatoonStorageScope,
         ) {
-            val directory = File(
-                scope.rootDirectory(context),
-                PlatoonRepository.RETAINED_CSV_DIRECTORY,
-            )
-            val previous = File(
-                scope.rootDirectory(context),
-                "${PlatoonRepository.RETAINED_CSV_DIRECTORY}.pre_restore",
-            )
+            val directory = scope.retainedCsvDirectory(context)
+            val previous = scope.previousRetainedCsvDirectory(context)
             if (!previous.exists()) return
             require(!directory.exists()) {
                 "Both retained CSV state and a previous restore copy exist"
@@ -772,14 +706,7 @@ class PlatoonBackupManager internal constructor(
             }
         }
 
-        // Function Name: cleanupLegacyRetiredCsvArtifacts
-        // Description:
-        // - Removes obsolete cache-only retained-CSV copies left by pre-v2 restore code.
-        // - Runs only when no current full-restore transaction state exists.
-        // Parameters:
-        // - context: Application context used to locate the private restore cache.
-        // Returns:
-        // - Returns normally after all obsolete artifacts are removed.
+        /** Removes obsolete cache-only retained-CSV copies left by pre-v2 restore code. */
         private fun cleanupLegacyRetiredCsvArtifacts(
             context: Context,
             scope: PlatoonStorageScope,
@@ -804,6 +731,11 @@ class PlatoonBackupManager internal constructor(
             restoreTransactionDirectory(context, scope).exists() ||
                 scope.previousRetainedCsvDirectory(context).exists() ||
                 legacyRetiredCsvArtifacts(context, scope).isNotEmpty()
+
+        private fun previousDatabaseFile(context: Context, scope: PlatoonStorageScope) = File(
+            context.getDatabasePath(scope.databaseName).parentFile,
+            "${scope.databaseName}.pre_restore",
+        )
 
         private fun writeAtomic(file: File, bytes: ByteArray) {
             file.parentFile?.mkdirs()

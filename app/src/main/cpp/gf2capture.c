@@ -277,27 +277,32 @@ static int connection_open_callback(zdtun_t *tunnel, zdtun_conn_t *connection) {
     const int family = tuple->ipver == 4 ? AF_INET : AF_INET6;
     char local_address[INET6_ADDRSTRLEN] = {0};
     char remote_address[INET6_ADDRSTRLEN] = {0};
-    if (inet_ntop(family, &tuple->src_ip, local_address, sizeof(local_address)) != NULL &&
-            inet_ntop(family, &tuple->dst_ip, remote_address, sizeof(remote_address)) != NULL) {
-        jstring local = (*context->env)->NewStringUTF(context->env, local_address);
-        jstring remote = (*context->env)->NewStringUTF(context->env, remote_address);
-        if (local != NULL && remote != NULL &&
-                !clear_java_exception(context, "flow address allocation")) {
-            (*context->env)->CallVoidMethod(
-                    context->env,
-                    context->listener,
-                    context->flow_opened_method,
-                    (jlong) flow->id,
-                    (jint) tuple->ipproto,
-                    local,
-                    (jint) ntohs(tuple->src_port),
-                    remote,
-                    (jint) ntohs(tuple->dst_port));
-            clear_java_exception(context, "flow open");
-        }
-        if (local != NULL) (*context->env)->DeleteLocalRef(context->env, local);
-        if (remote != NULL) (*context->env)->DeleteLocalRef(context->env, remote);
+    if (inet_ntop(family, &tuple->src_ip, local_address, sizeof(local_address)) == NULL ||
+            inet_ntop(family, &tuple->dst_ip, remote_address, sizeof(remote_address)) == NULL) {
+        return 0;
     }
+    // A failed NewStringUTF leaves an OutOfMemoryError pending, and no further JNI call may be
+    // made until it is cleared.
+    JNIEnv *env = context->env;
+    jstring local = (*env)->NewStringUTF(env, local_address);
+    jstring remote = local == NULL ? NULL : (*env)->NewStringUTF(env, remote_address);
+    if (remote != NULL) {
+        (*env)->CallVoidMethod(
+                env,
+                context->listener,
+                context->flow_opened_method,
+                (jlong) flow->id,
+                (jint) tuple->ipproto,
+                local,
+                (jint) ntohs(tuple->src_port),
+                remote,
+                (jint) ntohs(tuple->dst_port));
+        clear_java_exception(context, "flow open");
+        (*env)->DeleteLocalRef(env, remote);
+    } else {
+        clear_java_exception(context, "flow address allocation");
+    }
+    if (local != NULL) (*env)->DeleteLocalRef(env, local);
     return 0;
 }
 

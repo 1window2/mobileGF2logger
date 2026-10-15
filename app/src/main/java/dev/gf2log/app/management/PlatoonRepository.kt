@@ -526,8 +526,16 @@ internal class PlatoonRepository(
         private const val MAX_REVISION_NOTE_BYTES = 16 * 1_024
         private const val MAX_REVISION_PRIVATE_NOTE_BYTES = 2 * 1_024
         private const val TAG = "GF2PlatoonRepository"
+        /*
+         * Global lock order; acquire left to right and never in reverse:
+         * CsvImportCheckpointManager scope state -> maintenanceLock -> PlatoonDatabase monitor ->
+         * PlatoonProfileRegistry lock -> settings preference locks. databaseLock only guards the
+         * helper cache; it is taken after the maintenance lock and only closes evicted helpers.
+         */
         private val databaseLock = Any()
         private val maintenanceLock = ReentrantReadWriteLock(true)
+
+        internal fun holdsSharedDatabaseAccess(): Boolean = maintenanceLock.readHoldCount > 0
 
         private val databaseInstances = mutableMapOf<String, PlatoonDatabase>()
 

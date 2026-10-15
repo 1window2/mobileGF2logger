@@ -62,6 +62,10 @@ internal data class PlatoonProfile(
         }
     }
 
+    /** True for the one non-legacy profile that owns this verified full identity. */
+    fun hasIdentity(client: PlatoonClient, region: GameServerRegion, platoonId: Long): Boolean =
+        !legacy && this.client == client && serverRegion == region && this.platoonId == platoonId
+
     companion object {
         const val MAX_BANNER_ID = 6L
         const val MAX_NAME_LENGTH = 128
@@ -132,29 +136,21 @@ internal class PlatoonProfileRegistry(context: Context) {
     private val appContext = context.applicationContext
     private val preferences = appContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
-    fun ensureInitialized(): List<PlatoonProfile> = synchronized(lock) {
-        PlatoonProfileAdministration.recoverPending(appContext)
-        retireLegacyMetadataLocked()
-        readAllLocked().filterNot(PlatoonProfile::legacy)
-    }
+    fun ensureInitialized(): List<PlatoonProfile> = initialized { it }
 
-    fun list(): List<PlatoonProfile> = synchronized(lock) {
-        ensureInitialized()
-        readAllLocked().filterNot(PlatoonProfile::legacy).sortedWith(
+    fun list(): List<PlatoonProfile> = initialized { profiles ->
+        profiles.sortedWith(
             compareByDescending<PlatoonProfile> { it.lastSeenAt }.thenBy { it.storageId },
         )
     }
 
-    fun active(): PlatoonProfile? = synchronized(lock) {
-        ensureInitialized()
+    fun active(): PlatoonProfile? = initialized { current ->
         val activeId = preferences.getString(KEY_ACTIVE, null)
-        val current = readAllLocked().filterNot(PlatoonProfile::legacy)
         current.firstOrNull { it.storageId == activeId }
             ?: current.maxByOrNull(PlatoonProfile::lastSeenAt)
     }
 
-    fun find(storageId: String): PlatoonProfile? = synchronized(lock) {
-        ensureInitialized()
+    fun find(storageId: String): PlatoonProfile? = initialized {
         readLocked(storageId)?.takeUnless(PlatoonProfile::legacy)
     }
 
@@ -162,23 +158,27 @@ internal class PlatoonProfileRegistry(context: Context) {
         client: PlatoonClient,
         region: GameServerRegion,
         platoonId: Long,
-    ): PlatoonProfile? = synchronized(lock) {
-        ensureInitialized()
-        readAllLocked().firstOrNull {
-            !it.legacy &&
-                it.client == client &&
-                it.serverRegion == region &&
-                it.platoonId == platoonId
-        }
+    ): PlatoonProfile? = initialized { profiles ->
+        profiles.firstOrNull { it.hasIdentity(client, region, platoonId) }
     }
 
     fun findByClientAndPlatoonId(
         client: PlatoonClient,
         platoonId: Long,
-    ): List<PlatoonProfile> = synchronized(lock) {
-        ensureInitialized()
-        readAllLocked().filter {
-            !it.legacy && it.client == client && it.platoonId == platoonId
+    ): List<PlatoonProfile> = initialized { profiles ->
+        profiles.filter { it.client == client && it.platoonId == platoonId }
+    }
+
+    /**
+     * Global lock order is PlatoonRepository maintenance lock -> registry [lock]. Finishing a
+     * pending deletion takes the exclusive maintenance lock, so it runs before [lock] is held;
+     * restores already hold the maintenance lock when they update registry metadata.
+     */
+    private inline fun <T> initialized(block: (List<PlatoonProfile>) -> T): T {
+        PlatoonProfileAdministration.recoverPending(appContext)
+        return synchronized(lock) {
+            retireLegacyMetadataLocked()
+            block(readAllLocked().filterNot(PlatoonProfile::legacy))
         }
     }
 
@@ -217,12 +217,7 @@ internal class PlatoonProfileRegistry(context: Context) {
         require(region != GameServerRegion.MANUAL) { "A server region is required" }
         require(data.platoonId != 0u && data.platoonName.isNotBlank())
         val platoonId = data.platoonId.toLong()
-        val existing = readAllLocked().firstOrNull {
-            !it.legacy &&
-                it.client == client &&
-                it.serverRegion == region &&
-                it.platoonId == platoonId
-        }
+        val existing = readAllLocked().firstOrNull { it.hasIdentity(client, region, platoonId) }
         val storageId = existing?.storageId ?: allocateStorageIdLocked(client, region, platoonId)
         require(readLocked(storageId) != null || readAllLocked().size < MAX_PROFILES) {
             "Too many Platoon profiles are already registered"
@@ -268,12 +263,9 @@ internal class PlatoonProfileRegistry(context: Context) {
             "The server region does not belong to this client"
         }
         require(platoonId in 1L..UInt.MAX_VALUE.toLong()) { "Platoon ID is invalid" }
-        require(readAllLocked().none {
-            !it.legacy &&
-                it.client == client &&
-                it.serverRegion == region &&
-                it.platoonId == platoonId
-        }) { "That client/server Platoon profile already exists" }
+        require(readAllLocked().none { it.hasIdentity(client, region, platoonId) }) {
+            "That client/server Platoon profile already exists"
+        }
         require(readAllLocked().size < MAX_PROFILES) {
             "Too many Platoon profiles are already registered"
         }
@@ -328,10 +320,7 @@ internal class PlatoonProfileRegistry(context: Context) {
             require(
                 readAllLocked().none {
                     it.storageId != storageId &&
-                        !it.legacy &&
-                        it.client == current.client &&
-                        it.serverRegion == region &&
-                        it.platoonId == current.platoonId
+                        it.hasIdentity(current.client, region, current.platoonId)
                 },
             ) { "That client/server Platoon profile already exists" }
             val updated = current.copy(serverRegion = region)
@@ -554,11 +543,7 @@ internal class PlatoonProfileRegistry(context: Context) {
         require(
             profiles.none {
                 it.storageId != profile.storageId &&
-                    !it.legacy &&
-                    !profile.legacy &&
-                    it.client == profile.client &&
-                    it.serverRegion == profile.serverRegion &&
-                    it.platoonId == profile.platoonId
+                    it.hasIdentity(profile.client, profile.serverRegion, profile.platoonId)
             },
         ) { "Backup Platoon identity already belongs to another storage scope" }
     }

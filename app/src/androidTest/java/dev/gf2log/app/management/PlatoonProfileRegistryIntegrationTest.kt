@@ -453,6 +453,45 @@ class PlatoonProfileRegistryIntegrationTest {
     }
 
     @Test
+    fun pendingDeletionRecoveryCannotDeadlockWithAnExclusiveRestore() {
+        val registry = PlatoonProfileRegistry(context)
+        val kept = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            PlatoonProfileData(1u, "Kept", 0u, 0u),
+        )
+        val pendingId = PlatoonProfileIdentity.randomStorageId()
+        context.getSharedPreferences("platoon_profile_deletions", android.content.Context.MODE_PRIVATE)
+            .edit().putStringSet("pending_storage_ids", setOf(pendingId)).commit()
+        val exclusiveHeld = java.util.concurrent.CountDownLatch(1)
+        val failures = java.util.concurrent.ConcurrentLinkedQueue<Throwable>()
+        val restore = Thread {
+            runCatching {
+                PlatoonRepository.withExclusiveDatabase(PlatoonStorageScope(kept.storageId)) {
+                    exclusiveHeld.countDown()
+                    Thread.sleep(300)
+                    registry.find(kept.storageId)
+                }
+            }.onFailure(failures::add)
+        }.apply { isDaemon = true }
+        val reader = Thread {
+            runCatching {
+                exclusiveHeld.await()
+                registry.list()
+            }.onFailure(failures::add)
+        }.apply { isDaemon = true }
+
+        restore.start()
+        reader.start()
+        restore.join(10_000)
+        reader.join(10_000)
+
+        assertFalse("registry and maintenance locks deadlocked", restore.isAlive || reader.isAlive)
+        assertTrue(failures.isEmpty())
+        assertEquals(listOf(kept.storageId), registry.list().map(PlatoonProfile::storageId))
+    }
+
+    @Test
     fun registryRejectsUnboundedNewProfilesAndCanRemoveInactiveMetadata() {
         val registry = PlatoonProfileRegistry(context)
         val profiles = (1..PlatoonProfileRegistry.MAX_PROFILES).map { id ->

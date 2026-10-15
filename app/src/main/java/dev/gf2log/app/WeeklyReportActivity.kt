@@ -669,12 +669,16 @@ class WeeklyReportActivity : BaseActivity() {
                 Feedback.show(this, R.string.total_not_editable)
                 return
             }
+            // The draft is being committed; edits made now would be cleared with it.
+            if (work.isBusy(SAVE)) return
             val key = member.uid to cell.gameDay
             val nextCell = member.days.getOrNull(member.days.indexOf(cell) + 1)
             val next = nextCell?.let { { onCellTapped(member, it) } }
             WeeklyDialogs.showEdit(this, title, current.report.isGunsmokeWeek, member.uid, cell, edits[key], next) { edit ->
+                if (editingPeriod != current.report.periodStart) return@showEdit
                 if (edit.isEmpty) edits.remove(key) else edits[key] = edit
-                rowsAdapter.notifyItemChanged(current.displayedMembers.indexOfFirst { it.uid == member.uid })
+                // Rows are addressed in the list the adapter currently shows, not the tapped model.
+                rowsAdapter.notifyMemberChanged(member.uid)
                 updateTopBar()
             }
             return
@@ -865,6 +869,11 @@ class WeeklyReportActivity : BaseActivity() {
         fun submit(next: List<WeeklyReportBuilder.MemberRow>) {
             members = next
             notifyDataSetChanged()
+        }
+
+        fun notifyMemberChanged(uid: Long) {
+            val position = members.indexOfFirst { it.uid == uid }
+            if (position >= 0) notifyItemChanged(position)
         }
 
         override fun getItemCount() = members.size

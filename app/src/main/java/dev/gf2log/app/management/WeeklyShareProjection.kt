@@ -62,7 +62,7 @@ object WeeklyShareProjection {
                 dailyCells = member.days.map { formatDaily(it, report.isGunsmokeWeek, labels) },
                 total = formatTotal(member, report.isGunsmokeWeek, labels),
                 privateNote = privateNotesByUid[member.uid]
-                    ?.take(MAX_PRIVATE_NOTE_CHARS)
+                    ?.takeWhole(MAX_PRIVATE_NOTE_CHARS)
                     ?.takeIf { privacy.includePrivateNotes && it.isNotBlank() },
             )
         }
@@ -83,8 +83,8 @@ object WeeklyShareProjection {
         labels: Labels,
     ): String = when {
         privacy.includeMemberNames && privacy.includeUids ->
-            member.name.take(MAX_MEMBER_LABEL_CHARS) + " (#" + member.uid + ")"
-        privacy.includeMemberNames -> member.name.take(MAX_MEMBER_LABEL_CHARS)
+            member.name.takeWhole(MAX_MEMBER_LABEL_CHARS) + " (#" + member.uid + ")"
+        privacy.includeMemberNames -> member.name.takeWhole(MAX_MEMBER_LABEL_CHARS)
         privacy.includeUids -> "#" + member.uid
         else -> labels.anonymousMember(index + 1)
     }
@@ -124,6 +124,13 @@ object WeeklyShareProjection {
     }
 
     private val DAY = DateTimeFormatter.ofPattern("MM/dd")
+    /** At most [maximum] UTF-16 units, never ending on the high half of a surrogate pair. */
+    private fun String.takeWhole(maximum: Int): String {
+        if (length <= maximum) return this
+        val end = if (Character.isHighSurrogate(this[maximum - 1])) maximum - 1 else maximum
+        return substring(0, end)
+    }
+
     private const val MAX_MEMBER_LABEL_CHARS = 128
     private const val MAX_PRIVATE_NOTE_CHARS = 512
 }

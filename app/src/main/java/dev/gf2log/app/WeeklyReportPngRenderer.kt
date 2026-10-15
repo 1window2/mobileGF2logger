@@ -42,6 +42,7 @@ object WeeklyReportPngRenderer {
         val height = maxOf(1, (naturalHeight * scale).toInt())
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
+        val paints = CellPaints()
         canvas.drawColor(PAPER)
         canvas.scale(scale, scale)
 
@@ -73,7 +74,7 @@ object WeeklyReportPngRenderer {
 
         var top = PADDING + TITLE_HEIGHT
         var left = PADDING
-        drawCell(canvas, document.headers.first(), left, top, memberWidth, HEADER_HEIGHT, header = true)
+        drawCell(canvas, document.headers.first(), left, top, memberWidth, HEADER_HEIGHT, paints, header = true)
         left += memberWidth
         document.headers.drop(1).forEachIndexed { index, value ->
             val isLast = index == document.headers.lastIndex - 1
@@ -82,23 +83,23 @@ object WeeklyReportPngRenderer {
                 index == days -> totalWidth
                 else -> dayWidth
             }
-            drawCell(canvas, value, left, top, cellWidth, HEADER_HEIGHT, header = true)
+            drawCell(canvas, value, left, top, cellWidth, HEADER_HEIGHT, paints, header = true)
             left += cellWidth
         }
 
         top += HEADER_HEIGHT
         document.rows.forEach { row ->
             left = PADDING
-            drawCell(canvas, row.member, left, top, memberWidth, rowHeight)
+            drawCell(canvas, row.member, left, top, memberWidth, rowHeight, paints)
             left += memberWidth
             row.dailyCells.forEach { value ->
-                drawCell(canvas, value, left, top, dayWidth, rowHeight)
+                drawCell(canvas, value, left, top, dayWidth, rowHeight, paints)
                 left += dayWidth
             }
-            drawCell(canvas, row.total, left, top, totalWidth, rowHeight)
+            drawCell(canvas, row.total, left, top, totalWidth, rowHeight, paints)
             left += totalWidth
             if (document.includeNotes) {
-                drawCell(canvas, row.privateNote.orEmpty(), left, top, notesWidth, rowHeight)
+                drawCell(canvas, row.privateNote.orEmpty(), left, top, notesWidth, rowHeight, paints)
             }
             top += rowHeight
         }
@@ -112,27 +113,15 @@ object WeeklyReportPngRenderer {
         top: Int,
         width: Int,
         height: Int,
+        paints: CellPaints,
         header: Boolean = false,
     ) {
-        val fill = Paint().apply {
-            color = if (header) HEADER else SURFACE
-            style = Paint.Style.FILL
-        }
-        val border = Paint().apply {
-            color = OUTLINE
-            style = Paint.Style.STROKE
-            strokeWidth = 1f
-        }
-        canvas.drawRect(left.toFloat(), top.toFloat(), (left + width).toFloat(), (top + height).toFloat(), fill)
-        canvas.drawRect(left.toFloat(), top.toFloat(), (left + width).toFloat(), (top + height).toFloat(), border)
-        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = INK
-            textSize = if (header) 18f else 16f
-            typeface = Typeface.create(
-                Typeface.DEFAULT,
-                if (header) Typeface.BOLD else Typeface.NORMAL,
-            )
-        }
+        val textPaint = if (header) paints.headerText else paints.bodyText
+        paints.fill.color = if (header) HEADER else SURFACE
+        val right = (left + width).toFloat()
+        val bottom = (top + height).toFloat()
+        canvas.drawRect(left.toFloat(), top.toFloat(), right, bottom, paints.fill)
+        canvas.drawRect(left.toFloat(), top.toFloat(), right, bottom, paints.border)
         val lines = wrap(value, textPaint, width - CELL_PADDING * 2)
             .take(MAX_CELL_LINES)
         val lineHeight = textPaint.fontSpacing
@@ -142,6 +131,24 @@ object WeeklyReportPngRenderer {
                 canvas.drawText(line, (left + CELL_PADDING).toFloat(), baseline, textPaint)
             }
             baseline += lineHeight
+        }
+    }
+
+    /** Paints reused for every cell of one render; each render owns its own set. */
+    private class CellPaints {
+        val fill = Paint().apply { style = Paint.Style.FILL }
+        val border = Paint().apply {
+            color = OUTLINE
+            style = Paint.Style.STROKE
+            strokeWidth = 1f
+        }
+        val headerText = text(18f, Typeface.BOLD)
+        val bodyText = text(16f, Typeface.NORMAL)
+
+        private fun text(size: Float, style: Int) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = INK
+            textSize = size
+            typeface = Typeface.create(Typeface.DEFAULT, style)
         }
     }
 

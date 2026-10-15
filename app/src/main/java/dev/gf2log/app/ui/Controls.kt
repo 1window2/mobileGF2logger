@@ -228,7 +228,8 @@ internal object Controls {
                 setOnClickListener {
                     if (value == currentValue) return@setOnClickListener
                     currentValue = value
-                    moveSelection(index, animated = true) { onSelected(value) }
+                    moveSelection(index, animated = true)
+                    onSelected(value)
                 }
             }, RadioGroup.LayoutParams(0, segmentHeight, 1f))
         }

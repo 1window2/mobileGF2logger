@@ -26,8 +26,16 @@ internal object DocumentAccess {
         if (Paths.get(path).normalize().startsWith("/data")) {
             throw SecurityException("Export URI targets private app storage")
         }
-        return resolver.openOutputStream(destination, "wt")
-            ?: error("Document provider did not open an output stream")
+        // Truncate so an overwritten document cannot keep stale trailing bytes; providers that
+        // reject "wt" create a fresh document anyway, so plain "w" is the safe fallback.
+        val output = try {
+            resolver.openOutputStream(destination, "wt")
+        } catch (_: IllegalArgumentException) {
+            resolver.openOutputStream(destination, "w")
+        } catch (_: java.io.FileNotFoundException) {
+            resolver.openOutputStream(destination, "w")
+        }
+        return output ?: error("Document provider did not open an output stream")
     }
 
     fun openInput(resolver: ContentResolver, source: Uri): InputStream {

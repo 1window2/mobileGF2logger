@@ -266,7 +266,13 @@ internal fun Context.switchRow(
             }
         }, lp(width = 0, weight = 1f))
         // A permanently required option shows its badge instead of an inert switch.
-        if (enabled || badge == null) addView(toggle, lp(width = WRAP, start = 12))
+        if (enabled || badge == null) {
+            addView(toggle, lp(width = WRAP, start = 12))
+        } else {
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            isFocusable = true
+            contentDescription = toggle.contentDescription
+        }
     }
 }
 

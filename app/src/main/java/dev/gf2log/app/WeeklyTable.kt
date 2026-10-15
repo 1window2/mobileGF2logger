@@ -98,11 +98,12 @@ internal data class CellDisplay(
 internal class WeeklyTable(
     private val context: Context,
     val isGunsmokeWeek: Boolean,
-    private val zone: ZoneId,
-    private val cutlines: WeeklyCutlines,
-    private val now: Instant = Instant.now(),
+    var zone: ZoneId,
+    var cutlines: WeeklyCutlines,
+    val sync: HorizontalSync = HorizontalSync(),
 ) {
-    val sync = HorizontalSync()
+    /** Reference instant for open-day marks; refreshed with each render. */
+    var now: Instant = Instant.now()
     val rowHeight = context.dp(if (isGunsmokeWeek) GUNSMOKE_ROW_HEIGHT else STANDARD_ROW_HEIGHT)
 
     fun headerRow(report: WeeklyReportBuilder.Report): View = gridRow(

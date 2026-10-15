@@ -303,8 +303,9 @@ class MemberDetailActivity : BaseActivity() {
                     return@setOnClickListener
                 }
                 button.isEnabled = false
+                val noteText = noteInput.text.toString()
                 work.run(
-                    task = { repository.updateMembershipPeriod(period.id, joinedBoundary, leftBoundary, noteInput.text.toString()) },
+                    task = { repository.updateMembershipPeriod(period.id, joinedBoundary, leftBoundary, noteText) },
                 ) { result ->
                     button.isEnabled = true
                     if (result.getOrDefault(false)) {
@@ -366,8 +367,9 @@ class MemberDetailActivity : BaseActivity() {
                     return@setOnClickListener
                 }
                 button.isEnabled = false
+                val noteText = noteInput.text.toString()
                 work.run(
-                    task = { repository.addMembershipPeriod(uid, joinedBoundary, withdrewBoundary, noteInput.text.toString()) },
+                    task = { repository.addMembershipPeriod(uid, joinedBoundary, withdrewBoundary, noteText) },
                 ) { result ->
                     button.isEnabled = true
                     if (result.getOrDefault(false)) {

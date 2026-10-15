@@ -58,6 +58,15 @@ internal class Screen(
         activity.setContentView(root)
     }
 
+    /** Blocks leaving through the bottom bar, e.g. while an unsaved edit is open. */
+    fun setNavigationEnabled(enabled: Boolean) {
+        val bar = bottomBar as? android.view.ViewGroup ?: return
+        for (index in 0 until bar.childCount) {
+            bar.getChildAt(index).isEnabled = enabled
+        }
+        bar.alpha = if (enabled) 1f else 0.5f
+    }
+
     /** Replaces the body; scrolling bodies draw beneath the navigation bar and pad their end. */
     fun setBody(view: View) {
         content.removeAllViews()

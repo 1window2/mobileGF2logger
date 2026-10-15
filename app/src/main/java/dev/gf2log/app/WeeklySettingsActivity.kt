@@ -31,6 +31,7 @@ class WeeklySettingsActivity : BaseActivity() {
     private lateinit var preferences: WeeklyCutlinePreferences
     private lateinit var initial: WeeklyCutlines
     private val inputs = mutableListOf<Threshold>()
+    private var restoredEnabled: BooleanArray? = null
     private val unsavedBack = object : OnBackPressedCallback(true) {
         override fun handleOnBackPressed() = leave()
     }
@@ -44,6 +45,7 @@ class WeeklySettingsActivity : BaseActivity() {
         }
         preferences = WeeklyCutlinePreferences(this, scope.storageId)
         initial = preferences.read()
+        restoredEnabled = savedInstanceState?.getBooleanArray(STATE_ENABLED)
         onBackPressedDispatcher.addCallback(this, unsavedBack)
         val screen = Screen(this)
         screen.topBar
@@ -81,7 +83,7 @@ class WeeklySettingsActivity : BaseActivity() {
         }
         val supporting = maximum?.let { getString(R.string.cutline_range, it) }
         val field = LabeledField(context, getString(R.string.cutline_value), input, supporting)
-        val threshold = Threshold(input, field, maximum, value != null)
+        val threshold = Threshold(input, field, maximum, restoredEnabled?.getOrNull(inputs.size) ?: (value != null))
         field.visibility = if (threshold.enabled) View.VISIBLE else View.GONE
         addView(switchRow(getString(label), supporting, threshold.enabled) { checked ->
             threshold.enabled = checked
@@ -90,6 +92,11 @@ class WeeklySettingsActivity : BaseActivity() {
         }, lp())
         addView(field, lp(start = 4, end = 4, bottom = 8))
         inputs += threshold
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBooleanArray(STATE_ENABLED, inputs.map(Threshold::enabled).toBooleanArray())
+        super.onSaveInstanceState(outState)
     }
 
     private fun readValues(): List<Long?>? {
@@ -155,5 +162,6 @@ class WeeklySettingsActivity : BaseActivity() {
         const val DAILY_ATTEMPTS = 3
         const val WEEKLY_ATTEMPTS = 21
         const val WEEK_DAYS = 7
+        const val STATE_ENABLED = "cutlines.enabled"
     }
 }

@@ -150,9 +150,9 @@ internal object WeeklyDialogs {
                     WeeklyOverrideEditing.CellEdit(
                         uid = uid,
                         gameDay = cell.gameDay,
-                        merit = changed(merit to meritInitial),
-                        score = changed(score),
-                        attempts = changed(attempts),
+                        merit = changed(merit to meritInitial) ?: current?.merit,
+                        score = changed(score) ?: current?.score,
+                        attempts = changed(attempts) ?: current?.attempts,
                         attended = login.takeIf { it != loginInitial } ?: current?.attended,
                         dailyPatrol = patrol.takeIf { it != patrolInitial } ?: current?.dailyPatrol,
                     ),

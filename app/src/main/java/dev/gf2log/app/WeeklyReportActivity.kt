@@ -96,7 +96,10 @@ class WeeklyReportActivity : BaseActivity() {
 
     private var model: RenderModel? = null
     private var table: WeeklyTable? = null
-    private var tableGeneration = 0
+
+    /** One table per week kind, reused across renders so recycled rows and scroll position survive. */
+    private val tables = HashMap<Boolean, WeeklyTable>()
+    private val horizontalSync = HorizontalSync()
     private var editingPeriod: LocalDate? = null
     private val edits = linkedMapOf<Pair<Long, LocalDate>, WeeklyOverrideEditing.CellEdit>()
     private var noteDay: LocalDate? = null
@@ -160,6 +163,7 @@ class WeeklyReportActivity : BaseActivity() {
         onBackPressedDispatcher.addCallback(this, editingBack)
         screen = Screen(this, PrimaryNavigation.Destination.WEEKLY)
         buildNoteComposer()
+        savedInstanceState?.getString(STATE_NOTE_DRAFT)?.let(noteInput::setText)
         bottomSections = column()
         bottomAdapter.view = column {
             setPadding(dp(16), 0, dp(16), dp(24))
@@ -201,10 +205,13 @@ class WeeklyReportActivity : BaseActivity() {
         WeeklyPngExport.nameForState(cacheDir, pendingPng)?.let { outState.putString(STATE_PENDING_PNG_NAME, it) }
         pendingExport?.let { outState.putString(STATE_PENDING_EXPORT, it) }
         editingPeriod?.let { period ->
+            outState.putString(STATE_EDITING_SCOPE, scope.storageId)
             outState.putLong(STATE_EDITING_PERIOD, period.toEpochDay())
             outState.putParcelableArrayList(STATE_EDITS, ArrayList(edits.values.map(::encodeEdit)))
         }
         noteDay?.let { outState.putLong(STATE_NOTE_DAY, it.toEpochDay()) }
+        // The composer lives inside the RecyclerView, which does not save its children's state.
+        if (::noteInput.isInitialized) outState.putString(STATE_NOTE_DRAFT, noteInput.text.toString())
         super.onSaveInstanceState(outState)
     }
 
@@ -217,7 +224,8 @@ class WeeklyReportActivity : BaseActivity() {
                 ?.let(LocalDate::ofEpochDay)
                 ?: PlatoonPeriods.gameDay(Instant.now(), GameTimeZonePreferences.get(this, scope.storageId)),
         )
-        if (state?.containsKey(STATE_EDITING_PERIOD) == true) {
+        // Edits belong to one Platoon; a profile switch recreates this screen in another scope.
+        if (state?.containsKey(STATE_EDITING_PERIOD) == true && state.getString(STATE_EDITING_SCOPE) == scope.storageId) {
             editingPeriod = LocalDate.ofEpochDay(state.getLong(STATE_EDITING_PERIOD))
             @Suppress("DEPRECATION")
             state.getParcelableArrayList<Bundle>(STATE_EDITS)
@@ -290,9 +298,14 @@ class WeeklyReportActivity : BaseActivity() {
             edits.clear()
         }
         model = next
-        val weeklyTable = WeeklyTable(this, report.isGunsmokeWeek, next.zone, next.cutlines)
+        val weeklyTable = tables.getOrPut(report.isGunsmokeWeek) {
+            WeeklyTable(this, report.isGunsmokeWeek, next.zone, next.cutlines, horizontalSync)
+        }.apply {
+            zone = next.zone
+            cutlines = next.cutlines
+            now = Instant.now()
+        }
         table = weeklyTable
-        tableGeneration += 1
         topAdapter.view = buildTop(next)
         stickyHeader.removeAllViews()
         if (report.members.isEmpty()) {
@@ -333,7 +346,11 @@ class WeeklyReportActivity : BaseActivity() {
         val editing = editingPeriod == report.periodStart
         return column {
             setPadding(dp(16), 0, dp(16), dp(12))
-            addView(PlatoonProfileSelector.card(this@WeeklyReportActivity, compact = true), lp(top = 4))
+            addView(PlatoonProfileSelector.card(this@WeeklyReportActivity, compact = true).apply {
+                // Switching Platoons mid-edit would discard the draft without confirmation.
+                isEnabled = !editing
+                alpha = if (editing) 0.6f else 1f
+            }, lp(top = 4))
             addView(weekNavigator(next, editing), lp(top = 12))
             if (next.restoredHistory) {
                 addView(panel(emphasized = true, padding = 12) {
@@ -570,6 +587,7 @@ class WeeklyReportActivity : BaseActivity() {
         val current = model
         val editing = current != null && editingPeriod == current.report.periodStart
         editingBack.isEnabled = editing
+        screen.setNavigationEnabled(!editing)
         val bar = screen.topBar
         if (editing) {
             bar.setNavigationIcon(R.drawable.ic_close, getString(R.string.cancel_editing))
@@ -844,10 +862,10 @@ class WeeklyReportActivity : BaseActivity() {
 
         override fun getItemCount() = members.size
 
-        override fun getItemViewType(position: Int) = tableGeneration
+        override fun getItemViewType(position: Int) = if (table?.isGunsmokeWeek == true) GUNSMOKE_ROW else STANDARD_ROW
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RowHolder =
-            RowHolder(requireNotNull(table).MemberRow())
+            RowHolder(requireNotNull(tables[viewType == GUNSMOKE_ROW]).MemberRow())
 
         override fun onBindViewHolder(holder: RowHolder, position: Int) {
             val member = members[position]
@@ -897,6 +915,8 @@ class WeeklyReportActivity : BaseActivity() {
 
     private companion object {
         const val RENDER = "render"
+        const val STANDARD_ROW = 0
+        const val GUNSMOKE_ROW = 1
         const val SAVE = "save"
         const val EXPORT_ALL = "all"
         const val MAX_NOTE_LENGTH = 1_000
@@ -904,7 +924,9 @@ class WeeklyReportActivity : BaseActivity() {
         const val STATE_PENDING_PNG_NAME = "weekly.pending_png_name"
         const val STATE_PENDING_EXPORT = "weekly.pending_export"
         const val STATE_EDITING_PERIOD = "weekly.editing_period"
+        const val STATE_EDITING_SCOPE = "weekly.editing_scope"
         const val STATE_EDITS = "weekly.edits"
         const val STATE_NOTE_DAY = "weekly.note_day"
+        const val STATE_NOTE_DRAFT = "weekly.note_draft"
     }
 }

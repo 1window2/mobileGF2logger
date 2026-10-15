@@ -29,6 +29,7 @@ import java.lang.ref.WeakReference
  */
 internal object PendingPlatoonAdmissionPrompt {
     private var visible = WeakReference<AlertDialog>(null)
+    private var owner = WeakReference<Activity>(null)
     private var visibleToken: String? = null
     private val selections = HashMap<String, GameServerRegion>()
 
@@ -36,16 +37,25 @@ internal object PendingPlatoonAdmissionPrompt {
         if (activity.isFinishing || activity.isDestroyed) return
         val showing = visible.get()?.takeIf { it.isShowing }
         if (showing != null) {
-            if (candidates.none { it.token == visibleToken }) showing.dismiss()
-            return
+            if (candidates.any { it.token == visibleToken }) return
+            // The visible candidate was resolved; move on to the next queued one.
+            showing.dismiss()
+            clearVisible()
         }
         selections.keys.retainAll(candidates.mapTo(mutableSetOf()) { it.token })
         candidates.firstOrNull()?.let { show(activity, it) }
     }
 
-    fun dismiss() {
+    /** Dismisses the prompt only when [activity] owns it, so a newly started screen keeps its own. */
+    fun dismiss(activity: Activity) {
+        if (owner.get() !== activity) return
         visible.get()?.dismiss()
+        clearVisible()
+    }
+
+    private fun clearVisible() {
         visible.clear()
+        owner.clear()
         visibleToken = null
     }
 
@@ -107,12 +117,10 @@ internal object PendingPlatoonAdmissionPrompt {
             shown.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { confirmDiscard(activity, candidate) }
         }
         dialog.setOnDismissListener {
-            if (visible.get() === dialog) {
-                visible.clear()
-                visibleToken = null
-            }
+            if (visible.get() === dialog) clearVisible()
         }
         visible = WeakReference(dialog)
+        owner = WeakReference(activity)
         visibleToken = candidate.token
     }
 

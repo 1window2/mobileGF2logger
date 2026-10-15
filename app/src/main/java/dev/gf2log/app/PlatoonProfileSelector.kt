@@ -291,8 +291,10 @@ internal object PlatoonProfileSelector {
         val appContext = activity.applicationContext
         maintenanceExecutor.execute {
             val result = runCatching(operation)
-            val current = screen.get()
-            if (current == null || current.isFinishing || current.isDestroyed) {
+            // A rotation may have replaced the caller; refresh whichever screen is showing now.
+            val current = screen.get()?.takeUnless { it.isFinishing || it.isDestroyed }
+                ?: BaseActivity.foregroundScreen()
+            if (current == null) {
                 if (result.isFailure) Feedback.show(appContext, failureMessage, long = true)
                 return@execute
             }

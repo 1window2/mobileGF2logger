@@ -57,7 +57,7 @@ abstract class BaseActivity : ComponentActivity() {
 
     override fun onStop() {
         PendingPlatoonAdmissionStore.removeListener(admissionListener)
-        PendingPlatoonAdmissionPrompt.dismiss()
+        PendingPlatoonAdmissionPrompt.dismiss(this)
         super.onStop()
     }
 
@@ -70,9 +70,19 @@ abstract class BaseActivity : ComponentActivity() {
             recreate()
             return
         }
+        foreground = java.lang.ref.WeakReference(this)
         if (!isFinishing) onScreenResumed()
     }
 
     /** Called from onResume only when this instance remains current. */
     protected open fun onScreenResumed() = Unit
+
+    companion object {
+        @Volatile
+        private var foreground = java.lang.ref.WeakReference<BaseActivity>(null)
+
+        /** The most recently resumed screen, used to refresh after work that outlived its caller. */
+        internal fun foregroundScreen(): BaseActivity? =
+            foreground.get()?.takeUnless { it.isFinishing || it.isDestroyed }
+    }
 }

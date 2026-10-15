@@ -168,6 +168,7 @@ class PlatoonActivity : BaseActivity() {
                 onSuccess = { loaded ->
                     model = loaded
                     selected.retainAll(loaded.statuses.mapTo(mutableSetOf(), MemberStatus::uid))
+                    if (selecting) setSelecting(true)
                     renderSummary(loaded)
                     renderMembers()
                 },
@@ -410,6 +411,7 @@ class PlatoonActivity : BaseActivity() {
                     return@setOnClickListener
                 }
                 button.isEnabled = false
+                val noteText = note.input.text.toString()
                 work.run(
                     task = {
                         repository.addWithdrawnMember(
@@ -417,7 +419,7 @@ class PlatoonActivity : BaseActivity() {
                             name,
                             requireNotNull(joinedBoundary),
                             requireNotNull(withdrewBoundary),
-                            note.input.text.toString(),
+                            noteText,
                         )
                     },
                 ) { result ->

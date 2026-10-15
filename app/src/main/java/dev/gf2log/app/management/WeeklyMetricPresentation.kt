@@ -12,16 +12,11 @@ object WeeklyMetricPresentation {
         else -> "?"
     }
 
-    // Function Name: warnsBelowCutline
-    // Description:
-    // - Marks a displayed exact value or confirmed lower bound when it remains below its cutoff.
-    // - Leaves unknown values and lower bounds that already meet the cutoff unmarked.
-    // Parameters:
-    // - value: Numeric metric value rendered in the weekly table, or null when unavailable.
-    // - certainty: Whether the value is exact, a lower bound, or unknown.
-    // - belowCutline: Metric-specific cutoff comparison.
-    // Returns:
-    // - Returns true when the displayed value should use the cutoff warning color.
+    /**
+     * Marks a displayed exact value or confirmed lower bound when it remains below its cutoff.
+     * Leaves unknown values and lower bounds that already meet the cutoff unmarked. Returns true
+     * when the displayed value should use the cutoff warning color.
+     */
     fun <T : Any> warnsBelowCutline(
         value: T?,
         certainty: MetricCertainty,

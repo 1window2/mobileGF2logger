@@ -162,12 +162,10 @@ class GunsmokeWeekSolverTest {
         assertEquals(MetricCertainty.EXACT, cells[4].meritCertainty)
     }
 
-    // Function Name: restoredSevenDayHistoryCompletesWithinTheNavigationBudget
-    // Description:
-    // - Reproduces the seven counter checkpoints that previously made week navigation hang.
-    // - Guards the complete solver path as well as the exact three-attempt daily projections.
-    // Returns:
-    // - Completes within three seconds with seven valid projected cells.
+    /**
+     * Reproduces the seven counter checkpoints that previously made week navigation hang; the
+     * complete solver path must finish within three seconds with exact three-attempt days.
+     */
     @Test(timeout = 3_000)
     fun restoredSevenDayHistoryCompletesWithinTheNavigationBudget() {
         val totals = listOf(
@@ -270,12 +268,11 @@ class GunsmokeWeekSolverTest {
         assertNull(contradictory.totals)
     }
 
-    // Function Name: finalEventPacketCanConfirmWeeklyAttemptsWithoutFixingTheirDailyPlacement
-    // Description:
-    // - Models three adjacent days whose two-attempt shortfall can move between days.
-    // - Proves the final event packet still fixes the whole-week total at twenty attempts.
-    // Returns:
-    // - Keeps the affected daily cells as lower bounds while publishing an exact aggregate.
+    /**
+     * Three adjacent days share a two-attempt shortfall whose placement can move. The final
+     * event packet still fixes the weekly total at twenty attempts while those days stay lower
+     * bounds.
+     */
     @Test
     fun finalEventPacketCanConfirmWeeklyAttemptsWithoutFixingTheirDailyPlacement() {
         val days = (0L..6L).map(start::plusDays)

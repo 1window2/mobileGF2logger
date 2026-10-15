@@ -53,14 +53,10 @@ class CsvImportCheckpointManager internal constructor(
     }
     private fun hasBaseCheckpoint(): Boolean = archive(root).isFile && manifest(root).isFile
 
-    // Function Name: create
-    // Description:
-    // - Exports the current database before any selected CSV is retained.
-    // - Atomically publishes the archive with the deterministic file identities the import may add.
-    // Parameters:
-    // - plannedFileNames: Validated retained CSV identities for non-duplicate selected files.
-    // Returns:
-    // - Unit after a durable provisional checkpoint is published beside its predecessor.
+    /**
+     * Exports the current database before any selected CSV is retained. Atomically publishes the
+     * archive with the deterministic file identities the import may add.
+     */
     fun create(plannedFileNames: Set<String>) {
         claimOperation()
         var published = false
@@ -143,14 +139,10 @@ class CsvImportCheckpointManager internal constructor(
         }
     }
 
-    // Function Name: restore
-    // Description:
-    // - Quarantines only files planned by the reverted import, then restores the database.
-    // - Restores quarantined evidence if database replacement fails.
-    // Parameters:
-    // - None.
-    // Returns:
-    // - Unit after the checkpoint is consumed.
+    /**
+     * Quarantines only files planned by the reverted import, then restores the database. Restores
+     * quarantined evidence if database replacement fails.
+     */
     fun restore() {
         claimOperation()
         try {
@@ -221,14 +213,10 @@ class CsvImportCheckpointManager internal constructor(
         restorePreviousCheckpoint()
     }
 
-    // Function Name: recoverInterruptedState
-    // Description:
-    // - Restores an interrupted checkpoint publication, import rollback, or undo operation.
-    // - Keeps a sealed latest checkpoint and discards its obsolete predecessor.
-    // Parameters:
-    // - None.
-    // Returns:
-    // - Unit after checkpoint state is usable or the interrupted mutation is rolled back.
+    /**
+     * Restores an interrupted checkpoint publication, import rollback, or undo operation. Keeps a
+     * sealed latest checkpoint and discards its obsolete predecessor.
+     */
     private fun recoverInterruptedState() {
         deleteDirectory(staging)
         deleteDirectory(discarded)

@@ -46,7 +46,6 @@ class CaptureVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
-        CaptureStatus.attachLegacyContext(this)
         profileRegistry = PlatoonProfileRegistry(this)
         diagnosticsStore = CaptureDiagnosticsStore(this)
         notifications = CaptureNotifications(this).also { it.createChannel() }

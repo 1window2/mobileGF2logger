@@ -32,8 +32,4 @@
     <color name="destructive_action_background">#C77F82</color>
     <color name="destructive_action_foreground">#2F181A</color>
     <color name="destructive_action_pressed">#D99396</color>
-    <color name="webhook_configured_background">#2B392D</color>
-    <color name="webhook_configured_foreground">#A9C9A8</color>
-    <color name="webhook_missing_background">#40362A</color>
-    <color name="webhook_missing_foreground">#D9B98D</color>
 </resources>

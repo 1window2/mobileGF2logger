@@ -152,9 +152,7 @@ internal fun Context.iconButton(
     scaleType = ImageView.ScaleType.CENTER
     minimumWidth = dp(48)
     minimumHeight = dp(48)
-    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-        tooltipText = description
-    }
+    tooltipText = description
     setOnClickListener(onClick)
 }
 

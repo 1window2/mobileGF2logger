@@ -101,14 +101,4 @@ class CaptureStatusTest {
         CaptureStatus.markStopped()
         assertEquals(2, received.size)
     }
-
-    @Test
-    @Suppress("DEPRECATION")
-    fun deprecatedReadKeepsTheLegacySentinels() {
-        assertEquals("Capture is stopped", CaptureStatus.read())
-        CaptureStatus.markStarting()
-        assertEquals("Preparing capture", CaptureStatus.read())
-        CaptureStatus.markRunning(listOf("a", "b"))
-        assertTrue(CaptureStatus.read().startsWith("Capturing only "))
-    }
 }

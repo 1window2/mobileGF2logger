@@ -94,8 +94,6 @@ object CaptureStatus {
     private val listeners = CopyOnWriteArraySet<(CaptureSnapshot) -> Unit>()
     private val dispatchPending = AtomicBoolean(false)
 
-    @Volatile
-    private var legacyContext: Context? = null
 
     fun snapshot(): CaptureSnapshot = state.get()
 
@@ -151,26 +149,6 @@ object CaptureStatus {
         current.copy(guided = guided.copy(capturedPayloadTypes = guided.capturedPayloadTypes + payloadType))
     }
 
-    /** Lets the deprecated [read] localize notices until the UI moves to [snapshot]. */
-    internal fun attachLegacyContext(context: Context) {
-        legacyContext = context.applicationContext
-    }
-
-    @Deprecated("Use snapshot() and CaptureNoticeEvent.format()")
-    fun read(): String {
-        val current = snapshot()
-        val notice = current.notice
-            ?: return if (current.phase == CapturePhase.STARTING) LEGACY_PREPARING else LEGACY_STOPPED
-        return when (notice.notice) {
-            CaptureNotice.PREPARING -> LEGACY_PREPARING
-            CaptureNotice.CAPTURING -> "Capturing only " + notice.args.joinToString()
-            else -> legacyContext?.let(notice::format) ?: notice.notice.name
-        }
-    }
-
-    @Deprecated("Use snapshot().guided")
-    fun readGuidedProgress(): GuidedProgress? = snapshot().guided
-
     private inline fun update(transform: (CaptureSnapshot) -> CaptureSnapshot) {
         while (true) {
             val previous = state.get()
@@ -193,8 +171,6 @@ object CaptureStatus {
     private fun event(notice: CaptureNotice, args: Array<out String> = emptyArray()) =
         CaptureNoticeEvent(notice, args.toList(), System.currentTimeMillis())
 
-    private const val LEGACY_STOPPED = "Capture is stopped"
-    private const val LEGACY_PREPARING = "Preparing capture"
 
     data class GuidedProgress(
         val capturedPayloadTypes: Set<Int> = emptySet(),

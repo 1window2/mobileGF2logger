@@ -135,12 +135,12 @@ internal object MembershipEditing {
         val period = readMembershipPeriodForUpdate(db, membershipPeriodId, gameZone)
             ?: return@inTransaction false
         // Exact packet-linked boundaries stay immutable; only editable sides take the request.
-        val effectiveJoined = if (period.joinedSource.isImmutableMembershipBoundary()) {
-            period.joined
+        val effectiveJoined = if (isImmutableMembershipBoundary(period.joined, period.joinedSource)) {
+            requireNotNull(period.joined)
         } else {
             joined
-        } ?: return@inTransaction false
-        val effectiveLeft = if (period.leftSource?.isImmutableMembershipBoundary() == true) {
+        }
+        val effectiveLeft = if (isImmutableMembershipBoundary(period.left, period.leftSource)) {
             period.left
         } else {
             left

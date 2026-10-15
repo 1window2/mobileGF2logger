@@ -1315,6 +1315,42 @@ class PlatoonDatabaseIntegrationTest {
         assertEquals(listOf(override), database.listWeeklyOverrides(periodStart.toEpochDay()))
     }
 
+    @Test
+    fun unknownJoinOfAnUpdatesWithdrawalPeriodStaysEditable() {
+        val withdrewAt = Instant.parse("2026-08-10T12:00:00Z")
+        database.ingestPlatoonUpdates(
+            listOf(update(PlatoonUpdateSemantics.KIND_WITHDRAW, withdrewAt, TARGET_UID, "Leaver")),
+            withdrewAt.plusSeconds(60),
+        )
+        val period = database.listMemberStatuses().single { it.uid == TARGET_UID }
+            .membershipPeriods.single()
+        assertEquals(null, period.joinedAt)
+        assertEquals(EvidenceSource.GAME_UPDATES, period.joinedSource)
+        assertTrue(period.isJoinedBoundaryEditable)
+        assertFalse(period.isLeftBoundaryEditable)
+        val joined = MembershipBoundaryValue(
+            date = LocalDate.of(2026, 8, 1),
+            instant = Instant.parse("2026-08-01T09:00:00Z"),
+            timeKnown = true,
+        )
+        val attemptedLeft = MembershipBoundaryValue(
+            date = LocalDate.of(2026, 8, 20),
+            instant = Instant.parse("2026-08-20T09:00:00Z"),
+            timeKnown = true,
+        )
+
+        assertTrue(database.updateMembershipPeriod(period.id, joined, attemptedLeft, "Recovered"))
+
+        val updated = database.listMemberStatuses().single { it.uid == TARGET_UID }
+            .membershipPeriods.single()
+        assertEquals(joined.instant, updated.joinedAt)
+        assertEquals(EvidenceSource.MANUAL, updated.joinedSource)
+        assertEquals(withdrewAt, updated.leftAt)
+        assertEquals(EvidenceSource.GAME_UPDATES, updated.leftSource)
+        assertEquals("Recovered", updated.note)
+        assertForeignKeysValid()
+    }
+
     private fun update(kind: Long, at: Instant, uid: Long, name: String) =
         PlatoonUpdateObservation(
             kind = kind,

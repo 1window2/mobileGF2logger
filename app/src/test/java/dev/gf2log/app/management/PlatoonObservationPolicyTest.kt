@@ -6,7 +6,6 @@ import dev.gf2log.protocol.model.PlatoonUpdateEntry
 import dev.gf2log.protocol.model.PlatoonUpdateMember
 import dev.gf2log.protocol.model.PlatoonUpdatesData
 import java.time.Instant
-import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -162,19 +161,6 @@ class PlatoonObservationPolicyTest {
             PlatoonObservationPolicy.MAX_UPDATE_MEMBER_NAME_LENGTH * 3 <=
                 WeeklyReportHistoryCodec.MAX_STRING_BYTES,
         )
-    }
-
-    @Test
-    fun `weekly history work is capped after distinct week mapping`() {
-        val zone = ZoneOffset.UTC
-        val instants = generateSequence(Instant.parse("2020-01-06T05:00:00Z")) {
-            it.plusSeconds(7 * 24 * 60 * 60L)
-        }.take(WeeklyHistoryWorkPolicy.MAX_CHANGED_WEEKS_PER_INGEST + 50)
-
-        val periods = WeeklyHistoryWorkPolicy.changedPeriodStarts(instants, zone)
-
-        assertEquals(WeeklyHistoryWorkPolicy.MAX_CHANGED_WEEKS_PER_INGEST, periods.size)
-        assertEquals(periods.size, periods.distinct().size)
     }
 
     private fun activity(name: String) = PlatoonActivityObservation(

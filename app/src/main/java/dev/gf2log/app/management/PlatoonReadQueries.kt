@@ -21,6 +21,14 @@ internal object PlatoonReadQueries {
         }
     }
 
+    /** The earliest roster captured strictly after [instant], if any. */
+    fun firstSnapshotCapturedAfter(db: SQLiteDatabase, instant: Instant): Instant? = db.rawQuery(
+        "SELECT MIN(captured_at) FROM snapshots WHERE captured_at > ?",
+        arrayOf(instant.toEpochMilli().toString()),
+    ).use { cursor ->
+        if (cursor.moveToFirst() && !cursor.isNull(0)) Instant.ofEpochMilli(cursor.getLong(0)) else null
+    }
+
     fun snapshotSourceFiles(db: SQLiteDatabase): Set<String> = db.rawQuery(
         "SELECT source_file FROM snapshots WHERE source_file IS NOT NULL",
         null,

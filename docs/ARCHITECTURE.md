@@ -212,7 +212,11 @@ payload with 128-character names, and Updates ingestion accepts at most 250
 distinct supported observations. Packet-triggered weekly-history work derives
 only from those accepted observations and is independently capped at 32
 distinct periods per ingest, so rejected timestamps cannot amplify report or
-SQLite work. SQLite retains the newest 10,000 activity
+SQLite work. Within that cap, `WeeklyHistoryWorkPolicy` adds the listed
+neighbouring weeks that read an instant across a 05:00 reset (the closed week
+of an exact-reset roster, the calendar-day Join / Withdraw week, and later
+weeks up to the next stored roster), so their stored revisions never lag the
+live projection. SQLite retains the newest 10,000 activity
 facts, and one ingestion resolves at most 250 unresolved facts. A database-local
 cursor rotates those bounded batches through the complete retained backlog.
 Schema v11 owns the rotation cursor and a global `(captured_at, id)` retention

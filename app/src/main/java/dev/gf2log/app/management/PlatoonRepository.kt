@@ -470,12 +470,26 @@ internal class PlatoonRepository(
     private fun recordChangedWeeks(instants: Iterable<Instant>) =
         recordChangedWeeks(instants.asSequence())
 
+    /**
+     * Refreshes the weeks that evidence at [instants] can change, including neighbouring weeks
+     * that read it across a 05:00 reset (see [WeeklyHistoryWorkPolicy.affectedPeriodStarts]).
+     * If the neighbour scan fails, the instants' own game weeks are still refreshed.
+     */
     private fun recordChangedWeeks(instants: Sequence<Instant>) {
         val zone = gameZone()
-        WeeklyHistoryWorkPolicy.changedPeriodStarts(instants, zone)
-            .forEach { periodStart ->
-                recordLiveWeeklyRevisionSafely(periodStart, zone)
-            }
+        val changed = instants.toList()
+        val weeks = try {
+            WeeklyHistoryWorkPolicy.affectedPeriodStarts(
+                instants = changed.asSequence(),
+                zoneId = zone,
+                listedPeriodStarts = weeklyPeriodStarts(zone),
+                nextSnapshotAfter = { instant -> access { it.firstSnapshotCapturedAfter(instant) } },
+            )
+        } catch (error: Exception) {
+            Log.e(TAG, "Unable to scope neighbouring weekly history; refreshing own weeks", error)
+            WeeklyHistoryWorkPolicy.affectedPeriodStarts(changed.asSequence(), zone, emptyList()) { null }
+        }
+        weeks.forEach { periodStart -> recordLiveWeeklyRevisionSafely(periodStart, zone) }
     }
 
     /** Refreshes every derived weekly revision after a primary-data mutation. */

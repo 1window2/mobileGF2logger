@@ -94,6 +94,10 @@ internal class PlatoonDatabase private constructor(
         PlatoonReadQueries.latestSnapshotIdentity(readableDatabase)
 
     @Synchronized
+    fun firstSnapshotCapturedAfter(instant: Instant): Instant? =
+        PlatoonReadQueries.firstSnapshotCapturedAfter(readableDatabase, instant)
+
+    @Synchronized
     fun snapshotSourceFiles(): Set<String> = PlatoonReadQueries.snapshotSourceFiles(readableDatabase)
 
     @Synchronized

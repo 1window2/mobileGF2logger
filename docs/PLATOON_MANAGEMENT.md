@@ -194,6 +194,15 @@ transitions.
   dates and report mode, in-period notes, and valid contextual identities.
 - Changing the configured game timezone clears incompatible derived history
   and rebuilds it from the unchanged UTC evidence using the new 05:00 boundary.
+- Captured evidence refreshes every listed week that reads it, not only the
+  week of its game day. A roster captured exactly at Sunday 05:00 is the
+  closing Saturday capture of the week it ends, so that week is re-recorded
+  too. A current roster, or a membership event before the next roster, is the
+  carried-in baseline and period-end roster of every later listed week until
+  the next stored roster, so those weeks are re-recorded as well; this covers a
+  roster captured just before the reset. An instant before 05:00 on a calendar
+  Sunday also refreshes the following week, whose Join / Withdraw section uses
+  calendar days. The 32-period per-ingest bound still applies, own weeks first.
 - Weekly history is a derived audit trail, not the primary store. If refreshing
   one revision fails after a successful data mutation, the affected restored
   selection is cleared so the live database projection remains authoritative.

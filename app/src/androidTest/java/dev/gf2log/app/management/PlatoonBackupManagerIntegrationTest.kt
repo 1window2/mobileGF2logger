@@ -573,6 +573,32 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     @Test
+    fun aFailedSealKeepsTheImportClaimUntilItsRollbackFinishes() {
+        seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
+        var undoAvailableDuringRollback: Boolean? = null
+        lateinit var manager: CsvImportCheckpointManager
+        manager = CsvImportCheckpointManager(context, storageScope) { checkpoint ->
+            if (checkpoint == PlatoonBackupManager.RestoreCheckpoint.DATABASE_INSTALLED) {
+                undoAvailableDuringRollback = manager.canUndo()
+            }
+        }
+
+        assertThrows(IllegalStateException::class.java) {
+            manager.runImport(emptySet()) {
+                // A digest that is already present makes seal fail after the import applied.
+                java.io.File(FilePaths.csvCheckpointDirectory(context), "post-import.sha256")
+                    .writeText("0".repeat(64), Charsets.US_ASCII)
+            }
+        }
+
+        // Another operation sees the claim for the whole rollback, then can take it again.
+        assertEquals(false, undoAvailableDuringRollback)
+        val retried = CsvImportCheckpointManager(context, storageScope)
+        retried.runImport(emptySet()) {}
+        assertTrue(retried.canUndo())
+    }
+
+    @Test
     fun interruptedCsvUndoCompletesAfterDatabaseInstallationOnRestart() {
         seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
         val manager = CsvImportCheckpointManager(context, storageScope) { checkpoint ->

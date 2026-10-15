@@ -100,25 +100,29 @@ class CsvImportCheckpointManager internal constructor(
     /** Seals a successful import so undo is refused after any later database mutation. */
     fun seal() {
         try {
-            check(hasBaseCheckpoint()) { "No CSV import checkpoint is available" }
-            val target = digest(root)
-            check(!target.exists()) { "CSV import checkpoint is already sealed" }
-            val temporary = File(root, "$DIGEST_FILE.tmp")
-            try {
-                FileOutputStream(temporary).use { output ->
-                    output.write(
-                        backupManager().currentDatabaseSha256().toByteArray(Charsets.US_ASCII),
-                    )
-                    output.fd.sync()
-                }
-                check(temporary.renameTo(target)) { "Unable to seal the CSV import checkpoint" }
-            } finally {
-                temporary.delete()
-            }
-            discard(previous)
+            sealClaimed()
         } finally {
             releaseOperation()
         }
+    }
+
+    private fun sealClaimed() {
+        check(hasBaseCheckpoint()) { "No CSV import checkpoint is available" }
+        val target = digest(root)
+        check(!target.exists()) { "CSV import checkpoint is already sealed" }
+        val temporary = File(root, "$DIGEST_FILE.tmp")
+        try {
+            FileOutputStream(temporary).use { output ->
+                output.write(
+                    backupManager().currentDatabaseSha256().toByteArray(Charsets.US_ASCII),
+                )
+                output.fd.sync()
+            }
+            check(temporary.renameTo(target)) { "Unable to seal the CSV import checkpoint" }
+        } finally {
+            temporary.delete()
+        }
+        discard(previous)
     }
 
     /**
@@ -127,12 +131,14 @@ class CsvImportCheckpointManager internal constructor(
      */
     fun <T> runImport(plannedFileNames: Set<String>, apply: () -> T): T {
         create(plannedFileNames)
+        // The claim taken by create is held across apply, seal, and any rollback, and released
+        // exactly once, so no other operation on this scope can interleave with a rollback.
         try {
             val result = apply()
-            seal()
+            sealClaimed()
             return result
         } catch (failure: Throwable) {
-            runCatching(::rollbackFailedImport).exceptionOrNull()?.let(failure::addSuppressed)
+            runCatching(::rollbackClaimed).exceptionOrNull()?.let(failure::addSuppressed)
             throw failure
         } finally {
             releaseOperation()
@@ -162,11 +168,15 @@ class CsvImportCheckpointManager internal constructor(
 
     internal fun rollbackFailedImport() {
         try {
-            check(hasBaseCheckpoint()) { "No CSV import checkpoint is available" }
-            restoreUnchecked()
+            rollbackClaimed()
         } finally {
             releaseOperation()
         }
+    }
+
+    private fun rollbackClaimed() {
+        check(hasBaseCheckpoint()) { "No CSV import checkpoint is available" }
+        restoreUnchecked()
     }
 
     private fun restoreUnchecked() {

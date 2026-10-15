@@ -22,6 +22,10 @@ All notable changes to mobileGF2logger are documented here.
 - Restore either backup kind from one Settings entry, which detects whether the
   archive includes app settings; replay the welcome guide from Settings.
 - Localize every label in shared weekly PNGs.
+- Open the weekly grid at today's column, add Apply, next day to cell edits, and
+  show Home's latest roster change with joined/withdrew counts.
+- Add a clear button to Platoon search and confirm before a sort replaces a
+  hand-arranged member order.
 
 ### Changed
 
@@ -34,6 +38,12 @@ All notable changes to mobileGF2logger are documented here.
   single transactional owner, and split the capture service into a serial
   worker, flow engine, admission coordinator, and notification helper.
 - Add AndroidX Activity as the only new dependency.
+- Raise secondary-text and status-mark contrast, keep the accent for tappable or
+  selected items, mark today in the weekly header, fill below-cutline cells, and
+  keep rank highlights for the top three.
+- Show Undo last CSV import only while a checkpoint exists; scale weekly rows
+  and date fields with the system font size.
+- Build with stable Kotlin 2.4.21 instead of 2.4.20-Beta1.
 
 ### Fixed
 
@@ -62,6 +72,24 @@ All notable changes to mobileGF2logger are documented here.
 - Move every repository, file, and network call off the main thread.
 - Truncate document-provider files when exporting so overwritten files cannot
   keep stale trailing bytes.
+- Stop a native double free when a closing flow's reset cannot be written, keep
+  native flow ids unique across captures, clear pending JNI exceptions, and
+  drive native timers from the monotonic clock.
+- Discard a continued roster whose frame is malformed or cut short instead of
+  publishing it as complete, so missing members are never marked withdrawn.
+- Quarantine a bound flow that reports a different, unregistered Platoon,
+  release a pending claim when confirmation fails, and keep the per-capture
+  admission limit across service restarts.
+- Replay out-of-order captured rosters into history, derive game days from
+  local 05:00 across daylight-saving changes, export a rejoined member's
+  current period, and keep the unknown join of a withdrawal-only period
+  editable.
+- Retire CSV import checkpoints atomically, keep weekly notes and overrides
+  inside their week, render the live weekly table when history recording
+  fails, and restore the exact timezone when a server change fails.
+- Report admission failures inside the New Platoon dialog, block repeated
+  send/share/backup/restore taps, ask before leaving an edited member, and
+  dismiss a screen's dialogs when it closes.
 
 ## 2.4.2 - 2026-08-27
 

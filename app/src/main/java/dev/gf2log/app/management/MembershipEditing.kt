@@ -21,21 +21,22 @@ internal object MembershipEditing {
         note: String,
     ): Boolean {
         require(uid > 0)
-        require(name.isNotBlank())
+        val storedName = ManualTextPolicy.memberName(name)
+        val storedNote = ManualTextPolicy.note(note)
         require(isValidMembershipRange(joined, withdrew))
         return db.inTransaction {
             if (memberExists(db, uid)) return@inTransaction false
             MembershipRows.insertMember(
                 db = db,
                 uid = uid,
-                name = name.trim(),
+                name = storedName,
                 level = 0,
                 firstSeenAt = joined.instant,
                 lastSeenAt = withdrew.instant,
-                customName = name.trim(),
+                customName = storedName,
             )
-            val membershipPeriodId = insertManualMembershipPeriod(db, uid, joined, withdrew, note)
-            replaceManualMembershipPeriodEvents(db, membershipPeriodId, uid, name.trim(), joined, withdrew)
+            val membershipPeriodId = insertManualMembershipPeriod(db, uid, joined, withdrew, storedNote)
+            replaceManualMembershipPeriodEvents(db, membershipPeriodId, uid, storedName, joined, withdrew)
             synchronizeAndVerifyMembershipState(db, uid)
             true
         }
@@ -48,13 +49,14 @@ internal object MembershipEditing {
         withdrew: MembershipBoundaryValue?,
         note: String,
     ): Boolean {
+        val storedNote = ManualTextPolicy.note(note)
         require(isValidMembershipRange(joined, withdrew))
         return db.inTransaction {
             val memberName = memberName(db, uid) ?: return@inTransaction false
             if (!canStoreMembershipPeriod(db, uid, null, joined, withdrew)) {
                 return@inTransaction false
             }
-            val membershipPeriodId = insertManualMembershipPeriod(db, uid, joined, withdrew, note)
+            val membershipPeriodId = insertManualMembershipPeriod(db, uid, joined, withdrew, storedNote)
             replaceManualMembershipPeriodEvents(db, membershipPeriodId, uid, memberName, joined, withdrew)
             synchronizeAndVerifyMembershipState(db, uid)
             true
@@ -62,10 +64,9 @@ internal object MembershipEditing {
     }
 
     fun updateMember(db: SQLiteDatabase, uid: Long, name: String, note: String): Boolean {
-        require(name.isNotBlank())
         val values = ContentValues().apply {
-            put("custom_name", name.trim())
-            put("note", note.trim())
+            put("custom_name", ManualTextPolicy.memberName(name))
+            put("note", ManualTextPolicy.note(note))
         }
         return db.update("members", values, "uid = ?", arrayOf(uid.toString())) == 1
     }
@@ -131,62 +132,65 @@ internal object MembershipEditing {
         joined: MembershipBoundaryValue,
         left: MembershipBoundaryValue?,
         note: String,
-    ): Boolean = db.inTransaction {
-        val period = readMembershipPeriodForUpdate(db, membershipPeriodId, gameZone)
-            ?: return@inTransaction false
-        // Exact packet-linked boundaries stay immutable; only editable sides take the request.
-        val effectiveJoined = if (isImmutableMembershipBoundary(period.joined, period.joinedSource)) {
-            requireNotNull(period.joined)
-        } else {
-            joined
-        }
-        val effectiveLeft = if (isImmutableMembershipBoundary(period.left, period.leftSource)) {
-            period.left
-        } else {
-            left
-        }
-        require(isValidMembershipRange(effectiveJoined, effectiveLeft))
-        if (!canStoreMembershipPeriod(db, period.uid, membershipPeriodId, effectiveJoined, effectiveLeft)) {
-            return@inTransaction false
-        }
-        val joinedChanged = editableMembershipBoundaryChanged(
-            original = period.joined,
-            requested = joined,
-            source = period.joinedSource,
-        )
-        val leftChanged = editableMembershipBoundaryChanged(
-            original = period.left,
-            requested = left,
-            source = period.leftSource,
-        )
-        val updated = db.update(
-            "membership_periods",
-            ContentValues().apply {
-                if (joinedChanged) putManualBoundary("joined", joined)
-                if (leftChanged) putManualBoundary("left", left)
-                put("note", note.trim())
-            },
-            "id = ?",
-            arrayOf(membershipPeriodId.toString()),
-        ) == 1
-        if (updated && (joinedChanged || leftChanged)) {
-            val joinedIsManual = joinedChanged || period.joinedSource == EvidenceSource.MANUAL
-            val leftIsManual = if (leftChanged) {
-                left != null
+    ): Boolean {
+        val storedNote = ManualTextPolicy.note(note)
+        return db.inTransaction {
+            val period = readMembershipPeriodForUpdate(db, membershipPeriodId, gameZone)
+                ?: return@inTransaction false
+            // Exact packet-linked boundaries stay immutable; only editable sides take the request.
+            val effectiveJoined = if (isImmutableMembershipBoundary(period.joined, period.joinedSource)) {
+                requireNotNull(period.joined)
             } else {
-                period.leftSource == EvidenceSource.MANUAL
+                joined
             }
-            replaceManualMembershipPeriodEvents(
-                db,
-                membershipPeriodId,
-                period.uid,
-                memberName(db, period.uid).orEmpty(),
-                effectiveJoined.takeIf { joinedIsManual },
-                effectiveLeft.takeIf { leftIsManual },
+            val effectiveLeft = if (isImmutableMembershipBoundary(period.left, period.leftSource)) {
+                period.left
+            } else {
+                left
+            }
+            require(isValidMembershipRange(effectiveJoined, effectiveLeft))
+            if (!canStoreMembershipPeriod(db, period.uid, membershipPeriodId, effectiveJoined, effectiveLeft)) {
+                return@inTransaction false
+            }
+            val joinedChanged = editableMembershipBoundaryChanged(
+                original = period.joined,
+                requested = joined,
+                source = period.joinedSource,
             )
+            val leftChanged = editableMembershipBoundaryChanged(
+                original = period.left,
+                requested = left,
+                source = period.leftSource,
+            )
+            val updated = db.update(
+                "membership_periods",
+                ContentValues().apply {
+                    if (joinedChanged) putManualBoundary("joined", joined)
+                    if (leftChanged) putManualBoundary("left", left)
+                    put("note", storedNote)
+                },
+                "id = ?",
+                arrayOf(membershipPeriodId.toString()),
+            ) == 1
+            if (updated && (joinedChanged || leftChanged)) {
+                val joinedIsManual = joinedChanged || period.joinedSource == EvidenceSource.MANUAL
+                val leftIsManual = if (leftChanged) {
+                    left != null
+                } else {
+                    period.leftSource == EvidenceSource.MANUAL
+                }
+                replaceManualMembershipPeriodEvents(
+                    db,
+                    membershipPeriodId,
+                    period.uid,
+                    memberName(db, period.uid).orEmpty(),
+                    effectiveJoined.takeIf { joinedIsManual },
+                    effectiveLeft.takeIf { leftIsManual },
+                )
+            }
+            if (updated) synchronizeAndVerifyMembershipState(db, period.uid)
+            updated
         }
-        if (updated) synchronizeAndVerifyMembershipState(db, period.uid)
-        updated
     }
 
     /**
@@ -264,7 +268,7 @@ internal object MembershipEditing {
         uid: Long,
         joined: MembershipBoundaryValue,
         withdrew: MembershipBoundaryValue?,
-        note: String,
+        storedNote: String,
     ): Long = db.insertOrThrow(
         "membership_periods",
         null,
@@ -272,7 +276,7 @@ internal object MembershipEditing {
             put("uid", uid)
             putManualBoundary("joined", joined)
             putManualBoundary("left", withdrew)
-            put("note", note.trim())
+            put("note", storedNote)
         },
     )
 

@@ -152,6 +152,13 @@ transitions.
 - UID is the stable member identity; a display name can change over time.
 - A custom nickname is editable and immediately becomes the display name in
   Platoon management; the personal note remains private to member details.
+- Manual text is bounded where it is stored, not only by input fields. After
+  trimming, a custom nickname or manually added member name holds at most 256
+  characters (the roster name limit), and a private member note, membership-period
+  note, or weekly note holds at most 1,000 characters (the weekly-note field
+  limit). Longer text is rejected and nothing is written, so the draft is never
+  silently cut. Weekly history may still shorten a private note to its 2 KiB
+  per-member budget; a 1,000-character weekly note always fits its 16 KiB one.
 - The first observed roster creates an active membership period with an unknown historical
   join time unless the user supplies one.
 - A UID added between consecutive snapshots opens a join or rejoin membership period.

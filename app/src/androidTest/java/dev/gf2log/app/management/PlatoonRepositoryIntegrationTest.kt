@@ -13,6 +13,8 @@ import java.time.ZoneOffset
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -97,6 +99,55 @@ class PlatoonRepositoryIntegrationTest {
         assertEquals(listOf(UID), after?.members?.map { it.uid })
         assertEquals(liveReport(repository, OPENING_WEEK), after)
     }
+
+    @Test
+    fun manualTextBeyondItsLimitIsRejectedWithoutChangingStoredRows() {
+        val repository = utcRepository()
+        val capturedAt = Instant.parse("2026-08-03T12:00:00Z")
+        repository.ingest(capturedAt, listOf(member(UID, "A")), "a.csv")
+        val maximumName = "n".repeat(ManualTextPolicy.MAX_MEMBER_NAME_CHARS)
+        val maximumNote = "x".repeat(ManualTextPolicy.MAX_NOTE_CHARS)
+        // Limits apply to the stored, trimmed text.
+        assertTrue(repository.updateMember(UID, " $maximumName ", "\n$maximumNote\n"))
+        val stored = status(repository, UID)
+        assertEquals(maximumName, stored.name)
+        assertEquals(maximumNote, stored.note)
+
+        val longName = maximumName + "n"
+        val longNote = maximumNote + "x"
+        val period = stored.membershipPeriods.single()
+        val joined = MembershipBoundaryValue(
+            LocalDate.of(2026, 7, 1),
+            Instant.parse("2026-07-01T12:00:00Z"),
+            timeKnown = true,
+        )
+        val withdrew = MembershipBoundaryValue(
+            LocalDate.of(2026, 7, 2),
+            Instant.parse("2026-07-02T12:00:00Z"),
+            timeKnown = true,
+        )
+        listOf(
+            { repository.updateMember(UID, longName, "") },
+            { repository.updateMember(UID, "Short", longNote) },
+            { repository.updateMembershipPeriod(period.id, joined, null, longNote) },
+            { repository.addMembershipPeriod(UID, joined, withdrew, longNote) },
+            { repository.addWithdrawnMember(OTHER_UID, longName, joined, withdrew, "") },
+            { repository.addWithdrawnMember(OTHER_UID, "Other", joined, withdrew, longNote) },
+            {
+                repository.addWeeklyNote(OPENING_WEEK.toEpochDay(), OPENING_WEEK.toEpochDay(), longNote)
+                true
+            },
+        ).forEach { edit ->
+            assertThrows(IllegalArgumentException::class.java) { edit() }
+        }
+
+        assertEquals(stored, status(repository, UID))
+        assertEquals(listOf(UID), repository.listMemberStatuses().map { it.uid })
+        assertTrue(repository.listWeeklyNotes(OPENING_WEEK.toEpochDay()).isEmpty())
+    }
+
+    private fun status(repository: PlatoonRepository, uid: Long) =
+        repository.listMemberStatuses().single { it.uid == uid }
 
     private fun utcRepository(): PlatoonRepository {
         GameTimeZonePreferences.set(context, ZoneOffset.UTC, SCOPE.storageId)

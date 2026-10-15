@@ -224,7 +224,11 @@ index. Schema v13 repairs the derived active-member projection from canonical
 membership periods during upgrade; supported older backups are upgraded before
 strict current-schema validation.
 These limits are enforced again at repository and persistence boundaries so a
-future caller cannot bypass the protocol-layer checks.
+future caller cannot bypass the protocol-layer checks. User-entered text has
+the same treatment: `ManualTextPolicy` trims and then rejects a member name
+over 256 characters or a private, membership-period, or weekly note over
+1,000 characters inside `MembershipEditing` and `WeeklyAnnotationStore`,
+before any row is written.
 
 ## HTTPS and application-layer encryption
 

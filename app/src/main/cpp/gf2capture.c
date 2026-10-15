@@ -51,7 +51,6 @@ typedef struct capture_context {
     pthread_t thread;
     atomic_bool running;
     int tun_fd;
-    int64_t next_flow_id;
     uint64_t sent_bytes;
     uint64_t received_bytes;
     uint64_t inspected_bytes;
@@ -59,6 +58,9 @@ typedef struct capture_context {
 
 static pthread_mutex_t context_mutex = PTHREAD_MUTEX_INITIALIZER;
 static capture_context_t *active_context = NULL;
+// Process-wide so a flow ID is never reused by a later capture: unconfirmed Platoon candidates
+// outlive the capture that observed them and refer to their flows by ID.
+static _Atomic int64_t last_flow_id = 0;
 
 static bool clear_java_exception(capture_context_t *context, const char *operation) {
     if (!(*context->env)->ExceptionCheck(context->env)) {
@@ -263,7 +265,7 @@ static int connection_open_callback(zdtun_t *tunnel, zdtun_conn_t *connection) {
     }
 
     const zdtun_5tuple_t *tuple = zdtun_conn_get_5tuple(connection);
-    flow->id = ++context->next_flow_id;
+    flow->id = atomic_fetch_add(&last_flow_id, 1) + 1;
     // Only TCP streams can carry game frames, so other flows never reach Java.
     flow->tracked = tuple->ipproto == IPPROTO_TCP;
     flow->inspect_payload = flow->tracked;

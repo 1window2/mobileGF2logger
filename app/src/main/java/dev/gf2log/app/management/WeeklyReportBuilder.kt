@@ -328,10 +328,7 @@ object WeeklyReportBuilder {
             }
             .filter { it.second in days }
             .toSet()
-        val rosterCutoff = minOf(
-            PlatoonPeriods.periodStartInstant(start.plusDays(7), zoneId),
-            asOf.plusMillis(1),
-        )
+        val rosterCutoff = rosterCutoff(start, zoneId, asOf)
         val uids = sortedSnapshots.flatMap { it.members }.associateBy(SnapshotMember::uid).toMutableMap()
         val latestSnapshotAtByUid = buildMap {
             sortedSnapshots.forEach { snapshot ->
@@ -373,15 +370,14 @@ object WeeklyReportBuilder {
                 uids[uid] = SnapshotMember(uid, "#$uid", 0, 0, 0, 0, 0, 0)
             }
         }
-        val rosterSnapshot = sortedSnapshots.lastBefore(rosterCutoff)
-        val rosterAtPeriodEnd = applyMembershipEventsToRoster(
-            rosterSnapshot?.members?.map(SnapshotMember::uid).orEmpty().toSet(),
-            membershipEvents,
-            rosterSnapshot?.capturedAt,
-            rosterCutoff,
-        )
+        // Weekly rows represent the roster that is active at the end of the selected reporting
+        // period (or the latest roster for an in-progress week). A member observed earlier in
+        // the week disappears as soon as a later complete roster records their withdrawal; the
+        // immutable membership event remains in the Join / Withdraw section. Rows are solved
+        // only for that roster because each row depends on its own member's evidence alone.
+        val rosterAtPeriodEnd = rosterAtCutoff(sortedSnapshots, membershipEvents, rosterCutoff)
 
-        val rows = uids.values.map { latestKnown ->
+        val rows = uids.values.filter { it.uid in rosterAtPeriodEnd }.map { latestKnown ->
             val derivedCells = days.map { day ->
                 buildCell(
                     uid = latestKnown.uid,
@@ -455,13 +451,6 @@ object WeeklyReportBuilder {
                 resolvedStandardTotals = standardResolution?.totals,
                 gunsmokeAttemptsFloor = gunsmokeResolution?.attemptsFloor,
             )
-        }.filter { row ->
-            // Weekly rows represent the roster that is active at the end of the
-            // selected reporting period (or the latest roster for an in-progress
-            // week). A member observed earlier in the week must disappear as soon
-            // as a later complete roster records their withdrawal; the immutable
-            // membership event remains available in the Join / Withdraw section.
-            row.uid in rosterAtPeriodEnd
         }
             .sortedWith(
                 if (isGunsmoke) {
@@ -474,6 +463,38 @@ object WeeklyReportBuilder {
             )
 
         return Report(start, start.plusDays(6), isGunsmoke, days, rows)
+    }
+
+    /** UIDs whose rows the report for [referenceDay] contains, without solving any row. */
+    internal fun rosterAtPeriodEnd(
+        referenceDay: LocalDate,
+        zoneId: ZoneId,
+        snapshots: List<PlatoonSnapshot>,
+        membershipEvents: List<MemberEvent>,
+        asOf: Instant,
+    ): Set<Long> = rosterAtCutoff(
+        snapshots.sortedBy(PlatoonSnapshot::capturedAt),
+        membershipEvents,
+        rosterCutoff(PlatoonPeriods.weekStart(referenceDay), zoneId, asOf),
+    )
+
+    private fun rosterCutoff(periodStart: LocalDate, zoneId: ZoneId, asOf: Instant): Instant = minOf(
+        PlatoonPeriods.periodStartInstant(periodStart.plusDays(7), zoneId),
+        asOf.plusMillis(1),
+    )
+
+    private fun rosterAtCutoff(
+        sortedSnapshots: List<PlatoonSnapshot>,
+        membershipEvents: List<MemberEvent>,
+        cutoff: Instant,
+    ): Set<Long> {
+        val rosterSnapshot = sortedSnapshots.lastBefore(cutoff)
+        return applyMembershipEventsToRoster(
+            rosterSnapshot?.members?.map(SnapshotMember::uid).orEmpty().toSet(),
+            membershipEvents,
+            rosterSnapshot?.capturedAt,
+            cutoff,
+        )
     }
 
     private fun buildCell(

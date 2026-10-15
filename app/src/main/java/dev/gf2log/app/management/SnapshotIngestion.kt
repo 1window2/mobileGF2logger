@@ -34,7 +34,7 @@ internal object SnapshotIngestion {
         }
         return db.inTransaction {
             if (snapshot.sourceFile != null && sourceFileExists(db, snapshot.sourceFile)) {
-                return SnapshotIngestResult.duplicate()
+                return@inTransaction SnapshotIngestResult.duplicate()
             }
             val priorCapturedAt = latestSnapshotCapturedAt(db)
             if (historicalOnly) {

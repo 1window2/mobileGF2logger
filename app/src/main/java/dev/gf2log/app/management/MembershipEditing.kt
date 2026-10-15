@@ -24,7 +24,7 @@ internal object MembershipEditing {
         require(name.isNotBlank())
         require(isValidMembershipRange(joined, withdrew))
         return db.inTransaction {
-            if (memberExists(db, uid)) return false
+            if (memberExists(db, uid)) return@inTransaction false
             MembershipRows.insertMember(
                 db = db,
                 uid = uid,
@@ -50,8 +50,10 @@ internal object MembershipEditing {
     ): Boolean {
         require(isValidMembershipRange(joined, withdrew))
         return db.inTransaction {
-            val memberName = memberName(db, uid) ?: return false
-            if (!canStoreMembershipPeriod(db, uid, null, joined, withdrew)) return false
+            val memberName = memberName(db, uid) ?: return@inTransaction false
+            if (!canStoreMembershipPeriod(db, uid, null, joined, withdrew)) {
+                return@inTransaction false
+            }
             val membershipPeriodId = insertManualMembershipPeriod(db, uid, joined, withdrew, note)
             replaceManualMembershipPeriodEvents(db, membershipPeriodId, uid, memberName, joined, withdrew)
             synchronizeAndVerifyMembershipState(db, uid)
@@ -71,7 +73,7 @@ internal object MembershipEditing {
     fun deleteMember(db: SQLiteDatabase, uid: Long): Boolean {
         require(uid > 0)
         return db.inTransaction {
-            if (!memberExists(db, uid)) return false
+            if (!memberExists(db, uid)) return@inTransaction false
             val uidArgument = arrayOf(uid.toString())
             db.delete("weekly_overrides", "uid = ?", uidArgument)
             db.delete(
@@ -106,7 +108,7 @@ internal object MembershipEditing {
                 "SELECT uid FROM membership_periods WHERE id = ?",
                 arrayOf(membershipPeriodId.toString()),
             ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
-                ?: return false
+                ?: return@inTransaction false
             val periodCount = db.rawQuery(
                 "SELECT COUNT(*) FROM membership_periods WHERE uid = ?",
                 arrayOf(uid.toString()),
@@ -114,7 +116,8 @@ internal object MembershipEditing {
                 check(cursor.moveToFirst())
                 cursor.getLong(0)
             }
-            if (periodCount <= 1L) return false
+            if (periodCount <= 1L) return@inTransaction false
+            // A vanished row after its events were detached must roll those deletions back.
             if (!MembershipRows.deleteMembershipPeriod(db, membershipPeriodId)) return false
             synchronizeAndVerifyMembershipState(db, uid)
             true
@@ -130,13 +133,13 @@ internal object MembershipEditing {
         note: String,
     ): Boolean = db.inTransaction {
         val period = readMembershipPeriodForUpdate(db, membershipPeriodId, gameZone)
-            ?: return false
+            ?: return@inTransaction false
         // Exact packet-linked boundaries stay immutable; only editable sides take the request.
         val effectiveJoined = if (period.joinedSource.isImmutableMembershipBoundary()) {
             period.joined
         } else {
             joined
-        } ?: return false
+        } ?: return@inTransaction false
         val effectiveLeft = if (period.leftSource?.isImmutableMembershipBoundary() == true) {
             period.left
         } else {
@@ -144,7 +147,7 @@ internal object MembershipEditing {
         }
         require(isValidMembershipRange(effectiveJoined, effectiveLeft))
         if (!canStoreMembershipPeriod(db, period.uid, membershipPeriodId, effectiveJoined, effectiveLeft)) {
-            return false
+            return@inTransaction false
         }
         val joinedChanged = editableMembershipBoundaryChanged(
             original = period.joined,

@@ -447,6 +447,35 @@ class PlatoonDatabaseIntegrationTest {
     }
 
     @Test
+    fun rejectedNestedWritesDoNotDiscardTheOuterTransaction() {
+        val snapshot = PlatoonSnapshot(
+            id = 0,
+            capturedAt = Instant.parse("2026-07-31T00:00:00Z"),
+            sourceFile = "committed.csv",
+            members = listOf(member(TARGET_UID, "Committed")),
+        )
+        val joined = MembershipBoundaryValue(
+            date = LocalDate.of(2026, 7, 1),
+            instant = Instant.parse("2026-07-01T00:00:00Z"),
+            timeKnown = true,
+        )
+
+        database.runInTransaction {
+            database.ingestSnapshot(snapshot, EvidenceSource.LEGACY_IMPORT)
+            assertTrue(database.ingestSnapshot(snapshot, EvidenceSource.LEGACY_IMPORT).duplicate)
+            assertFalse(database.addWithdrawnMember(TARGET_UID, "Again", joined, joined, ""))
+            assertFalse(database.addMembershipPeriod(OTHER_UID, joined, null, ""))
+            assertFalse(database.deleteMember(OTHER_UID))
+            assertFalse(database.deleteMembershipPeriod(Long.MAX_VALUE))
+            assertFalse(database.updateMembershipPeriod(Long.MAX_VALUE, joined, null, ""))
+        }
+
+        assertEquals(1L, count("snapshots", "source_file = ?", "committed.csv"))
+        assertEquals(1L, count("members", "uid = ?", TARGET_UID))
+        assertForeignKeysValid()
+    }
+
+    @Test
     fun databaseRejectsRosterBoundsForEveryIngestionCaller() {
         val oversizedRoster = (1..257).map { index -> member(index.toLong(), "Member $index") }
         val oversizedName = member(TARGET_UID, "x".repeat(257))

@@ -35,6 +35,8 @@ internal enum class MembershipBoundary(
 /**
  * Commits only when [block] completes normally. An exception or a non-local `return` rolls the
  * transaction back; an early result that must commit returns through `return@inTransaction`.
+ * A nested block that rolls back discards its whole outer transaction, so read-only early exits
+ * also return through `return@inTransaction`.
  */
 internal inline fun <T> SQLiteDatabase.inTransaction(block: () -> T): T {
     beginTransaction()

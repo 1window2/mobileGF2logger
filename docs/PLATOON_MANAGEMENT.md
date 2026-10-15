@@ -219,6 +219,11 @@ transitions.
 - Weekly history is a derived audit trail, not the primary store. If refreshing
   one revision fails after a successful data mutation, the affected restored
   selection is cleared so the live database projection remains authoritative.
+- A manual Daily Patrol requires manual attendance. When an edit sets one of
+  the two and the other stored choice contradicts it, the edited choice wins
+  (Patrol yes also sets Login yes; Login no also sets Patrol no); Login no with
+  Patrol yes in the same edit is rejected before saving, so no edit can produce
+  a pair that storage refuses.
 - Weekly notes and manual overrides must fall inside their own week; anything
   else is rejected before it can make a revision fail its structural checks.
 - A captured roster older than the latest stored one, from a late packet or a

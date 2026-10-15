@@ -78,4 +78,68 @@ class WeeklyOverrideEditingTest {
     fun emptyEditsDoNotCreateOverrides() {
         assertTrue(valid(WeeklyOverrideEditing.merge(week, true, emptyList(), listOf(CellEdit(7, day)))).isEmpty())
     }
+
+    @Test
+    fun anEditedActivityChoiceResolvesAContradictionWithAStoredOne() {
+        // A completed Daily Patrol requires attendance, and storage rejects the contradiction.
+        assertEquals(
+            listOf(stored(attended = false, patrol = false)),
+            valid(
+                WeeklyOverrideEditing.merge(
+                    week,
+                    false,
+                    listOf(stored(patrol = true)),
+                    listOf(CellEdit(7, day, attended = Choice.NO)),
+                ),
+            ),
+        )
+        assertEquals(
+            listOf(stored(attended = true, patrol = true)),
+            valid(
+                WeeklyOverrideEditing.merge(
+                    week,
+                    false,
+                    listOf(stored(attended = false)),
+                    listOf(CellEdit(7, day, dailyPatrol = Choice.YES)),
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun contradictoryActivityChoicesInOneEditAreInvalid() {
+        assertEquals(
+            Result.Invalid(7, day, Field.ACTIVITY),
+            WeeklyOverrideEditing.merge(
+                week,
+                false,
+                emptyList(),
+                listOf(CellEdit(7, day, attended = Choice.NO, dailyPatrol = Choice.YES)),
+            ),
+        )
+    }
+
+    @Test
+    fun everyValidMergeIsAcceptedByStorageRules() {
+        val choices = listOf<Choice?>(null) + Choice.entries
+        val storedValues = listOf<Boolean?>(null, true, false)
+        storedValues.forEach { storedAttended ->
+            storedValues.forEach { storedPatrol ->
+                if (storedAttended == false && storedPatrol == true) return@forEach
+                choices.forEach { attended ->
+                    choices.forEach { patrol ->
+                        val result = WeeklyOverrideEditing.merge(
+                            week,
+                            false,
+                            listOf(stored(merit = 1, attended = storedAttended, patrol = storedPatrol)),
+                            listOf(CellEdit(7, day, attended = attended, dailyPatrol = patrol)),
+                        )
+                        if (result is Result.Valid) {
+                            assertTrue(result.overrides.none { it.attended == false && it.dailyPatrol == true })
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -45,7 +45,12 @@ internal class PlatoonRepository(
                 source = EvidenceSource.SNAPSHOT,
             )
         }
-        if (!result.duplicate) recordChangedWeeks(setOf(capturedAt))
+        when {
+            result.duplicate -> Unit
+            // A replayed older roster can rebuild membership periods across every week.
+            result.historical -> recordAllLiveWeeklyReports()
+            else -> recordChangedWeeks(setOf(capturedAt))
+        }
         return result
     }
 

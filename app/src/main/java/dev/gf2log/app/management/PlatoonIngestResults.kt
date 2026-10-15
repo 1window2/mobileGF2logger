@@ -8,11 +8,13 @@ data class SnapshotIngestResult(
     val rejoined: Int,
     val left: Int,
     val renamed: Int,
+    /** True when the roster predated current data and was replayed into history instead. */
+    val historical: Boolean = false,
 ) {
     companion object {
         fun duplicate() = SnapshotIngestResult(null, true, false, 0, 0, 0, 0)
         fun historical(snapshotId: Long) =
-            SnapshotIngestResult(snapshotId, false, false, 0, 0, 0, 0)
+            SnapshotIngestResult(snapshotId, false, false, 0, 0, 0, 0, historical = true)
     }
 }
 

@@ -476,6 +476,42 @@ class PlatoonDatabaseIntegrationTest {
     }
 
     @Test
+    fun anOutOfOrderCapturedRosterIsReplayedWithoutWithdrawingCurrentMembers() {
+        val newer = Instant.parse("2026-08-02T00:00:00Z")
+        val older = Instant.parse("2026-08-01T00:00:00Z")
+        database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = newer,
+                sourceFile = "newer.csv",
+                members = listOf(member(TARGET_UID, "Target"), member(OTHER_UID, "Other")),
+            ),
+            EvidenceSource.SNAPSHOT,
+        )
+
+        val late = database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = older,
+                sourceFile = "older.csv",
+                members = listOf(member(TARGET_UID, "Target")),
+            ),
+            EvidenceSource.SNAPSHOT,
+        )
+
+        assertTrue(late.historical)
+        assertEquals(0, late.left)
+        val statuses = database.listMemberStatuses().associateBy(MemberStatus::uid)
+        assertTrue(statuses.getValue(TARGET_UID).isActive)
+        assertTrue(statuses.getValue(OTHER_UID).isActive)
+        val otherPeriod = statuses.getValue(OTHER_UID).membershipPeriods.single()
+        assertEquals(newer, otherPeriod.joinedAt)
+        assertEquals(null, otherPeriod.leftAt)
+        assertEquals(2L, count("snapshots", "id > ?", 0))
+        assertForeignKeysValid()
+    }
+
+    @Test
     fun databaseRejectsRosterBoundsForEveryIngestionCaller() {
         val oversizedRoster = (1..257).map { index -> member(index.toLong(), "Member $index") }
         val oversizedName = member(TARGET_UID, "x".repeat(257))

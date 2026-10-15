@@ -169,7 +169,10 @@ transitions.
 - Manual edits are accepted only when every period ends after it starts, no two
   fully dated periods overlap, and at most one period remains open. An absent
   snapshot-derived start remains unknown rather than being treated as an
-  infinitely old boundary. Every writer derives current active state from the
+  infinitely old boundary. Snapshot and exact boundaries are dated in the
+  Platoon's game timezone for this check, the same calendar manual dates use,
+  so a manual same-day boundary with an unknown time is never a proven overlap
+  with a timed one. Every writer derives current active state from the
   periods inside the same transaction with one rule: a member is active while an
   open period remains effective. An open period started by an exact Updates join
   is superseded by a later recorded exit or by a newer roster that omits the

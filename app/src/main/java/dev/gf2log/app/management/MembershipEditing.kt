@@ -14,6 +14,7 @@ import java.time.ZoneId
 internal object MembershipEditing {
     fun addWithdrawnMember(
         db: SQLiteDatabase,
+        gameZone: () -> ZoneId,
         uid: Long,
         name: String,
         joined: MembershipBoundaryValue,
@@ -37,13 +38,14 @@ internal object MembershipEditing {
             )
             val membershipPeriodId = insertManualMembershipPeriod(db, uid, joined, withdrew, storedNote)
             replaceManualMembershipPeriodEvents(db, membershipPeriodId, uid, storedName, joined, withdrew)
-            synchronizeAndVerifyMembershipState(db, uid)
+            synchronizeAndVerifyMembershipState(db, gameZone(), uid)
             true
         }
     }
 
     fun addMembershipPeriod(
         db: SQLiteDatabase,
+        gameZone: () -> ZoneId,
         uid: Long,
         joined: MembershipBoundaryValue,
         withdrew: MembershipBoundaryValue?,
@@ -53,12 +55,12 @@ internal object MembershipEditing {
         require(isValidMembershipRange(joined, withdrew))
         return db.inTransaction {
             val memberName = memberName(db, uid) ?: return@inTransaction false
-            if (!canStoreMembershipPeriod(db, uid, null, joined, withdrew)) {
+            if (!canStoreMembershipPeriod(db, gameZone(), uid, null, joined, withdrew)) {
                 return@inTransaction false
             }
             val membershipPeriodId = insertManualMembershipPeriod(db, uid, joined, withdrew, storedNote)
             replaceManualMembershipPeriodEvents(db, membershipPeriodId, uid, memberName, joined, withdrew)
-            synchronizeAndVerifyMembershipState(db, uid)
+            synchronizeAndVerifyMembershipState(db, gameZone(), uid)
             true
         }
     }
@@ -102,7 +104,11 @@ internal object MembershipEditing {
      * Deletes one membership period and its derived boundary events atomically. The member's
      * final period is protected; returns false when the period is missing or is the only one.
      */
-    fun deleteMembershipPeriod(db: SQLiteDatabase, membershipPeriodId: Long): Boolean {
+    fun deleteMembershipPeriod(
+        db: SQLiteDatabase,
+        gameZone: () -> ZoneId,
+        membershipPeriodId: Long,
+    ): Boolean {
         require(membershipPeriodId > 0)
         return db.inTransaction {
             val uid = db.rawQuery(
@@ -120,7 +126,7 @@ internal object MembershipEditing {
             if (periodCount <= 1L) return@inTransaction false
             // A vanished row after its events were detached must roll those deletions back.
             if (!MembershipRows.deleteMembershipPeriod(db, membershipPeriodId)) return false
-            synchronizeAndVerifyMembershipState(db, uid)
+            synchronizeAndVerifyMembershipState(db, gameZone(), uid)
             true
         }
     }
@@ -149,7 +155,7 @@ internal object MembershipEditing {
                 left
             }
             require(isValidMembershipRange(effectiveJoined, effectiveLeft))
-            if (!canStoreMembershipPeriod(db, period.uid, membershipPeriodId, effectiveJoined, effectiveLeft)) {
+            if (!canStoreMembershipPeriod(db, gameZone(), period.uid, membershipPeriodId, effectiveJoined, effectiveLeft)) {
                 return@inTransaction false
             }
             val joinedChanged = editableMembershipBoundaryChanged(
@@ -188,7 +194,7 @@ internal object MembershipEditing {
                     effectiveLeft.takeIf { leftIsManual },
                 )
             }
-            if (updated) synchronizeAndVerifyMembershipState(db, period.uid)
+            if (updated) synchronizeAndVerifyMembershipState(db, gameZone(), period.uid)
             updated
         }
     }
@@ -199,6 +205,7 @@ internal object MembershipEditing {
      */
     private fun canStoreMembershipPeriod(
         db: SQLiteDatabase,
+        zoneId: ZoneId,
         uid: Long,
         replacedPeriodId: Long?,
         joined: MembershipBoundaryValue,
@@ -215,17 +222,17 @@ internal object MembershipEditing {
         )
         val periods = readMembershipIntervals(db, uid)
             .filterNot { it.id == replacedPeriodId } + proposed
-        return MembershipConsistencyPolicy.violation(periods) == null
+        return MembershipConsistencyPolicy.violation(periods, zoneId) == null
     }
 
     /**
      * Verifies chronology, derives current activity from the canonical periods, and verifies
      * event ownership before the surrounding transaction may commit.
      */
-    private fun synchronizeAndVerifyMembershipState(db: SQLiteDatabase, uid: Long) {
+    private fun synchronizeAndVerifyMembershipState(db: SQLiteDatabase, zoneId: ZoneId, uid: Long) {
         val periods = readMembershipIntervals(db, uid)
         checkNotNull(periods.takeIf { it.isNotEmpty() }) { "A member must retain a membership period" }
-        val violation = MembershipConsistencyPolicy.violation(periods)
+        val violation = MembershipConsistencyPolicy.violation(periods, zoneId)
         check(violation == null) { violation.orEmpty() }
         check(MembershipRows.synchronizeActiveState(db, listOf(uid)) == 1) {
             "Membership state has no owning member"

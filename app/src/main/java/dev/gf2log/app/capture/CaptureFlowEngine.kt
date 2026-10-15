@@ -237,14 +237,14 @@ internal class CaptureFlowEngine(
         if (admission.claimsIdentity(flowId, ownerPackage, data)) return
 
         val known = findKnownProfile(client, ownerPackage, data)
-        if (known == null) {
-            admission.begin(flowId, ownerPackage, data, preIdentity.take(flowId))
-            return
-        }
         val current = sessions[flowId]
-        if (current != null && current.profile.storageId != known.storageId) {
+        if (PlatoonProfilePolicy.changesBoundIdentity(current?.profile?.storageId, known?.storageId)) {
             quarantine(flowId)
             CaptureStatus.report(CaptureNotice.IDENTITY_CHANGED)
+            return
+        }
+        if (known == null) {
+            admission.begin(flowId, ownerPackage, data, preIdentity.take(flowId))
             return
         }
         val profile = observe(known.storageId, data)

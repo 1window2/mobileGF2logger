@@ -17,6 +17,16 @@ class PlatoonProfilePolicyTest {
     }
 
     @Test
+    fun boundFlowCannotSwitchToAnotherOrUnregisteredPlatoon() {
+        assertFalse(PlatoonProfilePolicy.changesBoundIdentity(null, null))
+        assertFalse(PlatoonProfilePolicy.changesBoundIdentity(null, "known"))
+        assertFalse(PlatoonProfilePolicy.changesBoundIdentity("known", "known"))
+        assertTrue(PlatoonProfilePolicy.changesBoundIdentity("known", "other"))
+        // An unregistered identity must not start admission while the flow stays bound.
+        assertTrue(PlatoonProfilePolicy.changesBoundIdentity("known", null))
+    }
+
+    @Test
     fun admissionGateAllowsOneNewProfilePerClientAndAlwaysAllowsKnownProfiles() {
         val gate = PlatoonProfilePolicy.AdmissionGate()
 

@@ -389,6 +389,83 @@ class Gfl2StreamParserTest {
     }
 
     @Test
+    fun malformedContinuationDiscardsTheWholeDatasetInsteadOfMergingAroundIt() {
+        val parser = Gfl2StreamParser()
+        val first = outerMessage(
+            0,
+            payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, guildMembersPayload("First", 1uL)),
+        )
+        val malformed = outerMessage(0, payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, MALFORMED))
+        val last = outerMessage(
+            42,
+            payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, guildMembersPayload("Last", 3uL)),
+        )
+
+        assertTrue(parser.accept(first).isEmpty())
+        assertEquals(1, parser.accept(malformed).filterIsInstance<ParseEvent.Warning>().size)
+        assertTrue(parser.accept(last).isEmpty())
+        assertTrue(parser.finish().isEmpty())
+        assertRecovers(parser)
+    }
+
+    @Test
+    fun malformedFirstFragmentQuarantinesItsTail() {
+        val parser = Gfl2StreamParser()
+        val events = parser.accept(
+            outerMessage(0, payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, MALFORMED)) +
+                outerMessage(
+                    42,
+                    payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, guildMembersPayload("Tail", 2uL)),
+                ),
+        )
+
+        assertEquals(1, events.filterIsInstance<ParseEvent.Warning>().size)
+        assertTrue(events.filterIsInstance<ParseEvent.Payload>().isEmpty())
+        assertRecovers(parser)
+    }
+
+    @Test
+    fun truncatedContinuationFrameDiscardsTheWholeDataset() {
+        val parser = Gfl2StreamParser()
+        val first = outerMessage(
+            0,
+            payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, guildMembersPayload("First", 1uL)),
+        )
+        val truncated = outerMessageWithBody(
+            0,
+            littleEndian16(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS) + littleEndian16(100) + byteArrayOf(0x0A),
+        )
+        val last = outerMessage(
+            42,
+            payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, guildMembersPayload("Last", 3uL)),
+        )
+
+        assertTrue(parser.accept(first).isEmpty())
+        val events = parser.accept(truncated + last)
+
+        assertEquals(1, events.filterIsInstance<ParseEvent.Warning>().size)
+        assertTrue(events.filterIsInstance<ParseEvent.Payload>().isEmpty())
+        assertRecovers(parser)
+    }
+
+    @Test
+    fun malformedProfileFrameKeepsTheEarlierIndependentProfile() {
+        val parser = Gfl2StreamParser()
+        val valid = outerMessage(
+            0,
+            payload(Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE, platoonProfilePayload(11uL, "Kept")),
+        )
+        val malformed = outerMessage(0, payload(Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE, MALFORMED))
+
+        assertTrue(parser.accept(valid).isEmpty())
+        val events = parser.accept(malformed)
+
+        assertEquals(1, events.filterIsInstance<ParseEvent.Warning>().size)
+        assertEquals("Kept", (events.singlePayload().value.data as PlatoonProfileData).platoonName)
+        assertTrue(parser.finish().isEmpty())
+    }
+
+    @Test
     fun unknownPayloadsRemainObservableWithoutRetainingTheirBytes() {
         val parser = Gfl2StreamParser()
         val events = parser.accept(outerMessage(51, payload(24567, byteArrayOf(1, 2, 3))))
@@ -488,6 +565,16 @@ class Gfl2StreamParserTest {
         return messageField(1, entry)
     }
 
+    private fun assertRecovers(parser: Gfl2StreamParser) {
+        val recovered = parser.accept(
+            outerMessage(
+                43,
+                payload(Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, guildMembersPayload("Fresh", 9uL)),
+            ),
+        ).singlePayload()
+        assertEquals("Fresh", (recovered.value.data as GuildMembersData).members.single().name)
+    }
+
     private fun List<ParseEvent>.singlePayload(): ParseEvent.Payload =
         filterIsInstance<ParseEvent.Payload>().single()
 
@@ -538,4 +625,9 @@ class Gfl2StreamParserTest {
         value.toByte(),
         (value ushr 8).toByte(),
     )
+
+    private companion object {
+        /** Field 1 declares 127 bytes that are not present. */
+        val MALFORMED = byteArrayOf(0x0A, 0x7F)
+    }
 }

@@ -87,6 +87,10 @@ class Gfl2StreamParser(
                 events += ParseEvent.Warning(
                     "Message $messageId payload $type declares $payloadSize bytes with ${message.size - offset} remaining",
                 )
+                // The truncated frame is necessarily the last one in this message.
+                if (type in Gfl2PayloadDecoder.supportedTypes) {
+                    discardDataset(type, messageId, isEndOfMessage = true, events)
+                }
                 return
             }
 
@@ -116,6 +120,7 @@ class Gfl2StreamParser(
                     events += ParseEvent.Warning(
                         "Unable to decode payload $type in message $messageId: ${error.message}",
                     )
+                    discardDataset(type, messageId, isEndOfMessage, events)
                 }
             } else {
                 emitPending(events)
@@ -142,10 +147,9 @@ class Gfl2StreamParser(
     ) {
         val pending = pendingPayload
         if (pending != null) {
-            val continues = pending.type == type &&
-                (pending.previousMessageId == 0 || pending.previousMessageId == messageId)
-            val merged = if (continues) merge(pending.data, data) else null
-            if (continues && merged != null) {
+            val continued = pending.type == type && continues(pending.previousMessageId, messageId)
+            val merged = if (continued) merge(pending.data, data) else null
+            if (continued && merged != null) {
                 val accumulatedBytes = pending.accumulatedPayloadBytes + payloadBytes.toLong()
                 val continuationCount = pending.continuationCount + 1
                 if (
@@ -153,7 +157,7 @@ class Gfl2StreamParser(
                     continuationCount > maximumPendingContinuations
                 ) {
                     pendingPayload = null
-                    quarantinedPayload = if (messageId != 0 && isEndOfMessage) {
+                    quarantinedPayload = if (isTerminal(messageId, isEndOfMessage)) {
                         null
                     } else {
                         QuarantinedPayload(type, messageId)
@@ -168,7 +172,7 @@ class Gfl2StreamParser(
                 pending.isEndOfMessage = isEndOfMessage
                 pending.accumulatedPayloadBytes = accumulatedBytes
                 pending.continuationCount = continuationCount
-                if (messageId != 0 && isEndOfMessage) emitPending(events)
+                if (isTerminal(messageId, isEndOfMessage)) emitPending(events)
                 return
             }
             // A different dataset, or a continuation of a single-object payload such as
@@ -176,7 +180,7 @@ class Gfl2StreamParser(
             emitPending(events)
         }
 
-        if (messageId != 0 && isEndOfMessage) {
+        if (isTerminal(messageId, isEndOfMessage)) {
             events += ParseEvent.Payload(ParsedPayload(messageId, type, true, data))
         } else {
             if (payloadBytes > maximumPendingPayloadBytes) {
@@ -197,18 +201,45 @@ class Gfl2StreamParser(
         }
     }
 
+    /**
+     * Drops the logical dataset a malformed frame belongs to. Merging its neighbours across the
+     * hole would publish an incomplete roster as if it were complete, so a continued pending
+     * payload is discarded and the dataset's remaining fragments are quarantined. A payload that
+     * cannot be merged, such as 21905, owns each frame and keeps its earlier, valid frames.
+     */
+    private fun discardDataset(
+        type: Int,
+        messageId: Int,
+        isEndOfMessage: Boolean,
+        events: MutableList<ParseEvent>,
+    ) {
+        val mergeable = type != Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE
+        val pending = pendingPayload
+        if (
+            mergeable && pending != null && pending.type == type &&
+            continues(pending.previousMessageId, messageId)
+        ) {
+            pendingPayload = null
+        } else {
+            emitPending(events)
+        }
+        if (!mergeable) return
+        quarantinedPayload = if (isTerminal(messageId, isEndOfMessage)) {
+            null
+        } else {
+            QuarantinedPayload(type, messageId)
+        }
+    }
+
     private fun consumeQuarantinedPayload(
         type: Int,
         messageId: Int,
         isEndOfMessage: Boolean,
     ): Boolean {
         val quarantined = quarantinedPayload ?: return false
-        if (
-            quarantined.type == type &&
-            (quarantined.previousMessageId == 0 || quarantined.previousMessageId == messageId)
-        ) {
+        if (quarantined.type == type && continues(quarantined.previousMessageId, messageId)) {
             quarantined.previousMessageId = messageId
-            if (messageId != 0 && isEndOfMessage) quarantinedPayload = null
+            if (isTerminal(messageId, isEndOfMessage)) quarantinedPayload = null
             return true
         }
         quarantinedPayload = null
@@ -248,6 +279,14 @@ class Gfl2StreamParser(
             FormationsData(first.formations + second.formations)
         else -> null
     }
+
+    /** The reference continuation rule: after message id 0, or within the same message id. */
+    private fun continues(previousMessageId: Int, messageId: Int): Boolean =
+        previousMessageId == 0 || previousMessageId == messageId
+
+    /** A frame with a non-zero message id that ends its message completes a logical payload. */
+    private fun isTerminal(messageId: Int, isEndOfMessage: Boolean): Boolean =
+        messageId != 0 && isEndOfMessage
 
     private fun readUInt16Le(bytes: ByteArray, offset: Int): Int =
         (bytes[offset].toInt() and 0xFF) or

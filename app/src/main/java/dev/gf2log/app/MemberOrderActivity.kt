@@ -74,6 +74,10 @@ class MemberOrderActivity : BaseActivity() {
         }
         repository = PlatoonRepository(this, scope)
         preferences = MemberOrderPreferences(this, scope.storageId)
+        savedInstanceState?.let { state ->
+            sortField = MemberSortField.entries.getOrElse(state.getInt(STATE_SORT_FIELD)) { sortField }
+            sortDirection = MemberSortDirection.entries.getOrElse(state.getInt(STATE_SORT_DIRECTION)) { sortDirection }
+        }
         val screen = Screen(this)
         screen.topBar
             .setNavigation(::finish)
@@ -96,6 +100,12 @@ class MemberOrderActivity : BaseActivity() {
 
     override fun onScreenResumed() {
         if (!profileBinding.isCurrent(this)) finish()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt(STATE_SORT_FIELD, sortField.ordinal)
+        outState.putInt(STATE_SORT_DIRECTION, sortDirection.ordinal)
+        super.onSaveInstanceState(outState)
     }
 
     private fun buildHeader(): View = column {
@@ -333,5 +343,7 @@ class MemberOrderActivity : BaseActivity() {
 
     private companion object {
         val POSITION_PAYLOAD = Any()
+        const val STATE_SORT_FIELD = "member_order.sort_field"
+        const val STATE_SORT_DIRECTION = "member_order.sort_direction"
     }
 }

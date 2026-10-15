@@ -289,12 +289,19 @@ the native listener contract); encapsulation is provided by stores and the
 repository facade. Android lifecycle inheritance remains shallow through
 `LocalizedActivity`, `VpnService`, and `SQLiteOpenHelper`.
 
-The large SQLite helper remains a maintenance boundary. Schema, migrations,
-and transactional evidence correlation stay together to preserve atomic
-ingestion. Read-only roster snapshot projection is extracted into
-`WeeklySnapshotStore` behind the repository-facing database API; further
-extractions must preserve the same single-transaction write owner and must not
-let Activities issue SQL directly.
+`PlatoonDatabase` is the single SQLite helper and transactional write owner of
+one scope. Its SQL lives in package-internal objects that receive the open
+database (`PlatoonDatabaseSchema`, `PlatoonDatabaseMigrations`,
+`SnapshotIngestion`, `RosterHistoryReplay`, `ActivityIngestion`,
+`ExactBoundaryCorrelation`, `MembershipEditing`, `MembershipRows`,
+`PlatoonReadQueries`, `WeeklyAnnotationStore`, `WeeklyHistoryStore`, and
+`WeeklySnapshotStore`), so one ingest still commits or rolls back as a whole.
+Activities never issue SQL directly.
+
+Locks are always acquired in one order: a CSV checkpoint's per-scope claim,
+the repository maintenance lock, the database helper, the profile registry,
+then settings stores. Restore recovery runs only when durable restore artifacts
+exist, so constructing a repository never takes the exclusive gate.
 
 ## Parsed-packet history
 

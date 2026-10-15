@@ -59,11 +59,6 @@ internal class BackgroundWork(owner: LifecycleOwner, threadName: String) {
         }
     }
 
-    /** Invalidates pending results for [key] without cancelling work already committing. */
-    fun cancel(key: String) {
-        generations[key] = (generations[key] ?: 0) + 1
-    }
-
     private companion object {
         const val TAG = "GF2Work"
     }

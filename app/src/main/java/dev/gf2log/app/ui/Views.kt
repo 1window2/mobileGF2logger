@@ -466,10 +466,5 @@ internal fun Context.selectableBorderless(): android.graphics.drawable.Drawable 
         null,
     )
 
-internal fun Context.spacer(heightDp: Int): View = View(this).apply {
-    layoutParams = LinearLayout.LayoutParams(MATCH, dp(heightDp))
-    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-}
-
 internal fun Context.frame(block: FrameLayout.() -> Unit = {}): FrameLayout =
     FrameLayout(this).apply(block)

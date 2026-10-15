@@ -6,7 +6,6 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.PopupMenu
-import android.widget.TextView
 import androidx.annotation.DrawableRes
 import dev.gf2log.app.R
 
@@ -62,8 +61,6 @@ internal class TopBar(context: Context) : LinearLayout(context) {
         }, context.lp(width = 0, weight = 1f, start = 8, end = 4))
         addView(actions, context.lp(WRAP, WRAP))
     }
-
-    val title: TextView get() = titleView
 
     fun setTitle(value: CharSequence?, subtitle: CharSequence? = null): TopBar = apply {
         titleView.text = value

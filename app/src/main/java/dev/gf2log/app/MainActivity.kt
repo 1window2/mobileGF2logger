@@ -28,6 +28,7 @@ import dev.gf2log.app.ui.DocumentAccess
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.Screen
+import dev.gf2log.app.ui.captureActive
 import dev.gf2log.app.ui.TextRole
 import dev.gf2log.app.ui.column
 import dev.gf2log.app.ui.dp
@@ -62,9 +63,13 @@ class MainActivity : BaseActivity() {
 
     private var captureOnceRequested = false
 
+    /** A start is waiting on the permission or VPN consent screens; further taps are ignored. */
+    private var startPending = false
+
     private val statusListener: (CaptureSnapshot) -> Unit = { capturePanel.render(it) }
 
     private val vpnConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        startPending = false
         if (result.resultCode == RESULT_OK) startCaptureService() else CaptureStatus.markStopped()
     }
 
@@ -190,6 +195,8 @@ class MainActivity : BaseActivity() {
     // region Capture
 
     private fun beginCapture(once: Boolean) {
+        if (startPending || captureActive) return
+        startPending = true
         captureOnceRequested = once
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -215,6 +222,7 @@ class MainActivity : BaseActivity() {
                 .putExtra(CaptureVpnService.EXTRA_CAPTURE_ONCE, captureOnceRequested),
         )
         captureOnceRequested = false
+        startPending = false
     }
 
     // endregion

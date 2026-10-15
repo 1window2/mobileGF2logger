@@ -52,12 +52,6 @@ internal class PlatoonDatabase private constructor(
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) =
         PlatoonDatabaseMigrations.upgrade(db, oldVersion, ::gameZone)
 
-    /** Returns true only when this database contains user-visible management state. */
-    internal fun hasManagementData(): Boolean {
-        val db = readableDatabase
-        return MANAGEMENT_DATA_TABLES.any { table -> PlatoonReadQueries.count(db, table) > 0L }
-    }
-
     @Synchronized
     internal fun <T> runInTransaction(block: () -> T): T = writableDatabase.inTransaction(block)
 
@@ -255,9 +249,6 @@ internal class PlatoonDatabase private constructor(
         WeeklyHistoryStore.clearActive(writableDatabase, periodStartEpochDay)
 
     @Synchronized
-    fun clearWeeklyReportHistory() = WeeklyHistoryStore.clear(writableDatabase)
-
-    @Synchronized
     internal fun replaceWeeklyReportHistory(replacements: List<WeeklyReportHistoryReplacement>) =
         WeeklyHistoryStore.replace(writableDatabase, replacements)
 
@@ -274,14 +265,5 @@ internal class PlatoonDatabase private constructor(
         const val DAILY_PATROL_REWARD_ACTION_ID = 802001L
         internal const val MAX_STORED_ACTIVITY_OBSERVATIONS = 10_000
         internal const val MAX_WEEKLY_REPORT_HISTORY = 15
-        private val MANAGEMENT_DATA_TABLES = listOf(
-            "snapshots",
-            "members",
-            "membership_periods",
-            "member_events",
-            "platoon_activity",
-            "weekly_notes",
-            "weekly_overrides",
-        )
     }
 }

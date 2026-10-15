@@ -112,7 +112,7 @@ internal object UserSettingsPreferences {
 
     fun setMemberOrder(context: Context, uids: List<Long>): Boolean = synchronized(lock) {
         preferencesLocked(context.applicationContext).edit()
-            .putString(KEY_MEMBER_ORDER, uids.distinct().joinToString(","))
+            .putString(KEY_MEMBER_ORDER, uids.filter { it > 0L }.distinct().joinToString(","))
             .commit()
     }
 
@@ -209,7 +209,7 @@ internal object UserSettingsPreferences {
         val memberOrder = parseMemberOrder(
             context.getSharedPreferences("weekly_member_order", Context.MODE_PRIVATE)
                 .safeString("uids"),
-        ).filter { it > 0L }
+        )
         val legacyCutlines = readLegacyCutlines(
             context.getSharedPreferences("weekly_cutlines", Context.MODE_PRIVATE),
         )
@@ -317,9 +317,11 @@ internal object UserSettingsPreferences {
     private fun SharedPreferences.safeInt(key: String): Int? =
         runCatching { getInt(key, 0) }.getOrNull().takeIf { contains(key) }
 
+    /** Only positive UIDs are member identities; anything else would fail settings validation. */
     private fun parseMemberOrder(value: String?): List<Long> = value.orEmpty()
         .split(',')
         .mapNotNull(String::toLongOrNull)
+        .filter { it > 0L }
         .distinct()
 
     private fun payloadKey(payloadType: Int) = "payload_$payloadType"

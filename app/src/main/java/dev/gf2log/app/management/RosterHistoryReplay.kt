@@ -57,7 +57,6 @@ internal object RosterHistoryReplay {
     }
 
     private fun ensureHistoricalMembers(db: SQLiteDatabase, snapshots: List<RosterFrame>) {
-        val latestFrame = snapshots.last()
         snapshots.flatMap { frame ->
             frame.members.map { (uid, identity) -> Triple(uid, identity, frame.capturedAt) }
         }.groupBy { it.first }.forEach { (uid, observations) ->

@@ -45,7 +45,12 @@ internal class PlatoonRepository(
                 source = EvidenceSource.SNAPSHOT,
             )
         }
-        if (!result.duplicate) recordChangedWeeks(setOf(capturedAt))
+        when {
+            result.duplicate -> Unit
+            // A replayed older roster can rebuild membership periods across every week.
+            result.historical -> recordAllLiveWeeklyReports()
+            else -> recordChangedWeeks(setOf(capturedAt))
+        }
         return result
     }
 
@@ -276,8 +281,9 @@ internal class PlatoonRepository(
 
     /**
      * The weekly screen's load: returns the displayed revision and records the live projection
-     * it was derived from, so the history list includes what the user saw. A stored selection
-     * that no longer decodes is cleared and the live projection is shown instead.
+     * it was derived from, so the history list includes what the user saw. History is a derived
+     * audit trail, so a revision it cannot record still renders. A stored selection that no
+     * longer decodes is cleared and the live projection is shown instead.
      */
     fun buildWeeklyTableRevision(
         referenceDay: LocalDate,
@@ -285,7 +291,11 @@ internal class PlatoonRepository(
         asOf: Instant = Instant.now(),
     ): WeeklyTableRevision {
         val live = buildLiveWeeklyRevision(referenceDay, zoneId, asOf)
-        recordHistory(live, Instant.now(), clearActiveOnChange = false)
+        try {
+            recordHistory(live, Instant.now(), clearActiveOnChange = false)
+        } catch (error: Exception) {
+            Log.e(TAG, "Unable to record weekly history for ${live.report.periodStart}", error)
+        }
         return activeRevision(live) ?: live.also {
             access { database ->
                 database.clearActiveWeeklyReportHistory(live.report.periodStart.toEpochDay())

@@ -447,6 +447,71 @@ class PlatoonDatabaseIntegrationTest {
     }
 
     @Test
+    fun rejectedNestedWritesDoNotDiscardTheOuterTransaction() {
+        val snapshot = PlatoonSnapshot(
+            id = 0,
+            capturedAt = Instant.parse("2026-07-31T00:00:00Z"),
+            sourceFile = "committed.csv",
+            members = listOf(member(TARGET_UID, "Committed")),
+        )
+        val joined = MembershipBoundaryValue(
+            date = LocalDate.of(2026, 7, 1),
+            instant = Instant.parse("2026-07-01T00:00:00Z"),
+            timeKnown = true,
+        )
+
+        database.runInTransaction {
+            database.ingestSnapshot(snapshot, EvidenceSource.LEGACY_IMPORT)
+            assertTrue(database.ingestSnapshot(snapshot, EvidenceSource.LEGACY_IMPORT).duplicate)
+            assertFalse(database.addWithdrawnMember(TARGET_UID, "Again", joined, joined, ""))
+            assertFalse(database.addMembershipPeriod(OTHER_UID, joined, null, ""))
+            assertFalse(database.deleteMember(OTHER_UID))
+            assertFalse(database.deleteMembershipPeriod(Long.MAX_VALUE))
+            assertFalse(database.updateMembershipPeriod(Long.MAX_VALUE, joined, null, ""))
+        }
+
+        assertEquals(1L, count("snapshots", "source_file = ?", "committed.csv"))
+        assertEquals(1L, count("members", "uid = ?", TARGET_UID))
+        assertForeignKeysValid()
+    }
+
+    @Test
+    fun anOutOfOrderCapturedRosterIsReplayedWithoutWithdrawingCurrentMembers() {
+        val newer = Instant.parse("2026-08-02T00:00:00Z")
+        val older = Instant.parse("2026-08-01T00:00:00Z")
+        database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = newer,
+                sourceFile = "newer.csv",
+                members = listOf(member(TARGET_UID, "Target"), member(OTHER_UID, "Other")),
+            ),
+            EvidenceSource.SNAPSHOT,
+        )
+
+        val late = database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = older,
+                sourceFile = "older.csv",
+                members = listOf(member(TARGET_UID, "Target")),
+            ),
+            EvidenceSource.SNAPSHOT,
+        )
+
+        assertTrue(late.historical)
+        assertEquals(0, late.left)
+        val statuses = database.listMemberStatuses().associateBy(MemberStatus::uid)
+        assertTrue(statuses.getValue(TARGET_UID).isActive)
+        assertTrue(statuses.getValue(OTHER_UID).isActive)
+        val otherPeriod = statuses.getValue(OTHER_UID).membershipPeriods.single()
+        assertEquals(newer, otherPeriod.joinedAt)
+        assertEquals(null, otherPeriod.leftAt)
+        assertEquals(2L, count("snapshots", "id > ?", 0))
+        assertForeignKeysValid()
+    }
+
+    @Test
     fun databaseRejectsRosterBoundsForEveryIngestionCaller() {
         val oversizedRoster = (1..257).map { index -> member(index.toLong(), "Member $index") }
         val oversizedName = member(TARGET_UID, "x".repeat(257))
@@ -1252,6 +1317,74 @@ class PlatoonDatabaseIntegrationTest {
             WeeklyNotePolicy.MAX_MANUAL_NOTES_PER_WEEK,
             database.listWeeklyNotes(period).count { !it.isAutomatic },
         )
+    }
+
+    @Test
+    fun weeklyAnnotationsOutsideTheirWeekAreRejectedBeforePersistence() {
+        val periodStart = LocalDate.of(2026, 8, 16)
+        val override = WeeklyCellOverride(
+            uid = TARGET_UID,
+            periodStart = periodStart,
+            gameDay = periodStart,
+            meritDelta = 50,
+            scoreDelta = null,
+            attempts = null,
+            attended = true,
+            dailyPatrol = null,
+        )
+
+        assertThrows(IllegalArgumentException::class.java) {
+            database.addWeeklyNote(periodStart.toEpochDay(), periodStart.plusDays(7).toEpochDay(), "Late")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            database.replaceWeeklyOverrides(
+                periodStart.toEpochDay(),
+                listOf(override.copy(gameDay = periodStart.minusDays(1))),
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            database.replaceWeeklyOverrides(periodStart.toEpochDay(), listOf(override, override))
+        }
+        database.replaceWeeklyOverrides(periodStart.toEpochDay(), listOf(override))
+
+        assertTrue(database.listWeeklyNotes(periodStart.toEpochDay()).isEmpty())
+        assertEquals(listOf(override), database.listWeeklyOverrides(periodStart.toEpochDay()))
+    }
+
+    @Test
+    fun unknownJoinOfAnUpdatesWithdrawalPeriodStaysEditable() {
+        val withdrewAt = Instant.parse("2026-08-10T12:00:00Z")
+        database.ingestPlatoonUpdates(
+            listOf(update(PlatoonUpdateSemantics.KIND_WITHDRAW, withdrewAt, TARGET_UID, "Leaver")),
+            withdrewAt.plusSeconds(60),
+        )
+        val period = database.listMemberStatuses().single { it.uid == TARGET_UID }
+            .membershipPeriods.single()
+        assertEquals(null, period.joinedAt)
+        assertEquals(EvidenceSource.GAME_UPDATES, period.joinedSource)
+        assertTrue(period.isJoinedBoundaryEditable)
+        assertFalse(period.isLeftBoundaryEditable)
+        val joined = MembershipBoundaryValue(
+            date = LocalDate.of(2026, 8, 1),
+            instant = Instant.parse("2026-08-01T09:00:00Z"),
+            timeKnown = true,
+        )
+        val attemptedLeft = MembershipBoundaryValue(
+            date = LocalDate.of(2026, 8, 20),
+            instant = Instant.parse("2026-08-20T09:00:00Z"),
+            timeKnown = true,
+        )
+
+        assertTrue(database.updateMembershipPeriod(period.id, joined, attemptedLeft, "Recovered"))
+
+        val updated = database.listMemberStatuses().single { it.uid == TARGET_UID }
+            .membershipPeriods.single()
+        assertEquals(joined.instant, updated.joinedAt)
+        assertEquals(EvidenceSource.MANUAL, updated.joinedSource)
+        assertEquals(withdrewAt, updated.leftAt)
+        assertEquals(EvidenceSource.GAME_UPDATES, updated.leftSource)
+        assertEquals("Recovered", updated.note)
+        assertForeignKeysValid()
     }
 
     private fun update(kind: Long, at: Instant, uid: Long, name: String) =

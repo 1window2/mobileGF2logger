@@ -1,6 +1,7 @@
 package dev.gf2log.app.settings
 
 import dev.gf2log.app.StrictProperties
+import dev.gf2log.protocol.Gfl2PayloadDecoder
 import dev.gf2log.protocol.PayloadCatalog
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -100,7 +101,7 @@ object AppBackupSettingsCodec {
             payloadHistory = PayloadCatalog.categories.associate { category ->
                 category.payloadType to if (
                     schemaVersion < SCHEMA_VERSION &&
-                    category.payloadType == dev.gf2log.protocol.Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE
+                    category.payloadType == Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE
                 ) {
                     true
                 } else {
@@ -164,7 +165,7 @@ object AppBackupSettingsCodec {
         } + PayloadCatalog.categories
             .filterNot {
                 schemaVersion < SCHEMA_VERSION &&
-                    it.payloadType == dev.gf2log.protocol.Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE
+                    it.payloadType == Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE
             }
             .map { payloadKey(it.payloadType) }
 

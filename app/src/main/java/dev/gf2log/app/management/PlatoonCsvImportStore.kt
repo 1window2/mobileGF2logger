@@ -17,14 +17,11 @@ import java.time.format.DateTimeFormatter
 
 /** Validates and durably retains user-selected Platoon roster CSV evidence. */
 class PlatoonCsvImportStore(private val directory: File) {
-    // Function Name: prepare
-    // Description:
-    // - Reads a bounded UTF-8 roster CSV, validates its complete schema, and hashes its bytes.
-    // - Does not create files, allowing callers to preview a whole selection before confirmation.
-    // Parameters:
-    // - input: User-selected document stream owned by the caller.
-    // Returns:
-    // - An immutable prepared import containing only validated data and its stable identity.
+    /**
+     * Reads a bounded UTF-8 roster CSV, validates its complete schema, and hashes its bytes. Does
+     * not create files, allowing callers to preview a whole selection before confirmation. Returns
+     * an immutable prepared import containing only validated data and its stable identity.
+     */
     fun prepare(input: InputStream): PreparedImport {
         val bytes = readBounded(input)
         val text = StandardCharsets.UTF_8.newDecoder()
@@ -46,14 +43,11 @@ class PlatoonCsvImportStore(private val directory: File) {
 
     fun retain(input: InputStream): RetainResult = retain(prepare(input))
 
-    // Function Name: retain
-    // Description:
-    // - Publishes a previously validated import under its deterministic identity.
-    // - Uses a durable temporary write and rejects a content-hash identity collision.
-    // Parameters:
-    // - prepared: Validated content returned by prepare.
-    // Returns:
-    // - Stable retained file identity and whether identical bytes already existed.
+    /**
+     * Publishes a previously validated import under its deterministic identity. Uses a durable
+     * temporary write and rejects a content-hash identity collision. Returns stable retained file
+     * identity and whether identical bytes already existed.
+     */
     fun retain(prepared: PreparedImport): RetainResult {
         val bytes = prepared.encoded
         val capturedAt = prepared.capturedAt
@@ -91,13 +85,6 @@ class PlatoonCsvImportStore(private val directory: File) {
             temporary.delete()
         }
         return RetainResult(file, duplicate = false)
-    }
-
-    fun isRetained(prepared: PreparedImport): Boolean {
-        val file = File(directory, prepared.fileName)
-        if (!file.isFile) return false
-        require(file.readBytes().contentEquals(prepared.encoded)) { "CSV identity collision" }
-        return true
     }
 
     private fun readBounded(input: InputStream): ByteArray {

@@ -51,6 +51,19 @@ data class MemberStatus(
     val membershipPeriods: List<MembershipPeriod>,
 )
 
+/**
+ * The membership period a member list shows: the open period, or the most recently closed one
+ * when the member has withdrawn. Unknown boundaries sort before every known one.
+ */
+fun MemberStatus.latestMembershipPeriod(): MembershipPeriod? {
+    val open = membershipPeriods.filter { it.leftAt == null }
+    return (open.ifEmpty { membershipPeriods }).maxWithOrNull(
+        compareBy<MembershipPeriod, Instant?>(nullsFirst()) { it.leftAt }
+            .thenBy(nullsFirst()) { it.joinedAt }
+            .thenBy { it.id },
+    )
+}
+
 data class MemberEvent(
     val id: Long,
     val uid: Long,

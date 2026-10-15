@@ -34,10 +34,14 @@ internal object SnapshotIngestion {
         }
         return db.inTransaction {
             if (snapshot.sourceFile != null && sourceFileExists(db, snapshot.sourceFile)) {
-                return SnapshotIngestResult.duplicate()
+                return@inTransaction SnapshotIngestResult.duplicate()
             }
             val priorCapturedAt = latestSnapshotCapturedAt(db)
-            if (historicalOnly) {
+            // A roster older than the stored current one cannot describe current presence (a
+            // late packet or a clock moved backwards), so it is replayed chronologically.
+            val historical = historicalOnly ||
+                priorCapturedAt?.let(snapshot.capturedAt::isBefore) == true
+            if (historical) {
                 require(priorCapturedAt != null && !snapshot.capturedAt.isAfter(priorCapturedAt)) {
                     "Historical snapshots must not be newer than current structured data"
                 }

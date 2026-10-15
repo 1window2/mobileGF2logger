@@ -221,16 +221,11 @@ class PlatoonBackupManager internal constructor(
         }
     }
 
-    // Function Name: replaceRestoredState
-    // Description:
-    // - Replaces the validated database and retires target-device roster CSV evidence atomically.
-    // - Replaces settings only for a complete backup while preserving them for a v1 backup.
-    // - Uses the durable restore journal so a process death or failure rolls every resource back.
-    // Parameters:
-    // - stagedDatabase: Validated database extracted from the selected backup.
-    // - restoredSettings: Complete-backup settings, or null for Platoon-only compatibility restore.
-    // Returns:
-    // - Returns normally after the restored state commits and rollback artifacts are cleaned.
+    /**
+     * Replaces the validated database and retires target-device roster CSV evidence atomically.
+     * Replaces settings only for a complete backup while preserving them for a v1 backup. Uses the
+     * durable restore journal so a process death or failure rolls every resource back.
+     */
     private fun replaceRestoredState(
         stagedDatabase: File,
         restoredSettings: AppBackupSettings?,
@@ -410,15 +405,10 @@ class PlatoonBackupManager internal constructor(
         }
     }
 
-    // Function Name: beginRestoreTransaction
-    // Description:
-    // - Journals only the resources that the selected backup format can replace.
-    // - Keeps v1 database-only restore independent from app settings validation.
-    // Parameters:
-    // - previousSettings: Settings rollback value for complete restore, or null for v1 restore.
-    // - databaseExisted: Whether rollback must restore a previous database or remove a new one.
-    // Returns:
-    // - Returns normally after the durable PREPARED transaction state is written.
+    /**
+     * Journals only the resources that the selected backup format can replace. Keeps v1
+     * database-only restore independent from app settings validation.
+     */
     private fun beginRestoreTransaction(
         previousSettings: AppBackupSettings?,
         databaseExisted: Boolean,
@@ -811,11 +801,6 @@ enum class RestoredBackupKind {
     COMPLETE,
 }
 
-// Class Name: InvalidBackupException
-// Role: Identifies failures that prove the selected backup is invalid.
-// Responsibilities:
-//   - Error classification: Separates backup validation failures from operational restore errors.
-// Attributes:
-//   - cause: Validation exception raised while reading the selected backup.
+/** A failure proving the selected backup invalid, as opposed to an operational restore error. */
 internal class InvalidBackupException(cause: Exception) :
     Exception("Selected backup failed validation", cause)

@@ -13,6 +13,12 @@ internal object WeeklyAnnotationStore {
         text: String,
     ): Long {
         require(text.isNotBlank())
+        require(
+            WeeklyNotePolicy.isWithinWeek(
+                LocalDate.ofEpochDay(periodStartEpochDay),
+                LocalDate.ofEpochDay(gameDayEpochDay),
+            ),
+        ) { "A weekly note must belong to its week" }
         val manualNoteCount = db.rawQuery(
             "SELECT COUNT(*) FROM weekly_notes WHERE period_start = ? AND is_automatic = 0",
             arrayOf(periodStartEpochDay.toString()),
@@ -115,7 +121,15 @@ internal object WeeklyAnnotationStore {
         periodStartEpochDay: Long,
         overrides: List<WeeklyCellOverride>,
     ) {
-        require(overrides.all { it.periodStart.toEpochDay() == periodStartEpochDay })
+        require(
+            overrides.all {
+                it.periodStart.toEpochDay() == periodStartEpochDay &&
+                    WeeklyNotePolicy.isWithinWeek(it.periodStart, it.gameDay)
+            },
+        ) { "A weekly override must belong to its week" }
+        require(overrides.distinctBy { it.uid to it.gameDay }.size == overrides.size) {
+            "A weekly cell can have only one override"
+        }
         require(
             overrides.all {
                 it.attempts == null || it.attempts in 0..ActivityInference.MAX_DAILY_ATTEMPTS

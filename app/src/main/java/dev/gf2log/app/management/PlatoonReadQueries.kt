@@ -218,12 +218,6 @@ internal object PlatoonReadQueries {
             arrayOf(membershipPeriodId.toString()),
         ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
 
-    fun count(db: SQLiteDatabase, table: String): Long =
-        db.rawQuery("SELECT COUNT(*) FROM $table", null).use { cursor ->
-            cursor.moveToFirst()
-            cursor.getLong(0)
-        }
-
     private fun Cursor.toMemberEvent(): MemberEvent = MemberEvent(
         id = getLong(0),
         uid = getLong(1),

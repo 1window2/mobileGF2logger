@@ -13,7 +13,8 @@ object NativeCaptureBridge {
             remotePort: Int,
         )
 
-        fun onPayload(flowId: Long, isSent: Boolean, payload: ByteArray)
+        /** Receives server-to-client TCP payload only; outgoing bytes stay native. */
+        fun onPayload(flowId: Long, payload: ByteArray)
 
         fun onFlowClosed(flowId: Long)
 

@@ -32,6 +32,8 @@
 
 typedef struct flow_state {
     int64_t id;
+    bool tracked;
+    bool classified;
     bool inspect_payload;
 } flow_state_t;
 
@@ -109,11 +111,17 @@ static void notify_payload(
         return;
     }
 
-    if (is_web_transport(payload, payload_length)) {
-        flow->inspect_payload = false;
-        return;
+    // Like the reference IgnoreTls addon, decide once at connection start. Later game
+    // segments may begin with TLS-like bytes and must not silently disable inspection.
+    if (!flow->classified) {
+        flow->classified = true;
+        if (is_web_transport(payload, payload_length)) {
+            flow->inspect_payload = false;
+            return;
+        }
     }
 
+    // Outgoing plaintext is used only for classification.
     if (is_sent) {
         return;
     }
@@ -138,7 +146,6 @@ static void notify_payload(
                 context->listener,
                 context->payload_method,
                 (jlong) flow->id,
-                is_sent ? JNI_TRUE : JNI_FALSE,
                 bytes);
         clear_java_exception(context, "payload delivery");
     }
@@ -255,11 +262,16 @@ static int connection_open_callback(zdtun_t *tunnel, zdtun_conn_t *connection) {
         return 1;
     }
 
-    flow->id = ++context->next_flow_id;
-    flow->inspect_payload = zdtun_conn_get_5tuple(connection)->ipproto == IPPROTO_TCP;
-    zdtun_conn_set_userdata(connection, flow);
-
     const zdtun_5tuple_t *tuple = zdtun_conn_get_5tuple(connection);
+    flow->id = ++context->next_flow_id;
+    // Only TCP streams can carry game frames, so other flows never reach Java.
+    flow->tracked = tuple->ipproto == IPPROTO_TCP;
+    flow->inspect_payload = flow->tracked;
+    zdtun_conn_set_userdata(connection, flow);
+    if (!flow->tracked) {
+        return 0;
+    }
+
     const int family = tuple->ipver == 4 ? AF_INET : AF_INET6;
     char local_address[INET6_ADDRSTRLEN] = {0};
     char remote_address[INET6_ADDRSTRLEN] = {0};
@@ -294,7 +306,7 @@ static void connection_close_callback(zdtun_t *tunnel, const zdtun_conn_t *conne
         return;
     }
 
-    if (context->env != NULL) {
+    if (flow->tracked && context->env != NULL) {
         (*context->env)->CallVoidMethod(
                 context->env,
                 context->listener,
@@ -349,26 +361,37 @@ static void notify_traffic(capture_context_t *context) {
     clear_java_exception(context, "traffic update");
 }
 
-static void release_context(capture_context_t *context) {
-    if (context->env != NULL) {
+/** Releases whatever the context still owns; global references need an attached env. */
+static void release_context(JNIEnv *env, capture_context_t *context) {
+    if (env != NULL) {
         if (context->listener != NULL) {
-            (*context->env)->DeleteGlobalRef(context->env, context->listener);
+            (*env)->DeleteGlobalRef(env, context->listener);
+            context->listener = NULL;
         }
         if (context->vpn_service != NULL) {
-            (*context->env)->DeleteGlobalRef(context->env, context->vpn_service);
+            (*env)->DeleteGlobalRef(env, context->vpn_service);
+            context->vpn_service = NULL;
         }
     }
 
     if (context->tun_fd >= 0) {
         close(context->tun_fd);
+        context->tun_fd = -1;
     }
+}
+
+/** Joins a capture thread exactly once, then frees its context. */
+static void reap_context(JNIEnv *env, capture_context_t *context) {
+    pthread_join(context->thread, NULL);
+    release_context(env, context);
+    free(context);
 }
 
 static void *capture_thread_main(void *argument) {
     capture_context_t *context = (capture_context_t *) argument;
     if ((*context->vm)->AttachCurrentThread(context->vm, &context->env, NULL) != JNI_OK) {
         LOGE("Unable to attach capture thread to JVM");
-        atomic_store(&context->running, false);
+        context->env = NULL;
         goto cleanup;
     }
 
@@ -465,24 +488,22 @@ static void *capture_thread_main(void *argument) {
     LOGI("Native packet loop stopped");
 
 detach:
-    if (context->env != NULL && context->listener != NULL && context->stopped_method != NULL) {
+    if (context->listener != NULL && context->stopped_method != NULL) {
         (*context->env)->CallVoidMethod(
                 context->env,
                 context->listener,
                 context->stopped_method);
         clear_java_exception(context, "capture stopped notification");
     }
+    // Global references must be deleted while this thread is still attached.
+    release_context(context->env, context);
     (*context->vm)->DetachCurrentThread(context->vm);
     context->env = NULL;
 
 cleanup:
-    release_context(context);
-    pthread_mutex_lock(&context_mutex);
-    if (active_context == context) {
-        active_context = NULL;
-    }
-    pthread_mutex_unlock(&context_mutex);
-    free(context);
+    // Closing the TUN descriptor now lets Android tear down the VPN before the thread is reaped.
+    release_context(NULL, context);
+    atomic_store(&context->running, false);
     return NULL;
 }
 
@@ -496,9 +517,21 @@ Java_dev_gf2log_app_capture_NativeCaptureBridge_nativeStart(
     (void) bridge;
 
     pthread_mutex_lock(&context_mutex);
-    if (active_context != NULL) {
+    capture_context_t *previous = active_context;
+    if (previous != NULL) {
+        if (atomic_load(&previous->running) || pthread_equal(pthread_self(), previous->thread)) {
+            pthread_mutex_unlock(&context_mutex);
+            return JNI_FALSE;
+        }
+        // The previous loop exited on its own and was never stopped; reap it before restarting.
+        active_context = NULL;
         pthread_mutex_unlock(&context_mutex);
-        return JNI_FALSE;
+        reap_context(env, previous);
+        pthread_mutex_lock(&context_mutex);
+        if (active_context != NULL) {
+            pthread_mutex_unlock(&context_mutex);
+            return JNI_FALSE;
+        }
     }
 
     capture_context_t *context = calloc(1, sizeof(capture_context_t));
@@ -518,8 +551,7 @@ Java_dev_gf2log_app_capture_NativeCaptureBridge_nativeStart(
     context->vpn_service = (*env)->NewGlobalRef(env, vpn_service);
     context->listener = (*env)->NewGlobalRef(env, listener);
     if (context->tun_fd < 0 || context->vpn_service == NULL || context->listener == NULL) {
-        context->env = env;
-        release_context(context);
+        release_context(env, context);
         free(context);
         pthread_mutex_unlock(&context_mutex);
         return JNI_FALSE;
@@ -528,7 +560,7 @@ Java_dev_gf2log_app_capture_NativeCaptureBridge_nativeStart(
     jclass service_class = (*env)->GetObjectClass(env, vpn_service);
     jclass listener_class = (*env)->GetObjectClass(env, listener);
     context->protect_method = (*env)->GetMethodID(env, service_class, "protect", "(I)Z");
-    context->payload_method = (*env)->GetMethodID(env, listener_class, "onPayload", "(JZ[B)V");
+    context->payload_method = (*env)->GetMethodID(env, listener_class, "onPayload", "(J[B)V");
     context->flow_opened_method = (*env)->GetMethodID(
             env,
             listener_class,
@@ -546,23 +578,20 @@ Java_dev_gf2log_app_capture_NativeCaptureBridge_nativeStart(
             context->stopped_method == NULL ||
             (*env)->ExceptionCheck(env)) {
         (*env)->ExceptionClear(env);
-        context->env = env;
-        release_context(context);
+        release_context(env, context);
         free(context);
         pthread_mutex_unlock(&context_mutex);
         return JNI_FALSE;
     }
 
     atomic_init(&context->running, true);
-    active_context = context;
     if (pthread_create(&context->thread, NULL, capture_thread_main, context) != 0) {
-        active_context = NULL;
-        context->env = env;
-        release_context(context);
+        release_context(env, context);
         free(context);
         pthread_mutex_unlock(&context_mutex);
         return JNI_FALSE;
     }
+    active_context = context;
 
     pthread_mutex_unlock(&context_mutex);
     return JNI_TRUE;
@@ -570,7 +599,6 @@ Java_dev_gf2log_app_capture_NativeCaptureBridge_nativeStart(
 
 JNIEXPORT void JNICALL
 Java_dev_gf2log_app_capture_NativeCaptureBridge_nativeStop(JNIEnv *env, jobject bridge) {
-    (void) env;
     (void) bridge;
 
     pthread_mutex_lock(&context_mutex);
@@ -581,10 +609,13 @@ Java_dev_gf2log_app_capture_NativeCaptureBridge_nativeStop(JNIEnv *env, jobject 
     }
 
     atomic_store(&context->running, false);
-    pthread_t thread = context->thread;
+    if (pthread_equal(pthread_self(), context->thread)) {
+        // A callback cannot join its own thread; the next start or stop reaps it.
+        pthread_mutex_unlock(&context_mutex);
+        return;
+    }
+    active_context = NULL;
     pthread_mutex_unlock(&context_mutex);
 
-    if (!pthread_equal(pthread_self(), thread)) {
-        pthread_join(thread, NULL);
-    }
+    reap_context(env, context);
 }

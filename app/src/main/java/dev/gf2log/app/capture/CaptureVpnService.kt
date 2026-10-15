@@ -274,8 +274,8 @@ class CaptureVpnService : VpnService() {
                         )
                     }
 
-                    override fun onPayload(flowId: Long, isSent: Boolean, payload: ByteArray) {
-                        enqueuePayload(flowId, isSent, payload)
+                    override fun onPayload(flowId: Long, payload: ByteArray) {
+                        enqueuePayload(flowId, payload)
                     }
 
                     override fun onFlowClosed(flowId: Long) {
@@ -307,9 +307,8 @@ class CaptureVpnService : VpnService() {
         updateNotification("Capturing selected game traffic")
     }
 
-    private fun enqueuePayload(flowId: Long, isSent: Boolean, payload: ByteArray) {
+    private fun enqueuePayload(flowId: Long, payload: ByteArray) {
         if (payload.isEmpty()) return
-        if (isSent) return
         if (flowId in taintedFlows) return
         if (!submitParserTask {
             if (flowId in taintedFlows) return@submitParserTask

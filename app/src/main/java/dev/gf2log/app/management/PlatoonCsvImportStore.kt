@@ -93,13 +93,6 @@ class PlatoonCsvImportStore(private val directory: File) {
         return RetainResult(file, duplicate = false)
     }
 
-    fun isRetained(prepared: PreparedImport): Boolean {
-        val file = File(directory, prepared.fileName)
-        if (!file.isFile) return false
-        require(file.readBytes().contentEquals(prepared.encoded)) { "CSV identity collision" }
-        return true
-    }
-
     private fun readBounded(input: InputStream): ByteArray {
         val output = ByteArrayOutputStream()
         val buffer = ByteArray(READ_BUFFER_BYTES)

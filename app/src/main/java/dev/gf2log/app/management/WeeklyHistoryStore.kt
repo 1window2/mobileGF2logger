@@ -130,10 +130,6 @@ internal object WeeklyHistoryStore {
             arrayOf(periodStartEpochDay.toString()),
         ) > 0
 
-    fun clear(db: SQLiteDatabase) {
-        db.inTransaction { deleteAll(db) }
-    }
-
     /**
      * Replaces every derived weekly revision in one SQLite transaction, validating the complete
      * replacement before deleting existing history.

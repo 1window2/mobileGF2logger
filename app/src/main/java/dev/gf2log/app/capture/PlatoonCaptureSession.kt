@@ -28,7 +28,7 @@ internal class PlatoonCaptureSession(
     fun dispatch(payload: ParsedPayload, flowEnded: Boolean = false): PlatoonPayloadDispatcher.Results =
         dispatcher.dispatch(payload, flowEnded)
 
-    override fun close() = writer.close()
+    override fun close() = Unit
 
     private fun ingestCompletedRoster(batch: GuildMembersCsvWriter.CompletedBatch) {
         val directResult = runCatching {

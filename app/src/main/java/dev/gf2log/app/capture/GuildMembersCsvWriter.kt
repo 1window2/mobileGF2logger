@@ -1,7 +1,6 @@
 package dev.gf2log.app.capture
 
 import dev.gf2log.app.history.AtomicFiles
-import dev.gf2log.protocol.Gfl2PayloadDecoder
 import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.LogTime
 import dev.gf2log.protocol.model.GuildMember
@@ -14,58 +13,56 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 /**
- * Collects one logical roster dataset in memory and writes it once, deduplicated by UID, only after
- * protocol completion. An empty `.partial` file reserves the final name while the batch is open.
+ * Writes each completed logical roster dataset once, deduplicated by UID. The stream parser
+ * already merges continuation frames, so a roster payload that does not complete its logical
+ * payload was cut short by another payload or by flow closure. Like the reference logger, such a
+ * boundary ends the dataset; it is discarded instead of being merged with a later, unrelated roster.
+ * An empty `.partial` file reserves the final name while the CSV is written.
  */
 class GuildMembersCsvWriter(
     private val outputDirectory: File,
     private val clock: Clock = Clock.systemUTC(),
     private val publisher: (File, File) -> Unit = AtomicFiles::move,
     private val onBatchClosed: (CompletedBatch) -> Unit = {},
-) : AutoCloseable {
-    private var activeBatch: Batch? = null
-
+) {
     @Synchronized
     fun accept(payload: ParsedPayload, flowEnded: Boolean = false): SaveResult? {
-        if (payload.payloadType != Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS) {
-            discardActiveBatch()
-            return null
-        }
-
         val data = payload.data as? GuildMembersData ?: return null
-        if (!GuildMembersCsv.hasValidMemberBounds(data.members)) {
-            discardActiveBatch()
-            error("Platoon roster exceeds the member or name limit")
+        check(GuildMembersCsv.hasValidMemberBounds(data.members)) {
+            "Platoon roster exceeds the member or name limit"
         }
-        var batch = activeBatch
-        if (batch == null || (batch.previousMessageId != 0 && batch.previousMessageId != payload.messageId)) {
-            discardActiveBatch()
-            batch = openBatch()
-            activeBatch = batch
-        }
-        if ((batch.members.keys + data.members.map(GuildMember::uid)).size >
-            GuildMembersCsv.MAX_ROSTER_MEMBERS
-        ) {
-            discardActiveBatch()
-            error("Platoon roster exceeds the member limit")
-        }
-
-        data.members.forEach { member -> batch.members[member.uid] = member }
-        batch.previousMessageId = payload.messageId
-
-        if (payload.messageId != 0 && payload.isEndOfMessage) return publishActiveBatch()
-        if (flowEnded) discardActiveBatch()
-        return null
+        if (payload.messageId == 0 || !payload.isEndOfMessage) return null
+        val members = linkedMapOf<UInt, GuildMember>()
+        data.members.forEach { member -> members[member.uid] = member }
+        if (members.isEmpty()) return null
+        return publish(members.values.toList())
     }
 
-    @Synchronized
-    override fun close() = discardActiveBatch()
+    private fun publish(members: List<GuildMember>): SaveResult {
+        val batch = reserve(Instant.now(clock), members)
+        try {
+            batch.workingFile.bufferedWriter(Charsets.UTF_8).use { writer ->
+                writer.appendLine(GuildMembersCsv.HEADER)
+                members.forEach { member ->
+                    writer.appendLine(GuildMembersCsv.row(member, batch.completed.logTime))
+                }
+            }
+            publishWithRetry(batch.workingFile, batch.completed.file)
+        } catch (error: Exception) {
+            // Structured ingestion still gets the completed batch; the caller sees the failure.
+            runCatching { onBatchClosed(batch.completed) }
+                .exceptionOrNull()
+                ?.let(error::addSuppressed)
+            throw error
+        }
+        onBatchClosed(batch.completed)
+        return SaveResult(batch.completed.file, members.size)
+    }
 
-    private fun openBatch(): Batch {
+    private fun reserve(instant: Instant, members: List<GuildMember>): Reservation {
         check(outputDirectory.isDirectory || outputDirectory.mkdirs()) {
             "Unable to create the roster directory"
         }
-        val instant = Instant.now(clock)
         val filenameStem = "gf2log_platoonmembers_${FILE_TIME_FORMAT.format(instant)}"
         var suffix = 1
         while (true) {
@@ -73,46 +70,10 @@ class GuildMembersCsvWriter(
             val finalFile = File(outputDirectory, name)
             val workingFile = File(outputDirectory, "$name.partial")
             if (!finalFile.exists() && workingFile.createNewFile()) {
-                return Batch(workingFile, finalFile, LogTime.format(instant))
+                return Reservation(workingFile, CompletedBatch(finalFile, LogTime.format(instant), members))
             }
             suffix += 1
         }
-    }
-
-    private fun discardActiveBatch() {
-        activeBatch?.workingFile?.delete()
-        activeBatch = null
-    }
-
-    private fun publishActiveBatch(): SaveResult? {
-        val batch = activeBatch ?: return null
-        activeBatch = null
-        if (batch.members.isEmpty()) {
-            batch.workingFile.delete()
-            return null
-        }
-        val completed = CompletedBatch(
-            file = batch.finalFile,
-            logTime = batch.logTime,
-            members = batch.members.values.toList(),
-        )
-        try {
-            batch.workingFile.bufferedWriter(Charsets.UTF_8).use { writer ->
-                writer.appendLine(GuildMembersCsv.HEADER)
-                completed.members.forEach { member ->
-                    writer.appendLine(GuildMembersCsv.row(member, completed.logTime))
-                }
-            }
-            publishWithRetry(batch.workingFile, batch.finalFile)
-        } catch (error: Exception) {
-            // Structured ingestion still gets the completed batch; the caller sees the failure.
-            runCatching { onBatchClosed(completed) }
-                .exceptionOrNull()
-                ?.let(error::addSuppressed)
-            throw error
-        }
-        onBatchClosed(completed)
-        return SaveResult(completed.file, completed.members.size)
     }
 
     private fun publishWithRetry(workingFile: File, finalFile: File) {
@@ -142,14 +103,7 @@ class GuildMembersCsvWriter(
         val members: List<GuildMember>,
     )
 
-    private class Batch(
-        val workingFile: File,
-        val finalFile: File,
-        val logTime: String,
-    ) {
-        val members = linkedMapOf<UInt, GuildMember>()
-        var previousMessageId: Int = -1
-    }
+    private class Reservation(val workingFile: File, val completed: CompletedBatch)
 
     companion object {
         private const val PUBLISH_ATTEMPTS = 2

@@ -791,9 +791,11 @@ class WeeklyReportActivity : BaseActivity() {
     }
 
     private fun share() {
-        val current = model ?: return
-        if (work.isBusy(PNG)) return
+        if (model == null || work.isBusy(PNG)) return
         WeeklyDialogs.showShare(this) { privacy, shareAfter ->
+            // A second share sheet opened by a double tap must not start another render.
+            val current = model ?: return@showShare
+            if (work.isBusy(PNG)) return@showShare
             Feedback.show(this, R.string.weekly_png_rendering)
             work.run(
                 key = PNG,

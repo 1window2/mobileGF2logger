@@ -14,8 +14,13 @@ object PlatoonPeriods {
     const val GUNSMOKE_FINAL_SCORE_HOUR = 2
     val GUNSMOKE_ANCHOR: LocalDate = LocalDate.of(2026, 7, 19)
 
+    /**
+     * The 05:00-based game day containing [instant]. The reset is a wall-clock time, so the
+     * shift is applied to the local date-time; shifting the instant would move the boundary by
+     * an hour on daylight-saving transition days and disagree with [periodStartInstant].
+     */
     fun gameDay(instant: Instant, zoneId: ZoneId): LocalDate =
-        instant.atZone(zoneId).minusHours(RESET_HOUR.toLong()).toLocalDate()
+        instant.atZone(zoneId).toLocalDateTime().minusHours(RESET_HOUR.toLong()).toLocalDate()
 
     fun weekStart(gameDay: LocalDate): LocalDate =
         gameDay.with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY))

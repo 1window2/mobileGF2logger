@@ -1283,6 +1283,38 @@ class PlatoonDatabaseIntegrationTest {
         )
     }
 
+    @Test
+    fun weeklyAnnotationsOutsideTheirWeekAreRejectedBeforePersistence() {
+        val periodStart = LocalDate.of(2026, 8, 16)
+        val override = WeeklyCellOverride(
+            uid = TARGET_UID,
+            periodStart = periodStart,
+            gameDay = periodStart,
+            meritDelta = 50,
+            scoreDelta = null,
+            attempts = null,
+            attended = true,
+            dailyPatrol = null,
+        )
+
+        assertThrows(IllegalArgumentException::class.java) {
+            database.addWeeklyNote(periodStart.toEpochDay(), periodStart.plusDays(7).toEpochDay(), "Late")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            database.replaceWeeklyOverrides(
+                periodStart.toEpochDay(),
+                listOf(override.copy(gameDay = periodStart.minusDays(1))),
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            database.replaceWeeklyOverrides(periodStart.toEpochDay(), listOf(override, override))
+        }
+        database.replaceWeeklyOverrides(periodStart.toEpochDay(), listOf(override))
+
+        assertTrue(database.listWeeklyNotes(periodStart.toEpochDay()).isEmpty())
+        assertEquals(listOf(override), database.listWeeklyOverrides(periodStart.toEpochDay()))
+    }
+
     private fun update(kind: Long, at: Instant, uid: Long, name: String) =
         PlatoonUpdateObservation(
             kind = kind,

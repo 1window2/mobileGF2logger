@@ -26,7 +26,7 @@ class GuildMembersCsvWriter(
     private val onBatchClosed: (CompletedBatch) -> Unit = {},
 ) {
     @Synchronized
-    fun accept(payload: ParsedPayload, flowEnded: Boolean = false): SaveResult? {
+    fun accept(payload: ParsedPayload): SaveResult? {
         val data = payload.data as? GuildMembersData ?: return null
         check(GuildMembersCsv.hasValidMemberBounds(data.members)) {
             "Platoon roster exceeds the member or name limit"

@@ -23,7 +23,7 @@ internal class PlatoonAdmissionCoordinator(
         fun isOpen(flowId: Long): Boolean
         fun bind(flowId: Long, profile: PlatoonProfile): PlatoonCaptureSession
         fun unbind(flowId: Long, session: PlatoonCaptureSession)
-        fun route(session: PlatoonCaptureSession, payload: ParsedPayload, flowEnded: Boolean)
+        fun route(session: PlatoonCaptureSession, payload: ParsedPayload)
         fun quarantine(flowId: Long)
         fun profileChanged(storageId: String)
     }
@@ -150,16 +150,10 @@ internal class PlatoonAdmissionCoordinator(
             claim.flowIds.filterNot(claim.endedFlowIds::contains).forEach { flowId ->
                 sessions[flowId] = flows.bind(flowId, profile)
             }
-            val lastPayloadIndexByFlow = claim.payloads
-                .withIndex()
-                .associate { it.value.flowId to it.index }
-            claim.payloads.forEachIndexed { index, buffered ->
-                val session = sessions.getOrPut(buffered.flowId) { flows.bind(buffered.flowId, profile) }
+            claim.payloads.forEach { buffered ->
                 flows.route(
-                    session = session,
-                    payload = buffered.payload,
-                    flowEnded = buffered.flowId in claim.endedFlowIds &&
-                        lastPayloadIndexByFlow[buffered.flowId] == index,
+                    sessions.getOrPut(buffered.flowId) { flows.bind(buffered.flowId, profile) },
+                    buffered.payload,
                 )
             }
         }

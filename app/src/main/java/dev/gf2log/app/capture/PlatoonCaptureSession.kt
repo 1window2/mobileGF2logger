@@ -7,12 +7,12 @@ import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.protocol.model.ParsedPayload
 import java.time.Instant
 
-/** Owns all mutable capture-to-management state for one identified TCP flow. */
+/** Routes one identified TCP flow's payloads into its verified Platoon scope. */
 internal class PlatoonCaptureSession(
     context: Context,
     val profile: PlatoonProfile,
     private val onRosterCaptured: (String) -> Unit,
-) : AutoCloseable {
+) {
     private val scope = PlatoonStorageScope(profile.storageId)
     private val repository = PlatoonRepository(context, scope)
     private val writer = GuildMembersCsvWriter(
@@ -25,10 +25,7 @@ internal class PlatoonCaptureSession(
         onUpdates = { repository.ingestUpdates(it).acceptedObservations > 0 },
     )
 
-    fun dispatch(payload: ParsedPayload, flowEnded: Boolean = false): PlatoonPayloadDispatcher.Results =
-        dispatcher.dispatch(payload, flowEnded)
-
-    override fun close() = Unit
+    fun dispatch(payload: ParsedPayload): PlatoonPayloadDispatcher.Results = dispatcher.dispatch(payload)
 
     private fun ingestCompletedRoster(batch: GuildMembersCsvWriter.CompletedBatch) {
         val directResult = runCatching {

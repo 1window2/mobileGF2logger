@@ -55,7 +55,6 @@ internal class CaptureFlowEngine(
     /** Discards per-flow state after the native thread has been joined and its chunks drained. */
     fun endSession() {
         admission.endSession()
-        sessions.values.forEach { runCatching(it::close) }
         sessions.clear()
         parsers.clear()
         metadata.clear()
@@ -99,24 +98,21 @@ internal class CaptureFlowEngine(
 
     override fun isOpen(flowId: Long): Boolean = flowId in metadata || flowId in parsers
 
-    override fun bind(flowId: Long, profile: PlatoonProfile): PlatoonCaptureSession {
-        sessions.remove(flowId)?.close()
-        return PlatoonCaptureSession(
+    override fun bind(flowId: Long, profile: PlatoonProfile): PlatoonCaptureSession =
+        PlatoonCaptureSession(
             context = context,
             profile = profile,
             onRosterCaptured = { storageId -> tracker?.rosterCaptured(storageId) },
         ).also { sessions[flowId] = it }
-    }
 
     override fun unbind(flowId: Long, session: PlatoonCaptureSession) {
         sessions.remove(flowId, session)
-        runCatching(session::close)
     }
 
     /** Permanently blocks management routing for this flow until native closure. */
     override fun quarantine(flowId: Long) {
         taintedFlows += flowId
-        sessions.remove(flowId)?.close()
+        sessions.remove(flowId)
         preIdentity.reject(flowId)
     }
 
@@ -124,10 +120,10 @@ internal class CaptureFlowEngine(
         observedProfiles.remove(storageId)
     }
 
-    override fun route(session: PlatoonCaptureSession, payload: ParsedPayload, flowEnded: Boolean) {
+    override fun route(session: PlatoonCaptureSession, payload: ParsedPayload) {
         val storageId = session.profile.storageId
         saveHistory(storageId, payload)
-        val routed = session.dispatch(payload, flowEnded)
+        val routed = session.dispatch(payload)
         routed.activity
             ?.onSuccess { if (it) tracker?.mark(storageId, Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY) }
             ?.onFailure { CaptureStatus.report(CaptureNotice.ACTIVITY_SAVE_FAILED) }
@@ -135,7 +131,7 @@ internal class CaptureFlowEngine(
             ?.onSuccess { if (it) tracker?.mark(storageId, Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES) }
             ?.onFailure { CaptureStatus.report(CaptureNotice.UPDATES_SAVE_FAILED) }
         routed.members
-            .onSuccess { saved ->
+            ?.onSuccess { saved ->
                 if (saved != null) {
                     CaptureStatus.report(
                         CaptureNotice.ROSTER_SAVED,
@@ -144,7 +140,7 @@ internal class CaptureFlowEngine(
                     )
                 }
             }
-            .onFailure { CaptureStatus.report(CaptureNotice.ROSTER_SAVE_FAILED) }
+            ?.onFailure { CaptureStatus.report(CaptureNotice.ROSTER_SAVE_FAILED) }
         if (payload.payloadType == Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE) {
             tracker?.mark(storageId, Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE)
         }
@@ -189,15 +185,15 @@ internal class CaptureFlowEngine(
     private fun close(flowId: Long) {
         val parser = parsers.remove(flowId)
         if (!taintedFlows.remove(flowId) && parser != null) {
-            process(flowId, parser.finish(), flowEnded = true)
+            process(flowId, parser.finish())
         }
         metadata.remove(flowId)
         admission.flowClosed(flowId)
         preIdentity.remove(flowId)
-        sessions.remove(flowId)?.close()
+        sessions.remove(flowId)
     }
 
-    private fun process(flowId: Long, events: List<ParseEvent>, flowEnded: Boolean = false) {
+    private fun process(flowId: Long, events: List<ParseEvent>) {
         if (events.isEmpty()) return
         val payloads = mutableListOf<ParsedPayload>()
         var warnings = 0
@@ -210,14 +206,14 @@ internal class CaptureFlowEngine(
         }
         stats.recordParsed(payloads.size, warnings)
 
-        payloads.forEachIndexed { index, payload ->
+        payloads.forEach { payload ->
             val profile = payload.data as? PlatoonProfileData
             if (profile != null && PlatoonProfilePolicy.isValid(profile)) identify(flowId, profile)
             val session = sessions[flowId]
             if (session == null) {
                 holdUntilIdentified(flowId, payload)
             } else {
-                route(session, payload, flowEnded = flowEnded && index == payloads.lastIndex)
+                route(session, payload)
             }
         }
     }
@@ -258,7 +254,7 @@ internal class CaptureFlowEngine(
         if (current != null) return
 
         val session = bind(flowId, profile)
-        preIdentity.take(flowId).forEach { pending -> route(session, pending, flowEnded = false) }
+        preIdentity.take(flowId).forEach { pending -> route(session, pending) }
         CaptureStatus.report(
             CaptureNotice.PLATOON_DETECTED,
             profile.platoonName.take(PlatoonAdmissionCoordinator.MAX_STATUS_NAME_CHARS),

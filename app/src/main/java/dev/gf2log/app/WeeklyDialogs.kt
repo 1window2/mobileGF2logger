@@ -5,7 +5,6 @@ import android.app.AlertDialog
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
-import android.widget.LinearLayout
 import dev.gf2log.app.management.MetricCertainty
 import dev.gf2log.app.management.WeeklyEvidenceAnalyzer
 import dev.gf2log.app.management.WeeklyEvidenceAnalyzer.Metric

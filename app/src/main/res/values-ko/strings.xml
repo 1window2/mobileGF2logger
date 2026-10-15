@@ -13,7 +13,7 @@
     <string name="stop_capture">중지</string>
     <string name="open_options">설정 열기</string>
     <string name="export_platoon_backup">서클 관리 백업 내보내기</string>
-    <string name="stop_capture_before_backup">백업을 내보내거나 가져오기 전에 캡처를 중지하세요.</string>
+    <string name="stop_capture_before_backup">캡처 중에는 패킷이 중간에 섞이지 않도록 백업과 복원을 할 수 없습니다.</string>
     <string name="status_backup_exported">서클 관리 백업을 내보냈습니다</string>
     <string name="language">언어</string>
     <string name="language_english">English</string>
@@ -172,7 +172,7 @@
     <string name="manage_platoon_profiles_detail">감지된 서클의 서버를 수정하거나 격리된 데이터를 완전히 삭제합니다.</string>
     <string name="active_platoon">선택됨</string>
     <string name="edit_platoon_server_description">%1$s 서버 수정</string>
-    <string name="stop_capture_before_profile_change">서클을 수정하거나 삭제하기 전에 캡처를 중지하세요.</string>
+    <string name="stop_capture_before_profile_change">서클 프로필은 캡처가 멈춘 상태에서만 바꿀 수 있습니다.</string>
     <string name="platoon_server_update_failed">서클 서버를 수정할 수 없습니다. 데이터는 이동되지 않았습니다.</string>
     <string name="delete_platoon_profile">서클 삭제</string>
     <string name="delete_platoon_description">%1$s 삭제</string>
@@ -323,7 +323,7 @@
     <string name="csv_import_undoing">CSV 가져오기 체크포인트를 복원하는 중…</string>
     <string name="csv_import_undone">마지막 CSV 가져오기를 실행 취소했습니다.</string>
     <string name="csv_import_undo_failed">체크포인트가 없거나 올바르지 않거나, 가져오기 이후 서클 데이터가 변경되어 되돌릴 수 없습니다.</string>
-    <string name="stop_capture_before_csv_import">CSV 미리보기, 가져오기 또는 실행 취소 전에 캡처를 중지하세요.</string>
+    <string name="stop_capture_before_csv_import">명단이 겹쳐 기록되지 않도록 CSV 가져오기와 되돌리기는 캡처가 멈춘 뒤에 할 수 있습니다.</string>
     <string name="share_weekly_table">주간 테이블 공유</string>
     <string name="share_include_member_names">멤버 이름 포함</string>
     <string name="share_include_uids">UID 포함</string>
@@ -557,7 +557,7 @@
     <string name="recent_packets_tab">최근 %1$d/%2$d</string>
     <string name="required">필수</string>
     <string name="restore_backup_detail">백업에 들어 있는 서클만 교체</string>
-    <string name="restore_backup_warning">복원하면 백업에 들어 있는 서클의 데이터를 교체하고 그 서클을 선택합니다. 전체 백업이면 앱 설정도 교체됩니다. 다른 서클은 바뀌지 않습니다. 캡처는 중지해 두세요.</string>
+    <string name="restore_backup_warning">복원하면 백업에 들어 있는 서클의 데이터를 교체하고 그 서클을 선택합니다. 전체 백업이면 앱 설정도 교체됩니다. 다른 서클은 바뀌지 않습니다.</string>
     <string name="roster_csv_exported">명단 CSV를 내보냈습니다</string>
     <string name="save_selected_history_short">보관</string>
     <string name="saved_packets_tab">보관 %1$d/%2$d</string>
@@ -590,4 +590,6 @@
     <string name="clear_search">검색어 지우기</string>
     <string name="apply_sort_warning">직접 옮긴 순서를 포함해 현재 순서를 모두 바꿉니다.</string>
     <string name="apply_and_next_day">적용 후 다음 날</string>
+    <string name="capture_running_title">캡처 중입니다</string>
+    <string name="stop_capture_and_continue">캡처 중지 후 계속</string>
 </resources>

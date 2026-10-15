@@ -15,7 +15,6 @@ import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.management.isJoinedBoundaryEditable
 import dev.gf2log.app.management.isLeftBoundaryEditable
 import dev.gf2log.app.management.isValidMembershipRange
-import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.ui.onTextChanged
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
@@ -138,7 +137,7 @@ class MemberDetailActivity : BaseActivity() {
                     Model(
                         status = it,
                         latest = repository.listSnapshots(1).firstOrNull()?.members?.firstOrNull { member -> member.uid == uid },
-                        zone = GameTimeZonePreferences.get(this),
+                        zone = repository.gameZone(),
                     )
                 }
             },

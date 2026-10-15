@@ -30,10 +30,10 @@ import dev.gf2log.app.management.CsvImportCheckpointManager
 import dev.gf2log.app.management.PlatoonCsvImportStore
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.SnapshotComparison
-import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.AccessibleRow
 import dev.gf2log.app.ui.BackgroundWork
+import dev.gf2log.app.ui.CaptureGuard
 import dev.gf2log.app.ui.BarAction
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.DocumentAccess
@@ -47,7 +47,6 @@ import dev.gf2log.app.ui.button
 import dev.gf2log.app.ui.column
 import dev.gf2log.app.ui.divider
 import dev.gf2log.app.ui.dp
-import dev.gf2log.app.ui.dpf
 import dev.gf2log.app.ui.group
 import dev.gf2log.app.ui.icon
 import dev.gf2log.app.ui.lp
@@ -61,6 +60,7 @@ import dev.gf2log.app.ui.text
 import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.Gfl2PayloadDecoder
 import java.io.File
+import java.time.ZoneId
 
 /**
  * Home: capture state and actions first, then the selected Platoon, data tools, and recent
@@ -436,10 +436,7 @@ class MainActivity : BaseActivity() {
         captureOnceRequested = false
     }
 
-    private fun stopCaptureService() {
-        startService(Intent(this, CaptureVpnService::class.java).setAction(CaptureVpnService.ACTION_STOP))
-        CaptureStatus.markStopped()
-    }
+    private fun stopCaptureService() = CaptureGuard.stop(this)
 
     private fun isInstalled(packageName: String): Boolean = runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -493,13 +490,7 @@ class MainActivity : BaseActivity() {
             task = {
                 val snapshots = PlatoonRepository(this, scope).listSnapshots(2)
                 val latest = snapshots.firstOrNull()
-                latest?.let {
-                    Triple(
-                        it,
-                        snapshots.getOrNull(1)?.let { older -> SnapshotComparison.compare(older, it) },
-                        GameTimeZonePreferences.get(this, scope.storageId),
-                    )
-                }
+                latest?.let { it to snapshots.getOrNull(1)?.let { older -> SnapshotComparison.compare(older, it) } }
             },
         ) { result ->
             val summary = result.getOrNull()
@@ -507,7 +498,7 @@ class MainActivity : BaseActivity() {
                 rosterSummary.visibility = View.GONE
                 return@run
             }
-            val (latest, comparison, zone) = summary
+            val (latest, comparison) = summary
             rosterSummary.removeAllViews()
             rosterSummary.visibility = View.VISIBLE
             val detail = buildList {
@@ -519,7 +510,7 @@ class MainActivity : BaseActivity() {
             }.joinToString(" · ")
             rosterSummary.addView(group(listOf(
                 navigationRow(
-                    getString(R.string.latest_roster_title, Labels.format(Labels.DATE_TIME, latest.capturedAt, zone)),
+                    getString(R.string.latest_roster_title, Labels.format(Labels.DATE_TIME, latest.capturedAt, ZoneId.systemDefault())),
                     detail,
                     R.drawable.ic_compare,
                     enabled = comparison != null,

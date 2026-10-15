@@ -4,7 +4,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import androidx.activity.result.contract.ActivityResultContracts
-import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.management.CsvImportCheckpointManager
 import dev.gf2log.app.management.CsvImportPreviewAnalyzer
 import dev.gf2log.app.management.PlatoonCsvImportStore
@@ -14,6 +13,7 @@ import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Dialogs
+import dev.gf2log.app.ui.CaptureGuard
 import dev.gf2log.app.ui.captureActive
 import dev.gf2log.app.ui.DocumentAccess
 import dev.gf2log.app.ui.Feedback
@@ -71,22 +71,14 @@ internal class CsvImportFlow(
         launchPicker()
     }
 
-    fun start() {
-        if (captureActive) {
-            Feedback.show(activity, R.string.stop_capture_before_csv_import, long = true)
-            return
-        }
+    fun start() = CaptureGuard.whenStopped(activity, R.string.stop_capture_before_csv_import) {
         PlatoonCsvImportPrompt.show(activity) { profile -> beginFor(profile) }
     }
 
-    fun undo() {
-        if (captureActive) {
-            Feedback.show(activity, R.string.stop_capture_before_csv_import, long = true)
-            return
-        }
+    fun undo() = CaptureGuard.whenStopped(activity, R.string.stop_capture_before_csv_import) {
         val scope = boundScope() ?: run {
             Feedback.show(activity, R.string.no_platoon_detected_detail, long = true)
-            return
+            return@whenStopped
         }
         work.run(task = { CsvImportCheckpointManager(activity, scope).canUndo() }) { result ->
             if (!result.getOrDefault(false)) {

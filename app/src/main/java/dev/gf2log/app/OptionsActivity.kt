@@ -13,7 +13,6 @@ import android.view.View
 import android.widget.LinearLayout
 import androidx.activity.result.contract.ActivityResultContracts
 import dev.gf2log.app.capture.CaptureDiagnosticsStore
-import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.discord.DiscordWebhookSecretStore
 import dev.gf2log.app.management.BackupFileName
 import dev.gf2log.app.management.InvalidBackupException
@@ -29,7 +28,7 @@ import dev.gf2log.app.settings.PayloadHistoryPreferences
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Dialogs
-import dev.gf2log.app.ui.captureActive
+import dev.gf2log.app.ui.CaptureGuard
 import dev.gf2log.app.ui.DocumentAccess
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
@@ -316,21 +315,13 @@ class OptionsActivity : BaseActivity() {
 
     // region Backup
 
-    private fun startExport(complete: Boolean) {
-        if (captureActive) {
-            Feedback.show(this, R.string.stop_capture_before_backup, long = true)
-            return
-        }
+    private fun startExport(complete: Boolean) = CaptureGuard.whenStopped(this, R.string.stop_capture_before_backup) {
         pendingExportComplete = complete
         val prefix = if (complete) "GF2logger-full" else "GF2logger-platoon"
         exportBackup.launch("$prefix-${Labels.FILE_STAMP.format(LocalDateTime.now())}.${PlatoonBackupManager.FILE_EXTENSION}")
     }
 
-    private fun confirmRestore() {
-        if (captureActive) {
-            Feedback.show(this, R.string.stop_capture_before_backup, long = true)
-            return
-        }
+    private fun confirmRestore() = CaptureGuard.whenStopped(this, R.string.stop_capture_before_backup) {
         Dialogs.confirm(this, R.string.restore_full_backup, R.string.restore_backup_warning, R.string.choose_file, destructive = true) {
             restoreBackup.launch(arrayOf(PlatoonBackupManager.MIME_TYPE, "application/zip", "application/octet-stream"))
         }

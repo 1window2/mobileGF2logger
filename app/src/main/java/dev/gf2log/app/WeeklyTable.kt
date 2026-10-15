@@ -11,7 +11,6 @@ import android.view.Gravity
 import android.view.View
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
-import android.widget.TextView
 import androidx.annotation.ColorRes
 import dev.gf2log.app.management.DailyEvidence
 import dev.gf2log.app.management.MetricCertainty

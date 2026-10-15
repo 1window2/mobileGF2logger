@@ -66,6 +66,11 @@ internal object PendingPlatoonAdmissionPrompt {
     private fun show(activity: Activity, candidate: PendingPlatoonAdmissionStore.Summary) {
         val client = PlatoonClient.fromPackage(candidate.ownerPackage) ?: return
         val regions = ClientServerRegionPreferences.allowedFor(candidate.ownerPackage)
+        // The server chosen in Settings is preselected; the user still confirms it explicitly.
+        if (candidate.token !in selections) {
+            ClientServerRegionPreferences(activity).configured(candidate.ownerPackage)
+                ?.let { selections[candidate.token] = it }
+        }
         val radios = RadioGroup(activity).apply { orientation = RadioGroup.VERTICAL }
         val status = activity.text(null, TextRole.CAPTION) {
             visibility = View.GONE

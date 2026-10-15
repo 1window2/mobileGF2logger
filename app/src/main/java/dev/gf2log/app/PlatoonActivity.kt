@@ -25,7 +25,6 @@ import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonSnapshot
 import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.management.isValidMembershipRange
-import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.ui.searchField
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.AccessibleRow
@@ -88,7 +87,7 @@ class PlatoonActivity : BaseActivity() {
             task = {
                 val statuses = repository.listMemberStatuses().filter { it.uid in uids }
                 val latest = latestMembers(repository.listSnapshots(1).firstOrNull())
-                val csv = PlatoonMemberCsv.format(statuses, latest, GameTimeZonePreferences.get(this))
+                val csv = PlatoonMemberCsv.format(statuses, latest, repository.gameZone())
                 DocumentAccess.openOutput(contentResolver, uri).writer(Charsets.UTF_8).use { it.write(csv) }
             },
         ) { result ->
@@ -159,7 +158,7 @@ class PlatoonActivity : BaseActivity() {
                     latest = latest,
                     statuses = repository.listMemberStatuses(),
                     latestMembers = latestMembers(latest),
-                    zone = GameTimeZonePreferences.get(this),
+                    zone = repository.gameZone(),
                 )
             },
         ) { result ->
@@ -224,7 +223,7 @@ class PlatoonActivity : BaseActivity() {
             getString(R.string.stat_active) to active.toString(),
             getString(R.string.stat_withdrawn) to (loaded.statuses.size - active).toString(),
             getString(R.string.stat_last_snapshot) to (loaded.latest?.let {
-                Labels.format(Labels.DATE_TIME, it.capturedAt, loaded.zone)
+                Labels.format(Labels.DATE_TIME, it.capturedAt, ZoneId.systemDefault())
             } ?: getString(R.string.none)),
         )
         tiles.forEachIndexed { index, (label, value) ->
@@ -351,7 +350,7 @@ class PlatoonActivity : BaseActivity() {
     }
 
     private fun showAddWithdrawnMemberDialog() {
-        val zone = GameTimeZonePreferences.get(this)
+        val zone = repository.gameZone()
         val uid = LabeledField(
             this,
             getString(R.string.uid),

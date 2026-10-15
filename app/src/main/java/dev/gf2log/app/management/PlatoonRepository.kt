@@ -26,6 +26,9 @@ internal class PlatoonRepository(
         PlatoonBackupManager.recoverInterruptedFullRestore(appContext, storageScope)
     }
 
+    /** The 05:00 reset zone of this repository's own Platoon, never the currently active one. */
+    fun gameZone(): ZoneId = GameTimeZonePreferences.get(appContext, storageScope.storageId)
+
     fun ingest(
         capturedAt: Instant,
         members: List<GuildMember>,
@@ -427,7 +430,7 @@ internal class PlatoonRepository(
     ) {
         access { it.replaceWeeklyOverrides(periodStartEpochDay, overrides) }
         val day = LocalDate.ofEpochDay(periodStartEpochDay)
-        val zone = GameTimeZonePreferences.get(appContext, storageScope.storageId)
+        val zone = gameZone()
         recordLiveWeeklyRevisionSafely(day, zone)
     }
 
@@ -468,7 +471,7 @@ internal class PlatoonRepository(
         recordChangedWeeks(instants.asSequence())
 
     private fun recordChangedWeeks(instants: Sequence<Instant>) {
-        val zone = GameTimeZonePreferences.get(appContext, storageScope.storageId)
+        val zone = gameZone()
         WeeklyHistoryWorkPolicy.changedPeriodStarts(instants, zone)
             .forEach { periodStart ->
                 recordLiveWeeklyRevisionSafely(periodStart, zone)
@@ -477,7 +480,7 @@ internal class PlatoonRepository(
 
     /** Refreshes every derived weekly revision after a primary-data mutation. */
     private fun recordAllLiveWeeklyReports() {
-        val zone = GameTimeZonePreferences.get(appContext, storageScope.storageId)
+        val zone = gameZone()
         weeklyPeriodStarts(zone).forEach { periodStart ->
             recordLiveWeeklyRevisionSafely(periodStart, zone)
         }
@@ -494,7 +497,7 @@ internal class PlatoonRepository(
      * fails, every week is refreshed so the mutation stays authoritative.
      */
     private fun refreshingWeeksOf(uid: Long?, mutation: () -> Boolean): Boolean {
-        val zone = GameTimeZonePreferences.get(appContext, storageScope.storageId)
+        val zone = gameZone()
         val asOf = Instant.now()
         val before = uid?.let { runCatching { weeksShowingMember(it, zone, asOf) }.getOrNull() }
         if (!mutation()) return false
@@ -558,7 +561,7 @@ internal class PlatoonRepository(
     }
 
     private fun recordLiveWeeklyRevision(periodStart: LocalDate) {
-        val zone = GameTimeZonePreferences.get(appContext, storageScope.storageId)
+        val zone = gameZone()
         recordLiveWeeklyRevisionSafely(periodStart, zone)
     }
 

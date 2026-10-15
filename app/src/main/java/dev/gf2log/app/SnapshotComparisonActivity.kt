@@ -5,11 +5,9 @@ import android.content.ClipboardManager
 import android.os.Bundle
 import android.text.TextUtils
 import android.view.View
-import android.widget.LinearLayout
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.SnapshotComparison
 import dev.gf2log.app.management.SnapshotComparisonCsv
-import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.BarAction
 import dev.gf2log.app.ui.Feedback
@@ -51,13 +49,12 @@ class SnapshotComparisonActivity : BaseActivity() {
         work.run(
             task = {
                 val snapshots = PlatoonRepository(this, scope).listSnapshots(2)
-                snapshots.takeIf { it.size == 2 }?.let { SnapshotComparison.compare(it[1], it[0]) } to
-                    GameTimeZonePreferences.get(this)
+                snapshots.takeIf { it.size == 2 }?.let { SnapshotComparison.compare(it[1], it[0]) }
             },
         ) { result ->
             content.removeAllViews()
             result.fold(
-                onSuccess = { (comparison, zone) -> render(comparison, zone) },
+                onSuccess = ::render,
                 onFailure = { content.addView(StateViews.failure(this, getString(R.string.platoon_load_failed)) { recreate() }) },
             )
         }
@@ -67,7 +64,9 @@ class SnapshotComparisonActivity : BaseActivity() {
         if (!profileBinding.isCurrent(this)) finish()
     }
 
-    private fun render(result: SnapshotComparison.Result?, zone: ZoneId) {
+    private fun render(result: SnapshotComparison.Result?) {
+        // Capture instants are shown in device time, like packet history.
+        val zone = ZoneId.systemDefault()
         if (result == null) {
             content.addView(StateViews.empty(this, R.drawable.ic_compare, getString(R.string.need_two_snapshots)))
             return

@@ -13,7 +13,7 @@
     <string name="stop_capture">Stop</string>
     <string name="open_options">Open settings</string>
     <string name="export_platoon_backup">Export Platoon backup</string>
-    <string name="stop_capture_before_backup">Stop capture before exporting or importing a backup.</string>
+    <string name="stop_capture_before_backup">Backups and restores wait until capture stops, so no packet lands halfway through.</string>
     <string name="status_backup_exported">Platoon backup exported</string>
     <string name="language">Language</string>
     <string name="language_english">English</string>
@@ -172,7 +172,7 @@
     <string name="manage_platoon_profiles_detail">Edit a detected Platoon’s server or permanently delete its isolated data.</string>
     <string name="active_platoon">Active</string>
     <string name="edit_platoon_server_description">Edit server for %1$s</string>
-    <string name="stop_capture_before_profile_change">Stop capture before editing or deleting a Platoon.</string>
+    <string name="stop_capture_before_profile_change">Platoon profiles can only be changed while capture is stopped.</string>
     <string name="platoon_server_update_failed">Unable to update the Platoon server. No data was moved.</string>
     <string name="delete_platoon_profile">Delete Platoon</string>
     <string name="delete_platoon_description">Delete %1$s</string>
@@ -327,7 +327,7 @@
     <string name="csv_import_undoing">Restoring the CSV import checkpoint…</string>
     <string name="csv_import_undone">The last CSV import was undone.</string>
     <string name="csv_import_undo_failed">Undo is unavailable, invalid, or blocked because Platoon data changed after the import.</string>
-    <string name="stop_capture_before_csv_import">Stop capture before previewing, importing, or undoing CSV files.</string>
+    <string name="stop_capture_before_csv_import">CSV import and undo wait until capture stops, so the roster isn\'t written twice.</string>
     <string name="share_weekly_table">Share weekly table</string>
     <string name="share_include_member_names">Include member names</string>
     <string name="share_include_uids">Include UIDs</string>
@@ -564,7 +564,7 @@
     <string name="recent_packets_tab">Recent %1$d/%2$d</string>
     <string name="required">Required</string>
     <string name="restore_backup_detail">Replaces only the Platoon inside the backup</string>
-    <string name="restore_backup_warning">Restoring replaces the data of the Platoon inside the backup and then selects it. A complete backup also replaces app settings. Other Platoons are unchanged. Keep capture stopped.</string>
+    <string name="restore_backup_warning">Restoring replaces the data of the Platoon inside the backup and then selects it. A complete backup also replaces app settings. Other Platoons are unchanged.</string>
     <string name="roster_csv_exported">Roster CSV exported</string>
     <string name="save_selected_history_short">Save</string>
     <string name="saved_packets_tab">Saved %1$d/%2$d</string>
@@ -598,4 +598,6 @@
     <string name="clear_search">Clear search</string>
     <string name="apply_sort_warning">This replaces the current order, including any members you moved by hand.</string>
     <string name="apply_and_next_day">Apply, next day</string>
+    <string name="capture_running_title">Capture is running</string>
+    <string name="stop_capture_and_continue">Stop capture</string>
 </resources>

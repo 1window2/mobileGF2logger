@@ -9,7 +9,6 @@ import android.view.Gravity
 import android.view.View
 import android.widget.ImageView
 import android.widget.LinearLayout
-import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.management.PlatoonProfile
 import dev.gf2log.app.management.PlatoonProfileAdministration
 import dev.gf2log.app.management.PlatoonProfileRegistry
@@ -17,7 +16,7 @@ import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.app.ui.onTextChanged
 import dev.gf2log.app.ui.AccessibleRow
 import dev.gf2log.app.ui.Dialogs
-import dev.gf2log.app.ui.captureActive
+import dev.gf2log.app.ui.CaptureGuard
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.TextRole
@@ -201,11 +200,10 @@ internal object PlatoonProfileSelector {
         }, activity.lp(48, 48))
     }
 
-    private fun chooseProfileRegion(activity: Activity, profile: PlatoonProfile) {
-        if (captureActive) {
-            Feedback.show(activity, R.string.stop_capture_before_profile_change, long = true)
-            return
-        }
+    private fun chooseProfileRegion(activity: Activity, profile: PlatoonProfile) =
+        CaptureGuard.whenStopped(activity, R.string.stop_capture_before_profile_change) { chooseProfileRegionNow(activity, profile) }
+
+    private fun chooseProfileRegionNow(activity: Activity, profile: PlatoonProfile) {
         val regions = ClientServerRegionPreferences.allowedFor(profile.client.packageName)
         Dialogs.show(
             Dialogs.builder(activity)
@@ -226,11 +224,10 @@ internal object PlatoonProfileSelector {
         )
     }
 
-    private fun confirmDeleteFirst(activity: Activity, profile: PlatoonProfile) {
-        if (captureActive) {
-            Feedback.show(activity, R.string.stop_capture_before_profile_change, long = true)
-            return
-        }
+    private fun confirmDeleteFirst(activity: Activity, profile: PlatoonProfile) =
+        CaptureGuard.whenStopped(activity, R.string.stop_capture_before_profile_change) { confirmDeleteFirstNow(activity, profile) }
+
+    private fun confirmDeleteFirstNow(activity: Activity, profile: PlatoonProfile) {
         Dialogs.confirm(
             activity,
             activity.getString(R.string.delete_platoon_profile),

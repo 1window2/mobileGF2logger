@@ -101,7 +101,3 @@ internal object Labels {
         },
     )
 }
-
-/** True from the moment capture is requested until it fully stops; risky data operations wait. */
-internal val captureActive: Boolean
-    get() = dev.gf2log.app.capture.CaptureStatus.snapshot().phase != dev.gf2log.app.capture.CapturePhase.STOPPED

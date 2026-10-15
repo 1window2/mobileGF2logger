@@ -129,10 +129,11 @@ internal object Controls {
             intArrayOf(android.R.attr.state_checked),
             intArrayOf(),
         ),
+        // An off thumb in outline ink stays visible on dark dialogs as well as light panels.
         intArrayOf(
-            context.getColor(R.color.surface_variant),
+            context.getColor(R.color.outline),
             context.getColor(R.color.accent_text),
-            context.getColor(R.color.surface),
+            context.getColor(R.color.outline_strong),
         ),
     )
 

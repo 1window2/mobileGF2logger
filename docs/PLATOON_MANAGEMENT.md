@@ -41,6 +41,8 @@ rules below take precedence over stale copied dates in archived templates.
   remain in a bounded in-memory candidate until the user selects one of the six
   supported regions compatible with the VPN-owner-verified client. Only then is
   its immutable scoped repository created and the buffered evidence ingested.
+  When Settings holds an explicit capture server for that client, the dialog
+  preselects it; the user still confirms before anything is stored.
 - Changing a profile's server rebuilds its weekly history without changing its
   storage scope. Deleting a profile removes only that scope after two warnings
   and an exact Platoon-name confirmation; interrupted cleanup resumes later.

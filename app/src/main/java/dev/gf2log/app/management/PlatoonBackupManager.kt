@@ -643,6 +643,9 @@ class PlatoonBackupManager internal constructor(
             settingsStore: BackupSettingsStore,
             scope: PlatoonStorageScope,
         ) {
+            // Constructing a repository or manager must not take the exclusive gate (and evict
+            // the cached helper) unless a durable restore artifact actually needs recovery.
+            if (!hasPendingRestoreWork(appContext, scope)) return
             PlatoonRepository.withExclusiveDatabase(scope) {
                 val stateFile = restoreStateFile(appContext, scope)
                 if (!stateFile.isFile) {
@@ -781,20 +784,26 @@ class PlatoonBackupManager internal constructor(
             context: Context,
             scope: PlatoonStorageScope,
         ) {
-            val restoreDirectories = buildList {
-                add(File(context.cacheDir, "platoon-restore/${scope.storageId}"))
-                if (scope.isLegacy) add(File(context.cacheDir, "platoon-restore"))
+            legacyRetiredCsvArtifacts(context, scope).forEach { directory ->
+                check(directory.deleteRecursively()) {
+                    "Unable to remove an obsolete retained CSV restore artifact"
+                }
             }
-            restoreDirectories.flatMap { it.listFiles().orEmpty().asList() }
-                .filter { file ->
-                    file.isDirectory && file.name.startsWith("guild-members.retired-")
-                }
-                .forEach { directory ->
-                    check(directory.deleteRecursively()) {
-                        "Unable to remove an obsolete retained CSV restore artifact"
-                    }
-                }
         }
+
+        private fun legacyRetiredCsvArtifacts(
+            context: Context,
+            scope: PlatoonStorageScope,
+        ): List<File> = buildList {
+            add(File(context.cacheDir, "platoon-restore/${scope.storageId}"))
+            if (scope.isLegacy) add(File(context.cacheDir, "platoon-restore"))
+        }.flatMap { it.listFiles().orEmpty().asList() }
+            .filter { file -> file.isDirectory && file.name.startsWith("guild-members.retired-") }
+
+        private fun hasPendingRestoreWork(context: Context, scope: PlatoonStorageScope): Boolean =
+            restoreTransactionDirectory(context, scope).exists() ||
+                scope.previousRetainedCsvDirectory(context).exists() ||
+                legacyRetiredCsvArtifacts(context, scope).isNotEmpty()
 
         private fun writeAtomic(file: File, bytes: ByteArray) {
             file.parentFile?.mkdirs()

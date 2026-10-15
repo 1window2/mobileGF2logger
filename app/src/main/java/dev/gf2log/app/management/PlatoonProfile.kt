@@ -117,6 +117,10 @@ internal data class PlatoonStorageScope(val storageId: String) {
     fun retainedCsvDirectory(context: Context): File =
         File(rootDirectory(context), PlatoonRepository.RETAINED_CSV_DIRECTORY)
 
+    /** Retained evidence parked by an uncommitted complete restore. */
+    fun previousRetainedCsvDirectory(context: Context): File =
+        File(rootDirectory(context), "${PlatoonRepository.RETAINED_CSV_DIRECTORY}.pre_restore")
+
     companion object {
         private val SCOPED_DATABASE = Regex("platoon-([0-9a-f]{32})\\.db")
 

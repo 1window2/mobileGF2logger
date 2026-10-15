@@ -480,6 +480,33 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     @Test
+    fun constructingRepositoriesAndManagersDoesNotWaitForTheExclusiveGate() {
+        val held = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val holder = Thread {
+            PlatoonRepository.withExclusiveDatabase(storageScope) {
+                held.countDown()
+                release.await()
+            }
+        }.apply {
+            isDaemon = true
+            start()
+        }
+        held.await()
+        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        try {
+            executor.submit {
+                PlatoonRepository(context, storageScope)
+                PlatoonBackupManager(context, storageScope)
+            }.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        } finally {
+            release.countDown()
+            holder.join()
+            executor.shutdown()
+        }
+    }
+
+    @Test
     fun csvCheckpointRecoversAnInterruptedRestoreIntoTheScopedSettings() {
         settingsStore.replace(currentSettings())
         FilePaths.restoreSettingsFile(context).apply {

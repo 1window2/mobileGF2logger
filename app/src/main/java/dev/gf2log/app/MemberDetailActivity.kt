@@ -231,10 +231,8 @@ class MemberDetailActivity : BaseActivity() {
                 .setTitle(R.string.unsaved_changes_title)
                 .setMessage(R.string.unsaved_changes_message)
                 .setNegativeButton(R.string.discard) { _, _ -> finish() }
-                .setPositiveButton(R.string.save_member) { _, _ ->
-                    saveProfile()
-                    finish()
-                },
+                // Leave only once the save lands; a failure keeps the screen and its edits.
+                .setPositiveButton(R.string.save_member) { _, _ -> saveProfile(thenFinish = true) },
         )
     }
 
@@ -245,12 +243,14 @@ class MemberDetailActivity : BaseActivity() {
             nickname.text.isNotBlank()
     }
 
-    private fun saveProfile() {
+    private fun saveProfile(thenFinish: Boolean = false) {
+        if (work.isBusy(SAVE)) return
         val name = nickname.text.toString()
         val noteText = note.text.toString()
         work.run(key = SAVE, task = { repository.updateMember(uid, name, noteText) }) { result ->
-            Feedback.show(this, if (result.getOrDefault(false)) R.string.saved else R.string.save_failed)
-            load()
+            val saved = result.getOrDefault(false)
+            Feedback.show(this, if (saved) R.string.saved else R.string.save_failed)
+            if (saved && thenFinish) finish() else load()
         }
         updateSaveState()
     }

@@ -109,6 +109,34 @@ class PendingPlatoonAdmissionStoreTest {
     }
 
     @Test
+    fun failedOrThrowingAdmissionReleasesTheClaimForAnotherDecision() {
+        val token = requireNotNull(
+            PendingPlatoonAdmissionStore.begin(
+                SupportedGamePackages.HAOPLAY,
+                profile(5u, "Owls"),
+                flowId = 4L,
+            ).token,
+        )
+
+        assertNull(PendingPlatoonAdmissionStore.withClaim(token) { false })
+        assertNotNull(PendingPlatoonAdmissionStore.summary(token))
+
+        assertTrue(
+            runCatching {
+                PendingPlatoonAdmissionStore.withClaim(token) { error("registry unavailable") }
+            }.isFailure,
+        )
+        assertNotNull(PendingPlatoonAdmissionStore.summary(token))
+
+        assertEquals(setOf(4L), PendingPlatoonAdmissionStore.withClaim(token) { claim ->
+            assertNull(PendingPlatoonAdmissionStore.summary(claim.summary.token))
+            true
+        })
+        assertFalse(PendingPlatoonAdmissionStore.contains(token))
+        assertNull(PendingPlatoonAdmissionStore.withClaim(token) { true })
+    }
+
+    @Test
     fun repeatedIdentitySharesOnePromptWithoutMixingOtherClients() {
         val first = requireNotNull(
             PendingPlatoonAdmissionStore.begin(

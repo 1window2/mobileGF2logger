@@ -178,6 +178,23 @@ internal object PendingPlatoonAdmissionStore {
     @Synchronized
     fun complete(token: String): Set<Long> = removeLocked(token)?.flowIds.orEmpty()
 
+    /**
+     * Claims [token] and runs [admit] outside the lock. The candidate is completed when [admit]
+     * returns true and released for another decision otherwise, including when it throws, so a
+     * failed confirmation can never leave a candidate claimed and invisible forever.
+     * Returns the completed candidate's flow IDs, or null when nothing was completed.
+     */
+    fun withClaim(token: String, admit: (Claim) -> Boolean): Set<Long>? {
+        val claim = claim(token) ?: return null
+        var admitted = false
+        try {
+            admitted = admit(claim)
+        } finally {
+            if (!admitted) releaseClaim(token)
+        }
+        return if (admitted) complete(token) else null
+    }
+
     @Synchronized
     fun discard(token: String): Set<Long> = removeLocked(token)?.flowIds.orEmpty()
 

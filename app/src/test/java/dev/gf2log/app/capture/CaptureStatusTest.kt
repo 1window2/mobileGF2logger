@@ -3,7 +3,6 @@ package dev.gf2log.app.capture
 import dev.gf2log.protocol.Gfl2PayloadDecoder
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -31,14 +30,13 @@ class CaptureStatusTest {
         assertNull(CaptureStatus.snapshot().notice)
 
         CaptureStatus.markStarting()
-        assertTrue(CaptureStatus.isStarting)
+        assertEquals(CapturePhase.STARTING, CaptureStatus.snapshot().phase)
         assertEquals(CaptureNotice.PREPARING, CaptureStatus.snapshot().notice?.notice)
 
         CaptureStatus.markRunning(listOf("pkg.one", "pkg.two"))
         CaptureStatus.report(CaptureNotice.ROSTER_SAVED, "12", "Owls")
         val running = CaptureStatus.snapshot()
         assertTrue(CaptureStatus.isRunning)
-        assertFalse(CaptureStatus.isStarting)
         assertEquals(listOf("pkg.one", "pkg.two"), running.capturedTargets)
         assertEquals(CaptureNotice.ROSTER_SAVED, running.notice?.notice)
         assertEquals(listOf("12", "Owls"), running.notice?.args)

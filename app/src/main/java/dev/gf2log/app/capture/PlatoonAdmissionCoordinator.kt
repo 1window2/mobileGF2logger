@@ -23,13 +23,12 @@ internal class PlatoonAdmissionCoordinator(
         fun isOpen(flowId: Long): Boolean
         fun bind(flowId: Long, profile: PlatoonProfile): PlatoonCaptureSession
         fun unbind(flowId: Long, session: PlatoonCaptureSession)
-        fun route(session: PlatoonCaptureSession, payload: ParsedPayload, flowEnded: Boolean)
+        fun route(session: PlatoonCaptureSession, payload: ParsedPayload)
         fun quarantine(flowId: Long)
         fun profileChanged(storageId: String)
     }
 
     private val tokenByFlow = HashMap<Long, String>()
-    private val admissionGate = PlatoonProfilePolicy.AdmissionGate()
 
     fun beginSession() = admissionGate.clear()
 
@@ -83,12 +82,27 @@ internal class PlatoonAdmissionCoordinator(
     }
 
     fun confirm(token: String, region: GameServerRegion) {
-        val claim = PendingPlatoonAdmissionStore.claim(token) ?: return
+        var admitted: PlatoonProfile? = null
+        val completedFlows = PendingPlatoonAdmissionStore.withClaim(token) { claim ->
+            admitted = admit(claim, region)
+            admitted != null
+        } ?: return
+        completedFlows.forEach { tokenByFlow.remove(it, token) }
+        val profile = admitted ?: return
+        CaptureStatus.report(
+            CaptureNotice.PLATOON_CONFIRMED,
+            profile.platoonName.take(MAX_STATUS_NAME_CHARS),
+            profile.platoonId.toString(),
+            profile.client.displayName,
+        )
+    }
+
+    /** Persists the claimed identity and replays its payloads; null after reporting a failure. */
+    private fun admit(claim: PendingPlatoonAdmissionStore.Claim, region: GameServerRegion): PlatoonProfile? {
         val ownerPackage = claim.summary.ownerPackage
         if (region !in clientServerRegions.allowed(ownerPackage)) {
-            PendingPlatoonAdmissionStore.releaseClaim(token)
             CaptureStatus.report(CaptureNotice.ADMISSION_REGION_MISMATCH)
-            return
+            return null
         }
         val client = requireNotNull(PlatoonClient.fromPackage(ownerPackage))
         val existing = profileRegistry.findByIdentity(
@@ -97,9 +111,8 @@ internal class PlatoonAdmissionCoordinator(
             claim.summary.profile.platoonId.toLong(),
         )
         if (!admissionGate.canAdmit(ownerPackage, existing != null)) {
-            PendingPlatoonAdmissionStore.releaseClaim(token)
             CaptureStatus.report(CaptureNotice.ADMISSION_LIMIT)
-            return
+            return null
         }
         val previousRegion = clientServerRegions.stored(ownerPackage)
         val profile = runCatching {
@@ -117,45 +130,41 @@ internal class PlatoonAdmissionCoordinator(
                     clientServerRegions.set(ownerPackage, previousRegion)
                 }
             }.onFailure(error::addSuppressed)
-            PendingPlatoonAdmissionStore.releaseClaim(token)
             CaptureStatus.report(CaptureNotice.ADMISSION_PROFILE_FAILED)
-            return
+            return null
         }
         if (existing == null) admissionGate.markAdmitted(ownerPackage)
         flows.profileChanged(profile.storageId)
+        if (!replay(claim, profile)) {
+            CaptureStatus.report(CaptureNotice.ADMISSION_REPLAY_FAILED)
+            return null
+        }
+        return profile
+    }
 
+    /** Binds live flows to [profile] and routes the buffered payloads in their captured order. */
+    private fun replay(claim: PendingPlatoonAdmissionStore.Claim, profile: PlatoonProfile): Boolean {
         val sessions = mutableMapOf<Long, PlatoonCaptureSession>()
         val replayed = runCatching {
-            claim.flowIds.forEach { flowId -> sessions[flowId] = flows.bind(flowId, profile) }
-            val lastPayloadIndexByFlow = claim.payloads
-                .withIndex()
-                .associate { it.value.flowId to it.index }
-            claim.payloads.forEachIndexed { index, buffered ->
-                val session = sessions.getOrPut(buffered.flowId) { flows.bind(buffered.flowId, profile) }
+            // Live flows stay bound; an ended flow needs a session only while its payloads replay.
+            claim.flowIds.filterNot(claim.endedFlowIds::contains).forEach { flowId ->
+                sessions[flowId] = flows.bind(flowId, profile)
+            }
+            claim.payloads.forEach { buffered ->
                 flows.route(
-                    session = session,
-                    payload = buffered.payload,
-                    flowEnded = buffered.flowId in claim.endedFlowIds &&
-                        lastPayloadIndexByFlow[buffered.flowId] == index,
+                    sessions.getOrPut(buffered.flowId) { flows.bind(buffered.flowId, profile) },
+                    buffered.payload,
                 )
             }
         }
         if (replayed.isFailure) {
             sessions.forEach { (flowId, session) -> flows.unbind(flowId, session) }
-            PendingPlatoonAdmissionStore.releaseClaim(token)
-            CaptureStatus.report(CaptureNotice.ADMISSION_REPLAY_FAILED)
-            return
+            return false
         }
         claim.endedFlowIds.forEach { flowId ->
             sessions.remove(flowId)?.let { flows.unbind(flowId, it) }
         }
-        PendingPlatoonAdmissionStore.complete(token).forEach { tokenByFlow.remove(it, token) }
-        CaptureStatus.report(
-            CaptureNotice.PLATOON_CONFIRMED,
-            profile.platoonName.take(MAX_STATUS_NAME_CHARS),
-            profile.platoonId.toString(),
-            profile.client.displayName,
-        )
+        return true
     }
 
     fun discard(token: String) {
@@ -191,5 +200,12 @@ internal class PlatoonAdmissionCoordinator(
 
     companion object {
         const val MAX_STATUS_NAME_CHARS = 40
+
+        /**
+         * Process-wide like the pending candidates it limits: the service, and with it this
+         * coordinator, is recreated after capture stops, while candidates from that capture can
+         * still be confirmed. A per-instance gate would reset and admit every one of them.
+         */
+        private val admissionGate = PlatoonProfilePolicy.AdmissionGate()
     }
 }

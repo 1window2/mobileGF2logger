@@ -36,18 +36,13 @@ class Gfl2StreamParser(
         }
 
         while (buffer.available >= OUTER_HEADER_SIZE) {
-            val messageId = buffer.peekUInt24Le(0)
+            // A 16-bit body length can never exceed one bounded outer message.
             val messageSize = buffer.peekUInt16Le(3) + OUTER_HEADER_SIZE
-
-            if (messageSize > MAXIMUM_MESSAGE_SIZE) {
-                buffer.discard(1)
-                events += ParseEvent.Warning("Discarded an invalid message header declaring $messageSize bytes")
-                continue
-            }
             if (buffer.available < messageSize) break
 
-            val message = buffer.read(messageSize)
-            parseMessage(messageId, message, events)
+            // Parsed in place: decoding copies only recognized payload bodies.
+            parseMessage(buffer.peekUInt24Le(0), buffer.storage, buffer.readOffset, messageSize, events)
+            buffer.discard(messageSize)
         }
 
         return events
@@ -69,55 +64,35 @@ class Gfl2StreamParser(
 
     private fun parseMessage(
         messageId: Int,
-        message: ByteArray,
+        bytes: ByteArray,
+        start: Int,
+        size: Int,
         events: MutableList<ParseEvent>,
     ) {
-        var offset = OUTER_HEADER_SIZE
-        while (offset < message.size) {
-            if (message.size - offset < PAYLOAD_HEADER_SIZE) {
+        val end = start + size
+        var offset = start + OUTER_HEADER_SIZE
+        while (offset < end) {
+            if (end - offset < PAYLOAD_HEADER_SIZE) {
                 events += ParseEvent.Warning(
                     "Message $messageId ends with an incomplete payload header",
                 )
                 return
             }
 
-            val type = readUInt16Le(message, offset)
-            val payloadSize = readUInt16Le(message, offset + 2) + PAYLOAD_HEADER_SIZE
-            if (payloadSize > message.size - offset) {
+            val type = readUInt16Le(bytes, offset)
+            val payloadSize = readUInt16Le(bytes, offset + 2) + PAYLOAD_HEADER_SIZE
+            val supported = Gfl2PayloadDecoder.isSupported(type)
+            if (payloadSize > end - offset) {
                 events += ParseEvent.Warning(
-                    "Message $messageId payload $type declares $payloadSize bytes with ${message.size - offset} remaining",
+                    "Message $messageId payload $type declares $payloadSize bytes with ${end - offset} remaining",
                 )
+                // The truncated frame is necessarily the last one in this message.
+                if (supported) discardDataset(type, messageId, isEndOfMessage = true, events)
                 return
             }
 
-            val isEndOfMessage = offset + payloadSize >= message.size
-            if (type in Gfl2PayloadDecoder.supportedTypes) {
-                if (consumeQuarantinedPayload(type, messageId, isEndOfMessage)) {
-                    offset += payloadSize
-                    continue
-                }
-                val payload = message.copyOfRange(
-                    offset + PAYLOAD_HEADER_SIZE,
-                    offset + payloadSize,
-                )
-                try {
-                    val decoded = Gfl2PayloadDecoder.decode(type, payload)
-                    if (decoded != null) {
-                        acceptDecodedPayload(
-                            messageId,
-                            type,
-                            isEndOfMessage,
-                            payload.size,
-                            decoded,
-                            events,
-                        )
-                    }
-                } catch (error: ProtocolException) {
-                    events += ParseEvent.Warning(
-                        "Unable to decode payload $type in message $messageId: ${error.message}",
-                    )
-                }
-            } else {
+            val isEndOfMessage = offset + payloadSize >= end
+            if (!supported) {
                 emitPending(events)
                 quarantinedPayload = null
                 events += ParseEvent.UnknownPayload(
@@ -126,6 +101,17 @@ class Gfl2StreamParser(
                     payloadBytes = payloadSize - PAYLOAD_HEADER_SIZE,
                     isEndOfMessage = isEndOfMessage,
                 )
+            } else if (!consumeQuarantinedPayload(type, messageId, isEndOfMessage)) {
+                val payload = bytes.copyOfRange(offset + PAYLOAD_HEADER_SIZE, offset + payloadSize)
+                try {
+                    val decoded = requireNotNull(Gfl2PayloadDecoder.decode(type, payload))
+                    acceptDecodedPayload(messageId, type, isEndOfMessage, payload.size, decoded, events)
+                } catch (error: ProtocolException) {
+                    events += ParseEvent.Warning(
+                        "Unable to decode payload $type in message $messageId: ${error.message}",
+                    )
+                    discardDataset(type, messageId, isEndOfMessage, events)
+                }
             }
 
             offset += payloadSize
@@ -142,10 +128,9 @@ class Gfl2StreamParser(
     ) {
         val pending = pendingPayload
         if (pending != null) {
-            val continues = pending.type == type &&
-                (pending.previousMessageId == 0 || pending.previousMessageId == messageId)
-            val merged = if (continues) merge(pending.data, data) else null
-            if (continues && merged != null) {
+            val continued = pending.type == type && continues(pending.previousMessageId, messageId)
+            val merged = if (continued) merge(pending.data, data) else null
+            if (continued && merged != null) {
                 val accumulatedBytes = pending.accumulatedPayloadBytes + payloadBytes.toLong()
                 val continuationCount = pending.continuationCount + 1
                 if (
@@ -153,7 +138,7 @@ class Gfl2StreamParser(
                     continuationCount > maximumPendingContinuations
                 ) {
                     pendingPayload = null
-                    quarantinedPayload = if (messageId != 0 && isEndOfMessage) {
+                    quarantinedPayload = if (isTerminal(messageId, isEndOfMessage)) {
                         null
                     } else {
                         QuarantinedPayload(type, messageId)
@@ -168,7 +153,7 @@ class Gfl2StreamParser(
                 pending.isEndOfMessage = isEndOfMessage
                 pending.accumulatedPayloadBytes = accumulatedBytes
                 pending.continuationCount = continuationCount
-                if (messageId != 0 && isEndOfMessage) emitPending(events)
+                if (isTerminal(messageId, isEndOfMessage)) emitPending(events)
                 return
             }
             // A different dataset, or a continuation of a single-object payload such as
@@ -176,7 +161,7 @@ class Gfl2StreamParser(
             emitPending(events)
         }
 
-        if (messageId != 0 && isEndOfMessage) {
+        if (isTerminal(messageId, isEndOfMessage)) {
             events += ParseEvent.Payload(ParsedPayload(messageId, type, true, data))
         } else {
             if (payloadBytes > maximumPendingPayloadBytes) {
@@ -197,18 +182,45 @@ class Gfl2StreamParser(
         }
     }
 
+    /**
+     * Drops the logical dataset a malformed frame belongs to. Merging its neighbours across the
+     * hole would publish an incomplete roster as if it were complete, so a continued pending
+     * payload is discarded and the dataset's remaining fragments are quarantined. A payload that
+     * cannot be merged, such as 21905, owns each frame and keeps its earlier, valid frames.
+     */
+    private fun discardDataset(
+        type: Int,
+        messageId: Int,
+        isEndOfMessage: Boolean,
+        events: MutableList<ParseEvent>,
+    ) {
+        val mergeable = type != Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE
+        val pending = pendingPayload
+        if (
+            mergeable && pending != null && pending.type == type &&
+            continues(pending.previousMessageId, messageId)
+        ) {
+            pendingPayload = null
+        } else {
+            emitPending(events)
+        }
+        if (!mergeable) return
+        quarantinedPayload = if (isTerminal(messageId, isEndOfMessage)) {
+            null
+        } else {
+            QuarantinedPayload(type, messageId)
+        }
+    }
+
     private fun consumeQuarantinedPayload(
         type: Int,
         messageId: Int,
         isEndOfMessage: Boolean,
     ): Boolean {
         val quarantined = quarantinedPayload ?: return false
-        if (
-            quarantined.type == type &&
-            (quarantined.previousMessageId == 0 || quarantined.previousMessageId == messageId)
-        ) {
+        if (quarantined.type == type && continues(quarantined.previousMessageId, messageId)) {
             quarantined.previousMessageId = messageId
-            if (messageId != 0 && isEndOfMessage) quarantinedPayload = null
+            if (isTerminal(messageId, isEndOfMessage)) quarantinedPayload = null
             return true
         }
         quarantinedPayload = null
@@ -249,6 +261,14 @@ class Gfl2StreamParser(
         else -> null
     }
 
+    /** The reference continuation rule: after message id 0, or within the same message id. */
+    private fun continues(previousMessageId: Int, messageId: Int): Boolean =
+        previousMessageId == 0 || previousMessageId == messageId
+
+    /** A frame with a non-zero message id that ends its message completes a logical payload. */
+    private fun isTerminal(messageId: Int, isEndOfMessage: Boolean): Boolean =
+        messageId != 0 && isEndOfMessage
+
     private fun readUInt16Le(bytes: ByteArray, offset: Int): Int =
         (bytes[offset].toInt() and 0xFF) or
             ((bytes[offset + 1].toInt() and 0xFF) shl 8)
@@ -256,7 +276,6 @@ class Gfl2StreamParser(
     private companion object {
         const val OUTER_HEADER_SIZE = 5
         const val PAYLOAD_HEADER_SIZE = 4
-        const val MAXIMUM_MESSAGE_SIZE = 65_540
         const val DEFAULT_MAXIMUM_BUFFERED_BYTES = 2 * 1024 * 1024
         const val DEFAULT_MAXIMUM_PENDING_PAYLOAD_BYTES = 2 * 1024 * 1024
         const val DEFAULT_MAXIMUM_PENDING_CONTINUATIONS = 64

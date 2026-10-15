@@ -26,13 +26,12 @@
 #define PACKET_BUFFER_SIZE 65535
 #define VPN_MTU 1500
 #define SELECT_TIMEOUT_USEC 250000
-#define PURGE_INTERVAL_SECONDS 1
+#define PURGE_INTERVAL_MILLIS 1000
 #define TUN_WRITE_TIMEOUT_MILLIS 100
 #define TUN_WRITE_POLL_SLICE_MILLIS 25
 
 typedef struct flow_state {
     int64_t id;
-    bool tracked;
     bool classified;
     bool inspect_payload;
 } flow_state_t;
@@ -51,7 +50,6 @@ typedef struct capture_context {
     pthread_t thread;
     atomic_bool running;
     int tun_fd;
-    int64_t next_flow_id;
     uint64_t sent_bytes;
     uint64_t received_bytes;
     uint64_t inspected_bytes;
@@ -59,6 +57,9 @@ typedef struct capture_context {
 
 static pthread_mutex_t context_mutex = PTHREAD_MUTEX_INITIALIZER;
 static capture_context_t *active_context = NULL;
+// Process-wide so a flow ID is never reused by a later capture: unconfirmed Platoon candidates
+// outlive the capture that observed them and refer to their flows by ID.
+static _Atomic int64_t last_flow_id = 0;
 
 static bool clear_java_exception(capture_context_t *context, const char *operation) {
     if (!(*context->env)->ExceptionCheck(context->env)) {
@@ -256,46 +257,50 @@ static void protect_socket_callback(zdtun_t *tunnel, socket_t socket_fd) {
 
 static int connection_open_callback(zdtun_t *tunnel, zdtun_conn_t *connection) {
     capture_context_t *context = (capture_context_t *) zdtun_userdata(tunnel);
+    const zdtun_5tuple_t *tuple = zdtun_conn_get_5tuple(connection);
+    // Only TCP streams can carry game frames, so other flows keep no state and never reach Java.
+    if (tuple->ipproto != IPPROTO_TCP) {
+        return 0;
+    }
+
     flow_state_t *flow = calloc(1, sizeof(flow_state_t));
     if (flow == NULL) {
         LOGE("Unable to allocate flow state");
         return 1;
     }
-
-    const zdtun_5tuple_t *tuple = zdtun_conn_get_5tuple(connection);
-    flow->id = ++context->next_flow_id;
-    // Only TCP streams can carry game frames, so other flows never reach Java.
-    flow->tracked = tuple->ipproto == IPPROTO_TCP;
-    flow->inspect_payload = flow->tracked;
+    flow->id = atomic_fetch_add(&last_flow_id, 1) + 1;
+    flow->inspect_payload = true;
     zdtun_conn_set_userdata(connection, flow);
-    if (!flow->tracked) {
-        return 0;
-    }
 
     const int family = tuple->ipver == 4 ? AF_INET : AF_INET6;
     char local_address[INET6_ADDRSTRLEN] = {0};
     char remote_address[INET6_ADDRSTRLEN] = {0};
-    if (inet_ntop(family, &tuple->src_ip, local_address, sizeof(local_address)) != NULL &&
-            inet_ntop(family, &tuple->dst_ip, remote_address, sizeof(remote_address)) != NULL) {
-        jstring local = (*context->env)->NewStringUTF(context->env, local_address);
-        jstring remote = (*context->env)->NewStringUTF(context->env, remote_address);
-        if (local != NULL && remote != NULL &&
-                !clear_java_exception(context, "flow address allocation")) {
-            (*context->env)->CallVoidMethod(
-                    context->env,
-                    context->listener,
-                    context->flow_opened_method,
-                    (jlong) flow->id,
-                    (jint) tuple->ipproto,
-                    local,
-                    (jint) ntohs(tuple->src_port),
-                    remote,
-                    (jint) ntohs(tuple->dst_port));
-            clear_java_exception(context, "flow open");
-        }
-        if (local != NULL) (*context->env)->DeleteLocalRef(context->env, local);
-        if (remote != NULL) (*context->env)->DeleteLocalRef(context->env, remote);
+    if (inet_ntop(family, &tuple->src_ip, local_address, sizeof(local_address)) == NULL ||
+            inet_ntop(family, &tuple->dst_ip, remote_address, sizeof(remote_address)) == NULL) {
+        return 0;
     }
+    // A failed NewStringUTF leaves an OutOfMemoryError pending, and no further JNI call may be
+    // made until it is cleared.
+    JNIEnv *env = context->env;
+    jstring local = (*env)->NewStringUTF(env, local_address);
+    jstring remote = local == NULL ? NULL : (*env)->NewStringUTF(env, remote_address);
+    if (remote != NULL) {
+        (*env)->CallVoidMethod(
+                env,
+                context->listener,
+                context->flow_opened_method,
+                (jlong) flow->id,
+                (jint) tuple->ipproto,
+                local,
+                (jint) ntohs(tuple->src_port),
+                remote,
+                (jint) ntohs(tuple->dst_port));
+        clear_java_exception(context, "flow open");
+        (*env)->DeleteLocalRef(env, remote);
+    } else {
+        clear_java_exception(context, "flow address allocation");
+    }
+    if (local != NULL) (*env)->DeleteLocalRef(env, local);
     return 0;
 }
 
@@ -306,7 +311,12 @@ static void connection_close_callback(zdtun_t *tunnel, const zdtun_conn_t *conne
         return;
     }
 
-    if (flow->tracked && context->env != NULL) {
+    // zdtun invokes this callback twice when the RST it sends while closing cannot be written to
+    // the TUN (send_to_client re-enters zdtun_conn_close). Detach first so the second invocation is
+    // a no-op instead of a duplicate onFlowClosed and a double free.
+    zdtun_conn_set_userdata((zdtun_conn_t *) connection, NULL);
+
+    if (context->env != NULL) {
         (*context->env)->CallVoidMethod(
                 context->env,
                 context->listener,
@@ -424,7 +434,8 @@ static void *capture_thread_main(void *argument) {
         goto detach;
     }
 
-    time_t last_purge = time(NULL);
+    // Monotonic, so a wall-clock adjustment cannot postpone purging or traffic updates.
+    int64_t last_purge = monotonic_millis();
     LOGI("Native packet loop started");
 
     while (atomic_load(&context->running)) {
@@ -474,8 +485,8 @@ static void *capture_thread_main(void *argument) {
             zdtun_handle_fd(tunnel, &read_fds, &write_fds);
         }
 
-        time_t now = time(NULL);
-        if (now - last_purge >= PURGE_INTERVAL_SECONDS) {
+        const int64_t now = monotonic_millis();
+        if (now - last_purge >= PURGE_INTERVAL_MILLIS) {
             zdtun_purge_expired(tunnel);
             notify_traffic(context);
             last_purge = now;

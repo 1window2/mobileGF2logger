@@ -12,13 +12,20 @@ internal class ByteAccumulator(
     val available: Int
         get() = writePosition - readPosition
 
+    /** Backing array holding [available] unread bytes from [readOffset]; valid until mutated. */
+    val storage: ByteArray
+        get() = bytes
+
+    val readOffset: Int
+        get() = readPosition
+
     fun append(source: ByteArray) {
         if (source.isEmpty()) return
         if (source.size > maximumSize - available) {
             throw ProtocolException("Buffered stream data exceeds $maximumSize bytes")
         }
 
-        ensureCapacity(available + source.size)
+        ensureCapacity(source.size)
         source.copyInto(bytes, writePosition)
         writePosition += source.size
     }
@@ -38,18 +45,10 @@ internal class ByteAccumulator(
             ((bytes[position + 2].toInt() and 0xFF) shl 16)
     }
 
-    fun read(count: Int): ByteArray {
-        requireAvailable(0, count)
-        val result = bytes.copyOfRange(readPosition, readPosition + count)
-        readPosition += count
-        compactIfNeeded()
-        return result
-    }
-
     fun discard(count: Int) {
         requireAvailable(0, count)
         readPosition += count
-        compactIfNeeded()
+        if (readPosition == writePosition) clear()
     }
 
     fun clear() {
@@ -57,33 +56,22 @@ internal class ByteAccumulator(
         writePosition = 0
     }
 
-    private fun ensureCapacity(required: Int) {
-        if (required <= bytes.size - readPosition) {
-            if (readPosition > 0) compact()
+    /** Compacts or grows only when [extra] bytes do not fit after the current write position. */
+    private fun ensureCapacity(extra: Int) {
+        if (writePosition + extra <= bytes.size) return
+        val required = available + extra
+        if (required <= bytes.size) {
+            compact()
             return
         }
 
         var newSize = bytes.size
-        while (newSize < required) {
-            newSize = minOf(maximumSize, newSize * 2)
-            if (newSize < required && newSize == maximumSize) {
-                throw ProtocolException("Unable to grow stream buffer to $required bytes")
-            }
-        }
-
+        while (newSize < required) newSize = minOf(maximumSize, newSize * 2)
         val replacement = ByteArray(newSize)
         bytes.copyInto(replacement, 0, readPosition, writePosition)
         writePosition = available
         readPosition = 0
         bytes = replacement
-    }
-
-    private fun compactIfNeeded() {
-        if (readPosition == writePosition) {
-            clear()
-        } else if (readPosition >= bytes.size / 2) {
-            compact()
-        }
     }
 
     private fun compact() {

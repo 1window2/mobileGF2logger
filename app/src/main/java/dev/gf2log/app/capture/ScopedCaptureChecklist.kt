@@ -8,14 +8,10 @@ internal class ScopedCaptureChecklist(private val requiredTypes: Set<Int>) {
     private val capturedByScope = ConcurrentHashMap<String, MutableSet<Int>>()
     private val targetScope = AtomicReference<String?>(null)
 
-    fun mark(scopeId: String, payloadType: Int, chooseTarget: Boolean): Set<Int> {
+    fun mark(scopeId: String, payloadType: Int, chooseTarget: Boolean) {
         require(scopeId.isNotBlank())
         if (chooseTarget) targetScope.compareAndSet(null, scopeId)
-        val captured = capturedByScope.computeIfAbsent(scopeId) {
-            ConcurrentHashMap.newKeySet()
-        }
-        captured += payloadType
-        return captured.toSet()
+        capturedByScope.computeIfAbsent(scopeId) { ConcurrentHashMap.newKeySet() } += payloadType
     }
 
     fun targetScopeId(): String? = targetScope.get()
@@ -26,9 +22,4 @@ internal class ScopedCaptureChecklist(private val requiredTypes: Set<Int>) {
         .orEmpty()
 
     fun targetComplete(): Boolean = targetCaptured().containsAll(requiredTypes)
-
-    fun clear() {
-        capturedByScope.clear()
-        targetScope.set(null)
-    }
 }

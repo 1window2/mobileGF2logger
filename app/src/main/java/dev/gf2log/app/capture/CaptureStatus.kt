@@ -94,14 +94,10 @@ object CaptureStatus {
     private val listeners = CopyOnWriteArraySet<(CaptureSnapshot) -> Unit>()
     private val dispatchPending = AtomicBoolean(false)
 
-
     fun snapshot(): CaptureSnapshot = state.get()
 
     val isRunning: Boolean
         get() = snapshot().phase == CapturePhase.RUNNING
-
-    val isStarting: Boolean
-        get() = snapshot().phase == CapturePhase.STARTING
 
     /** [listener] runs on the main looper: once immediately, then after every change. */
     fun addListener(listener: (CaptureSnapshot) -> Unit) {
@@ -170,7 +166,6 @@ object CaptureStatus {
 
     private fun event(notice: CaptureNotice, args: Array<out String> = emptyArray()) =
         CaptureNoticeEvent(notice, args.toList(), System.currentTimeMillis())
-
 
     data class GuidedProgress(
         val capturedPayloadTypes: Set<Int> = emptySet(),

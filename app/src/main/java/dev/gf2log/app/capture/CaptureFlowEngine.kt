@@ -198,6 +198,7 @@ internal class CaptureFlowEngine(
     }
 
     private fun process(flowId: Long, events: List<ParseEvent>, flowEnded: Boolean = false) {
+        if (events.isEmpty()) return
         val payloads = mutableListOf<ParsedPayload>()
         var warnings = 0
         events.forEach { event ->

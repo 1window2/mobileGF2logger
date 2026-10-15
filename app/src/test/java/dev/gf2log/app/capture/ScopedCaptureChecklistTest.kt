@@ -23,16 +23,4 @@ class ScopedCaptureChecklistTest {
 
         assertTrue(checklist.targetComplete())
     }
-
-    @Test
-    fun clearRemovesTargetAndCapturedEvidence() {
-        val checklist = ScopedCaptureChecklist(setOf(1))
-        checklist.mark("profile", 1, chooseTarget = true)
-
-        checklist.clear()
-
-        assertEquals(null, checklist.targetScopeId())
-        assertTrue(checklist.targetCaptured().isEmpty())
-        assertFalse(checklist.targetComplete())
-    }
 }

@@ -294,8 +294,7 @@ object StandardWeekSolver {
                         observationIndex >= 0 && observationIndex <= index
                     }
                     .all { observation ->
-                        val observationIndex = days.indexOf(observation.gameDay)
-                        observationIndex > index || checkpointStage(
+                        checkpointStage(
                             candidate,
                             indexes.take(candidate.size),
                             days,

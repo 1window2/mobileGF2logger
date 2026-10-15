@@ -77,17 +77,6 @@ data class MemberEvent(
     val note: String,
 )
 
-data class PlatoonActivityFact(
-    val id: Long,
-    val occurredAt: Instant,
-    val actionId: Long,
-    val kind: Long,
-    val memberName: String,
-    val capturedAt: Instant,
-    val resolvedUid: Long?,
-    val resolution: ActivityResolution,
-)
-
 data class PlatoonActivityObservation(
     val occurredAt: Instant,
     val actionId: Long,
@@ -141,14 +130,6 @@ enum class EvidenceSource {
     MANUAL,
     LEGACY_IMPORT,
 }
-
-data class DailyActivity(
-    val uid: Long,
-    val gameDay: LocalDate,
-    val meritDelta: Long,
-    val scoreDelta: Long,
-    val inference: ActivityInference.Result,
-)
 
 enum class DailyEvidence {
     NO_OBSERVATION,

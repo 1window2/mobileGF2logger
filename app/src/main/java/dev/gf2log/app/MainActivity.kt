@@ -16,7 +16,6 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
-import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import dev.gf2log.app.capture.CaptureNotice
 import dev.gf2log.app.capture.CapturePhase
@@ -24,18 +23,14 @@ import dev.gf2log.app.capture.CaptureSnapshot
 import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.capture.CaptureVpnService
 import dev.gf2log.app.capture.format
-import dev.gf2log.app.history.CaptureHistoryStore
-import dev.gf2log.app.history.SavedHistoryStore
 import dev.gf2log.app.management.CsvImportCheckpointManager
 import dev.gf2log.app.management.PlatoonCsvImportStore
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.SnapshotComparison
 import dev.gf2log.app.ui.Controls
-import dev.gf2log.app.ui.AccessibleRow
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.CaptureGuard
 import dev.gf2log.app.ui.BarAction
-import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.DocumentAccess
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
@@ -45,7 +40,6 @@ import dev.gf2log.app.ui.WRAP
 import dev.gf2log.app.ui.badge
 import dev.gf2log.app.ui.button
 import dev.gf2log.app.ui.column
-import dev.gf2log.app.ui.divider
 import dev.gf2log.app.ui.dp
 import dev.gf2log.app.ui.group
 import dev.gf2log.app.ui.icon
@@ -55,11 +49,9 @@ import dev.gf2log.app.ui.setShownInGroup
 import dev.gf2log.app.ui.panel
 import dev.gf2log.app.ui.row
 import dev.gf2log.app.ui.sectionHeader
-import dev.gf2log.app.ui.selectableRect
 import dev.gf2log.app.ui.text
 import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.Gfl2PayloadDecoder
-import java.io.File
 import java.time.ZoneId
 
 /**
@@ -72,8 +64,7 @@ class MainActivity : BaseActivity() {
     private lateinit var screen: Screen
     private val work = BackgroundWork(this, "GF2Home")
     private lateinit var csvImport: CsvImportFlow
-    private var historyStore: CaptureHistoryStore? = null
-    private var savedStore: SavedHistoryStore? = null
+    private lateinit var packetHistory: HomePacketHistory
 
     private lateinit var capturePanel: LinearLayout
     private lateinit var stateDot: View
@@ -85,16 +76,9 @@ class MainActivity : BaseActivity() {
     private lateinit var undoRow: View
     private lateinit var progressBanner: LinearLayout
     private lateinit var progressText: TextView
-    private lateinit var historySection: LinearLayout
     private lateinit var rosterSummary: LinearLayout
 
     private var captureOnceRequested = false
-    private var showingSaved = false
-    private var selecting = false
-    private val selectedIds = linkedSetOf<String>()
-    private var showAll = false
-    private var recent = emptyList<CaptureHistoryStore.Entry>()
-    private var saved = emptyList<CaptureHistoryStore.Entry>()
     private var lastPhase: CapturePhase? = null
 
     private val statusListener: (CaptureSnapshot) -> Unit = ::renderCapture
@@ -125,10 +109,6 @@ class MainActivity : BaseActivity() {
         }
     }
 
-    private val exitSelection = object : OnBackPressedCallback(false) {
-        override fun handleOnBackPressed() = setSelecting(false)
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (!OnboardingPreferences.isCompleted(this)) {
@@ -137,21 +117,11 @@ class MainActivity : BaseActivity() {
             return
         }
         profileBinding = ActivePlatoonScopeBinding(this)
-        profileBinding.scope?.rootDirectory(this)?.let { root ->
-            historyStore = CaptureHistoryStore(File(root, CaptureHistoryStore.HISTORY_DIRECTORY))
-            savedStore = SavedHistoryStore(File(root, SavedHistoryStore.SAVED_HISTORY_DIRECTORY))
-        }
+        packetHistory = HomePacketHistory(this, work, profileBinding.scope)
+        packetHistory.restoreState(savedInstanceState)
         csvImport = CsvImportFlow(this, work, { profileBinding.scope }, ::showProgress)
         csvImport.restoreState(savedInstanceState)
-        savedInstanceState?.let {
-            captureOnceRequested = it.getBoolean(STATE_CAPTURE_ONCE)
-            showingSaved = it.getBoolean(STATE_SHOWING_SAVED)
-            showAll = it.getBoolean(STATE_SHOW_ALL)
-            selecting = it.getBoolean(STATE_SELECTING)
-            it.getStringArrayList(STATE_SELECTED)?.let(selectedIds::addAll)
-        }
-        onBackPressedDispatcher.addCallback(this, exitSelection)
-        exitSelection.isEnabled = selecting
+        captureOnceRequested = savedInstanceState?.getBoolean(STATE_CAPTURE_ONCE) == true
         screen = Screen(this, PrimaryNavigation.Destination.HOME)
         screen.topBar
             .setLeading(ImageView(this).apply {
@@ -182,7 +152,7 @@ class MainActivity : BaseActivity() {
             return
         }
         if (::clients.isInitialized) renderClients()
-        loadHistory()
+        packetHistory.load()
         loadRosterSummary()
         loadUndoAvailability()
         csvImport.onScreenReady()
@@ -190,11 +160,8 @@ class MainActivity : BaseActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         if (::csvImport.isInitialized) csvImport.saveState(outState)
+        if (::packetHistory.isInitialized) packetHistory.saveState(outState)
         outState.putBoolean(STATE_CAPTURE_ONCE, captureOnceRequested)
-        outState.putBoolean(STATE_SHOWING_SAVED, showingSaved)
-        outState.putBoolean(STATE_SHOW_ALL, showAll)
-        outState.putBoolean(STATE_SELECTING, selecting)
-        outState.putStringArrayList(STATE_SELECTED, ArrayList(selectedIds))
         super.onSaveInstanceState(outState)
     }
 
@@ -234,8 +201,7 @@ class MainActivity : BaseActivity() {
                 startActivity(Intent(this@MainActivity, OptionsActivity::class.java))
             },
         )), lp())
-        historySection = column()
-        addView(historySection, lp())
+        addView(packetHistory.view, lp())
         undoRow.setShownInGroup(false)
     }
 
@@ -520,250 +486,9 @@ class MainActivity : BaseActivity() {
         }
     }
 
-    // region Packet history
-
-    private fun loadHistory() {
-        val recentStore = historyStore
-        val savedEntries = savedStore
-        if (recentStore == null || savedEntries == null) {
-            renderHistory()
-            return
-        }
-        work.run(key = HISTORY, task = { recentStore.list() to savedEntries.list() }) { result ->
-            result.getOrNull()?.let { (recentEntries, savedList) ->
-                recent = recentEntries
-                saved = savedList
-                val ids = (if (showingSaved) saved else recent).mapTo(mutableSetOf()) { it.id }
-                selectedIds.retainAll(ids)
-            }
-            renderHistory()
-        }
-    }
-
-    private fun renderHistory() {
-        historySection.removeAllViews()
-        val entries = if (showingSaved) saved else recent
-        historySection.addView(row {
-            addView(sectionHeader(getString(R.string.packet_history_section)), lp(width = 0, weight = 1f))
-            if (entries.isNotEmpty()) {
-                addView(
-                    button(getString(if (selecting) R.string.done else R.string.select), Controls.Role.TERTIARY) {
-                        setSelecting(!selecting)
-                    },
-                    lp(WRAP, WRAP, top = 8),
-                )
-            }
-        }, lp())
-        historySection.addView(Controls.segmentedControl(
-            context = this,
-            options = listOf(
-                RECENT to getString(R.string.recent_packets_tab, recent.size, CaptureHistoryStore.MAX_ENTRIES),
-                SAVED to getString(R.string.saved_packets_tab, saved.size, SavedHistoryStore.MAX_ENTRIES),
-            ),
-            selectedValue = if (showingSaved) SAVED else RECENT,
-        ) { value ->
-            showingSaved = value == SAVED
-            showAll = false
-            setSelecting(false)
-        }, lp())
-        if (entries.isEmpty()) {
-            historySection.addView(text(
-                getString(
-                    when {
-                        profileBinding.scope == null -> R.string.no_platoon_history
-                        showingSaved -> R.string.no_saved_packets
-                        else -> R.string.no_parsed_packets
-                    },
-                ),
-                TextRole.SECONDARY,
-            ) { setPadding(dp(4), dp(16), dp(4), dp(8)) }, lp())
-            return
-        }
-        if (selecting) historySection.addView(selectionActions(), lp(top = 8))
-        val visible = if (showAll) entries else entries.take(COLLAPSED_COUNT)
-        historySection.addView(panel(padding = 4) {
-            visible.forEachIndexed { index, entry ->
-                if (index > 0) addView(divider(insetStartDp = 12))
-                addView(historyRow(entry), lp())
-            }
-        }, lp(top = 8))
-        if (!showAll && entries.size > COLLAPSED_COUNT) {
-            historySection.addView(button(getString(R.string.show_all_count, entries.size), Controls.Role.TERTIARY) {
-                showAll = true
-                renderHistory()
-            }, lp(top = 4))
-        }
-    }
-
-    private fun historyRow(entry: CaptureHistoryStore.Entry): View {
-        val tag = Labels.payloadTag(this, entry.payloadType)
-        val mark = icon(R.drawable.ic_circle_outline, R.color.outline_strong, sizeDp = 22)
-        val row = AccessibleRow(this)
-        fun refresh() {
-            val isSelected = selecting && entry.id in selectedIds
-            row.isSelected = isSelected
-            mark.setImageResource(if (isSelected) R.drawable.ic_check_circle else R.drawable.ic_circle_outline)
-            mark.imageTintList = android.content.res.ColorStateList.valueOf(
-                getColor(if (isSelected) R.color.accent_text else R.color.outline_strong),
-            )
-            row.contentDescription = listOfNotNull(
-                getString(R.string.selected).takeIf { isSelected },
-                entry.title,
-                getString(
-                    R.string.payload_tag_description,
-                    tag,
-                    entry.payloadType?.toString() ?: getString(R.string.unknown_payload_type),
-                ),
-            ).joinToString(". ")
-        }
-        return row.apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(52)
-            setPadding(dp(12), dp(4), dp(8), dp(4))
-            background = selectableRect()
-            if (selecting) addView(mark, lp(22, 22, end = 12))
-            addView(text(entry.title, TextRole.BODY) {
-                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            }, lp(width = 0, weight = 1f))
-            addView(badge(tag).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, lp(WRAP, WRAP, start = 8))
-            if (!selecting) addView(icon(R.drawable.ic_chevron_right, sizeDp = 20), lp(20, 20, start = 4))
-            refresh()
-            setOnClickListener {
-                if (selecting) {
-                    // Update in place so accessibility focus stays on this row.
-                    if (!selectedIds.add(entry.id)) selectedIds.remove(entry.id)
-                    refresh()
-                    updateSelectionBar()
-                } else {
-                    openEntry(entry)
-                }
-            }
-            setOnLongClickListener {
-                selectedIds.add(entry.id)
-                if (selecting) {
-                    refresh()
-                    updateSelectionBar()
-                } else {
-                    setSelecting(true)
-                }
-                true
-            }
-        }
-    }
-
-    private var selectionCount: TextView? = null
-    private val selectionButtons = mutableListOf<View>()
-
-    private fun selectionActions(): View = row {
-        selectionButtons.clear()
-        selectionCount = text(null, TextRole.LABEL)
-        addView(selectionCount, lp(width = 0, weight = 1f, start = 4))
-        if (!showingSaved) {
-            addView(button(getString(R.string.save_selected_history_short), Controls.Role.SECONDARY, R.drawable.ic_save) {
-                saveSelected()
-            }.also(selectionButtons::add), lp(WRAP, WRAP, end = 8))
-        }
-        addView(button(getString(R.string.delete), Controls.Role.DESTRUCTIVE_TEXT, R.drawable.ic_delete) {
-            confirmDeleteSelected()
-        }.also(selectionButtons::add), lp(WRAP, WRAP))
-        updateSelectionBar()
-    }
-
-    private fun updateSelectionBar() {
-        selectionCount?.text = resources.getQuantityString(R.plurals.selected_count, selectedIds.size, selectedIds.size)
-        selectionButtons.forEach { it.isEnabled = selectedIds.isNotEmpty() }
-    }
-
-    private fun setSelecting(enabled: Boolean) {
-        selecting = enabled
-        if (!enabled) selectedIds.clear()
-        exitSelection.isEnabled = enabled
-        renderHistory()
-    }
-
-    private fun openEntry(entry: CaptureHistoryStore.Entry) {
-        startActivity(
-            Intent(this, PacketHistoryActivity::class.java)
-                .putExtra(PacketHistoryActivity.EXTRA_ENTRY_ID, entry.id)
-                .putExtra(PacketHistoryActivity.EXTRA_ENTRY_TITLE, entry.title)
-                .putExtra(PacketHistoryActivity.EXTRA_SAVED_ENTRY, showingSaved)
-                .putExtra(PacketHistoryActivity.EXTRA_STORAGE_ID, profileBinding.scope?.storageId),
-        )
-    }
-
-    private fun saveSelected() {
-        val source = historyStore ?: return
-        val target = savedStore ?: return
-        if (work.isBusy(HISTORY_WRITE)) return
-        val ids = selectedIds.toList()
-        work.run(key = HISTORY_WRITE, task = { target.saveFrom(source, ids) }) { result ->
-            val saveResult = result.getOrNull()
-            Feedback.show(
-                this,
-                when {
-                    saveResult == null -> getString(R.string.status_save_history_failed)
-                    saveResult.saved > 0 && saveResult.limitReached -> resources.getQuantityString(
-                        R.plurals.status_saved_history_at_limit,
-                        saveResult.saved,
-                        saveResult.saved,
-                        SavedHistoryStore.MAX_ENTRIES,
-                    )
-                    saveResult.saved > 0 ->
-                        resources.getQuantityString(R.plurals.status_saved_history, saveResult.saved, saveResult.saved)
-                    saveResult.limitReached -> getString(R.string.status_saved_history_limit, SavedHistoryStore.MAX_ENTRIES)
-                    else -> getString(R.string.status_history_already_saved)
-                },
-            )
-            setSelecting(false)
-            loadHistory()
-        }
-    }
-
-    private fun confirmDeleteSelected() {
-        val ids = selectedIds.toList()
-        val fromSaved = showingSaved
-        Dialogs.confirm(
-            this,
-            getString(R.string.delete_history_title),
-            resources.getQuantityString(R.plurals.delete_history_message, ids.size, ids.size),
-            getString(R.string.delete),
-            destructive = true,
-        ) confirm@{
-            if (work.isBusy(HISTORY_WRITE)) return@confirm
-            work.run(
-                key = HISTORY_WRITE,
-                task = { (if (fromSaved) savedStore?.delete(ids) else historyStore?.delete(ids)) ?: 0 },
-            ) { result ->
-                val deleted = result.getOrDefault(0)
-                Feedback.show(
-                    this,
-                    resources.getQuantityString(
-                        if (fromSaved) R.plurals.status_deleted_saved_history else R.plurals.status_deleted_history,
-                        deleted,
-                        deleted,
-                    ),
-                )
-                setSelecting(false)
-                loadHistory()
-            }
-        }
-    }
-
-    // endregion
-
     private companion object {
-        const val HISTORY = "history"
         const val SUMMARY = "summary"
         const val UNDO = "undo"
-        const val HISTORY_WRITE = "history_write"
-        const val RECENT = "recent"
-        const val SAVED = "saved"
-        const val COLLAPSED_COUNT = 20
         const val STATE_CAPTURE_ONCE = "home.capture_once"
-        const val STATE_SHOWING_SAVED = "home.showing_saved"
-        const val STATE_SHOW_ALL = "home.show_all"
-        const val STATE_SELECTING = "home.selecting"
-        const val STATE_SELECTED = "home.selected"
     }
 }

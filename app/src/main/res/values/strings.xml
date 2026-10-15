@@ -605,4 +605,5 @@
     <string name="apply_and_next_day">Apply, next day</string>
     <string name="capture_running_title">Capture is running</string>
     <string name="stop_capture_and_continue">Stop capture</string>
+    <string name="invalid_activity_choice">Patrol can\'t be yes while login is no.</string>
 </resources>

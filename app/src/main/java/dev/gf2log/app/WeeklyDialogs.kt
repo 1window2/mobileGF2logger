@@ -139,7 +139,11 @@ internal object WeeklyDialogs {
                 )
                 if (probe is WeeklyOverrideEditing.Result.Invalid) {
                     error.showMessage(activity.getString(
-                        if (probe.field == WeeklyOverrideEditing.Field.ATTEMPTS) R.string.invalid_attempts else R.string.invalid_counter,
+                        when (probe.field) {
+                            WeeklyOverrideEditing.Field.ATTEMPTS -> R.string.invalid_attempts
+                            WeeklyOverrideEditing.Field.ACTIVITY -> R.string.invalid_activity_choice
+                            else -> R.string.invalid_counter
+                        },
                     ))
                     return
                 }

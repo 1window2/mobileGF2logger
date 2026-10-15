@@ -1,5 +1,6 @@
 package dev.gf2log.app
 
+import dev.gf2log.app.management.ManualTextPolicy
 import android.app.Activity
 import android.app.AlertDialog
 import android.text.InputType
@@ -26,13 +27,13 @@ internal object WithdrawnMemberDialog {
     ) = with(activity) {
         val zone = repository.gameZone()
         val uid = LabeledField(this, getString(R.string.uid), textField(getString(R.string.uid_hint), inputType = InputType.TYPE_CLASS_NUMBER))
-        val nickname = LabeledField(this, getString(R.string.member_nickname), textField(getString(R.string.member_nickname)))
+        val nickname = LabeledField(this, getString(R.string.member_nickname), textField(getString(R.string.member_nickname), maxLength = ManualTextPolicy.MAX_MEMBER_NAME_CHARS))
         val joined = DateTimePickerInput(this, getString(R.string.join_label), dateRequired = true, zone = zone)
         val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_label), dateRequired = true, zone = zone)
         val note = LabeledField(
             this,
             getString(R.string.membership_note_hint),
-            textField(getString(R.string.membership_note_hint), singleLine = false),
+            textField(getString(R.string.membership_note_hint), singleLine = false, maxLength = ManualTextPolicy.MAX_NOTE_CHARS),
         )
         val error = errorLine()
         val content = Dialogs.content(this) {

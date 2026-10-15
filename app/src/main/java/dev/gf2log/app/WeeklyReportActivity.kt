@@ -14,6 +14,7 @@ import androidx.recyclerview.widget.RecyclerView
 import dev.gf2log.app.management.MemberEvent
 import dev.gf2log.app.management.PlatoonPeriods
 import dev.gf2log.app.management.PlatoonRepository
+import dev.gf2log.app.management.WeeklyCellOverride
 import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.management.WeeklyEvidenceAnalyzer
 import dev.gf2log.app.management.WeeklyMemberNameProjection
@@ -523,8 +524,19 @@ class WeeklyReportActivity : BaseActivity() {
 
     private fun saveEdits() {
         val current = model ?: return
+        if (work.isBusy(SAVE)) return
         val report = current.report
-        val existing = report.members.flatMap { member -> member.days.mapNotNull { it.manualOverride } }
+        // Merge against the stored overrides, not the displayed table: a restored revision or a member
+        // missing from the roster would otherwise drop overrides the user never touched.
+        work.run(key = SAVE, task = { repository.listWeeklyOverrides(report.periodStart.toEpochDay()) }) { stored ->
+            stored.onFailure { Feedback.show(this, R.string.save_failed) }
+            stored.onSuccess { saveMerged(current, it) }
+        }
+        updateTopBar()
+    }
+
+    private fun saveMerged(current: RenderModel, existing: List<WeeklyCellOverride>) {
+        val report = current.report
         when (val merged = WeeklyOverrideEditing.merge(report.periodStart, report.isGunsmokeWeek, existing, edits.values)) {
             is WeeklyOverrideEditing.Result.Invalid -> {
                 val name = current.namesByUid[merged.uid] ?: Labels.uid(this, merged.uid)

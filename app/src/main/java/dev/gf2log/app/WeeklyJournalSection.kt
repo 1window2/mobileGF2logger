@@ -1,5 +1,6 @@
 package dev.gf2log.app
 
+import dev.gf2log.app.management.ManualTextPolicy
 import android.app.Activity
 import android.content.res.ColorStateList
 import android.os.Bundle
@@ -72,7 +73,7 @@ internal class WeeklyJournalSection(
         activity.getString(R.string.note_hint),
         id = R.id.weekly_note_input,
         singleLine = false,
-        maxLength = MAX_NOTE_LENGTH,
+        maxLength = ManualTextPolicy.MAX_NOTE_CHARS,
     )
     private val noteDayButton: TextView = activity.text(null, TextRole.BODY) {
         gravity = Gravity.CENTER_VERTICAL
@@ -267,7 +268,6 @@ internal class WeeklyJournalSection(
     }
 
     private companion object {
-        const val MAX_NOTE_LENGTH = 1_000
         const val STATE_NOTE_DAY = "weekly.note_day"
         const val STATE_NOTE_DRAFT = "weekly.note_draft"
     }

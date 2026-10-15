@@ -1,5 +1,6 @@
 package dev.gf2log.app
 
+import dev.gf2log.app.management.ManualTextPolicy
 import android.app.AlertDialog
 import android.os.Bundle
 import android.view.Gravity
@@ -103,8 +104,8 @@ class MemberDetailActivity : BaseActivity() {
     }
 
     private fun buildContent() {
-        nickname = textField(getString(R.string.member_nickname), id = R.id.member_nickname_input, maxLength = 256)
-        note = textField(getString(R.string.member_private_note_hint), id = R.id.member_note_input, singleLine = false)
+        nickname = textField(getString(R.string.member_nickname), id = R.id.member_nickname_input, maxLength = ManualTextPolicy.MAX_MEMBER_NAME_CHARS)
+        note = textField(getString(R.string.member_private_note_hint), id = R.id.member_note_input, singleLine = false, maxLength = ManualTextPolicy.MAX_NOTE_CHARS)
         saveButton = button(getString(R.string.save_member), Controls.Role.PRIMARY) { saveProfile() }
         nickname.onTextChanged { updateSaveState() }
         note.onTextChanged { updateSaveState() }
@@ -292,7 +293,7 @@ class MemberDetailActivity : BaseActivity() {
             editable = period.isLeftBoundaryEditable,
             zone = zone,
         )
-        val noteInput = textField(getString(R.string.membership_note_hint), singleLine = false).apply { setText(period.note) }
+        val noteInput = textField(getString(R.string.membership_note_hint), singleLine = false, maxLength = ManualTextPolicy.MAX_NOTE_CHARS).apply { setText(period.note) }
         val error = errorLine()
         val canDelete = status.membershipPeriods.size > 1
         val body = Dialogs.content(this) {
@@ -363,7 +364,7 @@ class MemberDetailActivity : BaseActivity() {
         val zone = model?.zone ?: return
         val joined = DateTimePickerInput(this, getString(R.string.join_label), dateRequired = true, zone = zone)
         val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_label), zone = zone)
-        val noteInput = textField(getString(R.string.membership_note_hint), singleLine = false)
+        val noteInput = textField(getString(R.string.membership_note_hint), singleLine = false, maxLength = ManualTextPolicy.MAX_NOTE_CHARS)
         val error = errorLine()
         val body = Dialogs.content(this) {
             addView(joined, lp())

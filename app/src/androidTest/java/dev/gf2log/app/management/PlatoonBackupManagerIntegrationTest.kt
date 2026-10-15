@@ -1260,15 +1260,17 @@ class WeeklyReportActivityStateTest {
         val target = WeeklyPngExport
             .newRenderTarget(context.cacheDir, LocalDate.of(2026, 8, 9))
             .apply { writeBytes(byteArrayOf(1, 2, 3)) }
-        val field = WeeklyReportActivity::class.java.getDeclaredField("pendingPng").apply {
+        // The pending render lives in the screen's export flow.
+        val exports = WeeklyReportActivity::class.java.getDeclaredField("exports").apply { isAccessible = true }
+        val pending = dev.gf2log.app.WeeklyExportFlow::class.java.getDeclaredField("pendingPng").apply {
             isAccessible = true
         }
         try {
             ActivityScenario.launch(WeeklyReportActivity::class.java).use { scenario ->
-                scenario.onActivity { activity -> field.set(activity, target) }
+                scenario.onActivity { activity -> pending.set(exports.get(activity), target) }
                 scenario.recreate()
                 scenario.onActivity { activity ->
-                    assertEquals(target.canonicalFile, (field.get(activity) as java.io.File).canonicalFile)
+                    assertEquals(target.canonicalFile, (pending.get(exports.get(activity)) as java.io.File).canonicalFile)
                 }
             }
         } finally {

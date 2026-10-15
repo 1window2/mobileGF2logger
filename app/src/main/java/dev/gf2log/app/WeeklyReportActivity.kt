@@ -98,8 +98,7 @@ class WeeklyReportActivity : BaseActivity() {
     /** One table per week kind, reused across renders so recycled rows and scroll position survive. */
     private val tables = HashMap<Boolean, WeeklyTable>()
     private val horizontalSync = HorizontalSync()
-    private var editingPeriod: LocalDate? = null
-    private val edits = linkedMapOf<Pair<Long, LocalDate>, WeeklyOverrideEditing.CellEdit>()
+    private val edits = WeeklyEditSession()
     private var noteDay: LocalDate? = null
     private var pendingExport: String? = null
     private var pendingPng: File? = null
@@ -202,11 +201,7 @@ class WeeklyReportActivity : BaseActivity() {
         }
         WeeklyPngExport.nameForState(cacheDir, pendingPng)?.let { outState.putString(STATE_PENDING_PNG_NAME, it) }
         pendingExport?.let { outState.putString(STATE_PENDING_EXPORT, it) }
-        editingPeriod?.let { period ->
-            outState.putString(STATE_EDITING_SCOPE, scope.storageId)
-            outState.putLong(STATE_EDITING_PERIOD, period.toEpochDay())
-            outState.putParcelableArrayList(STATE_EDITS, ArrayList(edits.values.map(::encodeEdit)))
-        }
+        if (::scope.isInitialized) edits.save(outState, scope.storageId)
         noteDay?.let { outState.putLong(STATE_NOTE_DAY, it.toEpochDay()) }
         // The composer lives inside the RecyclerView, which does not save its children's state.
         if (::noteInput.isInitialized) outState.putString(STATE_NOTE_DRAFT, noteInput.text.toString())
@@ -223,13 +218,7 @@ class WeeklyReportActivity : BaseActivity() {
                 ?: PlatoonPeriods.gameDay(Instant.now(), GameTimeZonePreferences.get(this, scope.storageId)),
         )
         // Edits belong to one Platoon; a profile switch recreates this screen in another scope.
-        if (state?.containsKey(STATE_EDITING_PERIOD) == true && state.getString(STATE_EDITING_SCOPE) == scope.storageId) {
-            editingPeriod = LocalDate.ofEpochDay(state.getLong(STATE_EDITING_PERIOD))
-            @Suppress("DEPRECATION")
-            state.getParcelableArrayList<Bundle>(STATE_EDITS)
-                ?.map(::decodeEdit)
-                ?.forEach { edits[it.uid to it.gameDay] = it }
-        }
+        edits.restore(state, scope.storageId)
         noteDay = state?.takeIf { it.containsKey(STATE_NOTE_DAY) }
             ?.getLong(STATE_NOTE_DAY)
             ?.let(LocalDate::ofEpochDay)
@@ -291,10 +280,7 @@ class WeeklyReportActivity : BaseActivity() {
 
     private fun render(next: RenderModel) {
         val report = next.report
-        if (editingPeriod != null && editingPeriod != report.periodStart) {
-            editingPeriod = null
-            edits.clear()
-        }
+        edits.retainFor(report.periodStart)
         model = next
         val weeklyTable = tables.getOrPut(report.isGunsmokeWeek) {
             WeeklyTable(this, report.isGunsmokeWeek, next.zone, next.cutlines, horizontalSync)
@@ -341,7 +327,7 @@ class WeeklyReportActivity : BaseActivity() {
 
     private fun buildTop(next: RenderModel): View {
         val report = next.report
-        val editing = editingPeriod == report.periodStart
+        val editing = edits.isEditing(report.periodStart)
         return column {
             setPadding(dp(16), 0, dp(16), dp(12))
             addView(PlatoonProfileSelector.card(this@WeeklyReportActivity, compact = true).apply {
@@ -449,7 +435,7 @@ class WeeklyReportActivity : BaseActivity() {
 
     private fun renderBottom(next: RenderModel) {
         bottomSections.removeAllViews()
-        if (editingPeriod == next.report.periodStart) return
+        if (edits.isEditing(next.report.periodStart)) return
         renderMembershipEvents(next)
         bottomSections.addView(sectionHeader(getString(R.string.notes)), lp())
         val notesByDay = next.notes.groupBy(WeeklyNote::gameDay)
@@ -586,7 +572,7 @@ class WeeklyReportActivity : BaseActivity() {
 
     private fun updateTopBar() {
         val current = model
-        val editing = current != null && editingPeriod == current.report.periodStart
+        val editing = current != null && edits.isEditing(current.report.periodStart)
         editingBack.isEnabled = editing
         screen.setNavigationEnabled(!editing)
         val bar = screen.topBar
@@ -598,7 +584,7 @@ class WeeklyReportActivity : BaseActivity() {
                     resources.getQuantityString(R.plurals.edited_cells, edits.size, edits.size),
                 )
                 .setActions(listOf(
-                    BarAction(R.drawable.ic_check, getString(R.string.save_weekly_edits), edits.isNotEmpty() && !work.isBusy(SAVE)) {
+                    BarAction(R.drawable.ic_check, getString(R.string.save_weekly_edits), !edits.isEmpty() && !work.isBusy(SAVE)) {
                         saveEdits()
                     },
                 ))
@@ -665,19 +651,17 @@ class WeeklyReportActivity : BaseActivity() {
         val weeklyTable = table ?: return
         val dayLabel = cell?.let { Labels.dayHeader(this, it.gameDay) } ?: getString(R.string.total)
         val title = getString(R.string.weekly_cell_title, member.name, dayLabel)
-        if (editingPeriod == current.report.periodStart) {
+        if (edits.isEditing(current.report.periodStart)) {
             if (cell == null) {
                 Feedback.show(this, R.string.total_not_editable)
                 return
             }
             // The draft is being committed; edits made now would be cleared with it.
             if (work.isBusy(SAVE)) return
-            val key = member.uid to cell.gameDay
             val nextCell = member.days.getOrNull(member.days.indexOf(cell) + 1)
             val next = nextCell?.let { { onCellTapped(member, it) } }
-            WeeklyDialogs.showEdit(this, title, current.report.isGunsmokeWeek, member.uid, cell, edits[key], next) { edit ->
-                if (editingPeriod != current.report.periodStart) return@showEdit
-                if (edit.isEmpty) edits.remove(key) else edits[key] = edit
+            WeeklyDialogs.showEdit(this, title, current.report.isGunsmokeWeek, member.uid, cell, edits[member.uid, cell.gameDay], next) { edit ->
+                if (!edits.isEditing(current.report.periodStart) || !edits.put(edit)) return@showEdit
                 // Rows are addressed in the list the adapter currently shows, not the tapped model.
                 rowsAdapter.notifyMemberChanged(member.uid)
                 updateTopBar()
@@ -705,8 +689,7 @@ class WeeklyReportActivity : BaseActivity() {
         Dialogs.confirm(this, R.string.manual_edit_warning_title, R.string.manual_edit_warning, R.string.start_editing) {
             // A resume may have re-rendered while the warning was open; edit what is shown now.
             val current = model ?: return@confirm
-            editingPeriod = current.report.periodStart
-            edits.clear()
+            edits.start(current.report.periodStart)
             render(current)
         }
     }
@@ -726,8 +709,7 @@ class WeeklyReportActivity : BaseActivity() {
     }
 
     private fun finishEditing() {
-        editingPeriod = null
-        edits.clear()
+        edits.finish()
         model?.let(::render) ?: updateTopBar()
     }
 
@@ -750,8 +732,7 @@ class WeeklyReportActivity : BaseActivity() {
                     task = { repository.replaceWeeklyOverrides(report.periodStart.toEpochDay(), merged.overrides) },
                 ) { result ->
                     if (result.isSuccess) {
-                        editingPeriod = null
-                        edits.clear()
+                        edits.finish()
                         Feedback.show(this, R.string.weekly_edits_saved)
                         requestRender()
                     } else {
@@ -888,33 +869,13 @@ class WeeklyReportActivity : BaseActivity() {
         override fun onBindViewHolder(holder: RowHolder, position: Int) {
             val member = members[position]
             val current = model ?: return
-            val dayEdits = edits.values.filter { it.uid == member.uid }.associateBy { it.gameDay }
+            val dayEdits = edits.forMember(member.uid)
             val rank = current.scoreRanks[member.uid].takeIf { current.report.isGunsmokeWeek }
             holder.row.bind(member, rank, dayEdits) { cell -> onCellTapped(member, cell) }
         }
     }
 
     private class RowHolder(val row: WeeklyTable.MemberRow) : RecyclerView.ViewHolder(row.view)
-
-    private fun encodeEdit(edit: WeeklyOverrideEditing.CellEdit) = Bundle().apply {
-        putLong("uid", edit.uid)
-        putLong("day", edit.gameDay.toEpochDay())
-        edit.merit?.let { putString("merit", it) }
-        edit.score?.let { putString("score", it) }
-        edit.attempts?.let { putString("attempts", it) }
-        edit.attended?.let { putString("attended", it.name) }
-        edit.dailyPatrol?.let { putString("patrol", it.name) }
-    }
-
-    private fun decodeEdit(bundle: Bundle) = WeeklyOverrideEditing.CellEdit(
-        uid = bundle.getLong("uid"),
-        gameDay = LocalDate.ofEpochDay(bundle.getLong("day")),
-        merit = bundle.getString("merit"),
-        score = bundle.getString("score"),
-        attempts = bundle.getString("attempts"),
-        attended = bundle.getString("attended")?.let(WeeklyOverrideEditing.Choice::valueOf),
-        dailyPatrol = bundle.getString("patrol")?.let(WeeklyOverrideEditing.Choice::valueOf),
-    )
 
     private data class RenderModel(
         val zone: ZoneId,
@@ -942,9 +903,6 @@ class WeeklyReportActivity : BaseActivity() {
         const val STATE_REFERENCE_DAY = "weekly.reference_day"
         const val STATE_PENDING_PNG_NAME = "weekly.pending_png_name"
         const val STATE_PENDING_EXPORT = "weekly.pending_export"
-        const val STATE_EDITING_PERIOD = "weekly.editing_period"
-        const val STATE_EDITING_SCOPE = "weekly.editing_scope"
-        const val STATE_EDITS = "weekly.edits"
         const val STATE_NOTE_DAY = "weekly.note_day"
         const val STATE_NOTE_DRAFT = "weekly.note_draft"
     }

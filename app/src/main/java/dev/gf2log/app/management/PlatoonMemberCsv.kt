@@ -19,7 +19,7 @@ object PlatoonMemberCsv {
         appendLine(HEADER)
         statuses.forEach { status ->
             val latest = latestMembers[status.uid]
-            val membershipPeriod = status.membershipPeriods.firstOrNull()
+            val membershipPeriod = status.latestMembershipPeriod()
             appendLine(
                 listOf(
                     status.uid,

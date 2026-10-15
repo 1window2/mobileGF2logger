@@ -12,7 +12,8 @@ import dev.gf2log.app.management.MemberStatus
 import dev.gf2log.app.management.MembershipPeriod
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.SnapshotMember
-import dev.gf2log.app.management.isImmutableMembershipBoundary
+import dev.gf2log.app.management.isJoinedBoundaryEditable
+import dev.gf2log.app.management.isLeftBoundaryEditable
 import dev.gf2log.app.management.isValidMembershipRange
 import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.ui.onTextChanged
@@ -277,7 +278,7 @@ class MemberDetailActivity : BaseActivity() {
             initialDate = period.joinedDate,
             initialTimeKnown = period.joinedTimeKnown,
             dateRequired = true,
-            editable = !period.joinedSource.isImmutableMembershipBoundary(),
+            editable = period.isJoinedBoundaryEditable,
             zone = zone,
         )
         val left = DateTimePickerInput(
@@ -286,7 +287,7 @@ class MemberDetailActivity : BaseActivity() {
             initialValue = period.leftAt,
             initialDate = period.leftDate,
             initialTimeKnown = period.leftTimeKnown ?: (period.leftAt != null),
-            editable = period.leftSource?.isImmutableMembershipBoundary() != true,
+            editable = period.isLeftBoundaryEditable,
             zone = zone,
         )
         val noteInput = textField(getString(R.string.membership_note_hint), singleLine = false).apply { setText(period.note) }

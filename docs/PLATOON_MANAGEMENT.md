@@ -195,6 +195,14 @@ transitions.
 - Weekly history is a derived audit trail, not the primary store. If refreshing
   one revision fails after a successful data mutation, the affected restored
   selection is cleared so the live database projection remains authoritative.
+- Weekly notes and manual overrides must fall inside their own week; anything
+  else is rejected before it can make a revision fail its structural checks.
+- A captured roster older than the latest stored one, from a late packet or a
+  clock moved backwards, is replayed into history instead of being treated as
+  the current roster, so it never withdraws members of a newer roster.
+- A consumed CSV import checkpoint is retired by an atomic rename to
+  `csv-import-checkpoint.discarded` before deletion, so a crash mid-cleanup can
+  never block later imports or undo.
 
 ## Persistence and privacy
 
@@ -211,7 +219,7 @@ The same neutralization is applied to captured roster, activity, Updates, and
 formation packet tables before they can be copied or opened in spreadsheet
 software.
 
-Untrusted evidence is bounded at every persistence boundary. A roster import
+Untrusted evidence is bounded at every persistence boundary. A 21960 Updates entry is dropped whole when any name exceeds 256 characters or it lists more than 256 members. A roster import
 must contain no more than 256 unique UIDs, an activity payload contributes at
 most 250 distinct observations, and the database keeps the newest 10,000
 activity facts. If a newly selected roster CSV fails parsing, duplicate-UID

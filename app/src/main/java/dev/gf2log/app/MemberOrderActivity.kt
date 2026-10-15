@@ -105,8 +105,8 @@ class MemberOrderActivity : BaseActivity() {
         addView(panel(padding = 12) {
             addView(text(getString(R.string.sort_once), TextRole.LABEL), lp())
             addView(row {
-                addView(fieldButton, lp(width = 0, height = 48, weight = 1.4f))
-                addView(directionButton, lp(width = 0, height = 48, weight = 1f, start = 8))
+                addView(fieldButton, lp(width = 0, weight = 1.4f))
+                addView(directionButton, lp(width = 0, weight = 1f, start = 8))
             }, lp(top = 8))
             addView(button(getString(R.string.apply_sort), Controls.Role.SECONDARY) { confirmSort() }, lp(top = 8))
         }, lp(top = 12, bottom = 8))
@@ -115,7 +115,8 @@ class MemberOrderActivity : BaseActivity() {
 
     private fun choiceChip(onClick: () -> Unit): TextView = text(null, TextRole.BODY) {
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(12), 0, dp(8), 0)
+        minHeight = dp(48)
+        setPadding(dp(12), dp(6), dp(8), dp(6))
         maxLines = 1
         ellipsize = TextUtils.TruncateAt.END
         background = android.graphics.drawable.GradientDrawable().apply {

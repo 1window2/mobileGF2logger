@@ -62,8 +62,8 @@ internal class DateTimePickerInput(
             setPadding(context.dp(4), 0, context.dp(4), context.dp(4))
         }, context.lp())
         addView(context.row {
-            addView(dateField, context.lp(width = 0, height = 48, weight = 1.3f))
-            addView(timeField, context.lp(width = 0, height = 48, weight = 1f, start = 8))
+            addView(dateField, context.lp(width = 0, weight = 1.3f))
+            addView(timeField, context.lp(width = 0, weight = 1f, start = 8))
             addView(clearButton, context.lp(48, 48, start = 4))
         }, context.lp())
         if (!editable) {
@@ -76,7 +76,9 @@ internal class DateTimePickerInput(
 
     private fun pickerField(icon: Int, onClick: () -> Unit): TextView = context.text(null, TextRole.BODY) {
         gravity = Gravity.CENTER_VERTICAL
-        setPadding(context.dp(12), 0, context.dp(8), 0)
+        // Grows with the font size instead of clipping; 48dp stays the minimum touch target.
+        minHeight = context.dp(48)
+        setPadding(context.dp(12), context.dp(6), context.dp(8), context.dp(6))
         maxLines = 1
         background = GradientDrawable().apply {
             setColor(context.getColor(R.color.surface_variant))

@@ -34,24 +34,39 @@ internal object GameTimeZonePreferences {
         storageId != PlatoonProfileIdentity.LEGACY_STORAGE_ID &&
             !scoped(context).contains(regionKey(storageId))
 
-    fun clearRegionOverride(context: Context, storageId: String) {
+    /** Returns the Platoon to its profile's server region; removes both scoped keys. */
+    fun clearRegionOverride(context: Context, storageId: String) =
+        restoreScopedState(context, storageId, ScopedZoneState(region = null, zone = null))
+
+    /** Profile deletion leaves no timezone keys behind; identical to [clearRegionOverride]. */
+    fun clearScope(context: Context, storageId: String) = clearRegionOverride(context, storageId)
+
+    /** The raw scoped keys, so a failed settings replacement can restore them exactly. */
+    internal data class ScopedZoneState(val region: String?, val zone: String?)
+
+    internal fun scopedState(context: Context, storageId: String): ScopedZoneState {
         require(storageId != PlatoonProfileIdentity.LEGACY_STORAGE_ID)
-        check(
-            scoped(context).edit()
-                .remove(regionKey(storageId))
-                .remove(zoneKey(storageId))
-                .commit(),
-        ) { "Unable to restore automatic server selection" }
+        val preferences = scoped(context)
+        return ScopedZoneState(
+            region = preferences.getString(regionKey(storageId), null),
+            zone = preferences.getString(zoneKey(storageId), null),
+        )
     }
 
-    fun clearScope(context: Context, storageId: String) {
+    /** Null for the legacy scope, whose timezone lives in the unified settings store. */
+    internal fun scopedStateOrNull(context: Context, storageId: String): ScopedZoneState? =
+        if (storageId == PlatoonProfileIdentity.LEGACY_STORAGE_ID) null else scopedState(context, storageId)
+
+    internal fun restoreScopedState(context: Context, storageId: String, state: ScopedZoneState) {
         require(storageId != PlatoonProfileIdentity.LEGACY_STORAGE_ID)
-        check(
-            scoped(context).edit()
-                .remove(regionKey(storageId))
-                .remove(zoneKey(storageId))
-                .commit(),
-        ) { "Unable to clear Platoon timezone settings" }
+        val editor = scoped(context).edit()
+        if (state.region == null) {
+            editor.remove(regionKey(storageId))
+        } else {
+            editor.putString(regionKey(storageId), state.region)
+        }
+        if (state.zone == null) editor.remove(zoneKey(storageId)) else editor.putString(zoneKey(storageId), state.zone)
+        check(editor.commit()) { "Unable to update Platoon timezone settings" }
     }
 
     fun setRegion(

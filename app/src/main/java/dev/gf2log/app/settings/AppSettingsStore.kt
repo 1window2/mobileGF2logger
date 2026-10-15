@@ -1,6 +1,7 @@
 package dev.gf2log.app.settings
 
 import android.content.Context
+import java.time.ZoneId
 
 internal interface BackupSettingsStore {
     fun read(): AppBackupSettings
@@ -34,30 +35,54 @@ internal class ScopedAppSettingsStore(
         )
     }
 
+    /**
+     * Replaces four preference files, which SharedPreferences cannot commit atomically. Every
+     * value is validated before the first write, and each committed file is restored in reverse
+     * order if a later one fails, so a failure leaves the previous settings in place.
+     */
     override fun replace(settings: AppBackupSettings) {
-        val previousGlobal = UserSettingsPreferences.read(appContext)
-        UserSettingsPreferences.replace(
-            appContext,
-            settings.copy(
-                gameServerRegion = previousGlobal.gameServerRegion,
-                gameTimeZoneId = previousGlobal.gameTimeZoneId,
-                memberOrder = previousGlobal.memberOrder,
-                weeklyCutlines = previousGlobal.weeklyCutlines,
-            ),
-        )
+        AppBackupSettingsCodec.encode(settings)
         val region = GameServerRegion.fromStored(settings.gameServerRegion)
-        if (region == GameServerRegion.MANUAL) {
-            GameTimeZonePreferences.set(
+        val manualZone = if (region == GameServerRegion.MANUAL) ZoneId.of(settings.gameTimeZoneId) else null
+        val previousGlobal = UserSettingsPreferences.read(appContext)
+        val memberOrder = MemberOrderPreferences(appContext, storageId)
+        val cutlines = WeeklyCutlinePreferences(appContext, storageId)
+        val previousOrder = memberOrder.read()
+        val previousCutlines = cutlines.read()
+        val previousZone = GameTimeZonePreferences.scopedStateOrNull(appContext, storageId)
+        val rollbacks = ArrayDeque<() -> Unit>()
+        try {
+            UserSettingsPreferences.replace(
                 appContext,
-                java.time.ZoneId.of(settings.gameTimeZoneId),
-                storageId,
+                settings.copy(
+                    gameServerRegion = previousGlobal.gameServerRegion,
+                    gameTimeZoneId = previousGlobal.gameTimeZoneId,
+                    memberOrder = previousGlobal.memberOrder,
+                    weeklyCutlines = previousGlobal.weeklyCutlines,
+                ),
             )
-        } else {
-            GameTimeZonePreferences.setRegion(appContext, region, storageId)
+            rollbacks.addFirst { UserSettingsPreferences.replace(appContext, previousGlobal) }
+            if (previousZone != null) {
+                rollbacks.addFirst {
+                    GameTimeZonePreferences.restoreScopedState(appContext, storageId, previousZone)
+                }
+            }
+            if (manualZone != null) {
+                GameTimeZonePreferences.set(appContext, manualZone, storageId)
+            } else {
+                GameTimeZonePreferences.setRegion(appContext, region, storageId)
+            }
+            rollbacks.addFirst { check(memberOrder.write(previousOrder)) }
+            check(memberOrder.write(settings.memberOrder)) {
+                "Unable to restore the Platoon member order"
+            }
+            rollbacks.addFirst { cutlines.write(previousCutlines) }
+            cutlines.write(settings.weeklyCutlines)
+        } catch (error: Exception) {
+            rollbacks.forEach { rollback ->
+                runCatching(rollback).exceptionOrNull()?.let(error::addSuppressed)
+            }
+            throw error
         }
-        check(MemberOrderPreferences(appContext, storageId).write(settings.memberOrder)) {
-            "Unable to restore the Platoon member order"
-        }
-        WeeklyCutlinePreferences(appContext, storageId).write(settings.weeklyCutlines)
     }
 }

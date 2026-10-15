@@ -19,7 +19,6 @@ import java.time.LocalDate
 
 /** Lists the bounded immutable revisions recorded for one weekly table. */
 class WeeklyTableHistoryActivity : BaseActivity() {
-    override val legacyStyling = false
 
     private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var repository: PlatoonRepository

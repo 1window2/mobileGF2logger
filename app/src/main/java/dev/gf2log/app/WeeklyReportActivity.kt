@@ -37,6 +37,7 @@ import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.MemberOrderPreferences
 import dev.gf2log.app.settings.WeeklyCutlinePreferences
 import dev.gf2log.app.settings.WeeklyCutlines
+import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.BarAction
 import dev.gf2log.app.ui.Dialogs
@@ -74,7 +75,6 @@ import java.time.ZoneId
  * one vertical list. Tapping a cell explains its evidence; edit mode turns taps into manual edits.
  */
 class WeeklyReportActivity : BaseActivity() {
-    override val legacyStyling = false
 
     private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var scope: PlatoonStorageScope
@@ -341,7 +341,7 @@ class WeeklyReportActivity : BaseActivity() {
                         setTextColor(getColor(R.color.accent_text))
                     }, lp())
                     addView(
-                        button(getString(R.string.show_live_table), ModernUi.ControlRole.SECONDARY) {
+                        button(getString(R.string.show_live_table), Controls.Role.SECONDARY) {
                             showLiveTable(report.periodStart)
                         },
                         lp(WRAP, WRAP, top = 8),
@@ -401,7 +401,7 @@ class WeeklyReportActivity : BaseActivity() {
             }, lp())
             if (report.periodStart != next.currentWeekStart && !editing) {
                 addView(
-                    button(getString(R.string.go_to_current_week), ModernUi.ControlRole.TERTIARY, R.drawable.ic_today) {
+                    button(getString(R.string.go_to_current_week), Controls.Role.TERTIARY, R.drawable.ic_today) {
                         reportState.selectDate(PlatoonPeriods.gameDay(Instant.now(), next.zone))
                         requestRender()
                     },
@@ -552,7 +552,7 @@ class WeeklyReportActivity : BaseActivity() {
             addView(text(getString(R.string.add_note), TextRole.SUBTITLE), lp())
             addView(noteDayButton, lp(top = 8))
             addView(noteInput, lp(top = 8))
-            addView(button(getString(R.string.add_note), ModernUi.ControlRole.PRIMARY) { addNote(report) }, lp(top = 8))
+            addView(button(getString(R.string.add_note), Controls.Role.PRIMARY) { addNote(report) }, lp(top = 8))
         }
     }
 

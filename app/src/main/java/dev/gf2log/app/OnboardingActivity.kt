@@ -11,10 +11,14 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import dev.gf2log.app.ui.Controls
+import dev.gf2log.app.ui.button
+import dev.gf2log.app.ui.dp
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.RadioButton
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.annotation.DrawableRes
@@ -22,6 +26,7 @@ import androidx.annotation.StringRes
 
 /** One-time, bilingual walkthrough of the app's five user-facing workflows. */
 class OnboardingActivity : BaseActivity() {
+
     override fun supportsPendingPlatoonAdmission(): Boolean = false
 
     private lateinit var pageHost: FrameLayout
@@ -39,7 +44,13 @@ class OnboardingActivity : BaseActivity() {
         pageIndex = savedInstanceState?.getInt(STATE_PAGE_INDEX)
             ?.coerceIn(PAGES.indices)
             ?: 0
-        setContentView(buildContent())
+        val root = buildContent()
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            view.setPadding(bars.left + dp(20), bars.top + dp(8), bars.right + dp(20), bars.bottom + dp(12))
+            WindowInsetsCompat.CONSUMED
+        }
+        setContentView(root)
         renderPage(animate = false)
     }
 
@@ -51,27 +62,29 @@ class OnboardingActivity : BaseActivity() {
     /** Builds the stable header, content host, and bottom navigation frame. */
     private fun buildContent(): View = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(20), dp(8), dp(20), dp(12))
+        setBackgroundColor(getColor(R.color.app_background))
 
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(
-                OnboardingLanguageToggle(context, LanguagePreferences.get(context)) { language ->
+                Controls.segmentedControl(
+                    context = context,
+                    options = listOf(
+                        LanguagePreferences.DEFAULT_LANGUAGE to "English",
+                        LanguagePreferences.KOREAN to "한국어",
+                    ),
+                    selectedValue = LanguagePreferences.get(context),
+                ) { language ->
                     if (LanguagePreferences.get(this@OnboardingActivity) != language) {
                         LanguagePreferences.set(this@OnboardingActivity, language)
                         recreate()
                     }
-                },
-                LinearLayout.LayoutParams(dp(120), dp(54)),
+                }.apply { contentDescription = getString(R.string.onboarding_language_toggle) },
+                LinearLayout.LayoutParams(dp(176), ViewGroup.LayoutParams.WRAP_CONTENT),
             )
             addView(View(context), LinearLayout.LayoutParams(0, dp(1), 1f))
-            skipButton = Button(context).apply {
-                text = getString(R.string.onboarding_skip)
-                contentDescription = getString(R.string.onboarding_skip)
-                useTertiaryActionStyle()
-                setOnClickListener { finishOnboarding() }
-            }
+            skipButton = button(getString(R.string.onboarding_skip), Controls.Role.TERTIARY) { finishOnboarding() }
             addView(skipButton, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 dp(48),
@@ -87,28 +100,21 @@ class OnboardingActivity : BaseActivity() {
 
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            backButton = Button(context).apply {
-                text = getString(R.string.onboarding_back)
-                useSecondaryActionStyle()
-                setOnClickListener {
-                    if (pageIndex > 0) {
-                        pageIndex--
-                        renderPage(animate = true, direction = -1)
-                    }
+            backButton = button(getString(R.string.onboarding_back), Controls.Role.SECONDARY) {
+                if (pageIndex > 0) {
+                    pageIndex--
+                    renderPage(animate = true, direction = -1)
                 }
             }
             addView(backButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
                 marginEnd = dp(6)
             })
-            nextButton = Button(context).apply {
-                usePrimaryActionStyle()
-                setOnClickListener {
-                    if (pageIndex == PAGES.lastIndex) {
-                        finishOnboarding()
-                    } else {
-                        pageIndex++
-                        renderPage(animate = true, direction = 1)
-                    }
+            nextButton = button("", Controls.Role.PRIMARY) {
+                if (pageIndex == PAGES.lastIndex) {
+                    finishOnboarding()
+                } else {
+                    pageIndex++
+                    renderPage(animate = true, direction = 1)
                 }
             }
             addView(nextButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
@@ -144,9 +150,7 @@ class OnboardingActivity : BaseActivity() {
         nextButton.text = getString(
             if (pageIndex == PAGES.lastIndex) R.string.onboarding_finish else R.string.onboarding_next,
         )
-        nextButton.isEnabled = true
-        nextButton.usePrimaryActionStyle()
-        skipButton.visibility = View.VISIBLE
+        skipButton.visibility = if (pageIndex == PAGES.lastIndex) View.INVISIBLE else View.VISIBLE
     }
 
     /** Builds one scroll-safe page from localized product copy and authored icon roles. */
@@ -208,9 +212,9 @@ class OnboardingActivity : BaseActivity() {
                     textSize = 13f
                     setTextColor(getColor(R.color.warning_text))
                     setPadding(dp(12), dp(9), dp(12), dp(9))
-                    background = ModernUi.panelBackground(context, emphasized = true).apply {
+                    background = GradientDrawable().apply {
                         setColor(getColor(R.color.warning_surface))
-                        cornerRadius = dp(8).toFloat()
+                        cornerRadius = dp(12).toFloat()
                     }
                 }, LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -256,8 +260,10 @@ class OnboardingActivity : BaseActivity() {
         }
 
     private fun finishOnboarding() {
-        OnboardingPreferences.complete(this)
-        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
+        if (!intent.getBooleanExtra(EXTRA_REPLAY, false)) {
+            OnboardingPreferences.complete(this)
+            startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
+        }
         finish()
     }
 
@@ -276,6 +282,8 @@ class OnboardingActivity : BaseActivity() {
     )
 
     companion object {
+        /** Opens the guide from Settings without touching the first-launch completion flag. */
+        const val EXTRA_REPLAY = "onboarding.replay"
         private const val STATE_PAGE_INDEX = "page_index"
         private val PAGES = listOf(
             OnboardingPage(
@@ -336,85 +344,4 @@ class OnboardingActivity : BaseActivity() {
             ),
         )
     }
-}
-
-/** Two-label segmented control whose selection thumb slides between English and Korean. */
-private class OnboardingLanguageToggle(
-    context: Context,
-    initialLanguage: String,
-    private val onLanguageChanged: (String) -> Unit,
-) : FrameLayout(context) {
-    private val thumb = View(context)
-    private var selectedLanguage = initialLanguage
-    private val english = label("English", LanguagePreferences.DEFAULT_LANGUAGE)
-    private val korean = label("한국어", LanguagePreferences.KOREAN)
-
-    init {
-        setPadding(dp(3), dp(3), dp(3), dp(3))
-        background = ModernUi.panelBackground(context).apply { cornerRadius = dp(12).toFloat() }
-        thumb.background = ModernUi.panelBackground(context, emphasized = true).apply {
-            cornerRadius = dp(9).toFloat()
-        }
-        addView(thumb)
-        addView(english)
-        addView(korean)
-        post { select(selectedLanguage, false) }
-    }
-
-    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val width = resolveSize(dp(120), widthMeasureSpec)
-        val height = resolveSize(dp(54), heightMeasureSpec)
-        setMeasuredDimension(width, height)
-        val childWidth = (width - paddingLeft - paddingRight) / 2
-        val childHeight = height - paddingTop - paddingBottom
-        val widthSpec = MeasureSpec.makeMeasureSpec(childWidth, MeasureSpec.EXACTLY)
-        val heightSpec = MeasureSpec.makeMeasureSpec(childHeight, MeasureSpec.EXACTLY)
-        repeat(childCount) { index -> getChildAt(index).measure(widthSpec, heightSpec) }
-    }
-
-    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
-        val width = right - left - paddingLeft - paddingRight
-        val height = bottom - top - paddingTop - paddingBottom
-        val half = width / 2
-        thumb.layout(paddingLeft, paddingTop, paddingLeft + half, paddingTop + height)
-        english.layout(paddingLeft, paddingTop, paddingLeft + half, paddingTop + height)
-        korean.layout(paddingLeft + half, paddingTop, paddingLeft + width, paddingTop + height)
-        thumb.translationX = if (selectedLanguage == LanguagePreferences.KOREAN) half.toFloat() else 0f
-    }
-
-    private fun label(textValue: String, language: String) = RadioButton(context).apply {
-        text = textValue
-        buttonDrawable = null
-        gravity = Gravity.CENTER
-        textSize = 12f
-        setTypeface(typeface, Typeface.BOLD)
-        minimumHeight = dp(48)
-        isChecked = selectedLanguage == language
-        setOnClickListener { select(language, true) }
-    }
-
-    private fun select(language: String, animate: Boolean) {
-        selectedLanguage = language
-        val distance = ((width - paddingLeft - paddingRight) / 2).toFloat()
-        val target = if (language == LanguagePreferences.KOREAN) distance else 0f
-        english.isChecked = language == LanguagePreferences.DEFAULT_LANGUAGE
-        korean.isChecked = language == LanguagePreferences.KOREAN
-        if (animate && ValueAnimator.areAnimatorsEnabled()) {
-            thumb.animate().cancel()
-            thumb.animate()
-                .translationX(target)
-                .setDuration(140L)
-                .withEndAction { onLanguageChanged(language) }
-                .start()
-        } else {
-            thumb.translationX = target
-            if (animate) onLanguageChanged(language)
-        }
-        val selectedColor = context.getColor(R.color.accent_text)
-        val idleColor = context.getColor(R.color.text_primary)
-        english.setTextColor(if (language == LanguagePreferences.DEFAULT_LANGUAGE) selectedColor else idleColor)
-        korean.setTextColor(if (language == LanguagePreferences.KOREAN) selectedColor else idleColor)
-    }
-
-    private fun dp(value: Int): Int = context.dp(value)
 }

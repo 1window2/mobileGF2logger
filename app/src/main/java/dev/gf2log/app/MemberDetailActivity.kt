@@ -17,6 +17,7 @@ import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.management.isImmutableMembershipBoundary
 import dev.gf2log.app.management.isValidMembershipRange
 import dev.gf2log.app.settings.GameTimeZonePreferences
+import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Feedback
@@ -44,7 +45,6 @@ import java.time.ZoneId
 
 /** One member's profile, private note, and editable membership history. */
 class MemberDetailActivity : BaseActivity() {
-    override val legacyStyling = false
 
     private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var repository: PlatoonRepository
@@ -101,7 +101,7 @@ class MemberDetailActivity : BaseActivity() {
     private fun buildContent() {
         nickname = textField(getString(R.string.member_nickname), id = R.id.member_nickname_input, maxLength = 256)
         note = textField(getString(R.string.member_private_note_hint), id = R.id.member_note_input, singleLine = false)
-        saveButton = button(getString(R.string.save_member), ModernUi.ControlRole.PRIMARY) { saveProfile() }
+        saveButton = button(getString(R.string.save_member), Controls.Role.PRIMARY) { saveProfile() }
         val watcher = object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = updateSaveState()
@@ -121,7 +121,7 @@ class MemberDetailActivity : BaseActivity() {
             }, lp())
             addView(row {
                 addView(sectionHeader(getString(R.string.membership_history)), lp(width = 0, weight = 1f))
-                addView(button(getString(R.string.add_membership_history_short), ModernUi.ControlRole.TERTIARY, R.drawable.ic_add_circle) {
+                addView(button(getString(R.string.add_membership_history_short), Controls.Role.TERTIARY, R.drawable.ic_add_circle) {
                     addMembershipPeriod()
                 }, lp(WRAP, WRAP, top = 8))
             }, lp())
@@ -383,13 +383,13 @@ class MemberDetailActivity : BaseActivity() {
 
     private fun errorText() = text(null, TextRole.CAPTION) {
         setTextColor(getColor(R.color.destructive_action))
+        accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         visibility = View.GONE
     }
 
     private fun android.widget.TextView.show(message: Int) {
         text = getString(message)
         visibility = View.VISIBLE
-        announceForAccessibility(text)
     }
 
     private fun boundaryText(date: LocalDate?, instant: Instant?, timeKnown: Boolean, zone: ZoneId): String {

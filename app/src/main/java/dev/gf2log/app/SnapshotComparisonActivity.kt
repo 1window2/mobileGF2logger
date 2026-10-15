@@ -31,7 +31,6 @@ import java.time.ZoneId
 
 /** Joins, withdrawals, and counter changes between the two latest roster snapshots. */
 class SnapshotComparisonActivity : BaseActivity() {
-    override val legacyStyling = false
 
     private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var screen: Screen

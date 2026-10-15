@@ -13,6 +13,8 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import dev.gf2log.app.management.PlatoonProfileRegistry
+import dev.gf2log.app.ui.Feedback
+import dev.gf2log.app.ui.dp
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 
@@ -23,24 +25,6 @@ internal object PrimaryNavigation {
         PLATOON,
         WEEKLY,
     }
-
-    fun wrap(activity: Activity, content: View, selected: Destination): View =
-        LinearLayout(activity).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(activity.getColor(R.color.app_background))
-            addView(content, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1f,
-            ))
-            addView(View(activity).apply {
-                setBackgroundColor(activity.getColor(R.color.outline))
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, activity.dp(1)))
-            addView(navigationBar(activity, selected), LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                activity.dp(64),
-            ))
-        }
 
     /** The bottom bar alone, for screens composed through [dev.gf2log.app.ui.Screen]. */
     fun bar(activity: Activity, selected: Destination): View = navigationBar(activity, selected).apply {
@@ -119,11 +103,7 @@ internal object PrimaryNavigation {
                     if (destination != Destination.HOME &&
                         PlatoonProfileRegistry(activity).active() == null
                     ) {
-                        TransientMessage.show(
-                            activity,
-                            R.string.no_platoon_detected_detail,
-                            android.widget.Toast.LENGTH_LONG,
-                        )
+                        Feedback.show(activity, R.string.no_platoon_detected_detail, long = true)
                     } else {
                         activity.startActivity(
                             Intent(activity, activityClass).addFlags(

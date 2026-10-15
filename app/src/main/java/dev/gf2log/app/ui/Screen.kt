@@ -73,7 +73,7 @@ internal class Screen(
         val base = (padded.getTag(R.id.gf2_base_bottom_padding) as? Int)
             ?: padded.paddingBottom.also { padded.setTag(R.id.gf2_base_bottom_padding, it) }
         padded.setPadding(padded.paddingLeft, padded.paddingTop, padded.paddingRight, base + bottomInset)
-        if (padded is ViewGroup) padded.clipToPadding = false
+        padded.clipToPadding = false
     }
 
     companion object {

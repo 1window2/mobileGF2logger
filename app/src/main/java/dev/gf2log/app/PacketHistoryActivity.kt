@@ -1,291 +1,201 @@
 package dev.gf2log.app
 
-import android.app.AlertDialog
-import android.content.Intent
-import android.content.res.ColorStateList
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Intent
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
-import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TableLayout
 import android.widget.TableRow
-import android.widget.TextView
-import android.widget.Toast
-import dev.gf2log.app.history.CaptureHistoryStore
-import dev.gf2log.app.history.SavedHistoryStore
 import dev.gf2log.app.discord.DiscordWebhookSecretStore
 import dev.gf2log.app.discord.DiscordWebhookSender
 import dev.gf2log.app.discord.OriginalCsvPayload
-import java.util.concurrent.Executors
-import dev.gf2log.protocol.ParsedPacketTableParser
-import java.io.File
+import dev.gf2log.app.history.CaptureHistoryStore
+import dev.gf2log.app.history.SavedHistoryStore
 import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.management.PlatoonStorageScope
+import dev.gf2log.app.ui.Controls
+import dev.gf2log.app.ui.BackgroundWork
+import dev.gf2log.app.ui.BarAction
+import dev.gf2log.app.ui.Dialogs
+import dev.gf2log.app.ui.Feedback
+import dev.gf2log.app.ui.MATCH
+import dev.gf2log.app.ui.MenuEntry
+import dev.gf2log.app.ui.Screen
+import dev.gf2log.app.ui.StateViews
+import dev.gf2log.app.ui.TextRole
+import dev.gf2log.app.ui.WRAP
+import dev.gf2log.app.ui.column
+import dev.gf2log.app.ui.dp
+import dev.gf2log.app.ui.lp
+import dev.gf2log.app.ui.text
+import dev.gf2log.protocol.ParsedPacketTableParser
+import java.io.File
 
+/** One parsed packet as a bounded table or its complete decoded text. */
 class PacketHistoryActivity : BaseActivity() {
-    private lateinit var actionButton: Button
-    private lateinit var contentContainer: LinearLayout
-    private lateinit var sendButton: Button
-    private lateinit var sendUnavailableOverlay: View
-    private lateinit var rawContent: String
+
+    private lateinit var screen: Screen
+    private val work = BackgroundWork(this, "GF2PacketHistory")
+    private val body by lazy { FrameLayout(this) }
+    private var rawContent: String? = null
     private var table: ParsedPacketTableParser.Table? = null
     private var showingRaw = false
 
-    private val sendExecutor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "GF2DiscordWebhook")
-    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         val entryId = intent.getStringExtra(EXTRA_ENTRY_ID).orEmpty()
-        val title = intent.getStringExtra(EXTRA_ENTRY_TITLE).orEmpty()
         val storageId = intent.getStringExtra(EXTRA_STORAGE_ID)
-        val active = PlatoonProfileRegistry(this).active()
-        if (storageId == null || active?.storageId != storageId) {
+        if (storageId == null || PlatoonProfileRegistry(this).active()?.storageId != storageId) {
             finish()
             return
         }
-        val historyRoot = PlatoonStorageScope(storageId).rootDirectory(this)
-        rawContent = if (intent.getBooleanExtra(EXTRA_SAVED_ENTRY, false)) {
-            SavedHistoryStore(
-                File(historyRoot, SavedHistoryStore.SAVED_HISTORY_DIRECTORY),
-            ).read(entryId)
-        } else {
-            CaptureHistoryStore(
-                File(historyRoot, CaptureHistoryStore.HISTORY_DIRECTORY),
-            ).read(entryId)
-        } ?: run {
-            finish()
-            return
-        }
-        table = ParsedPacketTableParser.parse(rawContent)
-
-        val spacing = (16 * resources.displayMetrics.density).toInt()
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(spacing, spacing, spacing, spacing)
-            addView(TextView(context).apply {
-                text = title
-                textSize = 24f
-                setTypeface(typeface, Typeface.BOLD)
-            }, matchWidth())
-            addView(LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                actionButton = Button(context).apply {
-                    useSecondaryActionStyle()
-                    setOnClickListener {
-                        if (showingRaw) copyToClipboard(rawContent) else showRawContent()
-                    }
+        showingRaw = savedInstanceState?.getBoolean(STATE_RAW) == true
+        screen = Screen(this)
+        screen.topBar.setNavigation(::finish).setTitle(intent.getStringExtra(EXTRA_ENTRY_TITLE).orEmpty())
+        screen.setBody(column {
+            addView(body, lp(height = 0, weight = 1f))
+        })
+        body.addView(StateViews.loading(this, getString(R.string.loading_packet)))
+        val root = PlatoonStorageScope(storageId).rootDirectory(this)
+        val saved = intent.getBooleanExtra(EXTRA_SAVED_ENTRY, false)
+        work.run(
+            task = {
+                val content = if (saved) {
+                    SavedHistoryStore(File(root, SavedHistoryStore.SAVED_HISTORY_DIRECTORY)).read(entryId)
+                } else {
+                    CaptureHistoryStore(File(root, CaptureHistoryStore.HISTORY_DIRECTORY)).read(entryId)
                 }
-                addView(actionButton, LinearLayout.LayoutParams(
-                    0,
-                    dp(48),
-                    1f,
-                ).apply { marginEnd = dp(4) })
-                sendButton = Button(context).apply {
-                    text = getString(R.string.send_original_csv)
-                    usePrimaryActionStyle()
-                    setCompoundDrawablesRelativeWithIntrinsicBounds(
-                        R.drawable.ic_discord, 0, 0, 0,
-                    )
-                    compoundDrawableTintList = ColorStateList.valueOf(
-                        context.getColor(R.color.primary_action_foreground),
-                    )
-                    compoundDrawablePadding = dp(6)
-                    setOnClickListener { confirmSendOriginalCsv() }
-                }
-                addView(FrameLayout(context).apply {
-                    addView(
-                        sendButton,
-                        FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                        ),
-                    )
-                    sendUnavailableOverlay = View(context).apply {
-                        isClickable = true
-                        isFocusable = true
-                        contentDescription = getString(R.string.discord_webhook_not_configured)
-                        setOnClickListener { showWebhookRequiredDialog() }
-                    }
-                    addView(
-                        sendUnavailableOverlay,
-                        FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                        ),
-                    )
-                }, LinearLayout.LayoutParams(
-                    0,
-                    dp(48),
-                    1f,
-                ).apply { marginStart = dp(4) })
-            }, matchWidth())
-            contentContainer = LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(0, spacing, 0, 0)
+                content?.let { it to ParsedPacketTableParser.parse(it) }
+            },
+        ) { result ->
+            val loaded = result.getOrNull()
+            if (loaded == null) {
+                body.removeAllViews()
+                body.addView(StateViews.empty(this, R.drawable.ic_warning, getString(R.string.packet_unavailable)))
+                return@run
             }
-            addView(contentContainer, matchWidth())
-        }
-
-        setContentView(ScrollView(this).apply { addView(container, matchWidth()) })
-        if (table == null) showRawContent() else showTable()
-        refreshSendAvailability()
-    }
-
-
-    override fun onScreenResumed() {
-        if (::sendButton.isInitialized) refreshSendAvailability()
-    }
-
-    private fun refreshSendAvailability() {
-        val hasCsvTable = table != null
-        val webhookConfigured = runCatching {
-            DiscordWebhookSecretStore(this).read() != null
-        }.getOrDefault(false)
-        val unavailable = hasCsvTable && !webhookConfigured
-        sendButton.isEnabled = hasCsvTable && webhookConfigured
-        sendButton.alpha = if (sendButton.isEnabled) 1f else 0.5f
-        sendUnavailableOverlay.visibility = if (unavailable) View.VISIBLE else View.GONE
-    }
-
-    private fun showWebhookRequiredDialog() {
-        AlertDialog.Builder(this)
-            .setTitle(R.string.discord_webhook_not_configured)
-            .setMessage(R.string.discord_webhook_required)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(R.string.open_options) { _, _ ->
-                startActivity(Intent(this, OptionsActivity::class.java))
-            }
-            .show()
-    }
-
-    override fun onDestroy() {
-        sendExecutor.shutdownNow()
-        super.onDestroy()
-    }
-
-    private fun confirmSendOriginalCsv() {
-        val csv = runCatching { OriginalCsvPayload.extract(rawContent) }.getOrElse {
-            TransientMessage.show(this, R.string.discord_csv_invalid, Toast.LENGTH_LONG)
-            return
-        }
-        val webhook = DiscordWebhookSecretStore(this).read() ?: run {
-            showWebhookRequiredDialog()
-            return
-        }
-        AlertDialog.Builder(this)
-            .setTitle(R.string.send_original_csv)
-            .setMessage(R.string.send_original_csv_warning)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(R.string.send_original_csv) { _, _ ->
-                sendOriginalCsv(webhook, csv)
-            }
-            .show()
-    }
-
-    // Function Name: sendOriginalCsv
-    // Description:
-    // - Sends only the validated original CSV body after explicit confirmation.
-    // - Runs bounded HTTPS I/O away from the main thread and never logs the secret URL.
-    // Parameters:
-    // - webhook: Decrypted, policy-validated Discord incoming-webhook URL.
-    // - csv: Validated original CSV body with history metadata removed.
-    // Returns:
-    // - Unit after scheduling the request and result notification.
-    private fun sendOriginalCsv(webhook: String, csv: String) {
-        sendButton.alpha = 0.5f
-        sendButton.isEnabled = false
-        TransientMessage.show(this, R.string.discord_csv_sending)
-        sendExecutor.execute {
-            val sent = runCatching { DiscordWebhookSender().send(webhook, csv) }.isSuccess
-            runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                refreshSendAvailability()
-                TransientMessage.show(
-                    this,
-                    if (sent) R.string.discord_csv_sent else R.string.discord_csv_send_failed,
-                    Toast.LENGTH_LONG,
-                )
-            }
+            rawContent = loaded.first
+            table = loaded.second
+            if (table == null) showingRaw = true
+            render()
         }
     }
 
-    private fun showTable() {
-        val parsed = table ?: return
-        showingRaw = false
-        actionButton.text = getString(R.string.show_raw_csv_file)
-        contentContainer.removeAllViews()
-        contentContainer.addView(HorizontalScrollView(this).apply {
-            isFillViewport = true
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(STATE_RAW, showingRaw)
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun render() {
+        val content = rawContent ?: return
+        val hasTable = table != null
+        screen.topBar.setActions(
+            listOf(BarAction(R.drawable.ic_copy, getString(R.string.copy_parsed_packet)) { copy(content) }),
+            overflow = listOf(MenuEntry(getString(R.string.send_original_csv), hasTable) { confirmSend(content) }),
+        )
+        body.removeAllViews()
+        body.addView(column {
+            if (hasTable) {
+                addView(Controls.segmentedControl(
+                    context = this@PacketHistoryActivity,
+                    options = listOf(TABLE to getString(R.string.packet_view_table), RAW to getString(R.string.packet_view_raw)),
+                    selectedValue = if (showingRaw) RAW else TABLE,
+                ) {
+                    showingRaw = it == RAW
+                    render()
+                }, lp(start = 16, end = 16, top = 4, bottom = 8))
+            }
+            addView(if (showingRaw) rawView(content) else tableView(requireNotNull(table)), lp(height = 0, weight = 1f))
+        }, FrameLayout.LayoutParams(MATCH, MATCH))
+    }
+
+    private fun rawView(content: String) = ScrollView(this).apply {
+        clipToPadding = false
+        setPadding(dp(16), 0, dp(16), dp(24))
+        addView(text(content, TextRole.BODY) {
+            typeface = Typeface.MONOSPACE
+            textSize = 12f
+            setTextIsSelectable(true)
+        })
+    }
+
+    private fun tableView(parsed: ParsedPacketTableParser.Table) = ScrollView(this).apply {
+        clipToPadding = false
+        setPadding(0, 0, 0, dp(24))
+        addView(HorizontalScrollView(context).apply {
+            clipToPadding = false
+            setPadding(dp(16), 0, dp(16), 0)
             addView(TableLayout(context).apply {
-                isStretchAllColumns = false
+                setBackgroundColor(getColor(R.color.outline))
+                setPadding(1, 1, 1, 1)
                 addView(tableRow(parsed.header, header = true))
                 parsed.rows.forEach { addView(tableRow(it, header = false)) }
             })
-        }, matchWidth())
-    }
-
-    private fun showRawContent() {
-        showingRaw = true
-        actionButton.text = getString(R.string.copy_parsed_packet)
-        contentContainer.removeAllViews()
-        contentContainer.addView(TextView(this).apply {
-            text = rawContent
-            textSize = 13f
-            typeface = Typeface.MONOSPACE
-            setTextIsSelectable(true)
-        }, matchWidth())
+        }, FrameLayout.LayoutParams(MATCH, WRAP))
     }
 
     private fun tableRow(values: List<String>, header: Boolean): TableRow = TableRow(this).apply {
         values.forEach { value ->
-            addView(TextView(context).apply {
-                text = value
-                textSize = if (header) 14f else 13f
+            addView(text(value, if (header) TextRole.LABEL else TextRole.BODY) {
+                if (header) setTextColor(getColor(R.color.text_primary))
+                textSize = 13f
                 gravity = Gravity.CENTER_VERTICAL
-                setTextColor(getColor(R.color.text_primary))
-                if (header) setTypeface(typeface, Typeface.BOLD)
-                val horizontal = (10 * resources.displayMetrics.density).toInt()
-                val vertical = (8 * resources.displayMetrics.density).toInt()
-                setPadding(horizontal, vertical, horizontal, vertical)
-                background = GradientDrawable().apply {
-                    setColor(getColor(if (header) R.color.table_header else R.color.table_cell))
-                    setStroke(1, getColor(R.color.outline_strong))
-                }
-            }, TableRow.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ))
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+                setBackgroundColor(getColor(if (header) R.color.table_header else R.color.table_cell))
+                setTextIsSelectable(!header)
+            }, TableRow.LayoutParams(WRAP, MATCH).apply { setMargins(0, 0, 1, 1) })
         }
     }
 
-    private fun copyToClipboard(content: String) {
+    private fun copy(content: String) {
         getSystemService(ClipboardManager::class.java)
             .setPrimaryClip(ClipData.newPlainText(getString(R.string.clipboard_label), content))
-        TransientMessage.show(this, R.string.status_packet_copied)
+        Feedback.show(this, R.string.status_packet_copied)
     }
 
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
-
-    private fun matchWidth(): ViewGroup.LayoutParams = ViewGroup.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT,
-        ViewGroup.LayoutParams.WRAP_CONTENT,
-    )
+    private fun confirmSend(content: String) {
+        val csv = runCatching { OriginalCsvPayload.extract(content) }.getOrElse {
+            Feedback.show(this, R.string.discord_csv_invalid, long = true)
+            return
+        }
+        work.run(task = { DiscordWebhookSecretStore(this).read() }) { result ->
+            val webhook = result.getOrNull()
+            if (webhook == null) {
+                Dialogs.show(
+                    Dialogs.builder(this)
+                        .setTitle(R.string.discord_webhook_not_configured)
+                        .setMessage(R.string.discord_webhook_required)
+                        .setNegativeButton(R.string.cancel, null)
+                        .setPositiveButton(R.string.open_options) { _, _ ->
+                            startActivity(Intent(this, OptionsActivity::class.java))
+                        },
+                )
+                return@run
+            }
+            Dialogs.confirm(this, R.string.send_original_csv, R.string.send_original_csv_warning, R.string.send) {
+                Feedback.show(this, R.string.discord_csv_sending)
+                work.run(task = { DiscordWebhookSender().send(webhook, csv) }) { sent ->
+                    Feedback.show(this, if (sent.isSuccess) R.string.discord_csv_sent else R.string.discord_csv_send_failed, long = true)
+                }
+            }
+        }
+    }
 
     companion object {
         const val EXTRA_ENTRY_ID = "entry_id"
         const val EXTRA_ENTRY_TITLE = "entry_title"
         const val EXTRA_SAVED_ENTRY = "saved_entry"
         const val EXTRA_STORAGE_ID = "storage_id"
+        private const val TABLE = "table"
+        private const val RAW = "raw"
+        private const val STATE_RAW = "packet.raw"
     }
 }

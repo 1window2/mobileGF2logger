@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <item name="gf2_ui_role" type="id" />
-    <item name="gf2_ui_compact_multiline" type="id" />
     <item name="gf2_base_bottom_padding" type="id" />
     <item name="screen_scroll" type="id" />
     <item name="screen_list" type="id" />

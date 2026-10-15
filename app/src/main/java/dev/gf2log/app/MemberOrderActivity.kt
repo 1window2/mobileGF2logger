@@ -24,6 +24,7 @@ import dev.gf2log.app.management.MemberStatus
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.settings.MemberOrderPreferences
+import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Feedback
@@ -49,7 +50,6 @@ import dev.gf2log.app.ui.text
  * dragging the handle or through the accessibility "move up/down" actions; every change saves.
  */
 class MemberOrderActivity : BaseActivity() {
-    override val legacyStyling = false
 
     private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var repository: PlatoonRepository
@@ -108,7 +108,7 @@ class MemberOrderActivity : BaseActivity() {
                 addView(fieldButton, lp(width = 0, height = 48, weight = 1.4f))
                 addView(directionButton, lp(width = 0, height = 48, weight = 1f, start = 8))
             }, lp(top = 8))
-            addView(button(getString(R.string.apply_sort), ModernUi.ControlRole.SECONDARY) { applySort() }, lp(top = 8))
+            addView(button(getString(R.string.apply_sort), Controls.Role.SECONDARY) { applySort() }, lp(top = 8))
         }, lp(top = 12, bottom = 8))
         updateSortLabels()
     }

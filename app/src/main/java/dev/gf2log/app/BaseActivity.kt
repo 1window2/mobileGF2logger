@@ -6,6 +6,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.Lifecycle
+import dev.gf2log.app.capture.PendingPlatoonAdmissionStore
 
 /**
  * Applies the persisted language and appearance before views exist, draws edge to edge, and
@@ -36,6 +38,29 @@ abstract class BaseActivity : ComponentActivity() {
 
     protected open fun supportsPendingPlatoonAdmission(): Boolean = true
 
+    private var pendingCandidates = 0
+    private val admissionListener: (List<PendingPlatoonAdmissionStore.Summary>) -> Unit = { candidates ->
+        PendingPlatoonAdmissionPrompt.onCandidatesChanged(this, candidates)
+        // A confirmed candidate becomes the active Platoon; let the screen rebind to it.
+        if (candidates.size < pendingCandidates && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            onScreenResumed()
+        }
+        pendingCandidates = candidates.size
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (supportsPendingPlatoonAdmission() && OnboardingPreferences.isCompleted(this)) {
+            PendingPlatoonAdmissionStore.addListener(admissionListener)
+        }
+    }
+
+    override fun onStop() {
+        PendingPlatoonAdmissionStore.removeListener(admissionListener)
+        PendingPlatoonAdmissionPrompt.dismiss()
+        super.onStop()
+    }
+
     final override fun onResume() {
         super.onResume()
         if (
@@ -45,31 +70,9 @@ abstract class BaseActivity : ComponentActivity() {
             recreate()
             return
         }
-        onScreenResumed()
-        if (supportsPendingPlatoonAdmission() && OnboardingPreferences.isCompleted(this)) {
-            PendingPlatoonAdmissionPrompt.showIfNeeded(this)
-        }
+        if (!isFinishing) onScreenResumed()
     }
 
     /** Called from onResume only when this instance remains current. */
     protected open fun onScreenResumed() = Unit
-
-    /** Screens not yet composed from shared components keep the legacy tree styling pass. */
-    protected open val legacyStyling: Boolean = true
-
-    override fun onPostCreate(savedInstanceState: Bundle?) {
-        super.onPostCreate(savedInstanceState)
-        if (!legacyStyling) return
-        val content = findViewById<android.view.View>(android.R.id.content)
-        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
-            val bars = insets.getInsets(
-                androidx.core.view.WindowInsetsCompat.Type.systemBars() or
-                    androidx.core.view.WindowInsetsCompat.Type.ime(),
-            )
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-            androidx.core.view.WindowInsetsCompat.CONSUMED
-        }
-        ModernUi.prepareContent(window.decorView)
-        window.decorView.post { if (!isFinishing) ModernUi.prepareContent(window.decorView) }
-    }
 }

@@ -5,7 +5,6 @@ import android.view.Gravity
 import android.view.View
 import android.widget.ProgressBar
 import androidx.annotation.DrawableRes
-import dev.gf2log.app.ModernUi
 import dev.gf2log.app.R
 
 /** Loading, empty, and failure states share one centered composition on every screen. */
@@ -48,7 +47,7 @@ internal object StateViews {
         }
         if (actionLabel != null && onAction != null) {
             addView(
-                context.button(actionLabel, ModernUi.ControlRole.SECONDARY) { onAction() },
+                context.button(actionLabel, Controls.Role.SECONDARY) { onAction() },
                 context.lp(WRAP, WRAP, top = 16),
             )
         }

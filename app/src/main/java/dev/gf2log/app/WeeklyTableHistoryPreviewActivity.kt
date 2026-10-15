@@ -12,6 +12,7 @@ import dev.gf2log.app.management.WeeklyEvidenceAnalyzer
 import dev.gf2log.app.management.WeeklyReportBuilder
 import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.WeeklyCutlinePreferences
+import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Feedback
@@ -31,7 +32,6 @@ import java.time.LocalDate
 
 /** Read-only view of one recorded weekly table with the explicit restore action. */
 class WeeklyTableHistoryPreviewActivity : BaseActivity() {
-    override val legacyStyling = false
 
     private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var repository: PlatoonRepository
@@ -85,7 +85,7 @@ class WeeklyTableHistoryPreviewActivity : BaseActivity() {
                     addView(text(getString(R.string.weekly_table_history_preview_notice), TextRole.SECONDARY) {
                         setTextColor(getColor(R.color.accent_text))
                     }, lp())
-                    restoreButton = button(getString(R.string.weekly_table_history_restore), ModernUi.ControlRole.PRIMARY) {
+                    restoreButton = button(getString(R.string.weekly_table_history_restore), Controls.Role.PRIMARY) {
                         confirmRestore()
                     }
                     addView(restoreButton, lp(top = 8))

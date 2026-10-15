@@ -22,7 +22,6 @@ import android.widget.TextView
 import androidx.annotation.ColorRes
 import androidx.annotation.DrawableRes
 import androidx.annotation.IdRes
-import dev.gf2log.app.ModernUi
 import dev.gf2log.app.R
 
 const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
@@ -120,13 +119,12 @@ internal fun View.accessibilityHeading() {
 
 internal fun Context.button(
     label: CharSequence,
-    role: ModernUi.ControlRole = ModernUi.ControlRole.SECONDARY,
+    role: Controls.Role = Controls.Role.SECONDARY,
     @DrawableRes icon: Int? = null,
     onClick: (View) -> Unit,
 ): Button = Button(this).apply {
     text = label
-    setTag(R.id.gf2_ui_role, role)
-    ModernUi.styleButton(this)
+    Controls.style(this, role)
     icon?.let { drawable ->
         val image = requireNotNull(getDrawable(drawable)).mutate()
         image.setTint(currentTextColor)
@@ -195,6 +193,7 @@ internal class LabeledField(
 ) : LinearLayout(context) {
     private val message = context.text(supporting, TextRole.CAPTION) {
         setPadding(context.dp(4), context.dp(4), context.dp(4), 0)
+        accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         visibility = if (supporting.isNullOrBlank()) View.GONE else View.VISIBLE
     }
 
@@ -214,7 +213,6 @@ internal class LabeledField(
             context.getColor(if (error == null) R.color.text_secondary else R.color.destructive_action),
         )
         message.visibility = if (message.text.isNullOrBlank()) View.GONE else View.VISIBLE
-        if (error != null) announceForAccessibility(error)
     }
 }
 
@@ -227,7 +225,7 @@ internal fun Context.checkBox(
     isChecked = checked
     textSize = 14f
     setTextColor(getColor(R.color.text_primary))
-    buttonTintList = ModernUi.controlTint(this@checkBox)
+    buttonTintList = Controls.controlTint(this@checkBox)
     minimumHeight = dp(48)
     setOnCheckedChangeListener { _, value -> onChanged(value) }
 }
@@ -244,8 +242,8 @@ internal fun Context.switchRow(
     val toggle = Switch(this).apply {
         isChecked = checked
         isEnabled = enabled
-        thumbTintList = ModernUi.switchThumbTint(this@switchRow)
-        trackTintList = ModernUi.switchTrackTint(this@switchRow)
+        thumbTintList = Controls.switchThumbTint(this@switchRow)
+        trackTintList = Controls.switchTrackTint(this@switchRow)
         contentDescription = listOfNotNull(title, badge, detail).joinToString(". ")
         setOnCheckedChangeListener { _, value -> onChanged(value) }
     }
@@ -268,7 +266,8 @@ internal fun Context.switchRow(
                 addView(text(it, TextRole.CAPTION) { setPadding(0, dp(2), 0, 0) }, lp())
             }
         }, lp(width = 0, weight = 1f))
-        addView(toggle, lp(width = WRAP, start = 12))
+        // A permanently required option shows its badge instead of an inert switch.
+        if (enabled || badge == null) addView(toggle, lp(width = WRAP, start = 12))
     }
 }
 

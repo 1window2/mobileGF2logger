@@ -13,6 +13,7 @@ import dev.gf2log.app.management.WeeklyOverrideEditing
 import dev.gf2log.app.management.WeeklyOverrideEditing.Choice
 import dev.gf2log.app.management.WeeklyReportBuilder
 import dev.gf2log.app.management.WeeklyShareProjection
+import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.LabeledField
 import dev.gf2log.app.ui.TextRole
@@ -102,6 +103,7 @@ internal object WeeklyDialogs {
         var patrol = patrolInitial
         val error = activity.text(null, TextRole.CAPTION) {
             setTextColor(activity.getColor(R.color.destructive_action))
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
             visibility = View.GONE
         }
         val content = Dialogs.content(activity) {
@@ -138,7 +140,6 @@ internal object WeeklyDialogs {
                         if (probe.field == WeeklyOverrideEditing.Field.ATTEMPTS) R.string.invalid_attempts else R.string.invalid_counter,
                     )
                     error.visibility = View.VISIBLE
-                    error.announceForAccessibility(error.text)
                     return
                 }
                 dialog.dismiss()
@@ -178,7 +179,7 @@ internal object WeeklyDialogs {
             addView(activity.text(activity.getString(label), TextRole.LABEL) {
                 setPadding(activity.dp(4), 0, 0, activity.dp(4))
             }, activity.lp())
-            addView(ModernUi.segmentedControl(
+            addView(Controls.segmentedControl(
                 context = activity,
                 options = listOf(
                     Choice.UNSET.name to activity.getString(R.string.choice_unset),

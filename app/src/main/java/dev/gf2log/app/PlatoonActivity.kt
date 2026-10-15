@@ -28,6 +28,7 @@ import dev.gf2log.app.management.PlatoonSnapshot
 import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.management.isValidMembershipRange
 import dev.gf2log.app.settings.GameTimeZonePreferences
+import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.AccessibleRow
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.BarAction
@@ -59,7 +60,6 @@ import java.time.ZoneId
 
 /** Platoon roster: search, filter, and sort members; long-press starts selection for export. */
 class PlatoonActivity : BaseActivity() {
-    override val legacyStyling = false
 
     private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var repository: PlatoonRepository
@@ -211,7 +211,7 @@ class PlatoonActivity : BaseActivity() {
             addView(PlatoonProfileSelector.card(this@PlatoonActivity), lp(top = 4))
             addView(summary, lp(top = 12))
             addView(searchInput, lp(top = 16))
-            addView(ModernUi.segmentedControl(
+            addView(Controls.segmentedControl(
                 context = this@PlatoonActivity,
                 options = Filter.entries.map { it.name to getString(it.label) },
                 selectedValue = filter.name,
@@ -376,6 +376,7 @@ class PlatoonActivity : BaseActivity() {
         )
         val error = text(null, TextRole.CAPTION) {
             setTextColor(getColor(R.color.destructive_action))
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
             visibility = View.GONE
         }
         val content = Dialogs.content(this) {
@@ -406,7 +407,6 @@ class PlatoonActivity : BaseActivity() {
                 if (problem != null) {
                     error.text = getString(problem)
                     error.visibility = View.VISIBLE
-                    error.announceForAccessibility(error.text)
                     return@setOnClickListener
                 }
                 button.isEnabled = false
@@ -450,7 +450,7 @@ class PlatoonActivity : BaseActivity() {
             isClickable = false
             isFocusable = false
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            buttonTintList = ModernUi.controlTint(this@PlatoonActivity)
+            buttonTintList = Controls.controlTint(this@PlatoonActivity)
         }
         private val name = text(null, TextRole.SUBTITLE) {
             maxLines = 1

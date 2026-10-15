@@ -8,6 +8,7 @@ import android.widget.LinearLayout
 import androidx.activity.OnBackPressedCallback
 import dev.gf2log.app.settings.WeeklyCutlinePreferences
 import dev.gf2log.app.settings.WeeklyCutlines
+import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BarAction
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Feedback
@@ -25,7 +26,6 @@ import dev.gf2log.app.ui.textField
 
 /** Per-Platoon cutlines that highlight weekly cells which are, or may remain, below a target. */
 class WeeklySettingsActivity : BaseActivity() {
-    override val legacyStyling = false
 
     private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var preferences: WeeklyCutlinePreferences
@@ -66,7 +66,7 @@ class WeeklySettingsActivity : BaseActivity() {
                 threshold(R.id.cutline_login_days, R.string.weekly_login_cutline, initial.weeklyLoginDays?.toLong(), WEEK_DAYS)
                 threshold(R.id.cutline_patrol_days, R.string.weekly_patrol_cutline, initial.weeklyPatrolDays?.toLong(), WEEK_DAYS)
             }, lp())
-            addView(button(getString(R.string.save_settings), ModernUi.ControlRole.PRIMARY) { save() }, lp(top = 16))
+            addView(button(getString(R.string.save_settings), Controls.Role.PRIMARY) { save() }, lp(top = 16))
         }
         screen.setBody(Screen.scrollingBody(this, content))
     }

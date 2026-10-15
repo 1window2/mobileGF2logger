@@ -5,6 +5,7 @@ import dev.gf2log.app.ActivePlatoonScopeBinding
 import dev.gf2log.app.SupportedGamePackages
 import dev.gf2log.app.settings.GameServerRegion
 import dev.gf2log.app.settings.ClientServerRegionPreferences
+import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.MemberOrderPreferences
 import dev.gf2log.app.settings.WeeklyCutlinePreferences
 import dev.gf2log.app.settings.WeeklyCutlines
@@ -388,6 +389,36 @@ class PlatoonProfileRegistryIntegrationTest {
             GameServerRegion.HAOPLAY_JAPAN,
             ClientServerRegionPreferences(context).configured(SupportedGamePackages.HAOPLAY),
         )
+    }
+
+    @Test
+    fun failedServerRegionChangeRestoresAManualTimezoneExactly() {
+        val registry = PlatoonProfileRegistry(context)
+        val profile = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            PlatoonProfileData(101818u, "Manual zone", 0u, 0u),
+        )
+        // A schema-v1-v3 complete backup restores a manual timezone for its Platoon.
+        val manualZone = java.time.ZoneId.of("America/New_York")
+        GameTimeZonePreferences.set(context, manualZone, profile.storageId)
+        var rebuilds = 0
+        val administration = PlatoonProfileAdministration(context) { _, _, _ ->
+            rebuilds += 1
+            check(rebuilds > 1) { "Simulated weekly-history rebuild failure" }
+        }
+
+        assertThrows(IllegalStateException::class.java) {
+            administration.changeServerRegion(profile.storageId, GameServerRegion.HAOPLAY_JAPAN)
+        }
+
+        assertEquals(2, rebuilds)
+        assertEquals(GameServerRegion.HAOPLAY_KOREA, registry.find(profile.storageId)?.serverRegion)
+        assertEquals(
+            GameServerRegion.MANUAL,
+            GameTimeZonePreferences.region(context, profile.storageId),
+        )
+        assertEquals(manualZone, GameTimeZonePreferences.get(context, profile.storageId))
     }
 
     @Test

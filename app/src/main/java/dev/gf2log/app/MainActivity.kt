@@ -246,7 +246,7 @@ class MainActivity : BaseActivity() {
     private fun clientRows(): View = column {
         SupportedGamePackages.all.forEachIndexed { index, packageName ->
             val installed = isInstalled(packageName)
-            val client = if (packageName == SupportedGamePackages.HAOPLAY) "HaoPlay" else "Darkwinter"
+            val client = clientName(packageName)
             val status = getString(if (installed) R.string.client_installed else R.string.client_not_installed)
             addView(row {
                 minimumHeight = dp(40)
@@ -291,6 +291,7 @@ class MainActivity : BaseActivity() {
         )
         val notice = snapshot.notice
         stateDetail.text = when {
+            notice?.notice == CaptureNotice.CAPTURING -> getString(R.string.capturing_clients, clientNames(snapshot.capturedTargets))
             notice != null && notice.notice != CaptureNotice.PREPARING -> notice.format(this)
             phase == CapturePhase.STOPPED -> getString(R.string.capture_ready_detail)
             else -> getString(R.string.capture_preparing_detail)
@@ -310,6 +311,18 @@ class MainActivity : BaseActivity() {
             renderCaptureActions(phase)
         }
     }
+
+    private fun clientNames(packages: List<String>): String {
+        val names = packages.map(::clientName)
+        return when (names.size) {
+            0 -> getString(R.string.none)
+            1 -> names.single()
+            else -> getString(R.string.clients_and, names[0], names.drop(1).joinToString(", "))
+        }
+    }
+
+    private fun clientName(packageName: String) =
+        if (packageName == SupportedGamePackages.HAOPLAY) "HaoPlay" else if (packageName == SupportedGamePackages.DARKWINTER) "Darkwinter" else packageName
 
     private fun renderChecklist(guided: CaptureStatus.GuidedProgress?) {
         checklist.removeAllViews()

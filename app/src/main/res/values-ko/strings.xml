@@ -45,7 +45,7 @@
     <string name="onboarding_management_feature_1">현재 가입 중이거나 과거에 탈퇴한 멤버의 정보와 가입·탈퇴 이력을 검색하고 관리합니다.</string>
     <string name="onboarding_management_feature_2">CSV를 적용하기 전에 변경 내용을 미리 보고, 자동 체크포인트로 최근 가져오기를 되돌릴 수 있습니다.</string>
     <string name="onboarding_management_feature_3">분리된 서클을 전환하고, 스냅샷을 비교하거나 멤버를 길게 눌러 선택해 내보낼 수 있습니다.</string>
-    <string name="onboarding_weekly_title">주간 테이블</string>
+    <string name="onboarding_weekly_title">주간 과업표</string>
     <string name="onboarding_weekly_description">일반 주간과 흙먼지 주간이 구분된 주간 공적표를 확인합니다.</string>
     <string name="onboarding_weekly_feature_1">각 셀을 눌러 해당 값의 근거와 사용된 패킷 정보를 확인할 수 있습니다.</string>
     <string name="onboarding_weekly_feature_2">연필 버튼으로 공적이나 흙먼지 값을 수정하고, 공유 버튼으로 주간 표를 저장하거나 공유합니다.</string>
@@ -72,7 +72,7 @@
     <string name="select_members_first">먼저 멤버를 하나 이상 선택하세요</string>
     <string name="members_exported">선택 멤버를 내보냈습니다</string>
     <string name="search_members">이름 또는 UID 검색</string>
-    <string name="filter_active">가입</string>
+    <string name="filter_active">가입 중</string>
     <string name="sort_name">이름</string>
     <string name="sort_merit">이번 주 공적</string>
     <string name="sort_total_merit_management">누적 공적</string>
@@ -100,10 +100,10 @@
     <string name="add_membership_history">가입 이력 추가</string>
     <string name="add_membership_history_short">가입 이력 추가</string>
     <string name="delete_member">멤버 삭제</string>
-    <string name="delete_member_warning">멤버를 삭제하면 저장된 가입 이력, 비고와 주간 과업표 수정사항이 영구적으로 삭제됩니다. 이후 새 명단 패킷에서 멤버가 다시 추가될 수 있지만 삭제된 정보는 복구되지 않습니다.</string>
+    <string name="delete_member_warning">멤버를 삭제하면 가입 이력, 개인 메모, 주간 과업표 수정 내용이 영구적으로 삭제됩니다. 이후 명단에서 다시 추가될 수 있지만 삭제된 정보는 복구되지 않습니다.</string>
     <string name="member_deleted">멤버를 삭제했습니다</string>
     <string name="member_delete_failed">멤버를 삭제할 수 없습니다</string>
-    <string name="add_withdrawn_member">탈퇴한 멤버 수동 추가</string>
+    <string name="add_withdrawn_member">탈퇴한 멤버 추가</string>
     <string name="membership_note_hint">메모</string>
     <string name="date_unset">날짜 선택</string>
     <string name="time_optional">시간 (선택)</string>
@@ -135,7 +135,7 @@
     <string name="join_withdraw">가입/탈퇴</string>
     <string name="join_label">가입</string>
     <string name="withdraw_label">탈퇴</string>
-    <string name="unknown_date">불명</string>
+    <string name="unknown_date">날짜 알 수 없음</string>
     <string name="note_hint">선택한 게임 날짜의 비고 추가</string>
     <string name="add_note">비고 추가</string>
     <string name="weekly_note_limit_reached">이번 주에는 최대 128개의 비고가 이미 저장되어 있습니다.</string>
@@ -159,7 +159,7 @@
     <string name="server_region_haoplay_japan">HaoPlay 일본</string>
     <string name="server_region_haoplay_korea">HaoPlay 한국</string>
     <string name="server_region_haoplay_asia">HaoPlay 아시아</string>
-    <string name="new_platoon_detected">새로운 서클 감지</string>
+    <string name="new_platoon_detected">새 서클 감지</string>
     <string name="new_platoon_detected_message">게임 클라이언트는 확인했지만 패킷만으로 서버를 확정할 수 없습니다. 패킷을 저장하기 전에 서버를 선택하세요.</string>
     <string name="choose_server_region">이 서클의 서버 선택</string>
     <string name="new_platoon_memory_only_notice">확인 전까지 파싱된 패킷은 메모리에만 보관됩니다. GF2logger를 강제 종료하면 삭제됩니다.</string>
@@ -168,7 +168,7 @@
     <string name="keep_choosing">계속 선택</string>
     <string name="discard_pending_platoon_title">수집한 패킷을 버리시겠습니까?</string>
     <string name="discard_pending_platoon_message">서버 선택을 취소하면 수집한 패킷이 저장되지 않을 수 있습니다. 확인되지 않은 서클의 패킷을 버리시겠습니까?</string>
-    <string name="manage_platoon_profiles">서클 관리</string>
+    <string name="manage_platoon_profiles">서클 프로필 관리</string>
     <string name="manage_platoon_profiles_detail">감지된 서클의 서버를 수정하거나 격리된 데이터를 완전히 삭제합니다.</string>
     <string name="active_platoon">선택됨</string>
     <string name="edit_platoon_server_description">%1$s 서버 수정</string>
@@ -233,7 +233,7 @@
     <string name="no_capture_diagnostics">완료된 캡처 세션이 없습니다.</string>
     <string name="capture_diagnostics">%1$s\n전달: %2$d KiB · 검사: %3$d KiB\n디코딩: %4$d · 경고: %5$d · 누락 청크: %6$d\n알 수 없는 페이로드 (유형:횟수): %7$s</string>
     <string name="weekly_table_settings">주간 과업표 설정</string>
-    <string name="cutline_description">확인할 기준만 활성화하세요. 활성화한 기준보다 낮은 값은 노란색으로 표시됩니다.</string>
+    <string name="cutline_description">확인할 기준만 켜세요. 켜 둔 기준보다 낮은 값은 주황색 밑줄로 표시됩니다.</string>
     <string name="daily_cutlines">일일 커트라인</string>
     <string name="weekly_cutlines">주간 커트라인</string>
     <string name="merit_cutline">공적</string>
@@ -316,7 +316,7 @@
     <string name="csv_import_capture_range">%1$s — %2$s</string>
     <string name="csv_import_preparing_preview">CSV 파일을 검증하고 미리보기를 준비하는 중…</string>
     <string name="csv_import_applying">체크포인트를 만들고 CSV 파일을 가져오는 중…</string>
-    <string name="status_platoon_csv_imported_with_checkpoint">CSV 가져오기 완료: 보관 %1$d, 현재 %2$d, 과거 %3$d, 건너뜀 %4$d. 실행 취소할 수 있습니다.</string>
+    <string name="status_platoon_csv_imported_with_checkpoint">가져오기 완료: 파일 %1$d개 보관, 현재 %2$d, 과거 스냅샷 %3$d, 건너뜀 %4$d. 홈에서 되돌릴 수 있습니다.</string>
     <string name="undo_last_csv_import">마지막 CSV 가져오기 실행 취소</string>
     <string name="undo_last_csv_import_warning">마지막 CSV 가져오기 직전에 만든 자동 체크포인트를 복원할까요? 가져오기 이후 서클 데이터가 변경되었다면 되돌리기를 거부합니다.</string>
     <string name="no_csv_import_checkpoint">사용 가능한 CSV 가져오기 체크포인트가 없습니다.</string>
@@ -347,12 +347,12 @@
     <string name="discord_webhook_clear_failed">저장된 Discord 웹훅을 제거할 수 없습니다.</string>
     <string name="send_original_csv">원본 CSV 전송</string>
     <string name="send_original_csv_warning">이 원본 CSV 파일을 설정된 Discord 채널로 전송할까요? 캡처된 서클 데이터가 앱 외부로 이동합니다.</string>
-    <string name="discord_webhook_required">전송하기 전에 설정에서 Discord 수신 웹훅을 구성하세요.</string>
+    <string name="discord_webhook_required">전송하기 전에 설정에서 Discord 수신 웹훅을 설정하세요.</string>
     <string name="discord_csv_sending">원본 CSV를 Discord로 전송하는 중…</string>
     <string name="discord_csv_sent">원본 CSV를 Discord로 전송했습니다.</string>
     <string name="discord_csv_send_failed">원본 CSV를 전송할 수 없습니다. 웹훅과 네트워크 연결을 확인하세요.</string>
     <string name="discord_csv_invalid">이 파싱 패킷에는 전송할 수 있는 유효한 CSV 본문이 없습니다.</string>
-    <string name="weekly_table_history">표 히스토리</string>
+    <string name="weekly_table_history">표 기록</string>
     <string name="weekly_table_history_description">자동으로 기록된 현재 주간 테이블의 과거 히스토리 목록입니다.</string>
     <string name="weekly_table_history_empty">아직 기록된 주간 테이블 변경 이력이 없습니다.</string>
     <string name="weekly_table_history_active">현재 복원된 항목</string>
@@ -365,7 +365,7 @@
     <string name="select_platoon">서클 선택</string>
     <string name="select">선택</string>
     <string name="add_new_platoon_profile">새 서클 프로필 추가</string>
-    <string name="enter_new_platoon_profile">신규 서클 정보 입력</string>
+    <string name="enter_new_platoon_profile">새 서클 정보</string>
     <string name="new_platoon_entry_message">새롭게 등록할 서클의 정보를 입력해 주세요.</string>
     <string name="platoon_client">클라이언트</string>
     <string name="platoon_name">서클 이름</string>
@@ -431,7 +431,7 @@
     <string name="source_manual">수동</string>
     <string name="source_roster">명단 관측</string>
     <string name="source_updates">정확 (동향)</string>
-    <string name="stat_active">가입</string>
+    <string name="stat_active">가입 중</string>
     <string name="stat_last_snapshot">최근 스냅샷</string>
     <string name="stat_withdrawn">탈퇴</string>
     <string name="uid_hint">숫자 플레이어 UID</string>
@@ -526,7 +526,7 @@
     <string name="csv_import_choose_destination">명단 CSV에는 서클 정보가 없습니다. 파일을 넣을 서클을 직접 선택하세요.</string>
     <string name="csv_import_destination_label">가져올 서클</string>
     <string name="csv_import_destination_title">어느 서클로 가져올까요?</string>
-    <string name="csv_import_destination_warning">21917 데이터로는 대상을 검증할 수 없습니다. 올바른 서클인지 확인하세요.</string>
+    <string name="csv_import_destination_warning">명단 파일에는 서클 정보가 없습니다. 올바른 서클인지 확인하세요.</string>
     <string name="csv_import_no_changes_yet">아직 아무것도 바뀌지 않았습니다. 가져오기 전에 자동 체크포인트를 만들어 되돌릴 수 있습니다.</string>
     <string name="csv_preview_already_present">이미 있음</string>
     <string name="csv_preview_files">유효한 파일</string>
@@ -586,4 +586,5 @@
     <string name="latest_roster_title">최근 명단 · %1$s</string>
     <string name="roster_joined_count">가입 %1$d</string>
     <string name="roster_withdrew_count">탈퇴 %1$d</string>
+    <string name="confirming_platoon">서클을 저장하는 중…</string>
 </resources>

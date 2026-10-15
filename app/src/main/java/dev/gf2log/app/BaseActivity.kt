@@ -61,6 +61,11 @@ abstract class BaseActivity : ComponentActivity() {
         super.onStop()
     }
 
+    override fun onDestroy() {
+        dev.gf2log.app.ui.Dialogs.dismissAll(this)
+        super.onDestroy()
+    }
+
     final override fun onResume() {
         super.onResume()
         if (

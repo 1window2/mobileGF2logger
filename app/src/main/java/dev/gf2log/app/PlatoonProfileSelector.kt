@@ -18,6 +18,7 @@ import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.app.ui.AccessibleRow
 import dev.gf2log.app.ui.Dialogs
+import dev.gf2log.app.ui.captureActive
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.TextRole
@@ -206,7 +207,7 @@ internal object PlatoonProfileSelector {
     }
 
     private fun chooseProfileRegion(activity: Activity, profile: PlatoonProfile) {
-        if (CaptureStatus.isRunning) {
+        if (captureActive) {
             Feedback.show(activity, R.string.stop_capture_before_profile_change, long = true)
             return
         }
@@ -231,7 +232,7 @@ internal object PlatoonProfileSelector {
     }
 
     private fun confirmDeleteFirst(activity: Activity, profile: PlatoonProfile) {
-        if (CaptureStatus.isRunning) {
+        if (captureActive) {
             Feedback.show(activity, R.string.stop_capture_before_profile_change, long = true)
             return
         }

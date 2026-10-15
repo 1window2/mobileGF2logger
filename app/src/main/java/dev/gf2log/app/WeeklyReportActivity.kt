@@ -411,7 +411,7 @@ class WeeklyReportActivity : BaseActivity() {
                     }, lp())
                     contentDescription = "$weekType. $range. ${getString(R.string.select_week)}"
                 }, lp(width = 0, weight = 1f))
-                addView(iconButton(R.drawable.ic_chevron_next, getString(R.string.next_week)) {
+                addView(iconButton(R.drawable.ic_chevron_right, getString(R.string.next_week)) {
                     reportState.showNextWeek(report.periodEnd)
                     requestRender()
                 }.apply { isEnabled = !editing }, lp(48, 48))
@@ -782,9 +782,11 @@ class WeeklyReportActivity : BaseActivity() {
 
     private fun share() {
         val current = model ?: return
+        if (work.isBusy(PNG)) return
         WeeklyDialogs.showShare(this) { privacy, shareAfter ->
             Feedback.show(this, R.string.weekly_png_rendering)
             work.run(
+                key = PNG,
                 task = {
                     WeeklyPngExport.render(
                         this,
@@ -815,6 +817,7 @@ class WeeklyReportActivity : BaseActivity() {
     private fun addNote(report: WeeklyReportBuilder.Report) {
         val text = noteInput.text.toString().trim()
         val day = noteDay ?: return
+        if (work.isBusy(SAVE)) return
         if (text.isEmpty()) {
             noteInput.error = getString(R.string.note_required)
             return
@@ -918,6 +921,7 @@ class WeeklyReportActivity : BaseActivity() {
         const val STANDARD_ROW = 0
         const val GUNSMOKE_ROW = 1
         const val SAVE = "save"
+        const val PNG = "png"
         const val EXPORT_ALL = "all"
         const val MAX_NOTE_LENGTH = 1_000
         const val STATE_REFERENCE_DAY = "weekly.reference_day"

@@ -7,23 +7,28 @@
         <item name="android:textColorPrimary">@color/text_primary</item>
         <item name="android:textColorSecondary">@color/text_secondary</item>
         <item name="android:textViewStyle">@style/Widget.GF2.TextView</item>
-        <item name="android:buttonStyle">@style/Widget.GF2.Button</item>
         <item name="android:editTextStyle">@style/Widget.GF2.EditText</item>
-        <item name="android:navigationBarColor">@color/app_background</item>
-        <item name="android:statusBarColor">@color/app_background</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:alertDialogTheme">@style/GF2DialogTheme</item>
+        <item name="android:datePickerDialogTheme">@style/GF2PickerTheme</item>
+        <item name="android:timePickerDialogTheme">@style/GF2PickerTheme</item>
     </style>
 
     <style name="GF2DialogTheme" parent="android:style/Theme.Material.Dialog.Alert">
         <item name="android:fontFamily">sans-serif</item>
         <item name="android:windowBackground">@drawable/bg_dialog</item>
-        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:colorAccent">@color/accent_text</item>
         <item name="android:textColorPrimary">@color/text_primary</item>
         <item name="android:textColorSecondary">@color/text_secondary</item>
         <item name="android:windowMinWidthMajor">88%</item>
         <item name="android:windowMinWidthMinor">88%</item>
+    </style>
+
+    <!-- Pickers use the darker accent so selected dates and buttons stay legible. -->
+    <style name="GF2PickerTheme" parent="android:style/Theme.Material.Dialog">
+        <item name="android:colorAccent">@color/accent_text</item>
+        <item name="android:windowBackground">@drawable/bg_dialog</item>
     </style>
 </resources>

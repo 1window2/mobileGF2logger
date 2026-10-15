@@ -118,7 +118,7 @@ internal object Controls {
         ),
         intArrayOf(
             context.getColor(R.color.outline_strong),
-            context.getColor(R.color.accent),
+            context.getColor(R.color.accent_text),
             context.getColor(R.color.outline_strong),
         ),
     )
@@ -131,7 +131,7 @@ internal object Controls {
         ),
         intArrayOf(
             context.getColor(R.color.surface_variant),
-            context.getColor(R.color.accent),
+            context.getColor(R.color.accent_text),
             context.getColor(R.color.surface),
         ),
     )

@@ -35,7 +35,23 @@ internal object Dialogs {
             onShown(dialog)
         }
         dialog.show()
+        owner(builder.context)?.let { owner ->
+            open.getOrPut(owner) { mutableListOf() }.add(java.lang.ref.WeakReference(dialog))
+        }
         return dialog
+    }
+
+    private val open = java.util.WeakHashMap<android.app.Activity, MutableList<java.lang.ref.WeakReference<AlertDialog>>>()
+
+    private tailrec fun owner(context: Context): android.app.Activity? = when (context) {
+        is android.app.Activity -> context
+        is android.content.ContextWrapper -> owner(context.baseContext)
+        else -> null
+    }
+
+    /** Closes every dialog a screen opened so a recreated screen never leaks its windows. */
+    fun dismissAll(owner: android.app.Activity) {
+        open.remove(owner)?.forEach { it.get()?.takeIf(AlertDialog::isShowing)?.dismiss() }
     }
 
     fun confirm(

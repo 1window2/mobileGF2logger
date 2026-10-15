@@ -180,9 +180,10 @@ class PacketHistoryActivity : BaseActivity() {
                 )
                 return@run
             }
-            Dialogs.confirm(this, R.string.send_original_csv, R.string.send_original_csv_warning, R.string.send) {
+            Dialogs.confirm(this, R.string.send_original_csv, R.string.send_original_csv_warning, R.string.send) confirm@{
+                if (work.isBusy(SEND)) return@confirm
                 Feedback.show(this, R.string.discord_csv_sending)
-                work.run(task = { DiscordWebhookSender().send(webhook, csv) }) { sent ->
+                work.run(key = SEND, task = { DiscordWebhookSender().send(webhook, csv) }) { sent ->
                     Feedback.show(this, if (sent.isSuccess) R.string.discord_csv_sent else R.string.discord_csv_send_failed, long = true)
                 }
             }
@@ -195,6 +196,7 @@ class PacketHistoryActivity : BaseActivity() {
         const val EXTRA_SAVED_ENTRY = "saved_entry"
         const val EXTRA_STORAGE_ID = "storage_id"
         private const val TABLE = "table"
+        private const val SEND = "send"
         private const val RAW = "raw"
         private const val STATE_RAW = "packet.raw"
     }

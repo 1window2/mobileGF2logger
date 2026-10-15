@@ -29,6 +29,7 @@ import dev.gf2log.app.settings.PayloadHistoryPreferences
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Dialogs
+import dev.gf2log.app.ui.captureActive
 import dev.gf2log.app.ui.DocumentAccess
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
@@ -265,8 +266,10 @@ class OptionsActivity : BaseActivity() {
     }
 
     private fun updateResetRegion(scope: PlatoonStorageScope, region: GameServerRegion?) {
+        if (work.isBusy(MAINTENANCE)) return
         Feedback.show(this, R.string.rebuilding_weekly_history)
         work.run(
+            key = MAINTENANCE,
             task = {
                 val previousAutomatic = GameTimeZonePreferences.isAutomatic(this, scope.storageId)
                 val previousRegion = GameTimeZonePreferences.region(this, scope.storageId)
@@ -314,7 +317,7 @@ class OptionsActivity : BaseActivity() {
     // region Backup
 
     private fun startExport(complete: Boolean) {
-        if (CaptureStatus.isRunning) {
+        if (captureActive) {
             Feedback.show(this, R.string.stop_capture_before_backup, long = true)
             return
         }
@@ -324,7 +327,7 @@ class OptionsActivity : BaseActivity() {
     }
 
     private fun confirmRestore() {
-        if (CaptureStatus.isRunning) {
+        if (captureActive) {
             Feedback.show(this, R.string.stop_capture_before_backup, long = true)
             return
         }
@@ -338,8 +341,10 @@ class OptionsActivity : BaseActivity() {
             Feedback.show(this, R.string.invalid_full_backup, long = true)
             return
         }
+        if (work.isBusy(MAINTENANCE)) return
         Feedback.show(this, R.string.backup_restoring)
         work.run(
+            key = MAINTENANCE,
             task = {
                 DocumentAccess.openInput(contentResolver, uri).use { input ->
                     PlatoonBackupManager.restoreSelected(this, input)
@@ -366,8 +371,9 @@ class OptionsActivity : BaseActivity() {
         failure: (Throwable) -> Int,
         operation: () -> Unit,
     ) {
+        if (work.isBusy(MAINTENANCE)) return
         Feedback.show(this, progress)
-        work.run(task = operation) { result ->
+        work.run(key = MAINTENANCE, task = operation) { result ->
             Feedback.show(this, result.fold(onSuccess = { success }, onFailure = failure), long = true)
         }
     }
@@ -415,7 +421,8 @@ class OptionsActivity : BaseActivity() {
         Dialogs.show(builder) { dialog ->
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val value = input.text.toString()
-                work.run(task = { DiscordWebhookSecretStore(this).save(value) }) { result ->
+                if (work.isBusy(WEBHOOK)) return@setOnClickListener
+                work.run(key = WEBHOOK, task = { DiscordWebhookSecretStore(this).save(value) }) { result ->
                     if (result.isSuccess) {
                         dialog.dismiss()
                         Feedback.show(this, R.string.discord_webhook_saved)
@@ -487,6 +494,8 @@ class OptionsActivity : BaseActivity() {
 
     private companion object {
         const val STATE_EXPORT_COMPLETE = "settings.export_complete"
+        const val MAINTENANCE = "maintenance"
+        const val WEBHOOK = "webhook"
     }
 }
 

@@ -14,6 +14,7 @@ import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Dialogs
+import dev.gf2log.app.ui.captureActive
 import dev.gf2log.app.ui.DocumentAccess
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
@@ -71,7 +72,7 @@ internal class CsvImportFlow(
     }
 
     fun start() {
-        if (CaptureStatus.isRunning) {
+        if (captureActive) {
             Feedback.show(activity, R.string.stop_capture_before_csv_import, long = true)
             return
         }
@@ -79,7 +80,7 @@ internal class CsvImportFlow(
     }
 
     fun undo() {
-        if (CaptureStatus.isRunning) {
+        if (captureActive) {
             Feedback.show(activity, R.string.stop_capture_before_csv_import, long = true)
             return
         }
@@ -248,14 +249,14 @@ internal class CsvImportFlow(
 
     private fun apply(import: PendingImport) {
         val target = resolveTarget(import.target.scope.storageId)
-        if (pending !== import || CaptureStatus.isRunning || target == null ||
+        if (pending !== import || captureActive || target == null ||
             target.profile.client != import.target.profile.client ||
             target.profile.platoonId != import.target.profile.platoonId
         ) {
             clear()
             Feedback.show(
                 activity,
-                if (CaptureStatus.isRunning) R.string.stop_capture_before_csv_import else R.string.csv_import_target_changed,
+                if (captureActive) R.string.stop_capture_before_csv_import else R.string.csv_import_target_changed,
                 long = true,
             )
             return

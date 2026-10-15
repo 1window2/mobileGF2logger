@@ -143,8 +143,11 @@ class MainActivity : BaseActivity() {
             captureOnceRequested = it.getBoolean(STATE_CAPTURE_ONCE)
             showingSaved = it.getBoolean(STATE_SHOWING_SAVED)
             showAll = it.getBoolean(STATE_SHOW_ALL)
+            selecting = it.getBoolean(STATE_SELECTING)
+            it.getStringArrayList(STATE_SELECTED)?.let(selectedIds::addAll)
         }
         onBackPressedDispatcher.addCallback(this, exitSelection)
+        exitSelection.isEnabled = selecting
         screen = Screen(this, PrimaryNavigation.Destination.HOME)
         screen.topBar
             .setLeading(ImageView(this).apply {
@@ -184,6 +187,8 @@ class MainActivity : BaseActivity() {
         outState.putBoolean(STATE_CAPTURE_ONCE, captureOnceRequested)
         outState.putBoolean(STATE_SHOWING_SAVED, showingSaved)
         outState.putBoolean(STATE_SHOW_ALL, showAll)
+        outState.putBoolean(STATE_SELECTING, selecting)
+        outState.putStringArrayList(STATE_SELECTED, ArrayList(selectedIds))
         super.onSaveInstanceState(outState)
     }
 
@@ -575,17 +580,18 @@ class MainActivity : BaseActivity() {
     }
 
     private fun historyRow(entry: CaptureHistoryStore.Entry): View {
-        val isSelected = entry.id in selectedIds
         val tag = Labels.payloadTag(this, entry.payloadType)
-        return AccessibleRow(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(52)
-            setPadding(dp(12), dp(4), dp(8), dp(4))
-            background = selectableRect()
-            this.isSelected = selecting && isSelected
-            contentDescription = listOfNotNull(
-                getString(R.string.selected).takeIf { selecting && isSelected },
+        val mark = icon(R.drawable.ic_circle_outline, R.color.outline_strong, sizeDp = 22)
+        val row = AccessibleRow(this)
+        fun refresh() {
+            val isSelected = selecting && entry.id in selectedIds
+            row.isSelected = isSelected
+            mark.setImageResource(if (isSelected) R.drawable.ic_check_circle else R.drawable.ic_circle_outline)
+            mark.imageTintList = android.content.res.ColorStateList.valueOf(
+                getColor(if (isSelected) R.color.accent_text else R.color.outline_strong),
+            )
+            row.contentDescription = listOfNotNull(
+                getString(R.string.selected).takeIf { isSelected },
                 entry.title,
                 getString(
                     R.string.payload_tag_description,
@@ -593,56 +599,64 @@ class MainActivity : BaseActivity() {
                     entry.payloadType?.toString() ?: getString(R.string.unknown_payload_type),
                 ),
             ).joinToString(". ")
-            if (selecting) {
-                addView(icon(
-                    if (isSelected) R.drawable.ic_check_circle else R.drawable.ic_circle_outline,
-                    if (isSelected) R.color.accent else R.color.outline_strong,
-                    sizeDp = 22,
-                ), lp(22, 22, end = 12))
-            }
+        }
+        return row.apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(52)
+            setPadding(dp(12), dp(4), dp(8), dp(4))
+            background = selectableRect()
+            if (selecting) addView(mark, lp(22, 22, end = 12))
             addView(text(entry.title, TextRole.BODY) {
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             }, lp(width = 0, weight = 1f))
-            addView(text(tag, TextRole.LABEL) {
-                textSize = 11f
-                setTextColor(getColor(R.color.accent_text))
-                setPadding(dp(8), dp(3), dp(8), dp(3))
-                background = GradientDrawable().apply {
-                    setColor(getColor(R.color.accent_surface))
-                    cornerRadius = dpf(8f)
-                }
-            }, lp(WRAP, WRAP, start = 8))
+            addView(badge(tag).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, lp(WRAP, WRAP, start = 8))
             if (!selecting) addView(icon(R.drawable.ic_chevron_right, sizeDp = 20), lp(20, 20, start = 4))
+            refresh()
             setOnClickListener {
                 if (selecting) {
+                    // Update in place so accessibility focus stays on this row.
                     if (!selectedIds.add(entry.id)) selectedIds.remove(entry.id)
-                    renderHistory()
+                    refresh()
+                    updateSelectionBar()
                 } else {
                     openEntry(entry)
                 }
             }
             setOnLongClickListener {
-                if (!selecting) setSelecting(true)
                 selectedIds.add(entry.id)
-                renderHistory()
+                if (selecting) {
+                    refresh()
+                    updateSelectionBar()
+                } else {
+                    setSelecting(true)
+                }
                 true
             }
         }
     }
 
+    private var selectionCount: TextView? = null
+    private val selectionButtons = mutableListOf<View>()
+
     private fun selectionActions(): View = row {
-        addView(
-            text(resources.getQuantityString(R.plurals.selected_count, selectedIds.size, selectedIds.size), TextRole.LABEL),
-            lp(width = 0, weight = 1f, start = 4),
-        )
+        selectionButtons.clear()
+        selectionCount = text(null, TextRole.LABEL)
+        addView(selectionCount, lp(width = 0, weight = 1f, start = 4))
         if (!showingSaved) {
             addView(button(getString(R.string.save_selected_history_short), Controls.Role.SECONDARY, R.drawable.ic_save) {
                 saveSelected()
-            }.apply { isEnabled = selectedIds.isNotEmpty() }, lp(WRAP, WRAP, end = 8))
+            }.also(selectionButtons::add), lp(WRAP, WRAP, end = 8))
         }
         addView(button(getString(R.string.delete), Controls.Role.DESTRUCTIVE_TEXT, R.drawable.ic_delete) {
             confirmDeleteSelected()
-        }.apply { isEnabled = selectedIds.isNotEmpty() }, lp(WRAP, WRAP))
+        }.also(selectionButtons::add), lp(WRAP, WRAP))
+        updateSelectionBar()
+    }
+
+    private fun updateSelectionBar() {
+        selectionCount?.text = resources.getQuantityString(R.plurals.selected_count, selectedIds.size, selectedIds.size)
+        selectionButtons.forEach { it.isEnabled = selectedIds.isNotEmpty() }
     }
 
     private fun setSelecting(enabled: Boolean) {
@@ -726,5 +740,7 @@ class MainActivity : BaseActivity() {
         const val STATE_CAPTURE_ONCE = "home.capture_once"
         const val STATE_SHOWING_SAVED = "home.showing_saved"
         const val STATE_SHOW_ALL = "home.show_all"
+        const val STATE_SELECTING = "home.selecting"
+        const val STATE_SELECTED = "home.selected"
     }
 }

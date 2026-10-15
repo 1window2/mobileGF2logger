@@ -104,7 +104,12 @@ internal class WeeklyTable(
 ) {
     /** Reference instant for open-day marks; refreshed with each render. */
     var now: Instant = Instant.now()
-    val rowHeight = context.dp(if (isGunsmokeWeek) GUNSMOKE_ROW_HEIGHT else STANDARD_ROW_HEIGHT)
+    /** Heights follow the user's font size; widths grow more gently so a week still fits. */
+    private val fontScale = context.resources.configuration.fontScale.coerceAtLeast(1f)
+    private fun height(dp: Int) = (context.dp(dp) * fontScale).toInt()
+    private fun width(dp: Int) = (context.dp(dp) * fontScale.coerceAtMost(1.5f)).toInt()
+
+    val rowHeight = height(if (isGunsmokeWeek) GUNSMOKE_ROW_HEIGHT else STANDARD_ROW_HEIGHT)
 
     fun headerRow(report: WeeklyReportBuilder.Report): View = gridRow(
         frozen = headerCell(context.getString(R.string.member), null, MEMBER_WIDTH, Gravity.START or Gravity.CENTER_VERTICAL),
@@ -117,7 +122,7 @@ internal class WeeklyTable(
                 today = day == PlatoonPeriods.gameDay(now, zone),
             )
         } + headerCell(context.getString(R.string.total), null, TOTAL_WIDTH, Gravity.CENTER),
-        height = context.dp(HEADER_HEIGHT),
+        height = height(HEADER_HEIGHT),
     )
 
     /** One reusable member row; [bind] refreshes it in place for RecyclerView recycling. */
@@ -200,14 +205,23 @@ internal class WeeklyTable(
             addView(merit, context.lp())
             addView(gunsmoke, context.lp())
             addView(activity, context.lp())
-            layoutParams = LinearLayout.LayoutParams(context.dp(widthDp), rowHeight)
+            layoutParams = LinearLayout.LayoutParams(width(widthDp), rowHeight)
             isClickable = true
             isFocusable = true
         }
 
         fun bind(display: CellDisplay, description: String, onClick: () -> Unit) {
             merit.text = display.merit
-            merit.setTextColor(context.getColor(if (display.meritWarn) R.color.cutline_mark else R.color.text_primary))
+            // Unknown values recede so confirmed numbers and cutline warnings stand out.
+            merit.setTextColor(
+                context.getColor(
+                    when {
+                        display.meritWarn -> R.color.cutline_mark
+                        display.merit == "?" -> R.color.text_secondary
+                        else -> R.color.text_primary
+                    },
+                ),
+            )
             merit.paintFlags = if (display.meritWarn) merit.paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG
             else merit.paintFlags and android.graphics.Paint.UNDERLINE_TEXT_FLAG.inv()
             if (isGunsmokeWeek) {
@@ -360,7 +374,7 @@ internal class WeeklyTable(
             }, context.lp())
         }
         if (today) contentDescription = context.getString(R.string.today_column, title, subtitle.orEmpty())
-        layoutParams = LinearLayout.LayoutParams(context.dp(widthDp), LinearLayout.LayoutParams.MATCH_PARENT)
+        layoutParams = LinearLayout.LayoutParams(width(widthDp), LinearLayout.LayoutParams.MATCH_PARENT)
     }
 
     /** Grid row: hairline separators come from a 1px gap over the outline-colored row. */
@@ -370,15 +384,15 @@ internal class WeeklyTable(
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
                 cells.forEach { cell ->
-                    val width = (cell.layoutParams as? LinearLayout.LayoutParams)?.width ?: context.dp(DAY_WIDTH)
-                    addView(cell, LinearLayout.LayoutParams(width, height - hairline).apply { marginStart = hairline })
+                    val cellWidth = (cell.layoutParams as? LinearLayout.LayoutParams)?.width ?: width(DAY_WIDTH)
+                    addView(cell, LinearLayout.LayoutParams(cellWidth, height - hairline).apply { marginStart = hairline })
                 }
             })
         }
         return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(context.getColor(R.color.outline))
-            addView(frozen, LinearLayout.LayoutParams(context.dp(MEMBER_WIDTH), height - hairline))
+            addView(frozen, LinearLayout.LayoutParams(width(MEMBER_WIDTH), height - hairline))
             addView(scroller, LinearLayout.LayoutParams(0, height, 1f))
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, height)
         }

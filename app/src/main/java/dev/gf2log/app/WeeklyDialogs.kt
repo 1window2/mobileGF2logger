@@ -192,8 +192,8 @@ internal object WeeklyDialogs {
 
     fun showGuide(activity: Activity, isGunsmokeWeek: Boolean) {
         val rows = listOf(
-            "✓" to activity.getString(R.string.evidence_guide_exact),
-            "≥" to activity.getString(R.string.evidence_guide_minimum),
+            "90" to activity.getString(R.string.evidence_guide_exact),
+            "≥90" to activity.getString(R.string.evidence_guide_minimum),
             "?" to activity.getString(R.string.evidence_guide_unknown),
             activity.getString(R.string.login_initial) + " / " + activity.getString(R.string.patrol_initial) to
                 activity.getString(R.string.evidence_guide_marks),

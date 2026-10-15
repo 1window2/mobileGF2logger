@@ -73,8 +73,11 @@ class MemberDetailActivity : BaseActivity() {
         repository = PlatoonRepository(this, scope)
         inputsInitialized = savedInstanceState?.getBoolean(STATE_INPUTS_INITIALIZED) == true
         screen = Screen(this)
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() = leave()
+        })
         screen.topBar
-            .setNavigation(::finish)
+            .setNavigation(::leave)
             .setTitle(getString(R.string.member_details))
             .setActions(
                 emptyList(),
@@ -221,6 +224,24 @@ class MemberDetailActivity : BaseActivity() {
             lp(),
         )
         updateSaveState()
+    }
+
+    /** Unsaved nickname or note edits are confirmed instead of silently discarded. */
+    private fun leave() {
+        if (!::saveButton.isInitialized || !saveButton.isEnabled) {
+            finish()
+            return
+        }
+        Dialogs.show(
+            Dialogs.builder(this)
+                .setTitle(R.string.unsaved_changes_title)
+                .setMessage(R.string.unsaved_changes_message)
+                .setNegativeButton(R.string.discard) { _, _ -> finish() }
+                .setPositiveButton(R.string.save_member) { _, _ ->
+                    saveProfile()
+                    finish()
+                },
+        )
     }
 
     private fun updateSaveState() {

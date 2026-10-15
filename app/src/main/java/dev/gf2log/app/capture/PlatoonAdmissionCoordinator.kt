@@ -147,7 +147,10 @@ internal class PlatoonAdmissionCoordinator(
     private fun replay(claim: PendingPlatoonAdmissionStore.Claim, profile: PlatoonProfile): Boolean {
         val sessions = mutableMapOf<Long, PlatoonCaptureSession>()
         val replayed = runCatching {
-            claim.flowIds.forEach { flowId -> sessions[flowId] = flows.bind(flowId, profile) }
+            // Live flows stay bound; an ended flow needs a session only while its payloads replay.
+            claim.flowIds.filterNot(claim.endedFlowIds::contains).forEach { flowId ->
+                sessions[flowId] = flows.bind(flowId, profile)
+            }
             val lastPayloadIndexByFlow = claim.payloads
                 .withIndex()
                 .associate { it.value.flowId to it.index }

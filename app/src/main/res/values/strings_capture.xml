@@ -9,7 +9,7 @@
     <string name="capture_notice_vpn_establish_failed">Unable to establish VPN: %1$s</string>
     <string name="capture_notice_vpn_permission_revoked">VPN permission was revoked</string>
     <string name="capture_notice_native_start_failed">Native forwarding core failed to start</string>
-    <string name="capture_notice_stopped_unexpectedly">Capture stopped unexpectedly; press Prepare capture to retry</string>
+    <string name="capture_notice_stopped_unexpectedly">Capture stopped unexpectedly. Start capture again to retry.</string>
     <string name="capture_notice_capture_once_complete">Captured Platoon roster, activity, and updates</string>
     <string name="capture_notice_capture_once_partial">Captured Platoon roster; missing %1$s after the navigation period</string>
     <string name="capture_notice_traffic">Forwarded %1$s KiB; inspected %2$s KiB; decoded %3$s payloads; warnings %4$s; dropped %5$s</string>

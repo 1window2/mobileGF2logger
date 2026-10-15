@@ -24,13 +24,16 @@ internal object PlatoonProfilePolicy {
     internal class AdmissionGate {
         private val admittedClients = mutableSetOf<String>()
 
+        @Synchronized
         fun canAdmit(ownerPackage: String, alreadyRegistered: Boolean): Boolean =
             alreadyRegistered || ownerPackage !in admittedClients
 
+        @Synchronized
         fun markAdmitted(ownerPackage: String) {
             admittedClients += ownerPackage
         }
 
+        @Synchronized
         fun clear() = admittedClients.clear()
     }
 }

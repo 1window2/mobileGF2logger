@@ -29,7 +29,6 @@ internal class PlatoonAdmissionCoordinator(
     }
 
     private val tokenByFlow = HashMap<Long, String>()
-    private val admissionGate = PlatoonProfilePolicy.AdmissionGate()
 
     fun beginSession() = admissionGate.clear()
 
@@ -207,5 +206,12 @@ internal class PlatoonAdmissionCoordinator(
 
     companion object {
         const val MAX_STATUS_NAME_CHARS = 40
+
+        /**
+         * Process-wide like the pending candidates it limits: the service, and with it this
+         * coordinator, is recreated after capture stops, while candidates from that capture can
+         * still be confirmed. A per-instance gate would reset and admit every one of them.
+         */
+        private val admissionGate = PlatoonProfilePolicy.AdmissionGate()
     }
 }

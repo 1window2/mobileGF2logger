@@ -64,8 +64,10 @@ internal object PlatoonReadQueries {
         }
     }
 
+    /** Two queries in total: the members, then every listed member's periods at once. */
     fun listMemberStatuses(db: SQLiteDatabase, activeOnly: Boolean): List<MemberStatus> {
         val selection = if (activeOnly) "is_active = 1" else null
+        val periodsByUid = readMembershipPeriods(db, selection)
         return db.query(
             "members",
             MEMBER_COLUMNS,
@@ -87,7 +89,7 @@ internal object PlatoonReadQueries {
                             firstSeenAt = Instant.ofEpochMilli(cursor.getLong(4)),
                             lastSeenAt = Instant.ofEpochMilli(cursor.getLong(5)),
                             note = cursor.getString(6),
-                            membershipPeriods = readMembershipPeriods(db, uid),
+                            membershipPeriods = periodsByUid[uid].orEmpty(),
                         ),
                     )
                 }
@@ -95,40 +97,39 @@ internal object PlatoonReadQueries {
         }
     }
 
-    private fun readMembershipPeriods(db: SQLiteDatabase, uid: Long): List<MembershipPeriod> =
-        db.query(
-            "membership_periods",
-            MEMBERSHIP_PERIOD_COLUMNS,
-            "uid = ?",
-            arrayOf(uid.toString()),
-            null,
-            null,
-            "CASE WHEN joined_at IS NULL THEN 1 ELSE 0 END, joined_at, id",
-        ).use { cursor ->
-            buildList {
-                while (cursor.moveToNext()) {
-                    add(
-                        MembershipPeriod(
-                            id = cursor.getLong(0),
-                            uid = uid,
-                            joinedAt = cursor.getNullableInstant(1),
-                            leftAt = cursor.getNullableInstant(2),
-                            joinedDate = cursor.getNullableLong(3)?.let(LocalDate::ofEpochDay),
-                            leftDate = cursor.getNullableLong(4)?.let(LocalDate::ofEpochDay),
-                            joinedTimeKnown = cursor.getInt(5) != 0,
-                            leftTimeKnown = cursor.getNullableInt(6)?.let { it != 0 },
-                            joinedPrecision = enumValueOf(cursor.getString(7)),
-                            leftPrecision = cursor.getNullableString(8)
-                                ?.let(EvidencePrecision::valueOf),
-                            joinedSource = enumValueOf(cursor.getString(9)),
-                            leftSource = cursor.getNullableString(10)
-                                ?.let(EvidenceSource::valueOf),
-                            note = cursor.getString(11),
-                        ),
-                    )
-                }
-            }
+    private fun readMembershipPeriods(
+        db: SQLiteDatabase,
+        memberSelection: String?,
+    ): Map<Long, List<MembershipPeriod>> = db.query(
+        "membership_periods",
+        MEMBERSHIP_PERIOD_COLUMNS,
+        memberSelection?.let { "uid IN (SELECT uid FROM members WHERE $it)" },
+        null,
+        null,
+        null,
+        "uid, CASE WHEN joined_at IS NULL THEN 1 ELSE 0 END, joined_at, id",
+    ).use { cursor ->
+        val periods = mutableMapOf<Long, MutableList<MembershipPeriod>>()
+        while (cursor.moveToNext()) {
+            val uid = cursor.getLong(12)
+            periods.getOrPut(uid, ::mutableListOf) += MembershipPeriod(
+                id = cursor.getLong(0),
+                uid = uid,
+                joinedAt = cursor.getNullableInstant(1),
+                leftAt = cursor.getNullableInstant(2),
+                joinedDate = cursor.getNullableLong(3)?.let(LocalDate::ofEpochDay),
+                leftDate = cursor.getNullableLong(4)?.let(LocalDate::ofEpochDay),
+                joinedTimeKnown = cursor.getInt(5) != 0,
+                leftTimeKnown = cursor.getNullableInt(6)?.let { it != 0 },
+                joinedPrecision = enumValueOf(cursor.getString(7)),
+                leftPrecision = cursor.getNullableString(8)?.let(EvidencePrecision::valueOf),
+                joinedSource = enumValueOf(cursor.getString(9)),
+                leftSource = cursor.getNullableString(10)?.let(EvidenceSource::valueOf),
+                note = cursor.getString(11),
+            )
         }
+        periods
+    }
 
     fun listEvents(
         db: SQLiteDatabase,
@@ -264,5 +265,6 @@ internal object PlatoonReadQueries {
         "joined_source",
         "left_source",
         "note",
+        "uid",
     )
 }

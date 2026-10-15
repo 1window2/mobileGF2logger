@@ -114,6 +114,7 @@ internal class WeeklyTable(
                 "${day.monthValue}/${day.dayOfMonth}",
                 DAY_WIDTH,
                 Gravity.CENTER,
+                today = day == PlatoonPeriods.gameDay(now, zone),
             )
         } + headerCell(context.getString(R.string.total), null, TOTAL_WIDTH, Gravity.CENTER),
         height = context.dp(HEADER_HEIGHT),
@@ -343,17 +344,22 @@ internal class WeeklyTable(
         null -> NONE_MARK
     }
 
-    private fun headerCell(title: String, subtitle: String?, widthDp: Int, gravity: Int): View = context.column {
+    /** Today's column is marked with the accent so the open game day is found at a glance. */
+    private fun headerCell(title: String, subtitle: String?, widthDp: Int, gravity: Int, today: Boolean = false): View = context.column {
         this.gravity = gravity
         setPadding(context.dp(10), 0, context.dp(6), 0)
-        setBackgroundColor(context.getColor(R.color.table_header))
+        setBackgroundColor(context.getColor(if (today) R.color.accent_surface else R.color.table_header))
         addView(context.text(title, TextRole.LABEL) {
-            setTextColor(context.getColor(R.color.text_primary))
+            setTextColor(context.getColor(if (today) R.color.accent_text else R.color.text_primary))
             this.gravity = gravity
         }, context.lp())
         subtitle?.let {
-            addView(context.text(it, TextRole.CAPTION) { this.gravity = gravity }, context.lp())
+            addView(context.text(it, TextRole.CAPTION) {
+                this.gravity = gravity
+                if (today) setTextColor(context.getColor(R.color.accent_text))
+            }, context.lp())
         }
+        if (today) contentDescription = context.getString(R.string.today_column, title, subtitle.orEmpty())
         layoutParams = LinearLayout.LayoutParams(context.dp(widthDp), LinearLayout.LayoutParams.MATCH_PARENT)
     }
 

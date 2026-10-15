@@ -590,4 +590,8 @@
     <string name="png_anonymous_member">Member %1$d</string>
     <string name="capturing_clients">Watching %1$s. Open the Platoon pages in the game.</string>
     <string name="clients_and">%1$s and %2$s</string>
+    <string name="today_column">Today, %1$s %2$s</string>
+    <string name="latest_roster_title">Latest roster · %1$s</string>
+    <string name="roster_joined_count">joined %1$d</string>
+    <string name="roster_withdrew_count">withdrew %1$d</string>
 </resources>

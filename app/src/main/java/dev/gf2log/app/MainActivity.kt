@@ -27,6 +27,9 @@ import dev.gf2log.app.capture.format
 import dev.gf2log.app.history.CaptureHistoryStore
 import dev.gf2log.app.history.SavedHistoryStore
 import dev.gf2log.app.management.PlatoonCsvImportStore
+import dev.gf2log.app.management.PlatoonRepository
+import dev.gf2log.app.management.SnapshotComparison
+import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.AccessibleRow
 import dev.gf2log.app.ui.BackgroundWork
@@ -70,6 +73,7 @@ class MainActivity : BaseActivity() {
     private var historyStore: CaptureHistoryStore? = null
     private var savedStore: SavedHistoryStore? = null
 
+    private lateinit var capturePanel: LinearLayout
     private lateinit var stateDot: View
     private lateinit var stateTitle: TextView
     private lateinit var stateDetail: TextView
@@ -78,6 +82,7 @@ class MainActivity : BaseActivity() {
     private lateinit var progressBanner: LinearLayout
     private lateinit var progressText: TextView
     private lateinit var historySection: LinearLayout
+    private lateinit var rosterSummary: LinearLayout
 
     private var captureOnceRequested = false
     private var showingSaved = false
@@ -170,6 +175,7 @@ class MainActivity : BaseActivity() {
             return
         }
         loadHistory()
+        loadRosterSummary()
         csvImport.onScreenReady()
     }
 
@@ -198,6 +204,8 @@ class MainActivity : BaseActivity() {
         addView(capturePanel(), lp(top = 4))
         addView(sectionHeader(getString(R.string.active_platoon_section)), lp())
         addView(PlatoonProfileSelector.card(this@MainActivity), lp())
+        rosterSummary = column { visibility = View.GONE }
+        addView(rosterSummary, lp(top = 8))
         addView(sectionHeader(getString(R.string.data_tools)), lp())
         addView(group(listOf(
             navigationRow(getString(R.string.import_platoon_csv), getString(R.string.import_platoon_csv_detail), R.drawable.ic_upload) {
@@ -230,7 +238,7 @@ class MainActivity : BaseActivity() {
         stateDetail = text(null, TextRole.SECONDARY) { maxLines = 4 }
         checklist = column { visibility = View.GONE }
         captureActions = row(Gravity.TOP)
-        return panel(outlined = true) {
+        capturePanel = panel(outlined = true) {
             addView(row {
                 addView(stateDot, lp(10, 10, end = 8))
                 addView(text(getString(R.string.capture_status_label), TextRole.LABEL), lp(width = 0, weight = 1f))
@@ -241,6 +249,7 @@ class MainActivity : BaseActivity() {
             addView(clientRows(), lp(top = 12))
             addView(captureActions, lp(top = 12))
         }
+        return capturePanel
     }
 
     private fun clientRows(): View = column {
@@ -280,6 +289,11 @@ class MainActivity : BaseActivity() {
         }
         stateTitle.text = getString(title)
         stateTitle.setTextColor(getColor(color))
+        // A running capture tints the whole panel so its state reads from across the room.
+        (capturePanel.background as GradientDrawable).apply {
+            setColor(getColor(if (phase == CapturePhase.RUNNING) R.color.success_surface else R.color.surface))
+            setStroke(dp(1), getColor(if (phase == CapturePhase.RUNNING) R.color.success_mark else R.color.outline))
+        }
         (stateDot.background as GradientDrawable).setColor(
             getColor(
                 when (phase) {
@@ -440,6 +454,50 @@ class MainActivity : BaseActivity() {
     }
 
     // endregion
+
+    /** The latest roster change, so a leader sees what the last session captured without leaving Home. */
+    private fun loadRosterSummary() {
+        val scope = profileBinding.scope ?: return
+        work.run(
+            key = SUMMARY,
+            task = {
+                val snapshots = PlatoonRepository(this, scope).listSnapshots(2)
+                val latest = snapshots.firstOrNull()
+                latest?.let {
+                    Triple(
+                        it,
+                        snapshots.getOrNull(1)?.let { older -> SnapshotComparison.compare(older, it) },
+                        GameTimeZonePreferences.get(this, scope.storageId),
+                    )
+                }
+            },
+        ) { result ->
+            val summary = result.getOrNull()
+            if (summary == null) {
+                rosterSummary.visibility = View.GONE
+                return@run
+            }
+            val (latest, comparison, zone) = summary
+            rosterSummary.removeAllViews()
+            rosterSummary.visibility = View.VISIBLE
+            val detail = buildList {
+                add(resources.getQuantityString(R.plurals.member_count, latest.members.size, latest.members.size))
+                comparison?.let {
+                    add(getString(R.string.roster_joined_count, it.joined.size))
+                    add(getString(R.string.roster_withdrew_count, it.left.size))
+                }
+            }.joinToString(" · ")
+            rosterSummary.addView(group(listOf(
+                navigationRow(
+                    getString(R.string.latest_roster_title, Labels.format(Labels.DATE_TIME, latest.capturedAt, zone)),
+                    detail,
+                    R.drawable.ic_compare,
+                    enabled = comparison != null,
+                    showChevron = comparison != null,
+                ) { startActivity(Intent(this, SnapshotComparisonActivity::class.java)) },
+            )), lp())
+        }
+    }
 
     // region Packet history
 
@@ -661,6 +719,7 @@ class MainActivity : BaseActivity() {
 
     private companion object {
         const val HISTORY = "history"
+        const val SUMMARY = "summary"
         const val RECENT = "recent"
         const val SAVED = "saved"
         const val COLLAPSED_COUNT = 20

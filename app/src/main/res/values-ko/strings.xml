@@ -582,4 +582,8 @@
     <string name="png_anonymous_member">멤버 %1$d</string>
     <string name="capturing_clients">%1$s 통신을 보는 중입니다. 게임에서 서클 화면을 여세요.</string>
     <string name="clients_and">%1$s, %2$s</string>
+    <string name="today_column">오늘, %1$s %2$s</string>
+    <string name="latest_roster_title">최근 명단 · %1$s</string>
+    <string name="roster_joined_count">가입 %1$d</string>
+    <string name="roster_withdrew_count">탈퇴 %1$d</string>
 </resources>

@@ -700,8 +700,10 @@ class WeeklyReportActivity : BaseActivity() {
     }
 
     private fun confirmEditing() {
-        val current = model ?: return
+        if (model == null) return
         Dialogs.confirm(this, R.string.manual_edit_warning_title, R.string.manual_edit_warning, R.string.start_editing) {
+            // A resume may have re-rendered while the warning was open; edit what is shown now.
+            val current = model ?: return@confirm
             editingPeriod = current.report.periodStart
             edits.clear()
             render(current)

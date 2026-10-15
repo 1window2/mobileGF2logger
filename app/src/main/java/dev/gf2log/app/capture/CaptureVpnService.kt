@@ -79,7 +79,7 @@ class CaptureVpnService : VpnService() {
                 .minus(captured)
                 .map(PayloadCatalog::tag)
                 .joinToString()
-            stopCapture("Captured Platoon roster; missing $missing after the navigation period")
+            stopCapture(CaptureNotice.CAPTURE_ONCE_PARTIAL, missing)
         }
     }
     private val migrationExecutor = Executors.newSingleThreadExecutor { runnable ->
@@ -96,6 +96,7 @@ class CaptureVpnService : VpnService() {
         payloadHistoryPreferences = PayloadHistoryPreferences(this)
         capturePreferences = CapturePreferences(this)
         diagnosticsStore = CaptureDiagnosticsStore(this)
+        CaptureStatus.attachLegacyContext(this)
         createNotificationChannel()
     }
 
@@ -113,14 +114,14 @@ class CaptureVpnService : VpnService() {
                     intent.getStringExtra(EXTRA_SERVER_REGION),
                 )
                 if (token.isNullOrBlank() || region == GameServerRegion.MANUAL) {
-                    CaptureStatus.update("Unable to confirm the pending Platoon")
+                    CaptureStatus.report(CaptureNotice.ADMISSION_INVALID)
                     stopSelf(startId)
                 } else if (!submitParserTask {
                         confirmPendingPlatoon(token, region)
                         if (tunnel == null) stopSelf(startId)
                     }
                 ) {
-                    CaptureStatus.update("Unable to queue the pending Platoon confirmation")
+                    CaptureStatus.report(CaptureNotice.PARSER_OVERLOADED)
                     stopSelf(startId)
                 }
             }
@@ -132,7 +133,7 @@ class CaptureVpnService : VpnService() {
                             if (tunnel == null) stopSelf(startId)
                         }
                     ) {
-                        CaptureStatus.update("Unable to queue the pending Platoon discard")
+                        CaptureStatus.report(CaptureNotice.PARSER_OVERLOADED)
                         stopSelf(startId)
                     }
                 } else {
@@ -160,19 +161,19 @@ class CaptureVpnService : VpnService() {
 
     private fun startCapture() {
         if (tunnel != null) {
-            CaptureStatus.markRunning("Capture is already running")
+            CaptureStatus.report(CaptureNotice.ALREADY_RUNNING)
             updateNotification("Capturing selected game traffic")
             return
         }
         if (captureStartPending) {
-            CaptureStatus.update("Preparing capture")
+            CaptureStatus.report(CaptureNotice.PREPARING)
             return
         }
 
         startInForeground("Preparing capture")
-        CaptureStatus.update("Preparing capture")
+        CaptureStatus.report(CaptureNotice.PREPARING)
         if (!NativeCaptureBridge.isAvailable) {
-            failStart("Protocol parser ready; native forwarding core is not integrated yet")
+            failStart(CaptureNotice.NATIVE_UNAVAILABLE)
             return
         }
 
@@ -189,7 +190,7 @@ class CaptureVpnService : VpnService() {
                 captureStartPending = false
                 migration.fold(
                     onSuccess = { startTunnel() },
-                    onFailure = { failStart("Unable to import previous Platoon history") },
+                    onFailure = { failStart(CaptureNotice.HISTORY_IMPORT_FAILED) },
                 )
             }
         }
@@ -214,19 +215,22 @@ class CaptureVpnService : VpnService() {
             }
         }
         if (installedTargets.isEmpty()) {
-            failStart("Install a supported HaoPlay or Darkwinter client first")
+            failStart(CaptureNotice.NO_SUPPORTED_CLIENT)
             return
         }
 
         val descriptor = try {
             builder.establish()
         } catch (error: Exception) {
-            failStart("Unable to establish VPN: ${error.message ?: error.javaClass.simpleName}")
+            failStart(
+                CaptureNotice.VPN_ESTABLISH_FAILED,
+                error.message ?: error.javaClass.simpleName,
+            )
             return
         }
 
         if (descriptor == null) {
-            failStart("VPN permission was revoked")
+            failStart(CaptureNotice.VPN_PERMISSION_REVOKED)
             return
         }
         tunnel = descriptor
@@ -250,7 +254,6 @@ class CaptureVpnService : VpnService() {
         mainHandler.removeCallbacks(captureOnceGraceStop)
         sessionStartedAt = Instant.now()
 
-        CaptureStatus.markRunning("Starting native capture")
         val started = try {
             NativeCaptureBridge.start(
                 descriptor.fd,
@@ -299,11 +302,11 @@ class CaptureVpnService : VpnService() {
             false
         }
         if (!started) {
-            failStart("Native forwarding core failed to start")
+            failStart(CaptureNotice.NATIVE_START_FAILED)
             return
         }
 
-        CaptureStatus.markRunning("Capturing only ${installedTargets.joinToString()}")
+        CaptureStatus.markRunning(installedTargets)
         updateNotification("Capturing selected game traffic")
     }
 
@@ -385,13 +388,13 @@ class CaptureVpnService : VpnService() {
     private fun submitParserTask(task: () -> Unit): Boolean = try {
         parserExecutor.execute {
             runCatching(task).onFailure {
-                CaptureStatus.update("Protocol processing failed: ${it.javaClass.simpleName}")
+                CaptureStatus.report(CaptureNotice.PROCESSING_FAILED, it.javaClass.simpleName)
             }
         }
         true
     } catch (_: RejectedExecutionException) {
         val dropped = droppedParserTaskCount.incrementAndGet()
-        CaptureStatus.update("Parser overloaded; dropped $dropped queued chunks")
+        CaptureStatus.report(CaptureNotice.PARSER_OVERLOADED, dropped.toString())
         false
     }
 
@@ -437,13 +440,13 @@ class CaptureVpnService : VpnService() {
     ) {
         if (pendingFlowPayloads.isRejected(flowId)) {
             quarantineFlow(flowId)
-            CaptureStatus.update("Discarded an identified flow whose pre-identity buffer overflowed")
+            CaptureStatus.report(CaptureNotice.IDENTIFIED_FLOW_BUFFER_OVERFLOW)
             return
         }
         val ownerPackage = metadata?.ownerPackage
         if (ownerPackage !in SupportedGamePackages.all) {
             quarantineFlow(flowId)
-            CaptureStatus.update("Detected a Platoon profile, but its game client could not be verified")
+            CaptureStatus.report(CaptureNotice.CLIENT_UNVERIFIED)
             return
         }
         val verifiedOwnerPackage = requireNotNull(ownerPackage)
@@ -458,7 +461,7 @@ class CaptureVpnService : VpnService() {
             }
             discardPendingPlatoon(token)
             quarantineFlow(flowId)
-            CaptureStatus.update("Discarded a flow whose pending Platoon identity changed")
+            CaptureStatus.report(CaptureNotice.PENDING_IDENTITY_CHANGED)
             return
         }
         val knownProfiles = profileRegistry.findByClientAndPlatoonId(
@@ -480,14 +483,14 @@ class CaptureVpnService : VpnService() {
         val current = flowSessions[flowId]
         if (current != null && current.profile.storageId != known.storageId) {
             quarantineFlow(flowId)
-            CaptureStatus.update("Discarded a flow whose Platoon identity changed")
+            CaptureStatus.report(CaptureNotice.IDENTITY_CHANGED)
             return
         }
         val profile = runCatching {
             profileRegistry.updateObserved(known.storageId, data)
         }.getOrElse {
             quarantineFlow(flowId)
-            CaptureStatus.update("Unable to isolate the detected Platoon")
+            CaptureStatus.report(CaptureNotice.PROFILE_UPDATE_FAILED)
             return
         }
         if (current?.profile?.storageId == profile.storageId) {
@@ -501,9 +504,11 @@ class CaptureVpnService : VpnService() {
         pendingFlowPayloads.take(flowId).forEach { pending ->
             routeConfirmedPayload(session, pending)
         }
-        CaptureStatus.update(
-            "Detected ${profile.platoonName.take(40)} (${profile.platoonId}) via " +
-                profile.client.displayName,
+        CaptureStatus.report(
+            CaptureNotice.PLATOON_DETECTED,
+            profile.platoonName.take(40),
+            profile.platoonId.toString(),
+            profile.client.displayName,
         )
         markRequiredPayloadCaptured(
             profile.storageId,
@@ -516,7 +521,7 @@ class CaptureVpnService : VpnService() {
             when (val result = PendingPlatoonAdmissionStore.offer(token, flowId, payload)) {
                 PendingPlatoonAdmissionStore.OfferResult.Accepted -> Unit
                 PendingPlatoonAdmissionStore.OfferResult.Claimed ->
-                    CaptureStatus.update("Waiting for the pending Platoon confirmation to finish")
+                    CaptureStatus.report(CaptureNotice.ADMISSION_IN_PROGRESS)
                 PendingPlatoonAdmissionStore.OfferResult.Missing -> {
                     pendingAdmissionByFlow.remove(flowId, token)
                     quarantineFlow(flowId)
@@ -526,14 +531,14 @@ class CaptureVpnService : VpnService() {
                         pendingAdmissionByFlow.remove(rejectedFlow, token)
                         quarantineFlow(rejectedFlow)
                     }
-                    CaptureStatus.update("Discarded an oversized pending Platoon capture")
+                    CaptureStatus.report(CaptureNotice.PENDING_OVERFLOW)
                 }
             }
             return
         }
         when (pendingFlowPayloads.offer(flowId, payload)) {
             BoundedFlowPayloadBuffer.OfferResult.OVERFLOW ->
-                CaptureStatus.update("Discarded an unidentified Platoon flow that exceeded its buffer")
+                CaptureStatus.report(CaptureNotice.FLOW_BUFFER_OVERFLOW)
             BoundedFlowPayloadBuffer.OfferResult.ACCEPTED,
             BoundedFlowPayloadBuffer.OfferResult.REJECTED,
             -> Unit
@@ -549,7 +554,7 @@ class CaptureVpnService : VpnService() {
         val token = result.token
         if (token == null) {
             result.rejectedFlowIds.forEach(::quarantineFlow)
-            CaptureStatus.update("Discarded a new Platoon because the confirmation queue is full")
+            CaptureStatus.report(CaptureNotice.PENDING_QUEUE_FULL)
             return
         }
         pendingAdmissionByFlow[flowId] = token
@@ -561,7 +566,7 @@ class CaptureVpnService : VpnService() {
                         pendingAdmissionByFlow.remove(rejected, token)
                         quarantineFlow(rejected)
                     }
-                    CaptureStatus.update("Discarded an oversized pending Platoon capture")
+                    CaptureStatus.report(CaptureNotice.PENDING_OVERFLOW)
                     return
                 }
                 PendingPlatoonAdmissionStore.OfferResult.Claimed,
@@ -573,7 +578,7 @@ class CaptureVpnService : VpnService() {
                 }
             }
         }
-        CaptureStatus.update("New Platoon detected; return to GF2logger and choose its server")
+        CaptureStatus.report(CaptureNotice.PENDING_DETECTED)
     }
 
     private fun confirmPendingPlatoon(token: String, region: GameServerRegion) {
@@ -581,7 +586,7 @@ class CaptureVpnService : VpnService() {
         val ownerPackage = claim.summary.ownerPackage
         if (region !in clientServerRegions.allowed(ownerPackage)) {
             PendingPlatoonAdmissionStore.releaseClaim(token)
-            CaptureStatus.update("The selected server does not belong to the verified client")
+            CaptureStatus.report(CaptureNotice.ADMISSION_REGION_MISMATCH)
             return
         }
         val client = requireNotNull(PlatoonClient.fromPackage(ownerPackage))
@@ -592,7 +597,7 @@ class CaptureVpnService : VpnService() {
         )
         if (!profileAdmissionGate.canAdmit(ownerPackage, existing != null)) {
             PendingPlatoonAdmissionStore.releaseClaim(token)
-            CaptureStatus.update("Start a new capture before adding another Platoon for this client")
+            CaptureStatus.report(CaptureNotice.ADMISSION_LIMIT)
             return
         }
         val previousRegion = clientServerRegions.stored(ownerPackage)
@@ -612,7 +617,7 @@ class CaptureVpnService : VpnService() {
                 }
             }.onFailure(error::addSuppressed)
             PendingPlatoonAdmissionStore.releaseClaim(token)
-            CaptureStatus.update("Unable to create the confirmed Platoon profile")
+            CaptureStatus.report(CaptureNotice.ADMISSION_PROFILE_FAILED)
             return
         }
         if (existing == null) profileAdmissionGate.markAdmitted(ownerPackage)
@@ -647,7 +652,7 @@ class CaptureVpnService : VpnService() {
                 runCatching(session::close)
             }
             PendingPlatoonAdmissionStore.releaseClaim(token)
-            CaptureStatus.update("Unable to apply the confirmed Platoon packets")
+            CaptureStatus.report(CaptureNotice.ADMISSION_REPLAY_FAILED)
             return
         }
         claim.endedFlowIds.forEach { flowId ->
@@ -659,9 +664,11 @@ class CaptureVpnService : VpnService() {
         PendingPlatoonAdmissionStore.complete(token).forEach { flowId ->
             pendingAdmissionByFlow.remove(flowId, token)
         }
-        CaptureStatus.update(
-            "Confirmed ${profile.platoonName.take(40)} (${profile.platoonId}) via " +
-                profile.client.displayName,
+        CaptureStatus.report(
+            CaptureNotice.PLATOON_CONFIRMED,
+            profile.platoonName.take(40),
+            profile.platoonId.toString(),
+            profile.client.displayName,
         )
     }
 
@@ -672,7 +679,7 @@ class CaptureVpnService : VpnService() {
                 quarantineFlow(flowId)
             }
         }
-        CaptureStatus.update("Discarded the unconfirmed Platoon packets")
+        CaptureStatus.report(CaptureNotice.PENDING_DISCARDED)
     }
 
     private fun replaceFlowSession(
@@ -684,7 +691,6 @@ class CaptureVpnService : VpnService() {
             context = this,
             profile = profile,
             onRosterCaptured = ::markRosterCaptured,
-            onStatus = CaptureStatus::update,
         ).also { flowSessions[flowId] = it }
     }
 
@@ -708,7 +714,7 @@ class CaptureVpnService : VpnService() {
                     Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY,
                 )
             }
-        }?.onFailure { CaptureStatus.update("Unable to update Platoon activity history") }
+        }?.onFailure { CaptureStatus.report(CaptureNotice.ACTIVITY_SAVE_FAILED) }
         routed.updates?.onSuccess { accepted ->
             if (accepted) {
                 markRequiredPayloadCaptured(
@@ -716,14 +722,16 @@ class CaptureVpnService : VpnService() {
                     Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES,
                 )
             }
-        }?.onFailure { CaptureStatus.update("Unable to update exact Platoon history") }
+        }?.onFailure { CaptureStatus.report(CaptureNotice.UPDATES_SAVE_FAILED) }
         routed.members.onSuccess { saved ->
             if (saved != null) {
-                CaptureStatus.update(
-                    "Saved ${saved.rowCount} members for ${session.profile.platoonName}",
+                CaptureStatus.report(
+                    CaptureNotice.ROSTER_SAVED,
+                    saved.rowCount.toString(),
+                    session.profile.platoonName,
                 )
             }
-        }.onFailure { CaptureStatus.update("Unable to save Platoon CSV") }
+        }.onFailure { CaptureStatus.report(CaptureNotice.ROSTER_SAVE_FAILED) }
     }
 
     private fun routeConfirmedPayload(
@@ -750,7 +758,7 @@ class CaptureVpnService : VpnService() {
             )
         }
         runCatching { historyStore.save(payload) }
-            .onFailure { CaptureStatus.update("Unable to save parsed-packet history") }
+            .onFailure { CaptureStatus.report(CaptureNotice.HISTORY_SAVE_FAILED) }
     }
 
     private fun closeFlowSession(flowId: Long) {
@@ -775,7 +783,7 @@ class CaptureVpnService : VpnService() {
                 CaptureStatus.isRunning &&
                 captureChecklist.targetComplete()
             ) {
-                stopCapture("Captured Platoon roster, activity, and updates")
+                stopCapture(CaptureNotice.CAPTURE_ONCE_COMPLETE)
             }
         }
     }
@@ -802,10 +810,13 @@ class CaptureVpnService : VpnService() {
         val bucket = observed / TRAFFIC_REPORT_BYTES
         val previousBucket = reportedTrafficBucket.get()
         if (bucket > previousBucket && reportedTrafficBucket.compareAndSet(previousBucket, bucket)) {
-            CaptureStatus.update(
-                "Forwarded ${observed / 1024} KiB; inspected ${inspected / 1024} KiB; " +
-                    "decoded ${decodedPayloadCount.get()} payloads; " +
-                    "warnings ${parseWarningCount.get()}; dropped ${droppedParserTaskCount.get()}",
+            CaptureStatus.report(
+                CaptureNotice.TRAFFIC,
+                (observed / 1024).toString(),
+                (inspected / 1024).toString(),
+                decodedPayloadCount.get().toString(),
+                parseWarningCount.get().toString(),
+                droppedParserTaskCount.get().toString(),
             )
         }
     }
@@ -820,24 +831,24 @@ class CaptureVpnService : VpnService() {
             flowMetadata.clear()
             closeAllFlowSessions()
             pendingFlowPayloads.clear()
-            CaptureStatus.markStopped("Capture stopped unexpectedly; press Prepare capture to retry")
+            CaptureStatus.markStopped(CaptureNotice.STOPPED_UNEXPECTEDLY)
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
     }
 
-    private fun failStart(message: String) {
+    private fun failStart(notice: CaptureNotice, vararg args: String) {
         captureStartPending = false
         releaseCaptureResources()
-        CaptureStatus.markStopped(message)
+        CaptureStatus.markStopped(notice, *args)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
-    private fun stopCapture(message: String = "") {
+    private fun stopCapture(notice: CaptureNotice? = null, vararg args: String) {
         captureStartPending = false
         releaseCaptureResources()
-        if (message.isBlank()) CaptureStatus.markStopped() else CaptureStatus.markStopped(message)
+        CaptureStatus.markStopped(notice, *args)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -873,7 +884,7 @@ class CaptureVpnService : VpnService() {
                 unknownPayloads = unknownPayloadCounts.entries
                     .sortedBy { it.key }
                     .joinToString { "${it.key}:${it.value.get()}" },
-                finalStatus = CaptureStatus.read(),
+                finalStatus = CaptureStatus.snapshot().notice?.format(this).orEmpty(),
             ),
         )
         sessionStartedAt = null

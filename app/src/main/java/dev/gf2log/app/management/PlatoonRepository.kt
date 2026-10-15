@@ -619,12 +619,12 @@ internal class PlatoonRepository(
 
     companion object {
         const val RETAINED_CSV_DIRECTORY = "guild-members"
-        private const val MAX_REVISION_EVENTS = 512
-        private const val MAX_REVISION_NOTES = 128
-        private const val MAX_REVISION_NAMES = 768
-        private const val MAX_REVISION_NAME_BYTES = 1_024
-        private const val MAX_REVISION_NOTE_BYTES = 16 * 1_024
-        private const val MAX_REVISION_PRIVATE_NOTE_BYTES = 2 * 1_024
+        private const val MAX_REVISION_EVENTS = WeeklyReportHistoryCodec.MAX_EVENTS
+        private const val MAX_REVISION_NOTES = WeeklyReportHistoryCodec.MAX_NOTES
+        private const val MAX_REVISION_NAMES = WeeklyReportHistoryCodec.MAX_CONTEXT_MEMBERS
+        private const val MAX_REVISION_NAME_BYTES = WeeklyReportHistoryCodec.MAX_STRING_BYTES
+        private const val MAX_REVISION_NOTE_BYTES = WeeklyReportHistoryCodec.MAX_NOTE_BYTES
+        private const val MAX_REVISION_PRIVATE_NOTE_BYTES = WeeklyReportHistoryCodec.MAX_PRIVATE_NOTE_BYTES
         private const val TAG = "GF2PlatoonRepository"
         /*
          * Global lock order; acquire left to right and never in reverse:

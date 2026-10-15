@@ -15,6 +15,7 @@
     <string name="export_platoon_backup">Export Platoon backup</string>
     <string name="stop_capture_before_backup">Backups and restores wait until capture stops, so no packet lands halfway through.</string>
     <string name="status_backup_exported">Platoon backup exported</string>
+    <string name="status_backup_export_failed">Unable to export the Platoon backup</string>
     <string name="language">Language</string>
     <string name="language_english">English</string>
     <string name="language_korean_native">한국어</string>
@@ -144,6 +145,7 @@
     <string name="note_deleted">Note deleted</string>
     <string name="export_weekly_csv">Export weekly CSV</string>
     <string name="weekly_csv_exported">Weekly CSV exported</string>
+    <string name="weekly_csv_export_failed">Unable to export weekly CSV</string>
     <string name="export_all_weekly_tables">Export all weekly task tables</string>
     <string name="no_weekly_tables_to_export">No weekly task tables are available to export.</string>
     <string name="payload_options">Settings</string>

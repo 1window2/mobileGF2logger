@@ -64,7 +64,7 @@ class OptionsActivity : BaseActivity() {
         runBackup(
             progress = R.string.backup_exporting,
             success = if (complete) R.string.full_backup_exported else R.string.status_backup_exported,
-            failure = { R.string.full_backup_export_failed },
+            failure = { backupExportFailureMessage(complete) },
         ) {
             DocumentAccess.openOutput(contentResolver, uri).use { output ->
                 val manager = PlatoonBackupManager(this, scope)
@@ -493,3 +493,7 @@ class OptionsActivity : BaseActivity() {
 /** Known validation failures blame the selected file; anything else is an operational failure. */
 internal fun fullBackupRestoreFailureMessage(error: Throwable): Int =
     if (error is InvalidBackupException) R.string.invalid_full_backup else R.string.full_backup_restore_failed
+
+/** A Platoon-only export failure must not claim that the complete backup failed. */
+internal fun backupExportFailureMessage(complete: Boolean): Int =
+    if (complete) R.string.full_backup_export_failed else R.string.status_backup_export_failed

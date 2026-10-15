@@ -123,7 +123,7 @@ class WeeklyReportActivity : BaseActivity() {
                 DocumentAccess.openOutput(contentResolver, uri).writer(Charsets.UTF_8).use { it.write(csv) }
             },
         ) { result ->
-            Feedback.show(this, if (result.isSuccess) R.string.weekly_csv_exported else R.string.status_export_failed)
+            Feedback.show(this, if (result.isSuccess) R.string.weekly_csv_exported else R.string.weekly_csv_export_failed)
         }
     }
 

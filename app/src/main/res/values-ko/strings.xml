@@ -15,6 +15,7 @@
     <string name="export_platoon_backup">서클 관리 백업 내보내기</string>
     <string name="stop_capture_before_backup">캡처 중에는 패킷이 중간에 섞이지 않도록 백업과 복원을 할 수 없습니다.</string>
     <string name="status_backup_exported">서클 관리 백업을 내보냈습니다</string>
+    <string name="status_backup_export_failed">서클 관리 백업을 내보낼 수 없습니다</string>
     <string name="language">언어</string>
     <string name="language_english">English</string>
     <string name="language_korean_native">한국어</string>
@@ -144,6 +145,7 @@
     <string name="note_deleted">비고를 삭제했습니다</string>
     <string name="export_weekly_csv">주간 CSV 내보내기</string>
     <string name="weekly_csv_exported">주간 CSV를 내보냈습니다</string>
+    <string name="weekly_csv_export_failed">주간 CSV를 내보낼 수 없습니다</string>
     <string name="export_all_weekly_tables">전체 주간 과업표 내보내기</string>
     <string name="no_weekly_tables_to_export">내보낼 주간 과업표가 없습니다.</string>
     <string name="payload_options">설정</string>

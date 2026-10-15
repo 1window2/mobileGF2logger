@@ -289,7 +289,8 @@ class MainActivity : BaseActivity() {
                 }, lp(width = 0, weight = 1f))
                 addView(badge(
                     status,
-                    if (installed) R.color.success_surface else R.color.surface_variant,
+                    // Page-colored fill keeps the badge legible on the green running panel too.
+                    if (installed) R.color.app_background else R.color.surface_variant,
                     if (installed) R.color.success_text else R.color.text_secondary,
                 ).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, lp(WRAP, WRAP, start = 8))
             }, lp(top = if (index == 0) 0 else 6))

@@ -585,4 +585,7 @@
         <item quantity="other">Delete %1$d packets? This cannot be undone.</item>
     </plurals>
     <string name="member_since">First seen %1$s</string>
+    <string name="status_backup_restored">Platoon backup restored</string>
+    <string name="png_title">GF2logger — %1$s</string>
+    <string name="png_anonymous_member">Member %1$d</string>
 </resources>

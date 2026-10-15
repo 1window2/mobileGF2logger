@@ -20,6 +20,7 @@ import dev.gf2log.app.management.InvalidBackupException
 import dev.gf2log.app.management.PlatoonBackupManager
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonStorageScope
+import dev.gf2log.app.management.RestoredBackupKind
 import dev.gf2log.app.settings.CapturePreferences
 import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.app.settings.GameServerRegion
@@ -64,7 +65,6 @@ class OptionsActivity : BaseActivity() {
             progress = R.string.backup_exporting,
             success = if (complete) R.string.full_backup_exported else R.string.status_backup_exported,
             failure = { R.string.full_backup_export_failed },
-            reload = false,
         ) {
             DocumentAccess.openOutput(contentResolver, uri).use { output ->
                 val manager = PlatoonBackupManager(this, scope)
@@ -338,10 +338,25 @@ class OptionsActivity : BaseActivity() {
             Feedback.show(this, R.string.invalid_full_backup, long = true)
             return
         }
-        runBackup(R.string.backup_restoring, R.string.full_backup_restored, ::fullBackupRestoreFailureMessage, reload = true) {
-            DocumentAccess.openInput(contentResolver, uri).use { input ->
-                PlatoonBackupManager.restoreSelected(this, input, complete = true)
-            }
+        Feedback.show(this, R.string.backup_restoring)
+        work.run(
+            task = {
+                DocumentAccess.openInput(contentResolver, uri).use { input ->
+                    PlatoonBackupManager.restoreSelected(this, input)
+                }
+            },
+        ) { result ->
+            result.fold(
+                onSuccess = { kind ->
+                    Feedback.show(
+                        this,
+                        if (kind == RestoredBackupKind.COMPLETE) R.string.full_backup_restored else R.string.status_backup_restored,
+                        long = true,
+                    )
+                    recreate()
+                },
+                onFailure = { Feedback.show(this, fullBackupRestoreFailureMessage(it), long = true) },
+            )
         }
     }
 
@@ -349,13 +364,11 @@ class OptionsActivity : BaseActivity() {
         progress: Int,
         success: Int,
         failure: (Throwable) -> Int,
-        reload: Boolean,
         operation: () -> Unit,
     ) {
         Feedback.show(this, progress)
         work.run(task = operation) { result ->
             Feedback.show(this, result.fold(onSuccess = { success }, onFailure = failure), long = true)
-            if (result.isSuccess && reload) recreate()
         }
     }
 

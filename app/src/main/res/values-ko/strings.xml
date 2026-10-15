@@ -577,4 +577,7 @@
         <item quantity="other">패킷 %1$d개를 삭제할까요? 되돌릴 수 없습니다.</item>
     </plurals>
     <string name="member_since">%1$s 처음 확인</string>
+    <string name="status_backup_restored">서클 백업을 복원했습니다</string>
+    <string name="png_title">GF2logger — %1$s</string>
+    <string name="png_anonymous_member">멤버 %1$d</string>
 </resources>

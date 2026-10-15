@@ -266,27 +266,18 @@ internal class CsvImportFlow(
             task = {
                 val directory = import.target.scope.retainedCsvDirectory(activity)
                 val store = PlatoonCsvImportStore(directory)
-                val checkpoint = CsvImportCheckpointManager(activity, import.target.scope)
-                var checkpointCreated = false
-                runCatching {
-                    checkpoint.create(
-                        import.prepared.filterNot { it.fileName in import.duplicateFileNames }.mapTo(mutableSetOf()) { it.fileName },
-                    )
-                    checkpointCreated = true
+                val planned = import.prepared
+                    .filterNot { it.fileName in import.duplicateFileNames }
+                    .mapTo(mutableSetOf()) { it.fileName }
+                CsvImportCheckpointManager(activity, import.target.scope).runImport(planned) {
                     var retained = 0
                     var duplicates = 0
                     import.prepared.forEach { prepared ->
                         if (store.retain(prepared).duplicate) duplicates += 1 else retained += 1
                     }
                     val imported = PlatoonRepository(activity, import.target.scope).reconcileRetainedCsvFiles(directory)
-                    checkpoint.seal()
                     Summary(retained, duplicates, imported)
-                }.recoverCatching { failure ->
-                    if (checkpointCreated) {
-                        runCatching(checkpoint::rollbackFailedImport).exceptionOrNull()?.let(failure::addSuppressed)
-                    }
-                    throw failure
-                }.getOrThrow()
+                }
             },
         ) { result ->
             onProgress(null)

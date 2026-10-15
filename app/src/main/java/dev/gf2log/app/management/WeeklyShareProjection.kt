@@ -10,6 +10,21 @@ object WeeklyShareProjection {
         val includePrivateNotes: Boolean = false,
     )
 
+    /** Every word that appears in the image; the app passes its active language. */
+    data class Labels(
+        val standardTitle: String = "GF2logger \u2014 Standard week",
+        val gunsmokeTitle: String = "GF2logger \u2014 Gunsmoke week",
+        val member: String = "Member",
+        val total: String = "Total",
+        val privateNote: String = "Private note",
+        val anonymousMember: (Int) -> String = { "Member $it" },
+        val merit: String = "M",
+        val score: String = "S",
+        val attempts: String = "A",
+        val login: String = "L",
+        val patrol: String = "P",
+    )
+
     data class Document(
         val title: String,
         val subtitle: String,
@@ -31,27 +46,28 @@ object WeeklyShareProjection {
         displayedMembers: List<WeeklyReportBuilder.MemberRow>,
         privateNotesByUid: Map<Long, String>,
         privacy: Privacy,
+        labels: Labels = Labels(),
     ): Document {
         val reportUids = report.members.mapTo(mutableSetOf()) { it.uid }
         require(displayedMembers.all { it.uid in reportUids })
         val headers = buildList {
-            add("Member")
+            add(labels.member)
             addAll(report.days.map { it.format(DAY) })
-            add("Total")
-            if (privacy.includePrivateNotes) add("Private note")
+            add(labels.total)
+            if (privacy.includePrivateNotes) add(labels.privateNote)
         }
         val rows = displayedMembers.mapIndexed { index, member ->
             Row(
-                member = memberLabel(member, index, privacy),
-                dailyCells = member.days.map { formatDaily(it, report.isGunsmokeWeek) },
-                total = formatTotal(member, report.isGunsmokeWeek),
+                member = memberLabel(member, index, privacy, labels),
+                dailyCells = member.days.map { formatDaily(it, report.isGunsmokeWeek, labels) },
+                total = formatTotal(member, report.isGunsmokeWeek, labels),
                 privateNote = privateNotesByUid[member.uid]
                     ?.take(MAX_PRIVATE_NOTE_CHARS)
                     ?.takeIf { privacy.includePrivateNotes && it.isNotBlank() },
             )
         }
         return Document(
-            title = if (report.isGunsmokeWeek) "GF2logger \u2014 Gunsmoke week" else "GF2logger \u2014 Standard week",
+            title = if (report.isGunsmokeWeek) labels.gunsmokeTitle else labels.standardTitle,
             subtitle = report.periodStart.toString() + " \u2014 " + report.periodEnd.toString(),
             headers = headers,
             rows = rows,
@@ -64,38 +80,41 @@ object WeeklyShareProjection {
         member: WeeklyReportBuilder.MemberRow,
         index: Int,
         privacy: Privacy,
+        labels: Labels,
     ): String = when {
         privacy.includeMemberNames && privacy.includeUids ->
             member.name.take(MAX_MEMBER_LABEL_CHARS) + " (#" + member.uid + ")"
         privacy.includeMemberNames -> member.name.take(MAX_MEMBER_LABEL_CHARS)
         privacy.includeUids -> "#" + member.uid
-        else -> "Member " + (index + 1)
+        else -> labels.anonymousMember(index + 1)
     }
 
     private fun formatDaily(
         cell: WeeklyReportBuilder.DayCell,
         gunsmoke: Boolean,
+        labels: Labels,
     ): String = buildList {
-        add("M " + WeeklyMetricPresentation.format(cell.meritDelta, cell.meritCertainty))
+        add(labels.merit + " " + WeeklyMetricPresentation.format(cell.meritDelta, cell.meritCertainty))
         if (gunsmoke) {
-            add("S " + WeeklyMetricPresentation.format(cell.scoreDelta, cell.scoreCertainty))
-            add("A " + WeeklyMetricPresentation.format(cell.attempts, cell.attemptsCertainty))
+            add(labels.score + " " + WeeklyMetricPresentation.format(cell.scoreDelta, cell.scoreCertainty))
+            add(labels.attempts + " " + WeeklyMetricPresentation.format(cell.attempts, cell.attemptsCertainty))
         }
-        add("L " + activityMark(cell.attended))
-        add("P " + activityMark(cell.dailyPatrol))
+        add(labels.login + " " + activityMark(cell.attended))
+        add(labels.patrol + " " + activityMark(cell.dailyPatrol))
     }.joinToString("\n")
 
     private fun formatTotal(
         member: WeeklyReportBuilder.MemberRow,
         gunsmoke: Boolean,
+        labels: Labels,
     ): String = buildList {
-        add("M " + WeeklyMetricPresentation.format(member.totalMerit, member.totalMeritCertainty))
+        add(labels.merit + " " + WeeklyMetricPresentation.format(member.totalMerit, member.totalMeritCertainty))
         if (gunsmoke) {
-            add("S " + WeeklyMetricPresentation.format(member.totalScore, member.totalScoreCertainty))
-            add("A " + WeeklyMetricPresentation.format(member.totalAttempts, member.totalAttemptsCertainty))
+            add(labels.score + " " + WeeklyMetricPresentation.format(member.totalScore, member.totalScoreCertainty))
+            add(labels.attempts + " " + WeeklyMetricPresentation.format(member.totalAttempts, member.totalAttemptsCertainty))
         }
-        add("L " + WeeklyMetricPresentation.format(member.loginDays, member.loginDaysCertainty))
-        add("P " + WeeklyMetricPresentation.format(member.patrolDays, member.patrolDaysCertainty))
+        add(labels.login + " " + WeeklyMetricPresentation.format(member.loginDays, member.loginDaysCertainty))
+        add(labels.patrol + " " + WeeklyMetricPresentation.format(member.patrolDays, member.patrolDaysCertainty))
     }.joinToString("\n")
 
     private fun activityMark(value: Boolean?): String = when (value) {

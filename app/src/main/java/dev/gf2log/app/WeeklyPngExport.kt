@@ -20,6 +20,21 @@ import java.util.UUID
 internal object WeeklyPngExport {
     fun directory(cacheDirectory: File): File = File(cacheDirectory, DIRECTORY_NAME)
 
+    /** Image labels in the app's active language. */
+    fun labels(context: Context) = WeeklyShareProjection.Labels(
+        standardTitle = context.getString(R.string.png_title, context.getString(R.string.off_week)),
+        gunsmokeTitle = context.getString(R.string.png_title, context.getString(R.string.gunsmoke_week)),
+        member = context.getString(R.string.member),
+        total = context.getString(R.string.total),
+        privateNote = context.getString(R.string.member_private_note),
+        anonymousMember = { context.getString(R.string.png_anonymous_member, it) },
+        merit = context.getString(R.string.merit_short),
+        score = context.getString(R.string.point_short),
+        attempts = context.getString(R.string.attempt_short),
+        login = context.getString(R.string.login_short),
+        patrol = context.getString(R.string.patrol_short),
+    )
+
     fun exportName(periodStart: LocalDate): String = "GF2logger-week-${periodStart.format(DATE)}.png"
 
     fun render(context: Context, document: WeeklyShareProjection.Document, periodStart: LocalDate): File {

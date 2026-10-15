@@ -770,7 +770,13 @@ class WeeklyReportActivity : BaseActivity() {
                 task = {
                     WeeklyPngExport.render(
                         this,
-                        WeeklyShareProjection.build(current.report, current.displayedMembers, current.memberNotesByUid, privacy),
+                        WeeklyShareProjection.build(
+                            current.report,
+                            current.displayedMembers,
+                            current.memberNotesByUid,
+                            privacy,
+                            WeeklyPngExport.labels(this),
+                        ),
                         current.report.periodStart,
                     )
                 },

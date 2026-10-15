@@ -480,6 +480,25 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     @Test
+    fun csvCheckpointRecoversAnInterruptedRestoreIntoTheScopedSettings() {
+        settingsStore.replace(currentSettings())
+        FilePaths.restoreSettingsFile(context).apply {
+            parentFile?.mkdirs()
+            writeBytes(AppBackupSettingsCodec.encode(archivedSettings()))
+        }
+        FilePaths.restoreStateFile(context).writeText("PREPARED", Charsets.US_ASCII)
+
+        CsvImportCheckpointManager(context, storageScope).apply {
+            create(emptySet())
+            seal()
+        }
+
+        assertEquals(archivedSettings(), settingsStore.read())
+        assertTrue(dev.gf2log.app.settings.UserSettingsPreferences.memberOrder(context).isEmpty())
+        assertFalse(FilePaths.restoreTransactionDirectory(context).exists())
+    }
+
+    @Test
     fun interruptedCsvUndoCompletesAfterDatabaseInstallationOnRestart() {
         seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
         val manager = CsvImportCheckpointManager(context, storageScope) { checkpoint ->

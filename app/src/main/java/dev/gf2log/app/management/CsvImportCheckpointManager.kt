@@ -1,7 +1,7 @@
 package dev.gf2log.app.management
 
 import android.content.Context
-import dev.gf2log.app.settings.AppSettingsStore
+import dev.gf2log.app.settings.ScopedAppSettingsStore
 import java.io.File
 import java.io.FileOutputStream
 
@@ -68,11 +68,7 @@ class CsvImportCheckpointManager internal constructor(
             deleteDirectory(staging)
             check(staging.mkdirs()) { "Unable to stage the CSV import checkpoint" }
             FileOutputStream(archive(staging)).use { output ->
-                PlatoonBackupManager(
-                    appContext,
-                    AppSettingsStore(appContext),
-                    storageScope = storageScope,
-                ).export(output)
+                backupManager().export(output)
                 output.fd.sync()
             }
             FileOutputStream(manifest(staging)).use { output ->
@@ -108,12 +104,7 @@ class CsvImportCheckpointManager internal constructor(
         try {
             FileOutputStream(temporary).use { output ->
                 output.write(
-                    PlatoonBackupManager(
-                        appContext,
-                        AppSettingsStore(appContext),
-                        storageScope = storageScope,
-                    ).currentDatabaseSha256()
-                        .toByteArray(Charsets.US_ASCII),
+                    backupManager().currentDatabaseSha256().toByteArray(Charsets.US_ASCII),
                 )
                 output.fd.sync()
             }
@@ -141,13 +132,7 @@ class CsvImportCheckpointManager internal constructor(
             }
             val expectedDigest = digest(root).readText(Charsets.US_ASCII)
             require(expectedDigest.matches(SHA256)) { "Invalid CSV checkpoint digest" }
-            check(
-                PlatoonBackupManager(
-                    appContext,
-                    AppSettingsStore(appContext),
-                    storageScope = storageScope,
-                ).currentDatabaseSha256() == expectedDigest,
-            ) {
+            check(backupManager().currentDatabaseSha256() == expectedDigest) {
                 "Platoon data changed after the CSV import; undo would overwrite newer changes"
             }
             restoreUnchecked()
@@ -188,17 +173,12 @@ class CsvImportCheckpointManager internal constructor(
                     check(source.renameTo(target)) { "Unable to quarantine an imported CSV" }
                 }
             }
-            val backupManager = PlatoonBackupManager(
-                context = appContext,
-                settingsStore = AppSettingsStore(appContext),
-                storageScope = storageScope,
-                restoreObserver = { checkpoint ->
-                    if (checkpoint == PlatoonBackupManager.RestoreCheckpoint.DATABASE_INSTALLED) {
-                        markRestoreDatabaseInstalled()
-                    }
-                    restoreObserver(checkpoint)
-                },
-            )
+            val backupManager = backupManager { checkpoint ->
+                if (checkpoint == PlatoonBackupManager.RestoreCheckpoint.DATABASE_INSTALLED) {
+                    markRestoreDatabaseInstalled()
+                }
+                restoreObserver(checkpoint)
+            }
             archive(root).inputStream().use(backupManager::restoreCheckpoint)
         } catch (error: Exception) {
             val marker = restoreMarker(root)
@@ -296,6 +276,19 @@ class CsvImportCheckpointManager internal constructor(
             operationInProgress = false
         }
     }
+
+    /**
+     * Always binds restore recovery to this scope's settings. The global store would roll an
+     * interrupted scoped restore back into the legacy keys instead of the Platoon's own settings.
+     */
+    private fun backupManager(
+        observer: (PlatoonBackupManager.RestoreCheckpoint) -> Unit = {},
+    ) = PlatoonBackupManager(
+        context = appContext,
+        settingsStore = ScopedAppSettingsStore(appContext, storageScope.storageId),
+        restoreObserver = observer,
+        storageScope = storageScope,
+    )
 
     private fun requireSafeImportName(name: String) {
         require(name.matches(SAFE_IMPORT_NAME)) { "Invalid CSV checkpoint identity" }

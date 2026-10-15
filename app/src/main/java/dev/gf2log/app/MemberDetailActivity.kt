@@ -256,8 +256,9 @@ class MemberDetailActivity : BaseActivity() {
     }
 
     private fun confirmMemberDeletion() {
-        Dialogs.confirm(this, R.string.delete_member, R.string.delete_member_warning, R.string.delete, destructive = true) {
-            work.run(task = { repository.deleteMember(uid) }) { result ->
+        Dialogs.confirm(this, R.string.delete_member, R.string.delete_member_warning, R.string.delete, destructive = true) confirm@{
+            if (work.isBusy(DELETE)) return@confirm
+            work.run(key = DELETE, task = { repository.deleteMember(uid) }) { result ->
                 if (result.getOrDefault(false)) {
                     Feedback.show(this, R.string.member_deleted)
                     finish()
@@ -342,8 +343,9 @@ class MemberDetailActivity : BaseActivity() {
             R.string.delete_membership_period_warning,
             R.string.delete,
             destructive = true,
-        ) {
-            work.run(task = { repository.deleteMembershipPeriod(period.id) }) { result ->
+        ) confirm@{
+            if (work.isBusy(DELETE)) return@confirm
+            work.run(key = DELETE, task = { repository.deleteMembershipPeriod(period.id) }) { result ->
                 if (result.getOrDefault(false)) {
                     editor.dismiss()
                     Feedback.show(this, R.string.membership_period_deleted)
@@ -440,6 +442,7 @@ class MemberDetailActivity : BaseActivity() {
         const val EXTRA_UID = "uid"
         private const val LOAD = "load"
         private const val SAVE = "save"
+        private const val DELETE = "delete"
         private const val STATE_INPUTS_INITIALIZED = "member.inputs_initialized"
     }
 }

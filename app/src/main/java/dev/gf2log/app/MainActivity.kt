@@ -695,8 +695,9 @@ class MainActivity : BaseActivity() {
     private fun saveSelected() {
         val source = historyStore ?: return
         val target = savedStore ?: return
+        if (work.isBusy(HISTORY_WRITE)) return
         val ids = selectedIds.toList()
-        work.run(task = { target.saveFrom(source, ids) }) { result ->
+        work.run(key = HISTORY_WRITE, task = { target.saveFrom(source, ids) }) { result ->
             val saveResult = result.getOrNull()
             Feedback.show(
                 this,
@@ -728,8 +729,12 @@ class MainActivity : BaseActivity() {
             resources.getQuantityString(R.plurals.delete_history_message, ids.size, ids.size),
             getString(R.string.delete),
             destructive = true,
-        ) {
-            work.run(task = { (if (fromSaved) savedStore?.delete(ids) else historyStore?.delete(ids)) ?: 0 }) { result ->
+        ) confirm@{
+            if (work.isBusy(HISTORY_WRITE)) return@confirm
+            work.run(
+                key = HISTORY_WRITE,
+                task = { (if (fromSaved) savedStore?.delete(ids) else historyStore?.delete(ids)) ?: 0 },
+            ) { result ->
                 val deleted = result.getOrDefault(0)
                 Feedback.show(
                     this,
@@ -751,6 +756,7 @@ class MainActivity : BaseActivity() {
         const val HISTORY = "history"
         const val SUMMARY = "summary"
         const val UNDO = "undo"
+        const val HISTORY_WRITE = "history_write"
         const val RECENT = "recent"
         const val SAVED = "saved"
         const val COLLAPSED_COUNT = 20

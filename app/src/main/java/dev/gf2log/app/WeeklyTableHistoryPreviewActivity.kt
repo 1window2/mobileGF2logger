@@ -106,9 +106,10 @@ class WeeklyTableHistoryPreviewActivity : BaseActivity() {
             R.string.weekly_table_history_restore,
             R.string.weekly_table_history_restore_warning,
             R.string.weekly_table_history_restore,
-        ) {
+        ) confirm@{
+            if (work.isBusy(RESTORE)) return@confirm
             restoreButton?.isEnabled = false
-            work.run(task = { repository.restoreWeeklyReportHistory(historyId, periodStart) }) { result ->
+            work.run(key = RESTORE, task = { repository.restoreWeeklyReportHistory(historyId, periodStart) }) { result ->
                 if (result.getOrDefault(false)) {
                     Feedback.show(this, R.string.weekly_table_history_restored)
                     startActivity(
@@ -161,5 +162,6 @@ class WeeklyTableHistoryPreviewActivity : BaseActivity() {
     companion object {
         const val EXTRA_HISTORY_ID = "weekly_history_id"
         const val EXTRA_RECORDED_AT = "weekly_history_recorded_at"
+        private const val RESTORE = "restore"
     }
 }

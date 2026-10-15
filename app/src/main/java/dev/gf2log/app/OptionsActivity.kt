@@ -427,7 +427,8 @@ class OptionsActivity : BaseActivity() {
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.apply {
                 setTextColor(getColor(R.color.destructive_action))
                 setOnClickListener {
-                    work.run(task = { DiscordWebhookSecretStore(this@OptionsActivity).clear() }) { result ->
+                    if (work.isBusy(WEBHOOK)) return@setOnClickListener
+                    work.run(key = WEBHOOK, task = { DiscordWebhookSecretStore(this@OptionsActivity).clear() }) { result ->
                         dialog.dismiss()
                         Feedback.show(
                             this@OptionsActivity,

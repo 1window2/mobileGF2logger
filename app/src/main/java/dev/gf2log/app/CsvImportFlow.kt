@@ -80,14 +80,17 @@ internal class CsvImportFlow(
             Feedback.show(activity, R.string.no_platoon_detected_detail, long = true)
             return@whenStopped
         }
-        work.run(task = { CsvImportCheckpointManager(activity, scope).canUndo() }) { result ->
+        // One undo at a time: a second restore would run against the already-restored state.
+        if (work.isBusy(UNDO)) return@whenStopped
+        work.run(key = UNDO, task = { CsvImportCheckpointManager(activity, scope).canUndo() }) { result ->
             if (!result.getOrDefault(false)) {
                 Feedback.show(activity, R.string.no_csv_import_checkpoint)
                 return@run
             }
-            Dialogs.confirm(activity, R.string.undo_last_csv_import, R.string.undo_last_csv_import_warning, R.string.undo) {
+            Dialogs.confirm(activity, R.string.undo_last_csv_import, R.string.undo_last_csv_import_warning, R.string.undo) confirm@{
+                if (work.isBusy(UNDO)) return@confirm
                 onProgress(activity.getString(R.string.csv_import_undoing))
-                work.run(task = { CsvImportCheckpointManager(activity, scope).restore() }) { restore ->
+                work.run(key = UNDO, task = { CsvImportCheckpointManager(activity, scope).restore() }) { restore ->
                     onProgress(null)
                     Feedback.show(
                         activity,
@@ -310,6 +313,7 @@ internal class CsvImportFlow(
     )
 
     private companion object {
+        const val UNDO = "csv_import.undo"
         const val MAX_FILES = 64
         const val MAX_BYTES = 16L * 1024 * 1024
         const val STATE_TARGET = "csv_import.target"

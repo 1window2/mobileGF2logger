@@ -3,13 +3,9 @@ package dev.gf2log.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
-import android.text.TextUtils
-import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -17,8 +13,6 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
-import dev.gf2log.app.capture.CaptureNotice
-import dev.gf2log.app.capture.CapturePhase
 import dev.gf2log.app.capture.CaptureSnapshot
 import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.capture.CaptureVpnService
@@ -27,7 +21,6 @@ import dev.gf2log.app.management.CsvImportCheckpointManager
 import dev.gf2log.app.management.PlatoonCsvImportStore
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.SnapshotComparison
-import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.CaptureGuard
 import dev.gf2log.app.ui.BarAction
@@ -36,13 +29,9 @@ import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.Screen
 import dev.gf2log.app.ui.TextRole
-import dev.gf2log.app.ui.WRAP
-import dev.gf2log.app.ui.badge
-import dev.gf2log.app.ui.button
 import dev.gf2log.app.ui.column
 import dev.gf2log.app.ui.dp
 import dev.gf2log.app.ui.group
-import dev.gf2log.app.ui.icon
 import dev.gf2log.app.ui.lp
 import dev.gf2log.app.ui.navigationRow
 import dev.gf2log.app.ui.setShownInGroup
@@ -51,7 +40,6 @@ import dev.gf2log.app.ui.row
 import dev.gf2log.app.ui.sectionHeader
 import dev.gf2log.app.ui.text
 import dev.gf2log.protocol.GuildMembersCsv
-import dev.gf2log.protocol.Gfl2PayloadDecoder
 import java.time.ZoneId
 
 /**
@@ -66,22 +54,15 @@ class MainActivity : BaseActivity() {
     private lateinit var csvImport: CsvImportFlow
     private lateinit var packetHistory: HomePacketHistory
 
-    private lateinit var capturePanel: LinearLayout
-    private lateinit var stateDot: View
-    private lateinit var stateTitle: TextView
-    private lateinit var stateDetail: TextView
-    private lateinit var checklist: LinearLayout
-    private lateinit var captureActions: LinearLayout
-    private lateinit var clients: LinearLayout
+    private lateinit var capturePanel: HomeCapturePanel
     private lateinit var undoRow: View
     private lateinit var progressBanner: LinearLayout
     private lateinit var progressText: TextView
     private lateinit var rosterSummary: LinearLayout
 
     private var captureOnceRequested = false
-    private var lastPhase: CapturePhase? = null
 
-    private val statusListener: (CaptureSnapshot) -> Unit = ::renderCapture
+    private val statusListener: (CaptureSnapshot) -> Unit = { capturePanel.render(it) }
 
     private val vpnConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK) startCaptureService() else CaptureStatus.markStopped()
@@ -138,7 +119,7 @@ class MainActivity : BaseActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (::stateTitle.isInitialized) CaptureStatus.addListener(statusListener)
+        if (::capturePanel.isInitialized) CaptureStatus.addListener(statusListener)
     }
 
     override fun onStop() {
@@ -151,7 +132,7 @@ class MainActivity : BaseActivity() {
             recreate()
             return
         }
-        if (::clients.isInitialized) renderClients()
+        capturePanel.renderClients()
         packetHistory.load()
         loadRosterSummary()
         loadUndoAvailability()
@@ -179,7 +160,8 @@ class MainActivity : BaseActivity() {
             }, lp())
         }
         addView(progressBanner, lp(top = 4, bottom = 8))
-        addView(capturePanel(), lp(top = 4))
+        capturePanel = HomeCapturePanel(this@MainActivity, ::beginCapture) { CaptureGuard.stop(this@MainActivity) }
+        addView(capturePanel.view, lp(top = 4))
         addView(sectionHeader(getString(R.string.active_platoon_section)), lp())
         addView(PlatoonProfileSelector.card(this@MainActivity), lp())
         rosterSummary = column { visibility = View.GONE }
@@ -206,173 +188,6 @@ class MainActivity : BaseActivity() {
     }
 
     // region Capture
-
-    private fun capturePanel(): View {
-        stateDot = View(this).apply {
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL }
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }
-        stateTitle = text(null, TextRole.HEADLINE) { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
-        stateDetail = text(null, TextRole.SECONDARY) { maxLines = 4 }
-        checklist = column { visibility = View.GONE }
-        captureActions = row(Gravity.TOP)
-        clients = column()
-        renderClients()
-        capturePanel = panel(outlined = true) {
-            addView(row {
-                addView(stateDot, lp(10, 10, end = 8))
-                addView(text(getString(R.string.capture_status_label), TextRole.LABEL), lp(width = 0, weight = 1f))
-            }, lp())
-            addView(stateTitle, lp(top = 6))
-            addView(stateDetail, lp(top = 2))
-            addView(checklist, lp(top = 8))
-            addView(clients, lp(top = 12))
-            addView(captureActions, lp(top = 12))
-        }
-        return capturePanel
-    }
-
-    /** Rebuilt on every resume so installing or removing a client shows up immediately. */
-    private fun renderClients() = clients.apply {
-        removeAllViews()
-        SupportedGamePackages.all.forEachIndexed { index, packageName ->
-            val installed = isInstalled(packageName)
-            val client = clientName(packageName)
-            val status = getString(if (installed) R.string.client_installed else R.string.client_not_installed)
-            addView(row {
-                minimumHeight = dp(40)
-                isFocusable = true
-                contentDescription = "$client. $packageName. $status"
-                addView(column {
-                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-                    addView(text(client, TextRole.BODY), lp())
-                    addView(text(packageName, TextRole.CAPTION) {
-                        typeface = Typeface.MONOSPACE
-                        textSize = 11f
-                        maxLines = 1
-                        ellipsize = TextUtils.TruncateAt.MIDDLE
-                    }, lp())
-                }, lp(width = 0, weight = 1f))
-                addView(badge(
-                    status,
-                    // Page-colored fill keeps the badge legible on the green running panel too.
-                    if (installed) R.color.app_background else R.color.surface_variant,
-                    if (installed) R.color.success_text else R.color.text_secondary,
-                ).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, lp(WRAP, WRAP, start = 8))
-            }, lp(top = if (index == 0) 0 else 6))
-        }
-    }
-
-    private fun renderCapture(snapshot: CaptureSnapshot) {
-        val phase = snapshot.phase
-        val (title, color) = when (phase) {
-            CapturePhase.STOPPED -> R.string.capture_ready to R.color.text_primary
-            CapturePhase.STARTING -> R.string.status_preparing to R.color.accent_text
-            CapturePhase.RUNNING -> R.string.capture_running to R.color.success_text
-        }
-        stateTitle.text = getString(title)
-        stateTitle.setTextColor(getColor(color))
-        // A running capture tints the whole panel so its state reads from across the room.
-        (capturePanel.background as GradientDrawable).apply {
-            setColor(getColor(if (phase == CapturePhase.RUNNING) R.color.success_surface else R.color.surface))
-            setStroke(dp(1), getColor(if (phase == CapturePhase.RUNNING) R.color.success_mark else R.color.outline))
-        }
-        (stateDot.background as GradientDrawable).setColor(
-            getColor(
-                when (phase) {
-                    CapturePhase.STOPPED -> R.color.outline_strong
-                    CapturePhase.STARTING -> R.color.accent
-                    CapturePhase.RUNNING -> R.color.success_mark
-                },
-            ),
-        )
-        val notice = snapshot.notice
-        stateDetail.text = when {
-            notice?.notice == CaptureNotice.CAPTURING -> getString(R.string.capturing_clients, clientNames(snapshot.capturedTargets))
-            notice != null && notice.notice != CaptureNotice.PREPARING -> notice.format(this)
-            phase == CapturePhase.STOPPED -> getString(R.string.capture_ready_detail)
-            else -> getString(R.string.capture_preparing_detail)
-        }
-        stateDetail.setTextColor(
-            getColor(
-                when (notice?.notice?.severity) {
-                    CaptureNotice.Severity.ERROR -> R.color.destructive_action
-                    CaptureNotice.Severity.WARNING -> R.color.warning_text
-                    else -> R.color.text_secondary
-                },
-            ),
-        )
-        renderChecklist(snapshot.guided)
-        if (phase != lastPhase) {
-            lastPhase = phase
-            renderCaptureActions(phase)
-        }
-    }
-
-    private fun clientNames(packages: List<String>): String {
-        val names = packages.map(::clientName)
-        return when (names.size) {
-            0 -> getString(R.string.none)
-            1 -> names.single()
-            else -> getString(R.string.clients_and, names[0], names.drop(1).joinToString(", "))
-        }
-    }
-
-    private fun clientName(packageName: String) =
-        if (packageName == SupportedGamePackages.HAOPLAY) "HaoPlay" else if (packageName == SupportedGamePackages.DARKWINTER) "Darkwinter" else packageName
-
-    private fun renderChecklist(guided: CaptureStatus.GuidedProgress?) {
-        checklist.removeAllViews()
-        checklist.visibility = if (guided == null) View.GONE else View.VISIBLE
-        guided ?: return
-        listOf(
-            Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE to R.string.checklist_identity,
-            Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS to R.string.checklist_roster,
-            Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY to R.string.checklist_activity,
-            Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES to R.string.checklist_updates,
-        ).forEach { (type, label) ->
-            val done = type in guided.capturedPayloadTypes
-            checklist.addView(row {
-                minimumHeight = dp(32)
-                isFocusable = true
-                contentDescription = getString(label) + ". " + getString(if (done) R.string.captured else R.string.waiting)
-                addView(icon(
-                    if (done) R.drawable.ic_check_circle else R.drawable.ic_circle_outline,
-                    if (done) R.color.success_mark else R.color.outline_strong,
-                    sizeDp = 20,
-                ), lp(20, 20, end = 10))
-                addView(text(getString(label), TextRole.BODY) {
-                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                    if (!done) setTextColor(getColor(R.color.text_secondary))
-                }, lp(width = 0, weight = 1f))
-            }, lp())
-        }
-    }
-
-    private fun renderCaptureActions(phase: CapturePhase) {
-        captureActions.removeAllViews()
-        if (phase == CapturePhase.STOPPED) {
-            captureActions.addView(
-                button(getString(R.string.capture_one_roster), Controls.Role.PRIMARY, R.drawable.ic_bolt) {
-                    beginCapture(once = true)
-                },
-                lp(width = 0, weight = 1f, end = 4),
-            )
-            captureActions.addView(
-                button(getString(R.string.prepare_capture), Controls.Role.CAPTURE, R.drawable.ic_play) {
-                    beginCapture(once = false)
-                },
-                lp(width = 0, weight = 1f, start = 4),
-            )
-        } else {
-            captureActions.addView(
-                button(getString(R.string.stop_capture), Controls.Role.DESTRUCTIVE, R.drawable.ic_stop) {
-                    stopCaptureService()
-                },
-                lp(),
-            )
-        }
-    }
 
     private fun beginCapture(once: Boolean) {
         captureOnceRequested = once
@@ -401,17 +216,6 @@ class MainActivity : BaseActivity() {
         )
         captureOnceRequested = false
     }
-
-    private fun stopCaptureService() = CaptureGuard.stop(this)
-
-    private fun isInstalled(packageName: String): Boolean = runCatching {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
-        } else {
-            @Suppress("DEPRECATION")
-            packageManager.getPackageInfo(packageName, 0)
-        }
-    }.isSuccess
 
     // endregion
 

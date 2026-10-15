@@ -197,7 +197,7 @@ class OnboardingActivity : BaseActivity() {
             addView(TextView(context).apply {
                 text = if (pageIndex == 0) getString(R.string.app_name) else getString(page.title)
                 gravity = Gravity.CENTER
-                textSize = 28f
+                textSize = 26f
                 setTypeface(typeface, Typeface.BOLD)
             }, matchWidth())
             addView(TextView(context).apply {

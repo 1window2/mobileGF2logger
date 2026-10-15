@@ -96,7 +96,7 @@ internal object PrimaryNavigation {
             }, LinearLayout.LayoutParams(activity.dp(56), activity.dp(32)))
             addView(TextView(activity).apply {
                 text = activity.getString(label)
-                textSize = 11f
+                textSize = 12f
                 setTextColor(color)
                 typeface = Typeface.create(
                     "sans-serif-medium",

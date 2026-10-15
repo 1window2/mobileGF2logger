@@ -150,20 +150,17 @@ internal class WeeklyTable(
             ellipsize = TextUtils.TruncateAt.END
         }
         private val detail = context.text(null, TextRole.CAPTION) { maxLines = 1 }
+        private val rankChip = GradientDrawable().apply { cornerRadius = context.dpf(8f) }
         private val rank = context.text(null, TextRole.LABEL) {
             gravity = Gravity.CENTER
-            setTextColor(context.getColor(R.color.accent_text))
-            background = GradientDrawable().apply {
-                setColor(context.getColor(R.color.accent_surface))
-                cornerRadius = context.dpf(8f)
-            }
+            background = rankChip
             minWidth = context.dp(24)
             setPadding(context.dp(4), 0, context.dp(4), 0)
             visibility = if (isGunsmokeWeek) View.VISIBLE else View.GONE
         }
         private val frozen = context.row {
             setPadding(context.dp(10), 0, context.dp(6), 0)
-            background = cellBackground(R.color.table_cell, clickable = false)
+            background = ColorDrawable(context.getColor(R.color.table_cell))
             addView(rank, context.lp(WRAP, WRAP, end = 6))
             addView(context.column {
                 addView(name, context.lp())
@@ -182,6 +179,10 @@ internal class WeeklyTable(
             name.text = member.name
             detail.text = "#${member.uid}"
             rank.text = rankValue?.toString().orEmpty()
+            // Only the podium carries the accent; the rest of the ranking stays quiet.
+            val podium = rankValue != null && rankValue <= PODIUM
+            rankChip.setColor(context.getColor(if (podium) R.color.accent_surface else R.color.surface_variant))
+            rank.setTextColor(context.getColor(if (podium) R.color.accent_text else R.color.text_secondary))
             frozen.contentDescription = listOfNotNull(
                 rankValue?.let { context.getString(R.string.rank_description, it) },
                 member.name,
@@ -202,6 +203,7 @@ internal class WeeklyTable(
     }
 
     private inner class MetricCell(widthDp: Int, private val total: Boolean) {
+        private val fill = ColorDrawable()
         private val merit = context.text(null, TextRole.SUBTITLE) {
             textSize = 16f
             gravity = Gravity.CENTER
@@ -223,6 +225,7 @@ internal class WeeklyTable(
             addView(gunsmoke, context.lp())
             addView(activity, context.lp())
             layoutParams = LinearLayout.LayoutParams(width(widthDp), rowHeight)
+            background = RippleDrawable(ColorStateList.valueOf(context.getColor(R.color.control_ripple)), fill, null)
             isClickable = true
             isFocusable = true
         }
@@ -252,13 +255,14 @@ internal class WeeklyTable(
                 append("  ")
                 appendMark(context.getString(R.string.patrol_initial), display.patrol)
             }
-            view.background = cellBackground(
+            // Recolor the cell's own fill in place; binding allocates no drawables.
+            fill.color = context.getColor(
                 when {
                     display.edited -> R.color.accent_surface
+                    display.meritWarn || display.scoreWarn || display.attemptsWarn -> R.color.warning_surface
                     total -> R.color.table_header
                     else -> R.color.table_cell
                 },
-                clickable = true,
             )
             view.contentDescription = buildString {
                 append(description)
@@ -416,16 +420,6 @@ internal class WeeklyTable(
         }
     }
 
-    private fun cellBackground(@ColorRes color: Int, clickable: Boolean) = if (clickable) {
-        RippleDrawable(
-            ColorStateList.valueOf(context.getColor(R.color.control_ripple)),
-            ColorDrawable(context.getColor(color)),
-            null,
-        )
-    } else {
-        ColorDrawable(context.getColor(color))
-    }
-
     companion object {
         const val DAYS = 7
         const val MEMBER_WIDTH = 124
@@ -434,6 +428,7 @@ internal class WeeklyTable(
         const val HEADER_HEIGHT = 48
         const val STANDARD_ROW_HEIGHT = 64
         const val GUNSMOKE_ROW_HEIGHT = 80
+        const val PODIUM = 3
 
         private val YES_MARK = CellDisplay.Mark("✓", R.color.success_mark, R.string.yes)
         private val NO_MARK = CellDisplay.Mark("×", R.color.failure_mark, R.string.no)

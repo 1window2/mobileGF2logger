@@ -33,7 +33,7 @@ internal class TopBar(context: Context) : LinearLayout(context) {
     private val navigation = context.iconButton(R.drawable.ic_arrow_back, context.getString(R.string.back)) {}
     private val leading = context.frame()
     private val titleView = context.text(null, TextRole.TITLE) {
-        textSize = 19f
+        textSize = 20f
         maxLines = 1
         ellipsize = TextUtils.TruncateAt.END
         accessibilityHeading()

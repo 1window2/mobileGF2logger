@@ -2,7 +2,7 @@
 
 All notable changes to mobileGF2logger are documented here.
 
-## 2.5.0 - 2026-10-15
+## 2.5.0 - 2026-10-16
 
 ### Added
 
@@ -90,6 +90,17 @@ All notable changes to mobileGF2logger are documented here.
 - Report admission failures inside the New Platoon dialog, block repeated
   send/share/backup/restore taps, ask before leaving an edited member, and
   dismiss a screen's dialogs when it closes.
+- Offer Stop capture in place when a backup, restore, CSV import or profile
+  change needs capture stopped, and preselect the configured server when a new
+  Platoon is detected.
+- Refresh neighbouring weekly tables that read a capture at the 05:00 reset,
+  keep restored reset-zone overrides consistent with the Platoon's server, and
+  roll interrupted restores back to the exact previous settings.
+- Keep manual weekly values in restored tables and when saving edits, settle
+  contradictory Login/Patrol choices, and date manual membership overlaps in
+  the game time zone.
+- Bound manual member names to 256 and notes to 1,000 characters, and close
+  date pickers and dialogs that belong to a finishing or recreated screen.
 
 ## 2.4.2 - 2026-08-27
 

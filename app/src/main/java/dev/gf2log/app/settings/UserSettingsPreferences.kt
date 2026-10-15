@@ -20,14 +20,6 @@ internal object UserSettingsPreferences {
     private const val KEY_DETAILED_NOTIFICATIONS = "detailed_notifications"
     private const val KEY_TARGET_PACKAGE = "target_package"
     private const val KEY_MEMBER_ORDER = "member_order"
-    private const val KEY_DAILY_MERIT = "cutline_daily_merit"
-    private const val KEY_DAILY_SCORE = "cutline_daily_gunsmoke_score"
-    private const val KEY_DAILY_ATTEMPTS = "cutline_daily_gunsmoke_attempts"
-    private const val KEY_WEEKLY_MERIT = "cutline_weekly_merit"
-    private const val KEY_WEEKLY_SCORE = "cutline_weekly_gunsmoke_score"
-    private const val KEY_WEEKLY_ATTEMPTS = "cutline_weekly_gunsmoke_attempts"
-    private const val KEY_WEEKLY_LOGIN_DAYS = "cutline_weekly_login_days"
-    private const val KEY_WEEKLY_PATROL_DAYS = "cutline_weekly_patrol_days"
 
     private val lock = Any()
 
@@ -131,7 +123,7 @@ internal object UserSettingsPreferences {
     }
 
     fun setWeeklyCutlines(context: Context, cutlines: WeeklyCutlines) = edit(context) {
-        putCutlines(cutlines)
+        putWeeklyCutlines(cutlines, WeeklyCutlineField::settingsKey)
     }
 
     fun targetPackage(context: Context): String = synchronized(lock) {
@@ -290,16 +282,8 @@ internal object UserSettingsPreferences {
         )
     }
 
-    private fun readCutlines(preferences: SharedPreferences) = WeeklyCutlines(
-        dailyMerit = preferences.optionalLong(KEY_DAILY_MERIT),
-        dailyGunsmokeScore = preferences.optionalLong(KEY_DAILY_SCORE),
-        dailyGunsmokeAttempts = preferences.optionalInt(KEY_DAILY_ATTEMPTS),
-        weeklyMerit = preferences.optionalLong(KEY_WEEKLY_MERIT),
-        weeklyGunsmokeScore = preferences.optionalLong(KEY_WEEKLY_SCORE),
-        weeklyGunsmokeAttempts = preferences.optionalInt(KEY_WEEKLY_ATTEMPTS),
-        weeklyLoginDays = preferences.optionalInt(KEY_WEEKLY_LOGIN_DAYS),
-        weeklyPatrolDays = preferences.optionalInt(KEY_WEEKLY_PATROL_DAYS),
-    )
+    private fun readCutlines(preferences: SharedPreferences) =
+        preferences.readWeeklyCutlines(WeeklyCutlineField::settingsKey)
 
     private fun writeSettings(
         editor: SharedPreferences.Editor,
@@ -319,29 +303,7 @@ internal object UserSettingsPreferences {
                 target.putBoolean(payloadKey(payloadType), enabled)
             }
         }
-        .putCutlines(settings.weeklyCutlines)
-
-    private fun SharedPreferences.Editor.putCutlines(cutlines: WeeklyCutlines) =
-        putOptionalLong(KEY_DAILY_MERIT, cutlines.dailyMerit)
-            .putOptionalLong(KEY_DAILY_SCORE, cutlines.dailyGunsmokeScore)
-            .putOptionalInt(KEY_DAILY_ATTEMPTS, cutlines.dailyGunsmokeAttempts)
-            .putOptionalLong(KEY_WEEKLY_MERIT, cutlines.weeklyMerit)
-            .putOptionalLong(KEY_WEEKLY_SCORE, cutlines.weeklyGunsmokeScore)
-            .putOptionalInt(KEY_WEEKLY_ATTEMPTS, cutlines.weeklyGunsmokeAttempts)
-            .putOptionalInt(KEY_WEEKLY_LOGIN_DAYS, cutlines.weeklyLoginDays)
-            .putOptionalInt(KEY_WEEKLY_PATROL_DAYS, cutlines.weeklyPatrolDays)
-
-    private fun SharedPreferences.Editor.putOptionalLong(key: String, value: Long?) =
-        if (value == null) remove(key) else putLong(key, value)
-
-    private fun SharedPreferences.Editor.putOptionalInt(key: String, value: Int?) =
-        if (value == null) remove(key) else putInt(key, value)
-
-    private fun SharedPreferences.optionalLong(key: String): Long? =
-        if (contains(key)) getLong(key, 0L) else null
-
-    private fun SharedPreferences.optionalInt(key: String): Int? =
-        if (contains(key)) getInt(key, 0) else null
+        .putWeeklyCutlines(settings.weeklyCutlines, WeeklyCutlineField::settingsKey)
 
     private fun SharedPreferences.safeString(key: String): String? =
         runCatching { getString(key, null) }.getOrNull()

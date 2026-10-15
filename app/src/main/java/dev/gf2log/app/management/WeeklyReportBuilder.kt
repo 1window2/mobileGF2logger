@@ -634,9 +634,9 @@ object WeeklyReportBuilder {
             scoreDelta = if (isGunsmoke) null else 0L
         } else {
             val lastKnown = after ?: before
-            meritDelta = counterDelta(lastKnown.totalMerit, before.totalMerit)
+            meritDelta = ActivityInference.counterDelta(before.totalMerit, lastKnown.totalMerit)
             scoreDelta = if (isGunsmoke) {
-                counterDelta(lastKnown.totalScore, before.totalScore)
+                ActivityInference.counterDelta(before.totalScore, lastKnown.totalScore)
             } else {
                 0L
             }
@@ -742,15 +742,9 @@ object WeeklyReportBuilder {
     }
 
 
-    private fun PlatoonSnapshot.member(uid: Long): SnapshotMember? =
-        members.firstOrNull { it.uid == uid }
-
-    private fun counterDelta(current: Long, previous: Long): Long =
-        if (current >= previous) current - previous else current
 
     private const val BOUNDARY_WINDOW_MINUTES = 15L
-    private const val MAX_STANDARD_DAILY_MERIT = 90L
-    private const val MAX_STANDARD_WEEKLY_MERIT = MAX_STANDARD_DAILY_MERIT * 7
-    private const val STANDARD_LOGIN_MERIT = 50L
-    private const val STANDARD_PATROL_MERIT = 90L
+    private const val MAX_STANDARD_WEEKLY_MERIT = ActivityInference.LOGIN_AND_PATROL_MERIT * 7
+    private const val STANDARD_LOGIN_MERIT = ActivityInference.LOGIN_MERIT
+    private const val STANDARD_PATROL_MERIT = ActivityInference.LOGIN_AND_PATROL_MERIT
 }

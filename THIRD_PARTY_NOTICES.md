@@ -18,3 +18,9 @@ zdtun is dynamically packaged as `libzdtun.so`; mobileGF2logger's JNI integratio
 - License declaration: MIT
 
 mobileGF2logger reproduces the documented framing, recognized payload identifiers, protobuf field mappings, and Platoon CSV column order. It does not bundle the Python application or generated Python protobuf runtime.
+
+## Material icons
+
+- Project: [google/material-design-icons](https://github.com/google/material-design-icons)
+- License: Apache License 2.0
+- Bundled source: vector paths in `app/src/main/res/drawable/ic_*.xml`

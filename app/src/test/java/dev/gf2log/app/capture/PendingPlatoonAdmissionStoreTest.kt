@@ -14,7 +14,69 @@ import java.time.Instant
 
 class PendingPlatoonAdmissionStoreTest {
     @After
-    fun tearDown() = PendingPlatoonAdmissionStore.clearForTests()
+    fun tearDown() {
+        PendingPlatoonAdmissionStore.clearForTests()
+        MainThread.testExecutor = null
+    }
+
+    @Test
+    fun listenersSeeVisibleCandidatesChangeWithoutPolling() {
+        MainThread.testExecutor = { it() }
+        val observed = mutableListOf<List<String>>()
+        PendingPlatoonAdmissionStore.addListener { summaries ->
+            observed += summaries.map { it.profile.platoonName }
+        }
+        val token = requireNotNull(
+            PendingPlatoonAdmissionStore.begin(
+                SupportedGamePackages.HAOPLAY,
+                profile(5u, "Owls"),
+                flowId = 1L,
+            ).token,
+        )
+        PendingPlatoonAdmissionStore.offer(token, 1L, payload(profile(5u, "Owls")))
+        PendingPlatoonAdmissionStore.claim(token)
+        PendingPlatoonAdmissionStore.releaseClaim(token)
+        PendingPlatoonAdmissionStore.discard(token)
+
+        assertEquals(
+            listOf(emptyList(), listOf("Owls"), emptyList(), listOf("Owls"), emptyList()),
+            observed,
+        )
+    }
+
+    @Test
+    fun totalPayloadBoundIsSharedAcrossCandidatesAndReleasedOnRemoval() {
+        val tokens = (1..3).map { index ->
+            requireNotNull(
+                PendingPlatoonAdmissionStore.begin(
+                    SupportedGamePackages.HAOPLAY,
+                    profile(index.toUInt(), "P$index"),
+                    flowId = index.toLong(),
+                ).token,
+            )
+        }
+        repeat(PendingPlatoonAdmissionStore.MAX_PAYLOADS_PER_CANDIDATE) {
+            PendingPlatoonAdmissionStore.offer(tokens[0], 1L, payload(profile(1u, "P1")))
+            PendingPlatoonAdmissionStore.offer(tokens[1], 2L, payload(profile(2u, "P2")))
+        }
+        assertTrue(
+            PendingPlatoonAdmissionStore.offer(tokens[2], 3L, payload(profile(3u, "P3"))) is
+                PendingPlatoonAdmissionStore.OfferResult.Overflow,
+        )
+
+        PendingPlatoonAdmissionStore.discard(tokens[0])
+        val retry = requireNotNull(
+            PendingPlatoonAdmissionStore.begin(
+                SupportedGamePackages.HAOPLAY,
+                profile(3u, "P3"),
+                flowId = 3L,
+            ).token,
+        )
+        assertEquals(
+            PendingPlatoonAdmissionStore.OfferResult.Accepted,
+            PendingPlatoonAdmissionStore.offer(retry, 3L, payload(profile(3u, "P3"))),
+        )
+    }
 
     @Test
     fun candidateIsMemoryOnlyBoundedAndClaimedAtomically() {
@@ -44,6 +106,34 @@ class PendingPlatoonAdmissionStoreTest {
         assertNotNull(PendingPlatoonAdmissionStore.claim(token))
         assertEquals(setOf(7L), PendingPlatoonAdmissionStore.complete(token))
         assertFalse(PendingPlatoonAdmissionStore.contains(token))
+    }
+
+    @Test
+    fun failedOrThrowingAdmissionReleasesTheClaimForAnotherDecision() {
+        val token = requireNotNull(
+            PendingPlatoonAdmissionStore.begin(
+                SupportedGamePackages.HAOPLAY,
+                profile(5u, "Owls"),
+                flowId = 4L,
+            ).token,
+        )
+
+        assertNull(PendingPlatoonAdmissionStore.withClaim(token) { false })
+        assertNotNull(PendingPlatoonAdmissionStore.summary(token))
+
+        assertTrue(
+            runCatching {
+                PendingPlatoonAdmissionStore.withClaim(token) { error("registry unavailable") }
+            }.isFailure,
+        )
+        assertNotNull(PendingPlatoonAdmissionStore.summary(token))
+
+        assertEquals(setOf(4L), PendingPlatoonAdmissionStore.withClaim(token) { claim ->
+            assertNull(PendingPlatoonAdmissionStore.summary(claim.summary.token))
+            true
+        })
+        assertFalse(PendingPlatoonAdmissionStore.contains(token))
+        assertNull(PendingPlatoonAdmissionStore.withClaim(token) { true })
     }
 
     @Test

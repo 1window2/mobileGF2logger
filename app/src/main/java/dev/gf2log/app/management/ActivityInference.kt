@@ -41,16 +41,12 @@ object ActivityInference {
         )
     }
 
-    // Function Name: candidatesForScore
-    // Description:
-    // - Enumerates every valid Gunsmoke activity state for a captured score.
-    // - Supports a missing merit boundary without inventing one specific attendance or patrol state.
-    // - Uses the captured single-attempt high score as an optional aggregate-score ceiling.
-    // Parameters:
-    // - scoreDelta: Gunsmoke score accumulated in the current game day.
-    // - maximumAttemptScore: Largest possible score for one observed attempt, or null if unavailable.
-    // Returns:
-    // - Returns every compatible merit, attempt, attendance, patrol, and score-merit combination.
+    /**
+     * Enumerates every valid Gunsmoke activity state for a captured score. Supports a missing merit
+     * boundary without inventing one specific attendance or patrol state. Uses the captured
+     * single-attempt high score as an optional aggregate-score ceiling. Returns every compatible
+     * merit, attempt, attendance, patrol, and score-merit combination.
+     */
     fun candidatesForScore(
         scoreDelta: Long,
         maximumAttemptScore: Long? = null,
@@ -92,17 +88,11 @@ object ActivityInference {
         }.distinct()
     }
 
-    // Function Name: isCompatibleScore
-    // Description:
-    // - Verifies the exact aggregate score-to-merit relationship for a known attempt count.
-    // - Accounts for per-attempt integer rounding and an optional captured high-score ceiling.
-    // Parameters:
-    // - scoreDelta: Aggregate score earned by the attempts.
-    // - scoreMerit: Sum of the per-attempt score merit after integer division by ten.
-    // - attempts: Number of attempts represented by the aggregate.
-    // - maximumAttemptScore: Captured single-attempt upper bound, or null when unavailable.
-    // Returns:
-    // - True only when at least one per-attempt score distribution satisfies every constraint.
+    /**
+     * Verifies the exact aggregate score-to-merit relationship for a known attempt count. Accounts
+     * for per-attempt integer rounding and an optional captured high-score ceiling. Returns true
+     * only when at least one per-attempt score distribution satisfies every constraint.
+     */
     internal fun isCompatibleScore(
         scoreDelta: Long,
         scoreMerit: Long,
@@ -171,13 +161,13 @@ object ActivityInference {
     ): Boolean = score / attempts > maximumAttemptScore ||
         (score / attempts == maximumAttemptScore && score % attempts != 0L)
 
-    private fun saturatedMultiply(value: Long, factor: Int): Long = when {
+    fun saturatedMultiply(value: Long, factor: Int): Long = when {
         factor == 0 -> 0L
         value > Long.MAX_VALUE / factor -> Long.MAX_VALUE
         else -> value * factor
     }
 
-    private fun saturatedAdd(left: Long, right: Long): Long =
+    fun saturatedAdd(left: Long, right: Long): Long =
         if (left > Long.MAX_VALUE - right) Long.MAX_VALUE else left + right
 
     fun counterDelta(previous: Long, current: Long): Long =
@@ -220,6 +210,11 @@ object ActivityInference {
         val attended: Boolean,
         val dailyPatrol: Boolean,
     )
+
+    /** Daily non-Gunsmoke merit: login attendance, and Daily Patrol on top of it. */
+    const val LOGIN_MERIT = 50L
+    const val DAILY_PATROL_MERIT = 40L
+    const val LOGIN_AND_PATROL_MERIT = LOGIN_MERIT + DAILY_PATROL_MERIT
 
     const val MAX_DAILY_ATTEMPTS = 3
     const val MAX_WEEKLY_ATTEMPTS = MAX_DAILY_ATTEMPTS * 7

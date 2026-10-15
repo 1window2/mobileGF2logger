@@ -16,10 +16,10 @@ import org.junit.Test
 
 class PlatoonPayloadDispatcherTest {
     @Test
-    fun routesRequiredPayloadsAndAlwaysSignalsTheRosterWriter() {
+    fun routesEachRequiredPayloadOnlyToItsHandler() {
         val routed = mutableListOf<String>()
         val dispatcher = PlatoonPayloadDispatcher(
-            onMembers = { _, _ -> routed += "members"; null },
+            onMembers = { _ -> routed += "members"; null },
             onActivity = { routed += "activity"; true },
             onUpdates = { routed += "updates"; true },
         )
@@ -29,32 +29,32 @@ class PlatoonPayloadDispatcherTest {
         val updates = dispatcher.dispatch(updatesPayload())
 
         assertEquals(
-            listOf("members", "activity", "members", "updates", "members"),
+            listOf("members", "activity", "updates"),
             routed,
         )
-        assertTrue(members.members.getOrThrow() == null)
+        assertTrue(members.members?.getOrThrow() == null)
         assertNull(members.activity)
         assertNull(members.updates)
         assertTrue(activity.activity?.getOrThrow() == true)
-        assertTrue(activity.members.getOrThrow() == null)
+        assertNull(activity.members)
         assertTrue(updates.updates?.getOrThrow() == true)
-        assertTrue(updates.members.getOrThrow() == null)
+        assertNull(updates.members)
     }
 
     @Test
-    fun handlerFailureDoesNotSuppressTheRosterBoundarySignal() {
+    fun handlerFailureIsReturnedInsteadOfThrown() {
         val routed = mutableListOf<String>()
         val dispatcher = PlatoonPayloadDispatcher(
-            onMembers = { _, _ -> routed += "members"; null },
+            onMembers = { _ -> routed += "members"; null },
             onActivity = { routed += "activity"; error("database unavailable") },
             onUpdates = { routed += "updates"; true },
         )
 
         val result = dispatcher.dispatch(activityPayload())
 
-        assertEquals(listOf("activity", "members"), routed)
+        assertEquals(listOf("activity"), routed)
         assertTrue(result.activity?.isFailure == true)
-        assertTrue(result.members.isSuccess)
+        assertNull(result.members)
         assertNull(result.updates)
     }
 

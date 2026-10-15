@@ -36,9 +36,6 @@ object WeeklyReportBuilder {
         val resolvedStandardTotals: ResolvedStandardTotals? = null,
         val gunsmokeAttemptsFloor: Int? = null,
     ) {
-        val observedDays: List<DayCell>
-            get() = days.filter { it.observed }
-
         val totalAttempts: Int?
             get() {
                 val known = days.mapNotNull(DayCell::attempts)
@@ -144,14 +141,6 @@ object WeeklyReportBuilder {
                 loginDaysCertainty,
                 patrolDaysCertainty,
             ).any { certainty -> certainty != MetricCertainty.EXACT }
-
-        val hasIncompleteEvidence: Boolean
-            get() = days.any {
-                it.evidence == DailyEvidence.NO_OBSERVATION ||
-                    it.evidence == DailyEvidence.INCOMPLETE_BOUNDARY ||
-                    it.evidence == DailyEvidence.PARTIAL_DAY ||
-                    it.evidence == DailyEvidence.SPARSE_INFERRED
-            }
     }
 
     data class ResolvedGunsmokeTotals(
@@ -285,16 +274,6 @@ object WeeklyReportBuilder {
                 evidence == DailyEvidence.ATTRIBUTED ||
                 evidence == DailyEvidence.PARTIAL_DAY ||
                 evidence == DailyEvidence.SPARSE_INFERRED
-
-        val isGunsmokeActivityUnknown: Boolean
-            get() = manualOverride == null &&
-                !hasDailyPatrolFact &&
-                evidence in setOf(
-                    DailyEvidence.NO_OBSERVATION,
-                    DailyEvidence.INCOMPLETE_BOUNDARY,
-                    DailyEvidence.PARTIAL_DAY,
-                    DailyEvidence.SPARSE_INFERRED,
-                )
     }
 
     fun build(
@@ -313,25 +292,89 @@ object WeeklyReportBuilder {
             .filter { it.periodStart == start && it.gameDay in days }
             .associateBy { it.uid to it.gameDay }
         val sortedSnapshots = snapshots.sortedBy(PlatoonSnapshot::capturedAt)
-        val patrolFactsByMemberDay = dailyPatrolFacts
-            .filter { PlatoonPeriods.gameDay(it.occurredAt, zoneId) in days }
-            .groupBy { it.uid to PlatoonPeriods.gameDay(it.occurredAt, zoneId) }
-            .mapValues { (_, facts) -> facts.minBy(DailyPatrolFact::occurredAt) }
-        val loginFactsByMemberDay = sortedSnapshots
-            .flatMap { snapshot ->
-                snapshot.members.mapNotNull { member ->
-                    member.lastLogin
-                        .takeIf { it > 0L }
-                        ?.let(Instant::ofEpochSecond)
-                        ?.let { member.uid to PlatoonPeriods.gameDay(it, zoneId) }
-                }
-            }
-            .filter { it.second in days }
-            .toSet()
-        val rosterCutoff = minOf(
-            PlatoonPeriods.periodStartInstant(start.plusDays(7), zoneId),
-            asOf.plusMillis(1),
+        val week = WeekInputs(
+            days = days,
+            zoneId = zoneId,
+            isGunsmoke = isGunsmoke,
+            snapshots = sortedSnapshots,
+            overridesByCell = overridesByCell,
+            dailyPatrolFacts = dailyPatrolFacts,
+            patrolFactsByMemberDay = dailyPatrolFacts
+                .filter { PlatoonPeriods.gameDay(it.occurredAt, zoneId) in days }
+                .groupBy { it.uid to PlatoonPeriods.gameDay(it.occurredAt, zoneId) }
+                .mapValues { (_, facts) -> facts.minBy(DailyPatrolFact::occurredAt) },
+            loginFactsByMemberDay = loginFactsByMemberDay(sortedSnapshots, days, zoneId),
+            asOf = asOf,
         )
+        val rosterCutoff = rosterCutoff(start, zoneId, asOf)
+        val identities = memberIdentities(
+            sortedSnapshots,
+            membershipEvents,
+            overridesByCell.keys.map { it.first },
+            rosterCutoff,
+        )
+        // Weekly rows represent the roster that is active at the end of the selected reporting
+        // period (or the latest roster for an in-progress week). A member observed earlier in
+        // the week disappears as soon as a later complete roster records their withdrawal; the
+        // immutable membership event remains in the Join / Withdraw section. Rows are solved
+        // only for that roster because each row depends on its own member's evidence alone.
+        val rosterAtPeriodEnd = rosterAtCutoff(sortedSnapshots, membershipEvents, rosterCutoff)
+
+        val rows = identities.values
+            .filter { it.uid in rosterAtPeriodEnd }
+            .map { latestKnown -> buildRow(latestKnown, week) }
+            .sortedWith(
+                if (isGunsmoke) {
+                    compareByDescending<MemberRow> { it.totalScore }
+                        .thenByDescending { it.totalMerit }
+                        .thenBy { it.name }
+                } else {
+                    compareByDescending<MemberRow> { it.totalMerit }.thenBy { it.name }
+                },
+            )
+
+        return Report(start, start.plusDays(6), isGunsmoke, days, rows)
+    }
+
+    /** Everything one member row is derived from; shared by every row of the week. */
+    private class WeekInputs(
+        val days: List<LocalDate>,
+        val zoneId: ZoneId,
+        val isGunsmoke: Boolean,
+        val snapshots: List<PlatoonSnapshot>,
+        val overridesByCell: Map<Pair<Long, LocalDate>, WeeklyCellOverride>,
+        val dailyPatrolFacts: List<DailyPatrolFact>,
+        val patrolFactsByMemberDay: Map<Pair<Long, LocalDate>, DailyPatrolFact>,
+        val loginFactsByMemberDay: Set<Pair<Long, LocalDate>>,
+        val asOf: Instant,
+    )
+
+    private fun loginFactsByMemberDay(
+        sortedSnapshots: List<PlatoonSnapshot>,
+        days: List<LocalDate>,
+        zoneId: ZoneId,
+    ): Set<Pair<Long, LocalDate>> = sortedSnapshots
+        .flatMap { snapshot ->
+            snapshot.members.mapNotNull { member ->
+                member.lastLogin
+                    .takeIf { it > 0L }
+                    ?.let(Instant::ofEpochSecond)
+                    ?.let { member.uid to PlatoonPeriods.gameDay(it, zoneId) }
+            }
+        }
+        .filter { it.second in days }
+        .toSet()
+
+    /**
+     * The latest known identity of every member the week can show: roster observations, newer
+     * exact Updates names or joins before [rosterCutoff], and placeholders for manual overrides.
+     */
+    private fun memberIdentities(
+        sortedSnapshots: List<PlatoonSnapshot>,
+        membershipEvents: List<MemberEvent>,
+        overriddenUids: List<Long>,
+        rosterCutoff: Instant,
+    ): Map<Long, SnapshotMember> {
         val uids = sortedSnapshots.flatMap { it.members }.associateBy(SnapshotMember::uid).toMutableMap()
         val latestSnapshotAtByUid = buildMap {
             sortedSnapshots.forEach { snapshot ->
@@ -368,112 +411,121 @@ object WeeklyReportBuilder {
                     )
                 }
             }
-        overridesByCell.keys.map { it.first }.forEach { uid ->
+        overriddenUids.forEach { uid ->
             if (uid !in uids) {
                 uids[uid] = SnapshotMember(uid, "#$uid", 0, 0, 0, 0, 0, 0)
             }
         }
-        val rosterSnapshot = sortedSnapshots.lastBefore(rosterCutoff)
-        val rosterAtPeriodEnd = applyMembershipEventsToRoster(
+        return uids
+    }
+
+    private fun buildRow(latestKnown: SnapshotMember, week: WeekInputs): MemberRow {
+        val uid = latestKnown.uid
+        val derivedCells = week.days.map { day ->
+            buildCell(
+                uid = uid,
+                day = day,
+                zoneId = week.zoneId,
+                snapshots = week.snapshots,
+                isGunsmoke = week.isGunsmoke,
+                manualOverride = week.overridesByCell[uid to day],
+                dailyPatrolFact = week.patrolFactsByMemberDay[uid to day],
+                hasLoginFact = uid to day in week.loginFactsByMemberDay,
+            )
+        }
+        val gunsmokeResolution = if (week.isGunsmoke) {
+            GunsmokeWeekSolver.resolve(
+                uid = uid,
+                days = week.days,
+                zoneId = week.zoneId,
+                snapshots = week.snapshots,
+                cells = derivedCells,
+                dailyPatrolFacts = week.dailyPatrolFacts,
+            )
+        } else {
+            null
+        }
+        val standardResolution = if (!week.isGunsmoke) {
+            StandardWeekSolver.resolve(
+                uid = uid,
+                days = week.days,
+                zoneId = week.zoneId,
+                snapshots = week.snapshots,
+                cells = derivedCells,
+                asOf = week.asOf,
+            )
+        } else {
+            null
+        }
+        val cells = gunsmokeResolution?.cells ?: standardResolution?.cells ?: derivedCells
+        val snapshotsInPeriod = week.snapshots.mapNotNull { snapshot ->
+            val gameDay = PlatoonPeriods.gameDay(snapshot.capturedAt, week.zoneId)
+            snapshot.member(uid)
+                ?.takeIf { gameDay in week.days }
+                ?.let { gameDay to it }
+        }
+        val derivedMeritTotal = cells.sumOf { it.meritDelta ?: 0L }
+        val sundayMerit = cells.firstOrNull()?.meritDelta ?: 0L
+        val mondayThroughSaturday = snapshotsInPeriod
+            .lastOrNull { (gameDay, _) -> gameDay.dayOfWeek.value in 1..6 }
+            ?.second
+            ?.weeklyMerit
+            ?: 0L
+        val derivedScoreTotal = cells.sumOf { it.scoreDelta ?: 0L }
+        val latestCapturedScore = snapshotsInPeriod.lastOrNull()?.second?.totalScore ?: 0L
+        return MemberRow(
+            uid = uid,
+            name = latestKnown.name,
+            days = cells,
+            totalMerit = maxOf(
+                derivedMeritTotal,
+                sundayMerit + mondayThroughSaturday,
+                gunsmokeResolution?.totals?.merit ?: 0L,
+                standardResolution?.totals?.merit ?: 0L,
+            ),
+            totalScore = if (week.isGunsmoke) {
+                maxOf(derivedScoreTotal, latestCapturedScore)
+            } else {
+                derivedScoreTotal
+            },
+            isGunsmokeWeek = week.isGunsmoke,
+            hasFinalGunsmokeScore = cells.any(DayCell::hasFinalGunsmokeScore),
+            resolvedGunsmokeTotals = gunsmokeResolution?.totals,
+            resolvedStandardTotals = standardResolution?.totals,
+            gunsmokeAttemptsFloor = gunsmokeResolution?.attemptsFloor,
+        )
+    }
+
+    /** UIDs whose rows the report for [referenceDay] contains, without solving any row. */
+    internal fun rosterAtPeriodEnd(
+        referenceDay: LocalDate,
+        zoneId: ZoneId,
+        snapshots: List<PlatoonSnapshot>,
+        membershipEvents: List<MemberEvent>,
+        asOf: Instant,
+    ): Set<Long> = rosterAtCutoff(
+        snapshots.sortedBy(PlatoonSnapshot::capturedAt),
+        membershipEvents,
+        rosterCutoff(PlatoonPeriods.weekStart(referenceDay), zoneId, asOf),
+    )
+
+    private fun rosterCutoff(periodStart: LocalDate, zoneId: ZoneId, asOf: Instant): Instant = minOf(
+        PlatoonPeriods.periodStartInstant(periodStart.plusDays(7), zoneId),
+        asOf.plusMillis(1),
+    )
+
+    private fun rosterAtCutoff(
+        sortedSnapshots: List<PlatoonSnapshot>,
+        membershipEvents: List<MemberEvent>,
+        cutoff: Instant,
+    ): Set<Long> {
+        val rosterSnapshot = sortedSnapshots.lastBefore(cutoff)
+        return applyMembershipEventsToRoster(
             rosterSnapshot?.members?.map(SnapshotMember::uid).orEmpty().toSet(),
             membershipEvents,
             rosterSnapshot?.capturedAt,
-            rosterCutoff,
+            cutoff,
         )
-
-        val rows = uids.values.map { latestKnown ->
-            val derivedCells = days.map { day ->
-                buildCell(
-                    uid = latestKnown.uid,
-                    day = day,
-                    zoneId = zoneId,
-                    snapshots = sortedSnapshots,
-                    isGunsmoke = isGunsmoke,
-                    manualOverride = overridesByCell[latestKnown.uid to day],
-                    dailyPatrolFact = patrolFactsByMemberDay[latestKnown.uid to day],
-                    hasLoginFact = latestKnown.uid to day in loginFactsByMemberDay,
-                )
-            }
-            val gunsmokeResolution = if (isGunsmoke) {
-                GunsmokeWeekSolver.resolve(
-                    uid = latestKnown.uid,
-                    days = days,
-                    zoneId = zoneId,
-                    snapshots = sortedSnapshots,
-                    cells = derivedCells,
-                    dailyPatrolFacts = dailyPatrolFacts,
-                )
-            } else {
-                null
-            }
-            val standardResolution = if (!isGunsmoke) {
-                StandardWeekSolver.resolve(
-                    uid = latestKnown.uid,
-                    days = days,
-                    zoneId = zoneId,
-                    snapshots = sortedSnapshots,
-                    cells = derivedCells,
-                    asOf = asOf,
-                )
-            } else {
-                null
-            }
-            val cells = gunsmokeResolution?.cells ?: standardResolution?.cells ?: derivedCells
-            val snapshotsInPeriod = sortedSnapshots.mapNotNull { snapshot ->
-                val gameDay = PlatoonPeriods.gameDay(snapshot.capturedAt, zoneId)
-                snapshot.member(latestKnown.uid)
-                    ?.takeIf { gameDay in days }
-                    ?.let { gameDay to it }
-            }
-            val derivedMeritTotal = cells.sumOf { it.meritDelta ?: 0L }
-            val sundayMerit = cells.firstOrNull()?.meritDelta ?: 0L
-            val mondayThroughSaturday = snapshotsInPeriod
-                .lastOrNull { (gameDay, _) -> gameDay.dayOfWeek.value in 1..6 }
-                ?.second
-                ?.weeklyMerit
-                ?: 0L
-            val derivedScoreTotal = cells.sumOf { it.scoreDelta ?: 0L }
-            val latestCapturedScore = snapshotsInPeriod.lastOrNull()?.second?.totalScore ?: 0L
-            MemberRow(
-                uid = latestKnown.uid,
-                name = latestKnown.name,
-                days = cells,
-                totalMerit = maxOf(
-                    derivedMeritTotal,
-                    sundayMerit + mondayThroughSaturday,
-                    gunsmokeResolution?.totals?.merit ?: 0L,
-                    standardResolution?.totals?.merit ?: 0L,
-                ),
-                totalScore = if (isGunsmoke) {
-                    maxOf(derivedScoreTotal, latestCapturedScore)
-                } else {
-                    derivedScoreTotal
-                },
-                isGunsmokeWeek = isGunsmoke,
-                hasFinalGunsmokeScore = cells.any(DayCell::hasFinalGunsmokeScore),
-                resolvedGunsmokeTotals = gunsmokeResolution?.totals,
-                resolvedStandardTotals = standardResolution?.totals,
-                gunsmokeAttemptsFloor = gunsmokeResolution?.attemptsFloor,
-            )
-        }.filter { row ->
-            // Weekly rows represent the roster that is active at the end of the
-            // selected reporting period (or the latest roster for an in-progress
-            // week). A member observed earlier in the week must disappear as soon
-            // as a later complete roster records their withdrawal; the immutable
-            // membership event remains available in the Join / Withdraw section.
-            row.uid in rosterAtPeriodEnd
-        }
-            .sortedWith(
-                if (isGunsmoke) {
-                    compareByDescending<MemberRow> { it.totalScore }
-                        .thenByDescending { it.totalMerit }
-                        .thenBy { it.name }
-                } else {
-                    compareByDescending<MemberRow> { it.totalMerit }.thenBy { it.name }
-                },
-            )
-
-        return Report(start, start.plusDays(6), isGunsmoke, days, rows)
     }
 
     private fun buildCell(
@@ -497,19 +549,11 @@ object WeeklyReportBuilder {
                 dailyPatrolFact = dailyPatrolFact,
                 hasLoginFact = hasLoginFact,
             )
-            val merit = manualOverride.meritDelta ?: derived.meritDelta
-            val score = manualOverride.scoreDelta ?: derived.scoreDelta
-            return derived.copy(
-                meritDelta = merit,
-                scoreDelta = score,
-                inference = if (merit != null && score != null) {
-                    ActivityInference.infer(merit, score, isGunsmoke)
-                } else {
-                    derived.inference
-                },
-                manualOverride = manualOverride,
-            )
+            return overlayManualOverride(derived, manualOverride, isGunsmoke)
         }
+        fun withActivityFacts(cell: DayCell) =
+            applyActivityFacts(cell, isGunsmoke, dailyPatrolFact, hasLoginFact)
+
         val start = PlatoonPeriods.periodStartInstant(day, zoneId)
         val end = PlatoonPeriods.periodStartInstant(day.plusDays(1), zoneId)
         val observations = snapshots.filter {
@@ -529,7 +573,7 @@ object WeeklyReportBuilder {
         } == true
         val hasClosingBoundary = lastObservation?.first?.capturedAt == end
         if (baselineSnapshot == null) {
-            return applyActivityFacts(
+            return withActivityFacts(
                 DayCell(
                     gameDay = day,
                     meritDelta = null,
@@ -544,13 +588,10 @@ object WeeklyReportBuilder {
                     isGunsmokeWeek = isGunsmoke,
                     hasClosingBoundary = hasClosingBoundary,
                 ),
-                isGunsmoke,
-                dailyPatrolFact,
-                hasLoginFact,
             )
         }
-        if (observations.isEmpty()) {
-            return applyActivityFacts(
+        if (observations.isEmpty() || (after == null && before == null)) {
+            return withActivityFacts(
                 DayCell(
                     day,
                     null,
@@ -559,24 +600,6 @@ object WeeklyReportBuilder {
                     DailyEvidence.NO_OBSERVATION,
                     isGunsmokeWeek = isGunsmoke,
                 ),
-                isGunsmoke,
-                dailyPatrolFact,
-                hasLoginFact,
-            )
-        }
-        if (after == null && before == null) {
-            return applyActivityFacts(
-                DayCell(
-                    day,
-                    null,
-                    null,
-                    null,
-                    DailyEvidence.NO_OBSERVATION,
-                    isGunsmokeWeek = isGunsmoke,
-                ),
-                isGunsmoke,
-                dailyPatrolFact,
-                hasLoginFact,
             )
         }
         if (isGunsmoke && baselineSnapshot.capturedAt != start) {
@@ -584,7 +607,7 @@ object WeeklyReportBuilder {
             // Its counter delta is an interval total, not a safe lower bound
             // for the new Gunsmoke day. The path solver may still reconcile it
             // with adjacent checkpoints; otherwise keep the daily metrics unknown.
-            return applyActivityFacts(
+            return withActivityFacts(
                 DayCell(
                     gameDay = day,
                     meritDelta = null,
@@ -596,9 +619,6 @@ object WeeklyReportBuilder {
                     metricObservedAt = lastObservation?.first?.capturedAt,
                     hasClosingBoundary = hasClosingBoundary,
                 ),
-                isGunsmoke,
-                dailyPatrolFact,
-                hasLoginFact,
             )
         }
 
@@ -613,14 +633,14 @@ object WeeklyReportBuilder {
             scoreDelta = if (isGunsmoke) null else 0L
         } else {
             val lastKnown = after ?: before
-            meritDelta = counterDelta(lastKnown.totalMerit, before.totalMerit)
+            meritDelta = ActivityInference.counterDelta(before.totalMerit, lastKnown.totalMerit)
             scoreDelta = if (isGunsmoke) {
-                counterDelta(lastKnown.totalScore, before.totalScore)
+                ActivityInference.counterDelta(before.totalScore, lastKnown.totalScore)
             } else {
                 0L
             }
         }
-        return applyActivityFacts(
+        return withActivityFacts(
             DayCell(
                 gameDay = day,
                 meritDelta = meritDelta,
@@ -635,9 +655,26 @@ object WeeklyReportBuilder {
                 metricObservedAt = lastObservation?.first?.capturedAt,
                 hasClosingBoundary = hasClosingBoundary,
             ),
-            isGunsmoke,
-            dailyPatrolFact,
-            hasLoginFact,
+        )
+    }
+
+    /** Overlays only the explicitly edited fields; untouched values keep their derivation. */
+    private fun overlayManualOverride(
+        derived: DayCell,
+        manualOverride: WeeklyCellOverride,
+        isGunsmoke: Boolean,
+    ): DayCell {
+        val merit = manualOverride.meritDelta ?: derived.meritDelta
+        val score = manualOverride.scoreDelta ?: derived.scoreDelta
+        return derived.copy(
+            meritDelta = merit,
+            scoreDelta = score,
+            inference = if (merit != null && score != null) {
+                ActivityInference.infer(merit, score, isGunsmoke)
+            } else {
+                derived.inference
+            },
+            manualOverride = manualOverride,
         )
     }
 
@@ -720,16 +757,8 @@ object WeeklyReportBuilder {
         else -> MetricCertainty.LOWER_BOUND
     }
 
-
-    private fun PlatoonSnapshot.member(uid: Long): SnapshotMember? =
-        members.firstOrNull { it.uid == uid }
-
-    private fun counterDelta(current: Long, previous: Long): Long =
-        if (current >= previous) current - previous else current
-
     private const val BOUNDARY_WINDOW_MINUTES = 15L
-    private const val MAX_STANDARD_DAILY_MERIT = 90L
-    private const val MAX_STANDARD_WEEKLY_MERIT = MAX_STANDARD_DAILY_MERIT * 7
-    private const val STANDARD_LOGIN_MERIT = 50L
-    private const val STANDARD_PATROL_MERIT = 90L
+    private const val MAX_STANDARD_WEEKLY_MERIT = ActivityInference.LOGIN_AND_PATROL_MERIT * 7
+    private const val STANDARD_LOGIN_MERIT = ActivityInference.LOGIN_MERIT
+    private const val STANDARD_PATROL_MERIT = ActivityInference.LOGIN_AND_PATROL_MERIT
 }

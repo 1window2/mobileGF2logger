@@ -110,9 +110,19 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   fragments. The first continuation is checked before retention; exceeding
   either limit discards the pending payload and quarantines its remaining
   fragments through the logical terminal frame before later datasets are parsed.
+  A malformed or truncated continuation frame discards its dataset the same way.
   Quarantine is advanced from frame metadata before protobuf decoding, so even
   a malformed terminal fragment clears the discarded dataset deterministically.
-- The parser service has one worker and a queue capped at 256 payload chunks.
+- One serial `CaptureWorker` owns every parser, flow, session, and admission
+  structure, so that state needs no locks. Native callbacks share a budget of
+  256 queued chunks; lifecycle, confirm, and discard tasks bypass that budget
+  and are never rejected, so a pending Platoon can be confirmed or discarded
+  after capture stops. `CaptureFlowEngine` routes payloads,
+  `PlatoonAdmissionCoordinator` owns pending admission, and the service is
+  lifecycle glue whose fields are main-thread only.
+- Stopping capture never blocks the main thread: the worker stops the native
+  loop, drains already queued chunks, and clears per-run state; a start that
+  arrives during teardown waits for it to finish.
 - Before identity is established, each flow retains at most 32 decoded payload
   objects. Overflow rejects that flow until closure. The profile registry holds
   at most 16 bounded identities.
@@ -124,6 +134,9 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   capture may admit at most one new profile per supported client. Explicit
   profile deletion removes one immutable scope behind two confirmations.
 - TLS, HTTP, and UDP payloads remain native and are excluded from the parser.
+  A TCP flow is classified once, on its first payload in either direction, so
+  a later plaintext segment that happens to begin with TLS-like bytes can never
+  disable inspection.
 - Outgoing plaintext chunks are used only for native flow classification.
 - Flow-close callbacks finalize any pending recognized payload before removing parser state and
   unconditionally remove metadata even when no parser existed. A rejected close callback
@@ -153,7 +166,7 @@ preserving in-flow ordering.
 1. Start forwarding using the supplied TUN file descriptor.
 2. Stop and release native resources.
 
-The listener reports candidate plaintext payloads after TCP reassembly, flow closure, unexpected native termination, and aggregate byte counters. Every upstream socket is passed through `VpnService.protect()` so forwarded traffic cannot re-enter the VPN.
+The listener reports candidate plaintext payloads after TCP reassembly, flow closure, unexpected native termination, and aggregate byte counters. Flow ids are unique for the life of the process, so a pending Platoon that outlives one capture can never refer to a flow of the next. Every upstream socket is passed through `VpnService.protect()` so forwarded traffic cannot re-enter the VPN.
 
 The implementation uses zdtun rather than introducing a new TCP/IP stack.
 General PCAP export, nDPI classification, TLS decryption, root capture, remote
@@ -199,7 +212,11 @@ payload with 128-character names, and Updates ingestion accepts at most 250
 distinct supported observations. Packet-triggered weekly-history work derives
 only from those accepted observations and is independently capped at 32
 distinct periods per ingest, so rejected timestamps cannot amplify report or
-SQLite work. SQLite retains the newest 10,000 activity
+SQLite work. Within that cap, `WeeklyHistoryWorkPolicy` adds the listed
+neighbouring weeks that read an instant across a 05:00 reset (the closed week
+of an exact-reset roster, the calendar-day Join / Withdraw week, and later
+weeks up to the next stored roster), so their stored revisions never lag the
+live projection. SQLite retains the newest 10,000 activity
 facts, and one ingestion resolves at most 250 unresolved facts. A database-local
 cursor rotates those bounded batches through the complete retained backlog.
 Schema v11 owns the rotation cursor and a global `(captured_at, id)` retention
@@ -207,7 +224,11 @@ index. Schema v13 repairs the derived active-member projection from canonical
 membership periods during upgrade; supported older backups are upgraded before
 strict current-schema validation.
 These limits are enforced again at repository and persistence boundaries so a
-future caller cannot bypass the protocol-layer checks.
+future caller cannot bypass the protocol-layer checks. User-entered text has
+the same treatment: `ManualTextPolicy` trims and then rejects a member name
+over 256 characters or a private, membership-period, or weekly note over
+1,000 characters inside `MembershipEditing` and `WeeklyAnnotationStore`,
+before any row is written.
 
 ## HTTPS and application-layer encryption
 
@@ -233,29 +254,36 @@ plaintext TCP streams. Do not add pinning or anti-cheat bypasses.
 
 ## Display and first-launch boundary
 
-`LocalizedActivity` applies both locale and System, Light, or Dark appearance
-through a configuration-wrapped base context before an Activity creates its
-views. `ModernUi` supplies shared presentation primitives only; it does not own
-capture, parsing, persistence, or report policy. Theme-specific resources keep
-packet tables, weekly grids, controls, and status surfaces readable without
-duplicating domain logic in Activities.
+`BaseActivity` extends AndroidX `ComponentActivity`. It applies the persisted
+language and System, Light, or Dark appearance through a configuration-wrapped
+base context before views exist, draws edge to edge, and observes the pending
+Platoon admission store so a newly detected Platoon is offered for confirmation
+as soon as it appears. Screens are composed from the presentation-only
+`dev.gf2log.app.ui` package (`Screen`, `TopBar`, `Controls`, `Views`,
+`StateViews`, `Dialogs`); it owns no capture, parsing, persistence, or report
+policy. `BackgroundWork` runs each screen's repository, file, and network calls
+in submission order off the main thread and delivers results only while the
+screen exists, with keyed requests superseding stale loads.
 
-`PrimaryNavigation` is the presentation-only shell shared by Home, Platoon, and
-Weekly. It launches existing Activities and owns no data or domain state.
-Onboarding overrides only the resolved presentation theme so the approved dark
+Capture state reaches the UI as an immutable `CaptureSnapshot` (phase, latest
+typed and localized notice, captured targets, one-time checklist) published by
+`CaptureStatus` listeners on the main looper. Nothing in the UI parses status
+text or polls.
+
+`PrimaryNavigation` provides the Home, Platoon, and Weekly bar used by `Screen`.
+It launches existing Activities and owns no data or domain state. Onboarding
+overrides only the resolved presentation theme so the approved dark
 walkthrough remains stable; its selected language still persists through the
-same user-settings store as the rest of the app.
+same user-settings store as the rest of the app, and Settings can replay it
+without resetting the first-launch flag.
 
 The concrete presentation roles, warm light/dark palette, compact touch-target
 contract, and accessibility review gates are documented in
-[`UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md). Activities select semantic roles;
-they do not define one-off button palettes or treat compound controls as generic
-buttons.
+[`UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md).
 
 `MainActivity` routes an installation with no completed first-use flag to the
 non-exported `OnboardingActivity`. The five-page guide may be finished or
-skipped, and writes completion only at that explicit exit. Its English/Korean
-segmented control persists the same language preference used by Settings.
+skipped, and writes completion only at that explicit exit.
 Complete backup settings schema v4 includes language, theme, onboarding
 completion, and the server-region reset preset. Historical manual timezone
 values remain decodable for backup compatibility but are no longer offered in
@@ -273,8 +301,13 @@ from two clients cannot be combined into a false completion.
 CSV preview and apply retain the same immutable scope even if an Activity is
 recreated. A scoped backup is validated before profile metadata changes. Its
 database, settings, retained CSV retirement, registry metadata, active profile,
-and client-region routing then commit under one durable journal; interrupted
-restores roll all of those resources back together.
+client-region routing, and the scoped reset-zone keys then commit under one
+durable journal; interrupted restores roll all of those resources back
+together. The journal keeps the exact previous timezone keys because replaying
+effective settings would turn an automatic region into an explicit one.
+`RestoredTimeZonePolicy` decides, after the profile is installed, whether the
+restored override is redundant (complete restore) or stale (Platoon-only
+restore that changed the server region) and clears it.
 
 Profile server edits retain the immutable scope and rebuild weekly history under
 the repository's exclusive database gate. Full profile deletion uses a durable
@@ -289,12 +322,19 @@ the native listener contract); encapsulation is provided by stores and the
 repository facade. Android lifecycle inheritance remains shallow through
 `LocalizedActivity`, `VpnService`, and `SQLiteOpenHelper`.
 
-The large SQLite helper remains a maintenance boundary. Schema, migrations,
-and transactional evidence correlation stay together to preserve atomic
-ingestion. Read-only roster snapshot projection is extracted into
-`WeeklySnapshotStore` behind the repository-facing database API; further
-extractions must preserve the same single-transaction write owner and must not
-let Activities issue SQL directly.
+`PlatoonDatabase` is the single SQLite helper and transactional write owner of
+one scope. Its SQL lives in package-internal objects that receive the open
+database (`PlatoonDatabaseSchema`, `PlatoonDatabaseMigrations`,
+`SnapshotIngestion`, `RosterHistoryReplay`, `ActivityIngestion`,
+`ExactBoundaryCorrelation`, `MembershipEditing`, `MembershipRows`,
+`PlatoonReadQueries`, `WeeklyAnnotationStore`, `WeeklyHistoryStore`, and
+`WeeklySnapshotStore`), so one ingest still commits or rolls back as a whole.
+Activities never issue SQL directly.
+
+Locks are always acquired in one order: a CSV checkpoint's per-scope claim,
+the repository maintenance lock, the database helper, the profile registry,
+then settings stores. Restore recovery runs only when durable restore artifacts
+exist, so constructing a repository never takes the exclusive gate.
 
 ## Parsed-packet history
 
@@ -308,7 +348,12 @@ atomically copies selected entries into the same profile's `saved-history`
 directory, rejects duplicates, caps the collection at 50 without FIFO deletion,
 and keeps saved entries independent from recent-history rotation.
 
-The main activity renders both collections with timestamp-only titles in `yy/MM/dd HH:mm:ss` using the Android device timezone. Selecting a title opens a cleaned table parsed from the stored CSV body; the same screen can reveal the complete raw stored text and copy it to the clipboard. Android backup rules exclude all private files, including recent history, saved history, generated Platoon CSV files, and the structured management database. A user can separately invoke the explicit Platoon backup export, which contains parsed management data but never raw traffic.
+Every store instance for the same directory shares one process-wide lock, and
+only saving trims the recent collection; listing never deletes. Home renders
+both collections as Recent and Saved tabs with timestamp-only titles in
+`yy/MM/dd HH:mm:ss` using the Android device timezone. Selecting a title opens a
+cleaned table parsed from the stored CSV body; the same screen switches to the
+complete raw stored text and back, and can copy it to the clipboard. Android backup rules exclude all private files, including recent history, saved history, generated Platoon CSV files, and the structured management database. A user can separately invoke the explicit Platoon backup export, which contains parsed management data but never raw traffic.
 
 ## Explicit backup boundary
 
@@ -331,7 +376,10 @@ the repository maintenance lock. The previous database and a settings snapshot
 are retained until both resources commit, so any failure restores the prior
 state instead of leaving a partial import. A fresh install records that no
 database existed so rollback removes the staged replacement rather than
-mistaking it for prior state. Schema introspection uses the extended SQLite
+mistaking it for prior state. Cleanup deletes the transaction state file
+first, so a process death during cleanup leaves only leftovers to delete
+rather than a half-cleaned PREPARED transaction that recovery would reject on
+every start. Schema introspection uses the extended SQLite
 column metadata where available and the equivalent ordinary-column metadata on
 the older SQLite engine shipped with the supported Android 8 minimum.
 
@@ -386,11 +434,17 @@ packet, import, or manual override that changes the live fingerprint clears that
 selection. The history Activities can list, preview, and select revisions, but
 cannot mutate or delete individual history rows.
 
+Manual weekly corrections are merged with stored overrides by
+`WeeklyOverrideEditing`: only edited fields change, untouched fields keep their
+stored override, and the complete override set for the week is replaced as one
+unit.
+
 `WeeklyReportActivity` loads one immutable projection on a serialized worker.
 A lifecycle-independent `WeeklyReportStateHolder` owns the selected date and
 generation token, rejects results superseded by navigation or lifecycle
-changes, and survives Activity recreation. A bounded `RecyclerView` recycles
-member rows instead of accumulating the entire nested table hierarchy. The
+changes, and survives Activity recreation. One vertical `RecyclerView` hosts the
+week navigator, a sticky day header, recycled member rows with a frozen member
+column and synced horizontal scrolling, and the membership and note sections. The
 Gunsmoke solver merges equivalent partial histories instead of
 retaining every complete path and enforces deterministic state/operation
 budgets; evidence beyond those budgets stays conservative rather than blocking

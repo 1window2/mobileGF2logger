@@ -1,5 +1,6 @@
 package dev.gf2log.protocol
 
+import dev.gf2log.protocol.internal.CsvRecords
 import dev.gf2log.protocol.model.GuildMember
 
 object GuildMembersCsv {
@@ -64,7 +65,8 @@ object GuildMembersCsv {
     // - Returns null when any required field is malformed or capture times disagree.
     fun parse(content: String): Snapshot? {
         if (content.length > MAX_CONTENT_CHARS) return null
-        val records = parseRecords(content) ?: return null
+        val records = CsvRecords.parse(content, MAX_COLUMNS, MAX_RECORDS, MAX_FIELD_CHARS)
+            ?: return null
         val header = records.firstOrNull() ?: return null
         if (header != HEADER.split(',')) return null
 
@@ -94,59 +96,6 @@ object GuildMembersCsv {
         if (!isValidRoster(members)) return null
         val snapshotTime = logTime ?: return null
         return Snapshot(logTime = snapshotTime, members = members)
-    }
-
-    private fun parseRecords(content: String): List<List<String>>? {
-        val csv = content.replace("\r\n", "\n").replace('\r', '\n')
-        val records = mutableListOf<List<String>>()
-        val row = mutableListOf<String>()
-        val field = StringBuilder()
-        var quoted = false
-        var index = 0
-
-        while (index < csv.length) {
-            when (val character = csv[index]) {
-                '"' -> {
-                    if (quoted && index + 1 < csv.length && csv[index + 1] == '"') {
-                        field.append('"')
-                        index += 1
-                    } else {
-                        quoted = !quoted
-                    }
-                }
-                ',' -> if (quoted) {
-                    field.append(character)
-                } else {
-                    if (row.size >= MAX_COLUMNS || field.length > MAX_FIELD_CHARS) return null
-                    row += field.toString()
-                    field.clear()
-                }
-                '\n' -> if (quoted) {
-                    field.append(character)
-                } else {
-                    if (row.size >= MAX_COLUMNS || field.length > MAX_FIELD_CHARS) return null
-                    row += field.toString()
-                    field.clear()
-                    if (records.size >= MAX_RECORDS) return null
-                    records += row.toList()
-                    row.clear()
-                }
-                else -> {
-                    if (field.length >= MAX_FIELD_CHARS) return null
-                    field.append(character)
-                }
-            }
-            index += 1
-        }
-
-        if (quoted) return null
-        if (field.isNotEmpty() || row.isNotEmpty()) {
-            if (row.size >= MAX_COLUMNS || field.length > MAX_FIELD_CHARS) return null
-            row += field.toString()
-            if (records.size >= MAX_RECORDS) return null
-            records += row.toList()
-        }
-        return records
     }
 
     // Function Name: parseOptionalCounter

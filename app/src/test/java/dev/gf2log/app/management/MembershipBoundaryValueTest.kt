@@ -52,6 +52,37 @@ class MembershipBoundaryValueTest {
     }
 
     @Test
+    fun `an absent Updates boundary stays editable`() {
+        val requested = MembershipBoundaryValue(
+            date = LocalDate.of(2026, 7, 29),
+            instant = Instant.parse("2026-07-29T10:15:00Z"),
+            timeKnown = true,
+        )
+        val period = MembershipPeriod(
+            id = 1,
+            uid = 7,
+            joinedAt = null,
+            leftAt = Instant.parse("2026-07-30T00:00:00Z"),
+            joinedDate = null,
+            leftDate = null,
+            joinedTimeKnown = true,
+            leftTimeKnown = true,
+            joinedPrecision = EvidencePrecision.UNKNOWN,
+            leftPrecision = EvidencePrecision.EXACT,
+            joinedSource = EvidenceSource.GAME_UPDATES,
+            leftSource = EvidenceSource.GAME_UPDATES,
+            note = "",
+        )
+
+        assertTrue(editableMembershipBoundaryChanged(null, requested, EvidenceSource.GAME_UPDATES))
+        assertFalse(isImmutableMembershipBoundary(null, EvidenceSource.GAME_UPDATES))
+        assertTrue(isImmutableMembershipBoundary(requested, EvidenceSource.GAME_UPDATES))
+        assertTrue(period.isJoinedBoundaryEditable)
+        assertFalse(period.isLeftBoundaryEditable)
+        assertFalse(period.copy(joinedAt = requested.instant).isJoinedBoundaryEditable)
+    }
+
+    @Test
     fun allowsSameDateWhenEitherManualTimeIsUnknown() {
         val joined = boundary("2026-07-29", "2026-07-29T12:00:00Z", timeKnown = true)
         val withdrew = boundary("2026-07-29", "2026-07-29T00:00:00Z", timeKnown = false)

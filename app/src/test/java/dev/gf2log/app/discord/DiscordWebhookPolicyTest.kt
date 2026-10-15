@@ -19,6 +19,8 @@ class DiscordWebhookPolicyTest {
             "https://discord.com:444/api/webhooks/12345678901234567/" + token,
             "https://discord.com/api/webhooks/12345678901234567/" + token + "?wait=true",
             "https://discord.com/api/users/12345678901234567/" + token,
+            "https://discord.com/api/webhooks/%3112345678901234567/" + token,
+            "https://discord.com/api/webhooks/12345678901234567/%61" + token,
         ).forEach { value ->
             assertTrue(runCatching { DiscordWebhookPolicy.requireValid(value) }.isFailure)
         }

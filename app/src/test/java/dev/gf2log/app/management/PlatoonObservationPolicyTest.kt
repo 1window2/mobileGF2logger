@@ -6,8 +6,8 @@ import dev.gf2log.protocol.model.PlatoonUpdateEntry
 import dev.gf2log.protocol.model.PlatoonUpdateMember
 import dev.gf2log.protocol.model.PlatoonUpdatesData
 import java.time.Instant
-import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlatoonObservationPolicyTest {
@@ -133,16 +133,34 @@ class PlatoonObservationPolicyTest {
     }
 
     @Test
-    fun `weekly history work is capped after distinct week mapping`() {
-        val zone = ZoneOffset.UTC
-        val instants = generateSequence(Instant.parse("2020-01-06T05:00:00Z")) {
-            it.plusSeconds(7 * 24 * 60 * 60L)
-        }.take(WeeklyHistoryWorkPolicy.MAX_CHANGED_WEEKS_PER_INGEST + 50)
+    fun `updates reject names and member lists that persisted rows cannot represent`() {
+        val valid = update(members = listOf(member(1)))
+        val oversizedName = update(
+            kind = PlatoonUpdateSemantics.KIND_REMOVED,
+            occurredAt = Instant.parse("2026-07-31T00:00:01Z"),
+            members = listOf(
+                member(2),
+                member(3).copy(
+                    name = "x".repeat(PlatoonObservationPolicy.MAX_UPDATE_MEMBER_NAME_LENGTH + 1),
+                ),
+            ),
+        )
+        val oversizedEntry = update(
+            occurredAt = Instant.parse("2026-07-31T00:00:02Z"),
+            members = (1L..PlatoonObservationPolicy.MAX_UPDATE_MEMBERS_PER_OBSERVATION + 1L)
+                .map(::member),
+        )
 
-        val periods = WeeklyHistoryWorkPolicy.changedPeriodStarts(instants, zone)
-
-        assertEquals(WeeklyHistoryWorkPolicy.MAX_CHANGED_WEEKS_PER_INGEST, periods.size)
-        assertEquals(periods.size, periods.distinct().size)
+        assertEquals(
+            listOf(valid),
+            PlatoonObservationPolicy.updates(listOf(valid, oversizedName, oversizedEntry)),
+        )
+        // Every accepted name stays encodable as a weekly-history member name (UTF-8 <= 3 bytes
+        // per UTF-16 unit).
+        assertTrue(
+            PlatoonObservationPolicy.MAX_UPDATE_MEMBER_NAME_LENGTH * 3 <=
+                WeeklyReportHistoryCodec.MAX_STRING_BYTES,
+        )
     }
 
     private fun activity(name: String) = PlatoonActivityObservation(

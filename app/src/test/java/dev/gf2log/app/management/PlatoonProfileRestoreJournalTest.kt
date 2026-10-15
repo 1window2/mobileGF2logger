@@ -1,10 +1,12 @@
 package dev.gf2log.app.management
 
 import dev.gf2log.app.settings.GameServerRegion
+import dev.gf2log.app.settings.GameTimeZonePreferences
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.time.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class PlatoonProfileRestoreJournalTest {
@@ -35,6 +37,58 @@ class PlatoonProfileRestoreJournalTest {
         assertEquals(value, PlatoonProfileRestoreJournalCodec.decode(
             PlatoonProfileRestoreJournalCodec.encode(value),
         ))
+    }
+
+    @Test
+    fun journalRoundTripsTheExactScopedTimeZoneKeys() {
+        val storageId = PlatoonProfileIdentity.storageId(
+            PlatoonClient.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            101817L,
+        )
+        listOf(
+            GameTimeZonePreferences.ScopedZoneState(region = null, zone = null),
+            GameTimeZonePreferences.ScopedZoneState(GameServerRegion.HAOPLAY_JAPAN.storedValue, null),
+            GameTimeZonePreferences.ScopedZoneState(GameServerRegion.MANUAL.storedValue, "Asia/Seoul"),
+            // Raw keys the timezone reader tolerates must roll back verbatim, not abort recovery.
+            GameTimeZonePreferences.ScopedZoneState("region_from_a_newer_app", "Not/AZone"),
+            null,
+        ).forEach { state ->
+            val value = PlatoonProfileRestoreJournal(
+                targetStorageId = storageId,
+                previousProfile = null,
+                previousActiveStorageId = null,
+                ownerPackage = null,
+                previousCaptureRegion = null,
+                previousTimeZone = state,
+            )
+
+            assertEquals(value, PlatoonProfileRestoreJournalCodec.decode(
+                PlatoonProfileRestoreJournalCodec.encode(value),
+            ))
+        }
+    }
+
+    @Test
+    fun versionTwoJournalDecodesWithoutTimeZoneRollback() {
+        val storageId = PlatoonProfileIdentity.storageId(
+            PlatoonClient.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            101817L,
+        )
+        val bytes = ByteArrayOutputStream().use { target ->
+            DataOutputStream(target).use { output ->
+                output.writeInt(2)
+                output.writeUTF(storageId)
+                output.writeBoolean(false)
+                output.writeBoolean(false)
+                output.writeBoolean(false)
+                output.writeBoolean(false)
+            }
+            target.toByteArray()
+        }
+
+        assertNull(PlatoonProfileRestoreJournalCodec.decode(bytes).previousTimeZone)
     }
 
     @Test

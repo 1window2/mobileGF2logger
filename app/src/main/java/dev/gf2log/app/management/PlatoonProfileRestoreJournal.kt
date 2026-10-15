@@ -1,19 +1,25 @@
 package dev.gf2log.app.management
 
 import dev.gf2log.app.settings.GameServerRegion
+import dev.gf2log.app.settings.GameTimeZonePreferences
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.time.Instant
 
-/** Durable rollback state for profile metadata changed by a scoped backup restore. */
+/**
+ * Durable rollback state for profile metadata changed by a scoped backup restore. The exact
+ * scoped timezone keys are kept because settings rollback can only replay effective values,
+ * which would turn an automatic reset region into an explicit override.
+ */
 internal data class PlatoonProfileRestoreJournal(
     val targetStorageId: String,
     val previousProfile: PlatoonProfile?,
     val previousActiveStorageId: String?,
     val ownerPackage: String?,
     val previousCaptureRegion: GameServerRegion?,
+    val previousTimeZone: GameTimeZonePreferences.ScopedZoneState? = null,
 )
 
 internal object PlatoonProfileRestoreJournalCodec {
@@ -36,6 +42,11 @@ internal object PlatoonProfileRestoreJournalCodec {
                 output.writeLong(profile.lastSeenAt.toEpochMilli())
                 output.writeBoolean(profile.legacy)
             }
+            output.writeBoolean(value.previousTimeZone != null)
+            value.previousTimeZone?.let { state ->
+                output.writeNullable(state.region)
+                output.writeNullable(state.zone)
+            }
         }
         bytes.toByteArray()
     }
@@ -43,7 +54,7 @@ internal object PlatoonProfileRestoreJournalCodec {
     fun decode(bytes: ByteArray): PlatoonProfileRestoreJournal =
         DataInputStream(ByteArrayInputStream(bytes)).use { input ->
             val version = input.readInt()
-            require(version in setOf(LEGACY_VERSION, VERSION)) {
+            require(version in LEGACY_VERSION..VERSION) {
                 "Unsupported profile restore journal"
             }
             val targetStorageId = input.readUTF()
@@ -84,6 +95,16 @@ internal object PlatoonProfileRestoreJournalCodec {
             } else {
                 null
             }
+            // The raw keys are rolled back verbatim: the timezone reader already tolerates an
+            // unknown region or zone, so rejecting one here would only abort recovery.
+            val previousTimeZone = if (version >= TIME_ZONE_VERSION && input.readBoolean()) {
+                GameTimeZonePreferences.ScopedZoneState(
+                    region = input.readNullable(),
+                    zone = input.readNullable(),
+                )
+            } else {
+                null
+            }
             require(input.read() == -1) { "Profile restore journal contains trailing data" }
             PlatoonProfileRestoreJournal(
                 targetStorageId,
@@ -91,6 +112,7 @@ internal object PlatoonProfileRestoreJournalCodec {
                 previousActive,
                 ownerPackage,
                 previousRegion,
+                previousTimeZone,
             )
         }
 
@@ -108,6 +130,7 @@ internal object PlatoonProfileRestoreJournalCodec {
     }
 
     private const val LEGACY_VERSION = 1
-    private const val VERSION = 2
+    private const val TIME_ZONE_VERSION = 3
+    private const val VERSION = TIME_ZONE_VERSION
     private const val LEGACY_MAX_EMBLEM_PARTS = 32
 }

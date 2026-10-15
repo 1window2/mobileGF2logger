@@ -1,6 +1,8 @@
 package dev.gf2log.protocol
 
 import dev.gf2log.protocol.internal.ProtoReader
+import dev.gf2log.protocol.internal.collectMessages
+import dev.gf2log.protocol.internal.forEachField
 import dev.gf2log.protocol.model.Doll
 import dev.gf2log.protocol.model.Formation
 import dev.gf2log.protocol.model.FormationsData
@@ -43,6 +45,20 @@ object Gfl2PayloadDecoder {
         TYPE_FORMATIONS,
     )
 
+    /** Allocation-free equivalent of `type in supportedTypes` for the per-frame hot path. */
+    fun isSupported(type: Int): Boolean = when (type) {
+        TYPE_WEAPONS,
+        TYPE_WEAPON_MODS,
+        TYPE_PUBLIC_SKILL_ITEMS,
+        TYPE_PLATOON_PROFILE,
+        TYPE_GUILD_MEMBERS,
+        TYPE_PLATOON_ACTIVITY,
+        TYPE_PLATOON_UPDATES,
+        TYPE_FORMATIONS,
+        -> true
+        else -> false
+    }
+
     @Throws(ProtocolException::class)
     fun decode(type: Int, bytes: ByteArray): GameData? = when (type) {
         TYPE_WEAPONS -> decodeWeapons(ProtoReader(bytes))
@@ -56,14 +72,8 @@ object Gfl2PayloadDecoder {
         else -> null
     }
 
-    private fun decodeWeapons(reader: ProtoReader): WeaponsData {
-        val weapons = mutableListOf<Weapon>()
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
-            if (field.number == 1) weapons += decodeWeapon(reader.readMessage(field)) else reader.skip(field)
-        }
-        return WeaponsData(weapons)
-    }
+    private fun decodeWeapons(reader: ProtoReader) =
+        WeaponsData(reader.collectMessages(1, ::decodeWeapon))
 
     private fun decodeWeapon(reader: ProtoReader): Weapon {
         var id = 0u
@@ -74,8 +84,7 @@ object Gfl2PayloadDecoder {
         var breakTimes = 0u
         var rawFlags = 0u
         val weaponMods = mutableListOf<WeaponModBinding>()
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
+        reader.forEachField { field ->
             when (field.number) {
                 1 -> id = reader.readUInt(field).toUInt()
                 2 -> stcId = reader.readUInt(field).toUInt()
@@ -94,8 +103,7 @@ object Gfl2PayloadDecoder {
     private fun decodeWeaponModBinding(reader: ProtoReader): WeaponModBinding {
         var id = 0u
         var gunId = 0u
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
+        reader.forEachField { field ->
             when (field.number) {
                 1 -> id = reader.readUInt(field).toUInt()
                 2 -> gunId = reader.readUInt(field).toUInt()
@@ -105,18 +113,8 @@ object Gfl2PayloadDecoder {
         return WeaponModBinding(id, gunId)
     }
 
-    private fun decodeWeaponMods(reader: ProtoReader): WeaponModsData {
-        val mods = mutableListOf<WeaponMod>()
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
-            if (field.number == 1) {
-                mods += decodeWeaponMod(reader.readMessage(field))
-            } else {
-                reader.skip(field)
-            }
-        }
-        return WeaponModsData(mods)
-    }
+    private fun decodeWeaponMods(reader: ProtoReader) =
+        WeaponModsData(reader.collectMessages(1, ::decodeWeaponMod))
 
     private fun decodeWeaponMod(reader: ProtoReader): WeaponMod {
         var id = 0u
@@ -127,8 +125,7 @@ object Gfl2PayloadDecoder {
         var exp = 0u
         var suitFlags = 0uL
 
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
+        reader.forEachField { field ->
             when (field.number) {
                 1 -> id = reader.readUInt(field).toUInt()
                 2 -> stcId = reader.readUInt(field).toUInt()
@@ -152,18 +149,8 @@ object Gfl2PayloadDecoder {
         )
     }
 
-    private fun decodePublicSkillItems(reader: ProtoReader): PublicSkillItemsData {
-        val items = mutableListOf<PublicSkillItem>()
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
-            if (field.number == 1) {
-                items += decodePublicSkillItem(reader.readMessage(field))
-            } else {
-                reader.skip(field)
-            }
-        }
-        return PublicSkillItemsData(items)
-    }
+    private fun decodePublicSkillItems(reader: ProtoReader) =
+        PublicSkillItemsData(reader.collectMessages(1, ::decodePublicSkillItem))
 
     private fun decodePublicSkillItem(reader: ProtoReader): PublicSkillItem {
         var id = 0uL
@@ -171,8 +158,7 @@ object Gfl2PayloadDecoder {
         var gunId = 0u
         var lockedFlags = 0uL
         var isNew = false
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
+        reader.forEachField { field ->
             when (field.number) {
                 1 -> id = reader.readUInt(field)
                 2 -> stcId = reader.readUInt(field).toUInt()
@@ -190,8 +176,7 @@ object Gfl2PayloadDecoder {
         var profile = PlatoonProfileData(0u, "", 0u, 0u)
         var questId = 0u
         var seasonId = 0u
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
+        reader.forEachField { field ->
             when (field.number) {
                 1 -> profile = decodePlatoonProfileBody(reader.readMessage(field))
                 2 -> questId = reader.readUInt(field).toUInt()
@@ -212,8 +197,7 @@ object Gfl2PayloadDecoder {
         var bannerMarkId = 0u
         var declaration = ""
         var joinPolicyFlag = false
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
+        reader.forEachField { field ->
             when (field.number) {
                 1 -> platoonId = reader.readUInt(field).toUInt()
                 2 -> platoonName = reader.readString(field).take(MAX_PLATOON_NAME_CHARS)
@@ -242,18 +226,8 @@ object Gfl2PayloadDecoder {
         )
     }
 
-    private fun decodeGuildMembers(reader: ProtoReader): GuildMembersData {
-        val members = mutableListOf<GuildMember>()
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
-            if (field.number == 1) {
-                members += decodeGuildMember(reader.readMessage(field))
-            } else {
-                reader.skip(field)
-            }
-        }
-        return GuildMembersData(members)
-    }
+    private fun decodeGuildMembers(reader: ProtoReader) =
+        GuildMembersData(reader.collectMessages(1, ::decodeGuildMember))
 
     private fun decodeGuildMember(reader: ProtoReader): GuildMember {
         var name = ""
@@ -265,8 +239,7 @@ object Gfl2PayloadDecoder {
         var uid = 0u
         var lastLogin = 0u
 
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
+        reader.forEachField { field ->
             when (field.number) {
                 1 -> {
                     val player = decodePlayer(reader.readMessage(field))
@@ -289,8 +262,7 @@ object Gfl2PayloadDecoder {
     private fun decodePlatoonActivity(reader: ProtoReader): PlatoonActivityData {
         val summaries = mutableListOf<PlatoonActivitySummary>()
         val entries = mutableListOf<PlatoonActivityEntry>()
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
+        reader.forEachField { field ->
             when (field.number) {
                 1 -> summaries += decodePlatoonActivitySummary(reader.readMessage(field))
                 2 -> entries += decodePlatoonActivityEntry(reader.readMessage(field))
@@ -305,8 +277,7 @@ object Gfl2PayloadDecoder {
         var actionId = 0u
         var occurredAt = 0u
         var count = 0u
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
+        reader.forEachField { field ->
             when (field.number) {
                 1 -> id = reader.readUInt(field)
                 2 -> actionId = reader.readUInt(field).toUInt()
@@ -323,8 +294,7 @@ object Gfl2PayloadDecoder {
         var occurredAt = 0u
         var actionId = 0u
         var memberName = ""
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
+        reader.forEachField { field ->
             when (field.number) {
                 2 -> kind = reader.readUInt(field).toUInt()
                 3 -> occurredAt = reader.readUInt(field).toUInt()
@@ -336,25 +306,14 @@ object Gfl2PayloadDecoder {
         return PlatoonActivityEntry(kind, occurredAt, actionId, memberName)
     }
 
-    private fun decodePlatoonUpdates(reader: ProtoReader): PlatoonUpdatesData {
-        val entries = mutableListOf<PlatoonUpdateEntry>()
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
-            if (field.number == 1) {
-                entries += decodePlatoonUpdateEntry(reader.readMessage(field))
-            } else {
-                reader.skip(field)
-            }
-        }
-        return PlatoonUpdatesData(entries)
-    }
+    private fun decodePlatoonUpdates(reader: ProtoReader) =
+        PlatoonUpdatesData(reader.collectMessages(1, ::decodePlatoonUpdateEntry))
 
     private fun decodePlatoonUpdateEntry(reader: ProtoReader): PlatoonUpdateEntry {
         var kind = 0u
         val members = mutableListOf<PlatoonUpdateMember>()
         var occurredAt = 0u
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
+        reader.forEachField { field ->
             when (field.number) {
                 1 -> kind = reader.readUInt(field).toUInt()
                 2 -> members += decodePlatoonUpdateMember(reader.readMessage(field))
@@ -369,8 +328,7 @@ object Gfl2PayloadDecoder {
         var role = 0u
         var uid = 0u
         var name = ""
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
+        reader.forEachField { field ->
             when (field.number) {
                 1 -> role = reader.readUInt(field).toUInt()
                 2 -> uid = reader.readUInt(field).toUInt()
@@ -381,20 +339,13 @@ object Gfl2PayloadDecoder {
         return PlatoonUpdateMember(role, uid, name)
     }
 
-    private fun decodePlayer(reader: ProtoReader): Pair<String, UInt> {
-        var result = "" to 0u
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
-            if (field.number == 1) result = decodePlayerInfo(reader.readMessage(field)) else reader.skip(field)
-        }
-        return result
-    }
+    private fun decodePlayer(reader: ProtoReader): Pair<String, UInt> =
+        reader.collectMessages(1, ::decodePlayerInfo).lastOrNull() ?: ("" to 0u)
 
     private fun decodePlayerInfo(reader: ProtoReader): Pair<String, UInt> {
         var name = ""
         var level = 0u
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
+        reader.forEachField { field ->
             when (field.number) {
                 2 -> name = reader.readString(field)
                 3 -> level = reader.readUInt(field).toUInt()
@@ -404,33 +355,15 @@ object Gfl2PayloadDecoder {
         return name to level
     }
 
-    private fun decodeFormationsResponse(reader: ProtoReader): FormationsData {
-        val formations = mutableListOf<Formation>()
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
-            if (field.number == 1) {
-                formations += decodeFormationsContainer(reader.readMessage(field))
-            } else {
-                reader.skip(field)
-            }
-        }
-        return FormationsData(formations)
-    }
-
-    private fun decodeFormationsContainer(reader: ProtoReader): List<Formation> {
-        val formations = mutableListOf<Formation>()
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
-            if (field.number == 1) formations += decodeFormation(reader.readMessage(field)) else reader.skip(field)
-        }
-        return formations
-    }
+    private fun decodeFormationsResponse(reader: ProtoReader) = FormationsData(
+        reader.collectMessages(1) { container -> container.collectMessages(1, ::decodeFormation) }
+            .flatten(),
+    )
 
     private fun decodeFormation(reader: ProtoReader): Formation {
         var name = ""
         val dolls = mutableListOf<Doll>()
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
+        reader.forEachField { field ->
             when (field.number) {
                 1 -> name = reader.readString(field)
                 2 -> dolls += decodeDoll(reader.readMessage(field))
@@ -448,8 +381,7 @@ object Gfl2PayloadDecoder {
         val expansionKeyIds = mutableListOf<UInt>()
         val commonKeyUids = mutableListOf<ULong>()
 
-        while (!reader.exhausted) {
-            val field = reader.nextField() ?: break
+        reader.forEachField { field ->
             when (field.number) {
                 1 -> dollId = reader.readUInt(field).toUInt()
                 2 -> weaponUid = reader.readUInt(field)

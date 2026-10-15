@@ -1,10 +1,12 @@
 package dev.gf2log.app.capture
 
+import androidx.annotation.VisibleForTesting
 import dev.gf2log.app.SupportedGamePackages
 import dev.gf2log.protocol.model.ParsedPayload
 import dev.gf2log.protocol.model.PlatoonProfileData
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArraySet
 
 /**
  * Holds unconfirmed Platoon evidence only in process memory.
@@ -60,6 +62,21 @@ internal object PendingPlatoonAdmissionStore {
 
     private val candidates = linkedMapOf<String, Candidate>()
     private val tokenByIdentity = mutableMapOf<IdentityKey, String>()
+    private var totalPayloads = 0
+    private val listeners = CopyOnWriteArraySet<(List<Summary>) -> Unit>()
+
+    /**
+     * [listener] receives the visible candidates on the main looper: once immediately, then
+     * whenever a candidate appears, changes identity, is claimed or released, or is removed.
+     */
+    fun addListener(listener: (List<Summary>) -> Unit) {
+        listeners += listener
+        MainThread.runOrPost { if (listener in listeners) listener(summaries()) }
+    }
+
+    fun removeListener(listener: (List<Summary>) -> Unit) {
+        listeners -= listener
+    }
 
     @Synchronized
     fun begin(
@@ -74,7 +91,10 @@ internal object PendingPlatoonAdmissionStore {
         tokenByIdentity[key]?.let { token ->
             val existing = candidates[token]
             if (existing != null && !existing.claimed) {
-                existing.profile = profile
+                if (existing.profile != profile) {
+                    existing.profile = profile
+                    notifyChanged()
+                }
                 existing.flowIds += flowId
                 return BeginResult(token)
             }
@@ -92,6 +112,7 @@ internal object PendingPlatoonAdmissionStore {
             flowIds = linkedSetOf(flowId),
         )
         tokenByIdentity[key] = token
+        notifyChanged()
         return BeginResult(token)
     }
 
@@ -101,12 +122,13 @@ internal object PendingPlatoonAdmissionStore {
         if (candidate.claimed) return OfferResult.Claimed
         if (
             candidate.payloads.size >= MAX_PAYLOADS_PER_CANDIDATE ||
-            candidates.values.sumOf { it.payloads.size } >= MAX_TOTAL_PAYLOADS
+            totalPayloads >= MAX_TOTAL_PAYLOADS
         ) {
             return OfferResult.Overflow(removeLocked(token)?.flowIds.orEmpty())
         }
         candidate.flowIds += flowId
         candidate.payloads += BufferedPayload(flowId, payload)
+        totalPayloads += 1
         return OfferResult.Accepted
     }
 
@@ -136,6 +158,7 @@ internal object PendingPlatoonAdmissionStore {
         val candidate = candidates[token] ?: return null
         if (candidate.claimed) return null
         candidate.claimed = true
+        notifyChanged()
         return Claim(
             summary = candidate.summary(),
             payloads = candidate.payloads.toList(),
@@ -146,11 +169,31 @@ internal object PendingPlatoonAdmissionStore {
 
     @Synchronized
     fun releaseClaim(token: String) {
-        candidates[token]?.claimed = false
+        val candidate = candidates[token] ?: return
+        if (!candidate.claimed) return
+        candidate.claimed = false
+        notifyChanged()
     }
 
     @Synchronized
     fun complete(token: String): Set<Long> = removeLocked(token)?.flowIds.orEmpty()
+
+    /**
+     * Claims [token] and runs [admit] outside the lock. The candidate is completed when [admit]
+     * returns true and released for another decision otherwise, including when it throws, so a
+     * failed confirmation can never leave a candidate claimed and invisible forever.
+     * Returns the completed candidate's flow IDs, or null when nothing was completed.
+     */
+    fun withClaim(token: String, admit: (Claim) -> Boolean): Set<Long>? {
+        val claim = claim(token) ?: return null
+        var admitted = false
+        try {
+            admitted = admit(claim)
+        } finally {
+            if (!admitted) releaseClaim(token)
+        }
+        return if (admitted) complete(token) else null
+    }
 
     @Synchronized
     fun discard(token: String): Set<Long> = removeLocked(token)?.flowIds.orEmpty()
@@ -158,10 +201,13 @@ internal object PendingPlatoonAdmissionStore {
     @Synchronized
     fun contains(token: String): Boolean = token in candidates
 
+    @VisibleForTesting
     @Synchronized
     internal fun clearForTests() {
         candidates.clear()
         tokenByIdentity.clear()
+        totalPayloads = 0
+        listeners.clear()
     }
 
     private fun Candidate.summary() = Summary(
@@ -175,7 +221,18 @@ internal object PendingPlatoonAdmissionStore {
     private fun removeLocked(token: String): Candidate? {
         val removed = candidates.remove(token) ?: return null
         tokenByIdentity.remove(IdentityKey(removed.ownerPackage, removed.profile.platoonId), token)
+        totalPayloads -= removed.payloads.size
+        notifyChanged()
         return removed
+    }
+
+    /** Snapshots are taken on the main thread so listeners never run under this lock. */
+    private fun notifyChanged() {
+        if (listeners.isEmpty()) return
+        MainThread.post {
+            val current = summaries()
+            listeners.forEach { it(current) }
+        }
     }
 
     internal const val MAX_CANDIDATES = 4

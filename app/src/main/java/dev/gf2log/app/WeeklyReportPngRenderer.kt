@@ -1,5 +1,6 @@
 package dev.gf2log.app
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -9,9 +10,12 @@ import dev.gf2log.app.management.WeeklyShareProjection
 import kotlin.math.min
 import kotlin.math.sqrt
 
-/** Renders a bounded, privacy-filtered weekly share document without reading UI views. */
+/**
+ * Renders a bounded, privacy-filtered weekly share document without reading UI views. The image
+ * always uses the light paper palette so shared tables stay legible in any chat app.
+ */
 object WeeklyReportPngRenderer {
-    fun render(document: WeeklyShareProjection.Document): Bitmap {
+    fun render(context: Context, document: WeeklyShareProjection.Document): Bitmap {
         require(document.headers.size in 3..11)
         require(document.rows.size <= MAX_ROWS)
         val memberWidth = 240
@@ -38,26 +42,31 @@ object WeeklyReportPngRenderer {
         val height = maxOf(1, (naturalHeight * scale).toInt())
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        canvas.drawColor(Color.WHITE)
+        val paints = CellPaints()
+        canvas.drawColor(PAPER)
         canvas.scale(scale, scale)
 
         val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(27, 47, 78)
+            color = ACCENT_INK
             textSize = 30f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
         val subtitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(70, 78, 91)
+            color = MUTED_INK
             textSize = 18f
         }
         val health = document.evidenceHealth
         canvas.drawText(document.title, PADDING.toFloat(), (PADDING + 32).toFloat(), titlePaint)
         canvas.drawText(document.subtitle, PADDING.toFloat(), (PADDING + 58).toFloat(), subtitlePaint)
         canvas.drawText(
-            "Evidence: " + health.observedDays + "/" + health.totalDays +
-                " days \u2022 exact " + health.exactMetrics +
-                " \u2022 minimum " + health.lowerBoundMetrics +
-                " \u2022 unknown " + health.unknownMetrics,
+            context.getString(
+                R.string.png_evidence_summary,
+                health.observedDays,
+                health.totalDays,
+                health.exactMetrics,
+                health.lowerBoundMetrics,
+                health.unknownMetrics,
+            ),
             PADDING.toFloat(),
             (PADDING + 84).toFloat(),
             subtitlePaint,
@@ -65,7 +74,7 @@ object WeeklyReportPngRenderer {
 
         var top = PADDING + TITLE_HEIGHT
         var left = PADDING
-        drawCell(canvas, document.headers.first(), left, top, memberWidth, HEADER_HEIGHT, header = true)
+        drawCell(canvas, document.headers.first(), left, top, memberWidth, HEADER_HEIGHT, paints, header = true)
         left += memberWidth
         document.headers.drop(1).forEachIndexed { index, value ->
             val isLast = index == document.headers.lastIndex - 1
@@ -74,23 +83,23 @@ object WeeklyReportPngRenderer {
                 index == days -> totalWidth
                 else -> dayWidth
             }
-            drawCell(canvas, value, left, top, cellWidth, HEADER_HEIGHT, header = true)
+            drawCell(canvas, value, left, top, cellWidth, HEADER_HEIGHT, paints, header = true)
             left += cellWidth
         }
 
         top += HEADER_HEIGHT
         document.rows.forEach { row ->
             left = PADDING
-            drawCell(canvas, row.member, left, top, memberWidth, rowHeight)
+            drawCell(canvas, row.member, left, top, memberWidth, rowHeight, paints)
             left += memberWidth
             row.dailyCells.forEach { value ->
-                drawCell(canvas, value, left, top, dayWidth, rowHeight)
+                drawCell(canvas, value, left, top, dayWidth, rowHeight, paints)
                 left += dayWidth
             }
-            drawCell(canvas, row.total, left, top, totalWidth, rowHeight)
+            drawCell(canvas, row.total, left, top, totalWidth, rowHeight, paints)
             left += totalWidth
             if (document.includeNotes) {
-                drawCell(canvas, row.privateNote.orEmpty(), left, top, notesWidth, rowHeight)
+                drawCell(canvas, row.privateNote.orEmpty(), left, top, notesWidth, rowHeight, paints)
             }
             top += rowHeight
         }
@@ -104,27 +113,15 @@ object WeeklyReportPngRenderer {
         top: Int,
         width: Int,
         height: Int,
+        paints: CellPaints,
         header: Boolean = false,
     ) {
-        val fill = Paint().apply {
-            color = if (header) Color.rgb(218, 228, 244) else Color.WHITE
-            style = Paint.Style.FILL
-        }
-        val border = Paint().apply {
-            color = Color.rgb(122, 132, 146)
-            style = Paint.Style.STROKE
-            strokeWidth = 1f
-        }
-        canvas.drawRect(left.toFloat(), top.toFloat(), (left + width).toFloat(), (top + height).toFloat(), fill)
-        canvas.drawRect(left.toFloat(), top.toFloat(), (left + width).toFloat(), (top + height).toFloat(), border)
-        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(28, 32, 38)
-            textSize = if (header) 18f else 16f
-            typeface = Typeface.create(
-                Typeface.DEFAULT,
-                if (header) Typeface.BOLD else Typeface.NORMAL,
-            )
-        }
+        val textPaint = if (header) paints.headerText else paints.bodyText
+        paints.fill.color = if (header) HEADER else SURFACE
+        val right = (left + width).toFloat()
+        val bottom = (top + height).toFloat()
+        canvas.drawRect(left.toFloat(), top.toFloat(), right, bottom, paints.fill)
+        canvas.drawRect(left.toFloat(), top.toFloat(), right, bottom, paints.border)
         val lines = wrap(value, textPaint, width - CELL_PADDING * 2)
             .take(MAX_CELL_LINES)
         val lineHeight = textPaint.fontSpacing
@@ -134,6 +131,24 @@ object WeeklyReportPngRenderer {
                 canvas.drawText(line, (left + CELL_PADDING).toFloat(), baseline, textPaint)
             }
             baseline += lineHeight
+        }
+    }
+
+    /** Paints reused for every cell of one render; each render owns its own set. */
+    private class CellPaints {
+        val fill = Paint().apply { style = Paint.Style.FILL }
+        val border = Paint().apply {
+            color = OUTLINE
+            style = Paint.Style.STROKE
+            strokeWidth = 1f
+        }
+        val headerText = text(18f, Typeface.BOLD)
+        val bodyText = text(16f, Typeface.NORMAL)
+
+        private fun text(size: Float, style: Int) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = INK
+            textSize = size
+            typeface = Typeface.create(Typeface.DEFAULT, style)
         }
     }
 
@@ -157,6 +172,13 @@ object WeeklyReportPngRenderer {
         }
     }
 
+    private val PAPER = Color.rgb(0xF7, 0xF4, 0xEF)
+    private val SURFACE = Color.rgb(0xFF, 0xFC, 0xF8)
+    private val HEADER = Color.rgb(0xEC, 0xE7, 0xDF)
+    private val OUTLINE = Color.rgb(0xC9, 0xC2, 0xB8)
+    private val INK = Color.rgb(0x25, 0x23, 0x1F)
+    private val MUTED_INK = Color.rgb(0x6C, 0x66, 0x5F)
+    private val ACCENT_INK = Color.rgb(0x7D, 0x3F, 0x1E)
     private const val PADDING = 28
     private const val TITLE_HEIGHT = 104
     private const val HEADER_HEIGHT = 52

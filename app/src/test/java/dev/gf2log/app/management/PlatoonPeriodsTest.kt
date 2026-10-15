@@ -24,6 +24,32 @@ class PlatoonPeriodsTest {
     }
 
     @Test
+    fun gameDayFollowsTheLocalFiveAmResetAcrossDaylightSavingTransitions() {
+        val newYork = ZoneId.of("America/New_York")
+        // 2026-03-08 springs forward at 02:00 and 2026-11-01 falls back at 02:00.
+        listOf(
+            LocalDate.of(2026, 3, 7),
+            LocalDate.of(2026, 3, 8),
+            LocalDate.of(2026, 3, 9),
+            LocalDate.of(2026, 10, 31),
+            LocalDate.of(2026, 11, 1),
+            LocalDate.of(2026, 11, 2),
+        ).forEach { day ->
+            val reset = PlatoonPeriods.periodStartInstant(day, newYork)
+            assertEquals(day, PlatoonPeriods.gameDay(reset, newYork))
+            assertEquals(day.minusDays(1), PlatoonPeriods.gameDay(reset.minusMillis(1), newYork))
+        }
+        assertEquals(
+            LocalDate.of(2026, 3, 8),
+            PlatoonPeriods.gameDay(Instant.parse("2026-03-08T09:30:00Z"), newYork),
+        )
+        assertEquals(
+            LocalDate.of(2026, 10, 31),
+            PlatoonPeriods.gameDay(Instant.parse("2026-11-01T09:30:00Z"), newYork),
+        )
+    }
+
+    @Test
     fun everyWeeklyTableRunsFromSundayThroughSaturday() {
         val gunsmokeSunday = LocalDate.of(2026, 7, 19)
         val standardSunday = LocalDate.of(2026, 7, 26)

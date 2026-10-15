@@ -1,5 +1,5 @@
 // CodeQL 2.26.x can analyze Kotlin 2.4.0 through 2.4.19, while the production
-// build must use 2.4.20-Beta1 or newer to address GHSA-r937-wjx7-w2jp.
+// build uses 2.4.21 (2.4.20 or newer addresses GHSA-r937-wjx7-w2jp).
 // This init script is used only by the isolated, cache-disabled CodeQL compile.
 gradle.beforeProject { project ->
     project.buildscript.configurations.configureEach { configuration ->

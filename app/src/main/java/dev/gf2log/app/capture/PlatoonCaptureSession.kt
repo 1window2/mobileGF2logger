@@ -7,13 +7,12 @@ import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.protocol.model.ParsedPayload
 import java.time.Instant
 
-/** Owns all mutable capture-to-management state for one identified TCP flow. */
+/** Routes one identified TCP flow's payloads into its verified Platoon scope. */
 internal class PlatoonCaptureSession(
     context: Context,
     val profile: PlatoonProfile,
     private val onRosterCaptured: (String) -> Unit,
-    private val onStatus: (String) -> Unit,
-) : AutoCloseable {
+) {
     private val scope = PlatoonStorageScope(profile.storageId)
     private val repository = PlatoonRepository(context, scope)
     private val writer = GuildMembersCsvWriter(
@@ -26,10 +25,7 @@ internal class PlatoonCaptureSession(
         onUpdates = { repository.ingestUpdates(it).acceptedObservations > 0 },
     )
 
-    fun dispatch(payload: ParsedPayload, flowEnded: Boolean = false): PlatoonPayloadDispatcher.Results =
-        dispatcher.dispatch(payload, flowEnded)
-
-    override fun close() = writer.close()
+    fun dispatch(payload: ParsedPayload): PlatoonPayloadDispatcher.Results = dispatcher.dispatch(payload)
 
     private fun ingestCompletedRoster(batch: GuildMembersCsvWriter.CompletedBatch) {
         val directResult = runCatching {
@@ -42,9 +38,11 @@ internal class PlatoonCaptureSession(
         if (directResult.isSuccess) {
             val result = directResult.getOrThrow()
             if (!result.duplicate) {
-                onStatus(
-                    "Updated ${profile.platoonName}: +${result.joined + result.rejoined}, " +
-                        "-${result.left}",
+                CaptureStatus.report(
+                    CaptureNotice.ROSTER_UPDATED,
+                    profile.platoonName,
+                    (result.joined + result.rejoined).toString(),
+                    result.left.toString(),
                 )
             }
             onRosterCaptured(profile.storageId)
@@ -63,7 +61,7 @@ internal class PlatoonCaptureSession(
                 ?: recovery.exceptionOrNull()
                 ?: IllegalStateException("Roster ingestion and recovery both failed")
         }
-        onStatus("Recovered ${profile.platoonName} from the completed roster CSV")
+        CaptureStatus.report(CaptureNotice.ROSTER_RECOVERED, profile.platoonName)
         onRosterCaptured(profile.storageId)
     }
 }

@@ -31,4 +31,10 @@ class OptionsBackupFailureMessageTest {
             fullBackupRestoreFailureMessage(IllegalArgumentException("local restore state")),
         )
     }
+
+    @Test
+    fun `export failures name the backup kind that failed`() {
+        assertEquals(R.string.full_backup_export_failed, backupExportFailureMessage(complete = true))
+        assertEquals(R.string.status_backup_export_failed, backupExportFailureMessage(complete = false))
+    }
 }

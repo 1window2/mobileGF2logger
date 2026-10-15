@@ -3,215 +3,179 @@ package dev.gf2log.app
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
-import android.graphics.Typeface
 import android.text.TextUtils
-import android.view.Gravity
-import android.view.ViewGroup
-import android.widget.LinearLayout
+import android.view.View
 import android.widget.RadioButton
 import android.widget.RadioGroup
-import android.widget.TextView
+import dev.gf2log.app.capture.CaptureNotice
+import dev.gf2log.app.capture.CaptureSnapshot
+import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.capture.CaptureVpnService
+import dev.gf2log.app.capture.format
 import dev.gf2log.app.capture.PendingPlatoonAdmissionStore
 import dev.gf2log.app.management.PlatoonClient
 import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.app.settings.GameServerRegion
+import dev.gf2log.app.ui.Controls
+import dev.gf2log.app.ui.Dialogs
+import dev.gf2log.app.ui.Labels
+import dev.gf2log.app.ui.TextRole
+import dev.gf2log.app.ui.dp
+import dev.gf2log.app.ui.lp
+import dev.gf2log.app.ui.panel
+import dev.gf2log.app.ui.text
 import java.lang.ref.WeakReference
 
-/** Presents the process-memory admission gate without moving capture policy into an Activity. */
+/**
+ * Presents the process-memory admission gate for a newly detected Platoon. Screens observe the
+ * pending store, so the prompt appears as soon as a candidate arrives and closes when it is
+ * confirmed or discarded elsewhere.
+ */
 internal object PendingPlatoonAdmissionPrompt {
-    private var visibleDialog = WeakReference<AlertDialog>(null)
+    private var visible = WeakReference<AlertDialog>(null)
+    private var owner = WeakReference<Activity>(null)
+    private var visibleToken: String? = null
+    private val selections = HashMap<String, GameServerRegion>()
 
-    fun showIfNeeded(activity: Activity) {
+    fun onCandidatesChanged(activity: Activity, candidates: List<PendingPlatoonAdmissionStore.Summary>) {
         if (activity.isFinishing || activity.isDestroyed) return
-        if (visibleDialog.get()?.isShowing == true) return
-        val candidate = PendingPlatoonAdmissionStore.summaries().firstOrNull() ?: return
-        show(activity, candidate)
+        val showing = visible.get()?.takeIf { it.isShowing }
+        if (showing != null) {
+            if (candidates.any { it.token == visibleToken }) return
+            // The visible candidate was resolved; move on to the next queued one.
+            showing.dismiss()
+            clearVisible()
+        }
+        selections.keys.retainAll(candidates.mapTo(mutableSetOf()) { it.token })
+        candidates.firstOrNull()?.let { show(activity, it) }
     }
 
-    private fun show(
-        activity: Activity,
-        candidate: PendingPlatoonAdmissionStore.Summary,
-    ) {
+    /** Dismisses the prompt only when [activity] owns it, so a newly started screen keeps its own. */
+    fun dismiss(activity: Activity) {
+        if (owner.get() !== activity) return
+        visible.get()?.dismiss()
+        clearVisible()
+    }
+
+    private fun clearVisible() {
+        visible.clear()
+        owner.clear()
+        visibleToken = null
+    }
+
+    private fun show(activity: Activity, candidate: PendingPlatoonAdmissionStore.Summary) {
         val client = PlatoonClient.fromPackage(candidate.ownerPackage) ?: return
         val regions = ClientServerRegionPreferences.allowedFor(candidate.ownerPackage)
-        var selected: GameServerRegion? = null
-        val content = LinearLayout(activity).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(activity.dp(20), activity.dp(4), activity.dp(20), 0)
-            addView(TextView(context).apply {
-                text = activity.getString(R.string.new_platoon_detected_message)
-                textSize = 14f
-                setTextColor(context.getColor(R.color.text_secondary))
-            }, matchWidth())
-            addView(profilePanel(activity, candidate, client), matchWidth().apply {
-                topMargin = activity.dp(16)
-                bottomMargin = activity.dp(12)
-            })
-            addView(TextView(context).apply {
-                text = activity.getString(R.string.choose_server_region)
-                textSize = 15f
-                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            }, matchWidth())
-            addView(RadioGroup(context).apply {
-                orientation = RadioGroup.VERTICAL
-                regions.forEach { region ->
-                    addView(RadioButton(context).apply {
-                        id = android.view.View.generateViewId()
-                        text = activity.serverRegionLabel(region)
-                        textSize = 14f
-                        minimumHeight = activity.dp(48)
-                        setOnCheckedChangeListener { _, checked ->
-                            if (checked) selected = region
-                        }
-                    }, matchWidth())
-                }
-            }, matchWidth().apply { topMargin = activity.dp(4) })
-            addView(TextView(context).apply {
-                text = activity.getString(R.string.new_platoon_memory_only_notice)
-                textSize = 12f
-                setTextColor(context.getColor(R.color.text_secondary))
-                setPadding(0, activity.dp(8), 0, 0)
-            }, matchWidth())
+        // The server chosen in Settings is preselected; the user still confirms it explicitly.
+        if (candidate.token !in selections) {
+            ClientServerRegionPreferences(activity).configured(candidate.ownerPackage)
+                ?.let { selections[candidate.token] = it }
         }
-        val dialog = AlertDialog.Builder(activity)
-            .setTitle(R.string.new_platoon_detected)
-            .setView(content)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(R.string.confirm, null)
-            .setCancelable(false)
-            .create()
-        visibleDialog = WeakReference(dialog)
-        dialog.setOnShowListener {
-            val confirm = dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
-                isEnabled = false
-                usePrimaryActionStyle()
+        val radios = RadioGroup(activity).apply { orientation = RadioGroup.VERTICAL }
+        val status = activity.text(null, TextRole.CAPTION) {
+            visibility = View.GONE
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        val content = Dialogs.content(activity) {
+            addView(activity.text(activity.getString(R.string.new_platoon_detected_message), TextRole.SECONDARY), activity.lp())
+            addView(activity.panel(padding = 12) {
+                addView(activity.text(candidate.profile.platoonName, TextRole.TITLE) {
+                    maxLines = 2
+                    ellipsize = TextUtils.TruncateAt.END
+                }, activity.lp())
+                addView(activity.text(
+                    activity.getString(R.string.pending_platoon_identity, client.displayName, candidate.profile.platoonId.toLong()),
+                    TextRole.CAPTION,
+                ), activity.lp(top = 2))
+            }, activity.lp(top = 12))
+            addView(activity.text(activity.getString(R.string.choose_server_region), TextRole.SUBTITLE), activity.lp(top = 16))
+            addView(radios, activity.lp(top = 4))
+            addView(status, activity.lp(top = 8))
+            addView(activity.text(activity.getString(R.string.new_platoon_memory_only_notice), TextRole.CAPTION), activity.lp(top = 8))
+        }
+        var statusListener: ((CaptureSnapshot) -> Unit)? = null
+        val dialog = Dialogs.show(
+            Dialogs.builder(activity)
+                .setTitle(R.string.new_platoon_detected)
+                .setView(content)
+                .setCancelable(false)
+                .setNegativeButton(R.string.discard, null)
+                .setPositiveButton(R.string.confirm, null),
+        ) { shown ->
+            val confirm = shown.getButton(AlertDialog.BUTTON_POSITIVE)
+            val ids = regions.map { region ->
+                RadioButton(activity).apply {
+                    id = View.generateViewId()
+                    text = Labels.region(activity, region)
+                    textSize = 14f
+                    setTextColor(activity.getColor(R.color.text_primary))
+                    buttonTintList = Controls.controlTint(activity)
+                    minimumHeight = activity.dp(48)
+                    isChecked = selections[candidate.token] == region
+                }.also { radios.addView(it) }.id
             }
-            val radioGroup = content.getChildAt(3) as RadioGroup
-            radioGroup.setOnCheckedChangeListener { _, checkedId ->
-                val index = (0 until radioGroup.childCount)
-                    .indexOfFirst { radioGroup.getChildAt(it).id == checkedId }
-                selected = regions.getOrNull(index)
-                confirm.isEnabled = selected != null
+            confirm.isEnabled = candidate.token in selections
+            radios.setOnCheckedChangeListener { _, checkedId ->
+                regions.getOrNull(ids.indexOf(checkedId))?.let { selections[candidate.token] = it }
+                confirm.isEnabled = candidate.token in selections
             }
             confirm.setOnClickListener {
-                val region = selected ?: return@setOnClickListener
-                if (!PendingPlatoonAdmissionStore.contains(candidate.token)) {
-                    dialog.dismiss()
-                    showIfNeeded(activity)
-                    return@setOnClickListener
-                }
+                val region = selections[candidate.token] ?: return@setOnClickListener
+                val requestedAt = System.currentTimeMillis()
+                status.text = activity.getString(R.string.confirming_platoon)
+                status.setTextColor(activity.getColor(R.color.text_secondary))
+                status.visibility = View.VISIBLE
+                // Failures arrive only as capture notices; surface them here and allow a retry.
+                statusListener?.let(CaptureStatus::removeListener)
+                statusListener = { snapshot: CaptureSnapshot ->
+                    val event = snapshot.notice
+                    if (event != null && event.atMillis >= requestedAt && event.notice in ADMISSION_FAILURES) {
+                        status.text = event.format(activity)
+                        status.setTextColor(activity.getColor(R.color.destructive_action))
+                        confirm.isEnabled = true
+                    }
+                }.also(CaptureStatus::addListener)
                 activity.startService(
                     Intent(activity, CaptureVpnService::class.java)
                         .setAction(CaptureVpnService.ACTION_CONFIRM_PENDING_PLATOON)
                         .putExtra(CaptureVpnService.EXTRA_PENDING_TOKEN, candidate.token)
                         .putExtra(CaptureVpnService.EXTRA_SERVER_REGION, region.storedValue),
                 )
-                dialog.dismiss()
-                refreshAfterAdmission(activity, candidate.token)
+                confirm.isEnabled = false
             }
-            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
-                confirmDiscard(activity, dialog, candidate)
-            }
+            shown.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { confirmDiscard(activity, candidate) }
         }
         dialog.setOnDismissListener {
-            if (visibleDialog.get() === dialog) visibleDialog.clear()
+            statusListener?.let(CaptureStatus::removeListener)
+            if (visible.get() === dialog) clearVisible()
         }
-        dialog.show()
+        visible = WeakReference(dialog)
+        owner = WeakReference(activity)
+        visibleToken = candidate.token
     }
 
-    private fun profilePanel(
-        activity: Activity,
-        candidate: PendingPlatoonAdmissionStore.Summary,
-        client: PlatoonClient,
-    ) = LinearLayout(activity).apply {
-        orientation = LinearLayout.VERTICAL
-        background = ModernUi.panelBackground(context)
-        setPadding(activity.dp(14), activity.dp(12), activity.dp(14), activity.dp(12))
-        addView(TextView(context).apply {
-            text = candidate.profile.platoonName
-            textSize = 17f
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            maxLines = 2
-            ellipsize = TextUtils.TruncateAt.END
-        }, matchWidth())
-        addView(TextView(context).apply {
-            text = activity.getString(
-                R.string.pending_platoon_identity,
-                client.displayName,
-                candidate.profile.platoonId.toLong(),
-            )
-            textSize = 13f
-            setTextColor(context.getColor(R.color.text_secondary))
-            setPadding(0, activity.dp(4), 0, 0)
-        }, matchWidth())
-    }
-
-    private fun confirmDiscard(
-        activity: Activity,
-        parent: AlertDialog,
-        candidate: PendingPlatoonAdmissionStore.Summary,
-    ) {
-        val warning = AlertDialog.Builder(activity)
-            .setTitle(R.string.discard_pending_platoon_title)
-            .setMessage(R.string.discard_pending_platoon_message)
-            .setNegativeButton(R.string.keep_choosing, null)
-            .setPositiveButton(R.string.discard, null)
-            .create()
-        warning.setOnShowListener {
-            warning.getButton(AlertDialog.BUTTON_POSITIVE).apply {
-                useDestructiveActionStyle()
-                setOnClickListener {
+    private fun confirmDiscard(activity: Activity, candidate: PendingPlatoonAdmissionStore.Summary) {
+        Dialogs.show(
+            Dialogs.builder(activity)
+                .setTitle(R.string.discard_pending_platoon_title)
+                .setMessage(R.string.discard_pending_platoon_message)
+                .setNegativeButton(R.string.keep_choosing, null)
+                .setPositiveButton(R.string.discard) { _, _ ->
                     activity.startService(
                         Intent(activity, CaptureVpnService::class.java)
                             .setAction(CaptureVpnService.ACTION_DISCARD_PENDING_PLATOON)
                             .putExtra(CaptureVpnService.EXTRA_PENDING_TOKEN, candidate.token),
                     )
-                    warning.dismiss()
-                    parent.dismiss()
-                    parent.window?.decorView?.postDelayed(
-                        { showIfNeeded(activity) },
-                        PROMPT_REFRESH_DELAY_MILLIS,
-                    )
-                }
-            }
-        }
-        warning.show()
-    }
-
-    private fun refreshAfterAdmission(activity: Activity, token: String, attempt: Int = 0) {
-        activity.window.decorView.postDelayed(
-            {
-                if (activity.isFinishing || activity.isDestroyed) return@postDelayed
-                if (!PendingPlatoonAdmissionStore.contains(token)) {
-                    activity.recreate()
-                } else if (attempt < MAX_REFRESH_ATTEMPTS) {
-                    refreshAfterAdmission(activity, token, attempt + 1)
-                } else {
-                    showIfNeeded(activity)
-                }
-            },
-            PROMPT_REFRESH_DELAY_MILLIS,
+                },
+            destructive = true,
         )
     }
 
-    private fun Activity.serverRegionLabel(region: GameServerRegion): String = getString(
-        when (region) {
-            GameServerRegion.MANUAL -> R.string.server_region_manual
-            GameServerRegion.DARKWINTER_GLOBAL -> R.string.server_region_darkwinter_global
-            GameServerRegion.DARKWINTER_CHINA -> R.string.server_region_darkwinter_china
-            GameServerRegion.HAOPLAY_GLOBAL -> R.string.server_region_haoplay_global
-            GameServerRegion.HAOPLAY_JAPAN -> R.string.server_region_haoplay_japan
-            GameServerRegion.HAOPLAY_KOREA -> R.string.server_region_haoplay_korea
-            GameServerRegion.HAOPLAY_ASIA -> R.string.server_region_haoplay_asia
-        },
+    private val ADMISSION_FAILURES = setOf(
+        CaptureNotice.ADMISSION_INVALID,
+        CaptureNotice.ADMISSION_REGION_MISMATCH,
+        CaptureNotice.ADMISSION_LIMIT,
+        CaptureNotice.ADMISSION_PROFILE_FAILED,
+        CaptureNotice.ADMISSION_REPLAY_FAILED,
     )
-
-    private fun matchWidth() = LinearLayout.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT,
-        ViewGroup.LayoutParams.WRAP_CONTENT,
-    )
-
-    private const val PROMPT_REFRESH_DELAY_MILLIS = 250L
-    private const val MAX_REFRESH_ATTEMPTS = 20
 }

@@ -1,12 +1,12 @@
 package dev.gf2log.app.management
 
 import android.content.Context
+import android.content.SharedPreferences
 import dev.gf2log.app.SupportedGamePackages
 import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.app.settings.GameServerRegion
 import dev.gf2log.protocol.model.PlatoonProfileData
 import java.io.File
-import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.Instant
 
@@ -62,6 +62,10 @@ internal data class PlatoonProfile(
         }
     }
 
+    /** True for the one non-legacy profile that owns this verified full identity. */
+    fun hasIdentity(client: PlatoonClient, region: GameServerRegion, platoonId: Long): Boolean =
+        !legacy && this.client == client && serverRegion == region && this.platoonId == platoonId
+
     companion object {
         const val MAX_BANNER_ID = 6L
         const val MAX_NAME_LENGTH = 128
@@ -79,17 +83,12 @@ internal object PlatoonProfileIdentity {
         require(platoonId > 0L)
         val material = "${client.packageName}\u0000${region.storedValue}\u0000$platoonId"
             .toByteArray(Charsets.UTF_8)
-        return MessageDigest.getInstance("SHA-256")
-            .digest(material)
-            .take(16)
-            .joinToString("") { value -> "%02x".format(value) }
+        return material.sha256().copyOf(16).toHex()
     }
 
     fun isValidStorageId(value: String): Boolean = STORAGE_ID.matches(value)
 
-    fun randomStorageId(): String = ByteArray(16)
-        .also(SecureRandom()::nextBytes)
-        .joinToString("") { value -> "%02x".format(value) }
+    fun randomStorageId(): String = ByteArray(16).also(SecureRandom()::nextBytes).toHex()
 }
 
 /** Resolves every database and retained-evidence path from one validated profile ID. */
@@ -113,6 +112,10 @@ internal data class PlatoonStorageScope(val storageId: String) {
     fun retainedCsvDirectory(context: Context): File =
         File(rootDirectory(context), PlatoonRepository.RETAINED_CSV_DIRECTORY)
 
+    /** Retained evidence parked by an uncommitted complete restore. */
+    fun previousRetainedCsvDirectory(context: Context): File =
+        File(rootDirectory(context), "${PlatoonRepository.RETAINED_CSV_DIRECTORY}.pre_restore")
+
     companion object {
         private val SCOPED_DATABASE = Regex("platoon-([0-9a-f]{32})\\.db")
 
@@ -132,29 +135,21 @@ internal class PlatoonProfileRegistry(context: Context) {
     private val appContext = context.applicationContext
     private val preferences = appContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
-    fun ensureInitialized(): List<PlatoonProfile> = synchronized(lock) {
-        PlatoonProfileAdministration.recoverPending(appContext)
-        retireLegacyMetadataLocked()
-        readAllLocked().filterNot(PlatoonProfile::legacy)
-    }
+    fun ensureInitialized(): List<PlatoonProfile> = initialized { it }
 
-    fun list(): List<PlatoonProfile> = synchronized(lock) {
-        ensureInitialized()
-        readAllLocked().filterNot(PlatoonProfile::legacy).sortedWith(
+    fun list(): List<PlatoonProfile> = initialized { profiles ->
+        profiles.sortedWith(
             compareByDescending<PlatoonProfile> { it.lastSeenAt }.thenBy { it.storageId },
         )
     }
 
-    fun active(): PlatoonProfile? = synchronized(lock) {
-        ensureInitialized()
+    fun active(): PlatoonProfile? = initialized { current ->
         val activeId = preferences.getString(KEY_ACTIVE, null)
-        val current = readAllLocked().filterNot(PlatoonProfile::legacy)
         current.firstOrNull { it.storageId == activeId }
             ?: current.maxByOrNull(PlatoonProfile::lastSeenAt)
     }
 
-    fun find(storageId: String): PlatoonProfile? = synchronized(lock) {
-        ensureInitialized()
+    fun find(storageId: String): PlatoonProfile? = initialized {
         readLocked(storageId)?.takeUnless(PlatoonProfile::legacy)
     }
 
@@ -162,23 +157,27 @@ internal class PlatoonProfileRegistry(context: Context) {
         client: PlatoonClient,
         region: GameServerRegion,
         platoonId: Long,
-    ): PlatoonProfile? = synchronized(lock) {
-        ensureInitialized()
-        readAllLocked().firstOrNull {
-            !it.legacy &&
-                it.client == client &&
-                it.serverRegion == region &&
-                it.platoonId == platoonId
-        }
+    ): PlatoonProfile? = initialized { profiles ->
+        profiles.firstOrNull { it.hasIdentity(client, region, platoonId) }
     }
 
     fun findByClientAndPlatoonId(
         client: PlatoonClient,
         platoonId: Long,
-    ): List<PlatoonProfile> = synchronized(lock) {
-        ensureInitialized()
-        readAllLocked().filter {
-            !it.legacy && it.client == client && it.platoonId == platoonId
+    ): List<PlatoonProfile> = initialized { profiles ->
+        profiles.filter { it.client == client && it.platoonId == platoonId }
+    }
+
+    /**
+     * Global lock order is PlatoonRepository maintenance lock -> registry [lock]. Finishing a
+     * pending deletion takes the exclusive maintenance lock, so it runs before [lock] is held;
+     * restores already hold the maintenance lock when they update registry metadata.
+     */
+    private inline fun <T> initialized(block: (List<PlatoonProfile>) -> T): T {
+        PlatoonProfileAdministration.recoverPending(appContext)
+        return synchronized(lock) {
+            retireLegacyMetadataLocked()
+            block(readAllLocked().filterNot(PlatoonProfile::legacy))
         }
     }
 
@@ -217,22 +216,10 @@ internal class PlatoonProfileRegistry(context: Context) {
         require(region != GameServerRegion.MANUAL) { "A server region is required" }
         require(data.platoonId != 0u && data.platoonName.isNotBlank())
         val platoonId = data.platoonId.toLong()
-        val existing = readAllLocked().firstOrNull {
-            !it.legacy &&
-                it.client == client &&
-                it.serverRegion == region &&
-                it.platoonId == platoonId
-        }
+        val existing = readAllLocked().firstOrNull { it.hasIdentity(client, region, platoonId) }
         val storageId = existing?.storageId ?: allocateStorageIdLocked(client, region, platoonId)
-        require(readLocked(storageId) != null || readAllLocked().size < MAX_PROFILES) {
-            "Too many Platoon profiles are already registered"
-        }
-        val normalizedName = data.platoonName
-            .replace(Regex("\\s+"), " ")
-            .filterNot(Char::isISOControl)
-            .trim()
-            .take(PlatoonProfile.MAX_NAME_LENGTH)
-        require(normalizedName.isNotBlank()) { "Platoon name is empty after normalization" }
+        requireCapacityLocked(storageId)
+        val normalizedName = normalizeName(data.platoonName)
         val bannerIds = normalizedBannerIds(
             data = data,
             fallbackFrameId = existing?.bannerFrameId ?: 0L,
@@ -268,17 +255,13 @@ internal class PlatoonProfileRegistry(context: Context) {
             "The server region does not belong to this client"
         }
         require(platoonId in 1L..UInt.MAX_VALUE.toLong()) { "Platoon ID is invalid" }
-        require(readAllLocked().none {
-            !it.legacy &&
-                it.client == client &&
-                it.serverRegion == region &&
-                it.platoonId == platoonId
-        }) { "That client/server Platoon profile already exists" }
-        require(readAllLocked().size < MAX_PROFILES) {
-            "Too many Platoon profiles are already registered"
+        require(readAllLocked().none { it.hasIdentity(client, region, platoonId) }) {
+            "That client/server Platoon profile already exists"
         }
+        val storageId = allocateStorageIdLocked(client, region, platoonId)
+        requireCapacityLocked(storageId)
         val profile = PlatoonProfile(
-            storageId = allocateStorageIdLocked(client, region, platoonId),
+            storageId = storageId,
             client = client,
             serverRegion = region,
             platoonId = platoonId,
@@ -328,10 +311,7 @@ internal class PlatoonProfileRegistry(context: Context) {
             require(
                 readAllLocked().none {
                     it.storageId != storageId &&
-                        !it.legacy &&
-                        it.client == current.client &&
-                        it.serverRegion == region &&
-                        it.platoonId == current.platoonId
+                        it.hasIdentity(current.client, region, current.platoonId)
                 },
             ) { "That client/server Platoon profile already exists" }
             val updated = current.copy(serverRegion = region)
@@ -350,9 +330,7 @@ internal class PlatoonProfileRegistry(context: Context) {
     fun upsertRestored(profile: PlatoonProfile): PlatoonProfile = synchronized(lock) {
         require(!profile.legacy) { "Legacy unscoped Platoon data cannot be restored" }
         requireCompatibleRestoreTargetLocked(profile)
-        require(readLocked(profile.storageId) != null || readAllLocked().size < MAX_PROFILES) {
-            "Too many Platoon profiles are already registered"
-        }
+        requireCapacityLocked(profile.storageId)
         writeLocked(profile, setActive = false)
         profile
     }
@@ -361,9 +339,7 @@ internal class PlatoonProfileRegistry(context: Context) {
     fun requireRestoreCapacity(profile: PlatoonProfile) = synchronized(lock) {
         require(!profile.legacy) { "Legacy unscoped Platoon data cannot be restored" }
         requireCompatibleRestoreTargetLocked(profile)
-        require(readLocked(profile.storageId) != null || readAllLocked().size < MAX_PROFILES) {
-            "Too many Platoon profiles are already registered"
-        }
+        requireCapacityLocked(profile.storageId)
     }
 
     /** Removes registry metadata introduced by a failed restore; scoped data is left untouched. */
@@ -373,19 +349,9 @@ internal class PlatoonProfileRegistry(context: Context) {
         if (preferences.getString(KEY_ACTIVE, null) == storageId) return@synchronized false
         val ids = preferences.getStringSet(KEY_IDS, emptySet()).orEmpty().toMutableSet()
         if (!ids.remove(storageId)) return@synchronized false
-        val prefix = "$KEY_PROFILE.$storageId."
         preferences.edit()
             .putStringSet(KEY_IDS, ids)
-            .remove(prefix + CLIENT)
-            .remove(prefix + REGION)
-            .remove(prefix + PLATOON_ID)
-            .remove(prefix + NAME)
-            .remove(prefix + BANNER_FRAME_ID)
-            .remove(prefix + BANNER_MARK_ID)
-            .remove(prefix + EMBLEM_PRIMARY)
-            .remove(prefix + EMBLEM_SECONDARY)
-            .remove(prefix + LAST_SEEN)
-            .remove(prefix + LEGACY)
+            .removeProfileKeys(storageId)
             .commit()
     }
 
@@ -402,32 +368,13 @@ internal class PlatoonProfileRegistry(context: Context) {
                 PlatoonProfileIdentity.isValidStorageId(previousActiveStorageId),
         )
         val ids = preferences.getStringSet(KEY_IDS, emptySet()).orEmpty().toMutableSet()
-        val prefix = "$KEY_PROFILE.$targetStorageId."
         val editor = preferences.edit()
         if (previousProfile == null) {
             ids.remove(targetStorageId)
-            editor.remove(prefix + CLIENT)
-                .remove(prefix + REGION)
-                .remove(prefix + PLATOON_ID)
-                .remove(prefix + NAME)
-                .remove(prefix + BANNER_FRAME_ID)
-                .remove(prefix + BANNER_MARK_ID)
-                .remove(prefix + EMBLEM_PRIMARY)
-                .remove(prefix + EMBLEM_SECONDARY)
-                .remove(prefix + LAST_SEEN)
-                .remove(prefix + LEGACY)
+            editor.removeProfileKeys(targetStorageId)
         } else {
             ids += targetStorageId
-            editor.putString(prefix + CLIENT, previousProfile.client.name)
-                .putString(prefix + REGION, previousProfile.serverRegion.storedValue)
-                .putLong(prefix + PLATOON_ID, previousProfile.platoonId)
-                .putString(prefix + NAME, previousProfile.platoonName)
-                .putLong(prefix + BANNER_FRAME_ID, previousProfile.bannerFrameId)
-                .putLong(prefix + BANNER_MARK_ID, previousProfile.bannerMarkId)
-                .remove(prefix + EMBLEM_PRIMARY)
-                .remove(prefix + EMBLEM_SECONDARY)
-                .putLong(prefix + LAST_SEEN, previousProfile.lastSeenAt.toEpochMilli())
-                .putBoolean(prefix + LEGACY, previousProfile.legacy)
+            editor.putProfile(previousProfile)
         }
         editor.putStringSet(KEY_IDS, ids)
         if (previousActiveStorageId != null && previousActiveStorageId in ids) {
@@ -446,19 +393,9 @@ internal class PlatoonProfileRegistry(context: Context) {
         val ids = preferences.getStringSet(KEY_IDS, emptySet()).orEmpty().toMutableSet()
         if (!ids.remove(storageId)) return@synchronized false
         val remaining = ids.mapNotNull(::readLocked)
-        val prefix = "$KEY_PROFILE.$storageId."
         val editor = preferences.edit()
             .putStringSet(KEY_IDS, ids)
-            .remove(prefix + CLIENT)
-            .remove(prefix + REGION)
-            .remove(prefix + PLATOON_ID)
-            .remove(prefix + NAME)
-            .remove(prefix + BANNER_FRAME_ID)
-            .remove(prefix + BANNER_MARK_ID)
-            .remove(prefix + EMBLEM_PRIMARY)
-            .remove(prefix + EMBLEM_SECONDARY)
-            .remove(prefix + LAST_SEEN)
-            .remove(prefix + LEGACY)
+            .removeProfileKeys(storageId)
         if (preferences.getString(KEY_ACTIVE, null) == storageId) {
             val fallback = remaining.maxByOrNull(PlatoonProfile::lastSeenAt)
             if (fallback == null) {
@@ -481,19 +418,9 @@ internal class PlatoonProfileRegistry(context: Context) {
         if (!ids.remove(PlatoonProfileIdentity.LEGACY_STORAGE_ID) &&
             preferences.getString(KEY_ACTIVE, null) != PlatoonProfileIdentity.LEGACY_STORAGE_ID
         ) return
-        val prefix = "$KEY_PROFILE.${PlatoonProfileIdentity.LEGACY_STORAGE_ID}."
         val editor = preferences.edit()
             .putStringSet(KEY_IDS, ids)
-            .remove(prefix + CLIENT)
-            .remove(prefix + REGION)
-            .remove(prefix + PLATOON_ID)
-            .remove(prefix + NAME)
-            .remove(prefix + BANNER_FRAME_ID)
-            .remove(prefix + BANNER_MARK_ID)
-            .remove(prefix + EMBLEM_PRIMARY)
-            .remove(prefix + EMBLEM_SECONDARY)
-            .remove(prefix + LAST_SEEN)
-            .remove(prefix + LEGACY)
+            .removeProfileKeys(PlatoonProfileIdentity.LEGACY_STORAGE_ID)
         if (preferences.getString(KEY_ACTIVE, null) == PlatoonProfileIdentity.LEGACY_STORAGE_ID) {
             editor.remove(KEY_ACTIVE)
         }
@@ -502,7 +429,7 @@ internal class PlatoonProfileRegistry(context: Context) {
 
     private fun readLocked(storageId: String): PlatoonProfile? = runCatching {
         if (!PlatoonProfileIdentity.isValidStorageId(storageId)) return@runCatching null
-        val prefix = "$KEY_PROFILE.$storageId."
+        val prefix = profilePrefix(storageId)
         PlatoonProfile(
             storageId = storageId,
             client = PlatoonClient.valueOf(requireNotNull(preferences.getString(prefix + CLIENT, null))),
@@ -519,21 +446,39 @@ internal class PlatoonProfileRegistry(context: Context) {
     private fun writeLocked(profile: PlatoonProfile, setActive: Boolean) {
         val ids = preferences.getStringSet(KEY_IDS, emptySet()).orEmpty().toMutableSet()
         ids += profile.storageId
-        val prefix = "$KEY_PROFILE.${profile.storageId}."
         val editor = preferences.edit()
             .putStringSet(KEY_IDS, ids)
-            .putString(prefix + CLIENT, profile.client.name)
-            .putString(prefix + REGION, profile.serverRegion.storedValue)
-            .putLong(prefix + PLATOON_ID, profile.platoonId)
-            .putString(prefix + NAME, profile.platoonName)
-            .putLong(prefix + BANNER_FRAME_ID, profile.bannerFrameId)
-            .putLong(prefix + BANNER_MARK_ID, profile.bannerMarkId)
-            .remove(prefix + EMBLEM_PRIMARY)
-            .remove(prefix + EMBLEM_SECONDARY)
-            .putLong(prefix + LAST_SEEN, profile.lastSeenAt.toEpochMilli())
-            .putBoolean(prefix + LEGACY, profile.legacy)
+            .putProfile(profile)
         if (setActive) editor.putString(KEY_ACTIVE, profile.storageId)
         check(editor.commit()) { "Unable to persist the Platoon profile registry" }
+    }
+
+    private fun SharedPreferences.Editor.putProfile(profile: PlatoonProfile) = apply {
+        val prefix = profilePrefix(profile.storageId)
+        putString(prefix + CLIENT, profile.client.name)
+        putString(prefix + REGION, profile.serverRegion.storedValue)
+        putLong(prefix + PLATOON_ID, profile.platoonId)
+        putString(prefix + NAME, profile.platoonName)
+        putLong(prefix + BANNER_FRAME_ID, profile.bannerFrameId)
+        putLong(prefix + BANNER_MARK_ID, profile.bannerMarkId)
+        remove(prefix + EMBLEM_PRIMARY)
+        remove(prefix + EMBLEM_SECONDARY)
+        putLong(prefix + LAST_SEEN, profile.lastSeenAt.toEpochMilli())
+        putBoolean(prefix + LEGACY, profile.legacy)
+    }
+
+    private fun SharedPreferences.Editor.removeProfileKeys(storageId: String) = apply {
+        val prefix = profilePrefix(storageId)
+        PROFILE_KEYS.forEach { key -> remove(prefix + key) }
+    }
+
+    private fun profilePrefix(storageId: String) = "$KEY_PROFILE.$storageId."
+
+    /** A new scope must fit under [MAX_PROFILES]; an existing scope is always replaceable. */
+    private fun requireCapacityLocked(storageId: String) {
+        require(readLocked(storageId) != null || readAllLocked().size < MAX_PROFILES) {
+            "Too many Platoon profiles are already registered"
+        }
     }
 
     private fun requireCompatibleRestoreTargetLocked(profile: PlatoonProfile) {
@@ -554,11 +499,7 @@ internal class PlatoonProfileRegistry(context: Context) {
         require(
             profiles.none {
                 it.storageId != profile.storageId &&
-                    !it.legacy &&
-                    !profile.legacy &&
-                    it.client == profile.client &&
-                    it.serverRegion == profile.serverRegion &&
-                    it.platoonId == profile.platoonId
+                    it.hasIdentity(profile.client, profile.serverRegion, profile.platoonId)
             },
         ) { "Backup Platoon identity already belongs to another storage scope" }
     }
@@ -578,7 +519,7 @@ internal class PlatoonProfileRegistry(context: Context) {
     }
 
     private fun normalizeName(value: String): String = value
-        .replace(Regex("\\s+"), " ")
+        .replace(WHITESPACE, " ")
         .filterNot(Char::isISOControl)
         .trim()
         .take(PlatoonProfile.MAX_NAME_LENGTH)
@@ -620,6 +561,19 @@ internal class PlatoonProfileRegistry(context: Context) {
         private const val EMBLEM_SECONDARY = "emblem_secondary"
         private const val LAST_SEEN = "last_seen"
         private const val LEGACY = "legacy"
+        private val PROFILE_KEYS = listOf(
+            CLIENT,
+            REGION,
+            PLATOON_ID,
+            NAME,
+            BANNER_FRAME_ID,
+            BANNER_MARK_ID,
+            EMBLEM_PRIMARY,
+            EMBLEM_SECONDARY,
+            LAST_SEEN,
+            LEGACY,
+        )
+        private val WHITESPACE = Regex("\\s+")
         private val lock = Any()
     }
 }

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capture_notice_preparing">Preparing capture</string>
+    <string name="capture_notice_already_running">Capture is already running</string>
+    <string name="capture_notice_capturing">Capturing only %1$s</string>
+    <string name="capture_notice_native_unavailable">The native forwarding core is unavailable in this build</string>
+    <string name="capture_notice_history_import_failed">Unable to import previous Platoon history</string>
+    <string name="capture_notice_no_supported_client">Install a supported HaoPlay or Darkwinter client first</string>
+    <string name="capture_notice_vpn_establish_failed">Unable to establish VPN: %1$s</string>
+    <string name="capture_notice_vpn_permission_revoked">VPN permission was revoked</string>
+    <string name="capture_notice_native_start_failed">Native forwarding core failed to start</string>
+    <string name="capture_notice_stopped_unexpectedly">Capture stopped unexpectedly. Start capture again to retry.</string>
+    <string name="capture_notice_capture_once_complete">Captured Platoon roster, activity, and updates</string>
+    <string name="capture_notice_capture_once_partial">Captured Platoon roster; missing %1$s after the navigation period</string>
+    <string name="capture_notice_traffic">Forwarded %1$s KiB; inspected %2$s KiB; decoded %3$s payloads; warnings %4$s; dropped %5$s</string>
+    <string name="capture_notice_processing_failed">Protocol processing failed: %1$s</string>
+    <string name="capture_notice_parser_overloaded">Parser overloaded; dropped %1$s queued chunks</string>
+    <string name="capture_notice_flow_buffer_overflow">Discarded an unidentified Platoon flow that exceeded its buffer</string>
+    <string name="capture_notice_identified_flow_buffer_overflow">Discarded an identified flow whose pre-identity buffer overflowed</string>
+    <string name="capture_notice_client_unverified">Detected a Platoon profile, but its game client could not be verified</string>
+    <string name="capture_notice_identity_changed">Discarded a flow whose Platoon identity changed</string>
+    <string name="capture_notice_pending_identity_changed">Discarded a flow whose pending Platoon identity changed</string>
+    <string name="capture_notice_profile_update_failed">Unable to isolate the detected Platoon</string>
+    <string name="capture_notice_platoon_detected">Detected %1$s (%2$s) via %3$s</string>
+    <string name="capture_notice_pending_detected">New Platoon detected; return to GF2logger and choose its server</string>
+    <string name="capture_notice_pending_queue_full">Discarded a new Platoon because the confirmation queue is full</string>
+    <string name="capture_notice_pending_overflow">Discarded an oversized pending Platoon capture</string>
+    <string name="capture_notice_admission_in_progress">Waiting for the pending Platoon confirmation to finish</string>
+    <string name="capture_notice_admission_invalid">Unable to confirm the pending Platoon</string>
+    <string name="capture_notice_admission_region_mismatch">The selected server does not belong to the verified client</string>
+    <string name="capture_notice_admission_limit">Start a new capture before adding another Platoon for this client</string>
+    <string name="capture_notice_admission_profile_failed">Unable to create the confirmed Platoon profile</string>
+    <string name="capture_notice_admission_replay_failed">Unable to apply the confirmed Platoon packets</string>
+    <string name="capture_notice_platoon_confirmed">Confirmed %1$s (%2$s) via %3$s</string>
+    <string name="capture_notice_pending_discarded">Discarded the unconfirmed Platoon packets</string>
+    <string name="capture_notice_roster_saved">Saved %1$s members for %2$s</string>
+    <string name="capture_notice_roster_save_failed">Unable to save Platoon CSV</string>
+    <string name="capture_notice_roster_updated">Updated %1$s: +%2$s, -%3$s</string>
+    <string name="capture_notice_roster_recovered">Recovered %1$s from the completed roster CSV</string>
+    <string name="capture_notice_activity_save_failed">Unable to update Platoon activity history</string>
+    <string name="capture_notice_updates_save_failed">Unable to update exact Platoon history</string>
+    <string name="capture_notice_history_save_failed">Unable to save parsed-packet history</string>
+    <string name="capture_notification_preparing">Preparing capture</string>
+    <string name="capture_notification_running">Capturing selected game traffic</string>
+</resources>

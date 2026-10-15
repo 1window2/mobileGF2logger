@@ -11,6 +11,8 @@ data class PlatoonSnapshot(
     val gameVersion: String? = null,
 )
 
+internal fun PlatoonSnapshot.member(uid: Long): SnapshotMember? = members.firstOrNull { it.uid == uid }
+
 data class SnapshotMember(
     val uid: Long,
     val name: String,
@@ -49,6 +51,19 @@ data class MemberStatus(
     val membershipPeriods: List<MembershipPeriod>,
 )
 
+/**
+ * The membership period a member list shows: the open period, or the most recently closed one
+ * when the member has withdrawn. Unknown boundaries sort before every known one.
+ */
+fun MemberStatus.latestMembershipPeriod(): MembershipPeriod? {
+    val open = membershipPeriods.filter { it.leftAt == null }
+    return (open.ifEmpty { membershipPeriods }).maxWithOrNull(
+        compareBy<MembershipPeriod, Instant?>(nullsFirst()) { it.leftAt }
+            .thenBy(nullsFirst()) { it.joinedAt }
+            .thenBy { it.id },
+    )
+}
+
 data class MemberEvent(
     val id: Long,
     val uid: Long,
@@ -60,17 +75,6 @@ data class MemberEvent(
     val precision: EvidencePrecision,
     val source: EvidenceSource,
     val note: String,
-)
-
-data class PlatoonActivityFact(
-    val id: Long,
-    val occurredAt: Instant,
-    val actionId: Long,
-    val kind: Long,
-    val memberName: String,
-    val capturedAt: Instant,
-    val resolvedUid: Long?,
-    val resolution: ActivityResolution,
 )
 
 data class PlatoonActivityObservation(
@@ -127,14 +131,6 @@ enum class EvidenceSource {
     LEGACY_IMPORT,
 }
 
-data class DailyActivity(
-    val uid: Long,
-    val gameDay: LocalDate,
-    val meritDelta: Long,
-    val scoreDelta: Long,
-    val inference: ActivityInference.Result,
-)
-
 enum class DailyEvidence {
     NO_OBSERVATION,
     ATTRIBUTED,
@@ -149,6 +145,10 @@ enum class MetricCertainty {
     LOWER_BOUND,
     EXACT,
 }
+
+/** EXACT when a value's bounds coincide, otherwise only its minimum is known. */
+internal fun rangeCertainty(minimum: Number, maximum: Number): MetricCertainty =
+    if (minimum.toLong() == maximum.toLong()) MetricCertainty.EXACT else MetricCertainty.LOWER_BOUND
 
 data class WeeklyNote(
     val id: Long,

@@ -1,5 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <item name="gf2_ui_role" type="id" />
-    <item name="gf2_ui_compact_multiline" type="id" />
+    <item name="gf2_base_bottom_padding" type="id" />
+    <item name="screen_scroll" type="id" />
+    <item name="screen_list" type="id" />
+    <item name="member_nickname_input" type="id" />
+    <item name="member_note_input" type="id" />
+    <item name="platoon_search_input" type="id" />
+    <item name="weekly_note_input" type="id" />
+    <item name="webhook_input" type="id" />
+    <item name="action_move_up" type="id" />
+    <item name="action_move_down" type="id" />
+    <item name="cutline_daily_merit" type="id" />
+    <item name="cutline_daily_score" type="id" />
+    <item name="cutline_daily_attempts" type="id" />
+    <item name="cutline_weekly_merit" type="id" />
+    <item name="cutline_weekly_score" type="id" />
+    <item name="cutline_weekly_attempts" type="id" />
+    <item name="cutline_login_days" type="id" />
+    <item name="cutline_patrol_days" type="id" />
 </resources>

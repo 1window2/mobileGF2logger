@@ -30,11 +30,29 @@ fun isValidMembershipRange(
 fun EvidenceSource.isImmutableMembershipBoundary(): Boolean =
     this == EvidenceSource.GAME_UPDATES
 
+/**
+ * Only a recorded packet-linked boundary is immutable. A period opened by an exact Updates
+ * withdrawal has a GAME_UPDATES join source but no join time, and that unknown side stays
+ * editable.
+ */
+internal fun isImmutableMembershipBoundary(
+    value: MembershipBoundaryValue?,
+    source: EvidenceSource?,
+): Boolean = value != null && source?.isImmutableMembershipBoundary() == true
+
+/** Whether the join side may be edited; see [isImmutableMembershipBoundary]. */
+val MembershipPeriod.isJoinedBoundaryEditable: Boolean
+    get() = joinedAt == null || !joinedSource.isImmutableMembershipBoundary()
+
+/** Whether the withdrawal side may be edited; see [isImmutableMembershipBoundary]. */
+val MembershipPeriod.isLeftBoundaryEditable: Boolean
+    get() = leftAt == null || leftSource?.isImmutableMembershipBoundary() != true
+
 internal fun editableMembershipBoundaryChanged(
     original: MembershipBoundaryValue?,
     requested: MembershipBoundaryValue?,
     source: EvidenceSource?,
-): Boolean = source?.isImmutableMembershipBoundary() != true && original != requested
+): Boolean = !isImmutableMembershipBoundary(original, source) && original != requested
 
 internal fun migrationCalendarDate(epochMillis: Long, zoneId: ZoneId): LocalDate =
     Instant.ofEpochMilli(epochMillis).atZone(zoneId).toLocalDate()

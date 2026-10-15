@@ -5,7 +5,6 @@ import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
 import java.util.zip.GZIPInputStream
@@ -28,10 +27,24 @@ internal object WeeklyReportHistoryCodec {
         require(revision.notes.size <= MAX_NOTES)
         require(revision.memberNamesByUid.size <= MAX_CONTEXT_MEMBERS)
         require(revision.memberPrivateNotesByUid.size <= MAX_MEMBERS)
+        val overrides = report.members.flatMap { member ->
+            member.days.mapIndexedNotNull { index, cell ->
+                cell.manualOverride?.let { override ->
+                    require(
+                        override.uid == member.uid &&
+                            override.periodStart == report.periodStart &&
+                            override.gameDay == cell.gameDay,
+                    ) { "A manual override must belong to its cell" }
+                    index to override
+                }
+            }
+        }
+        // A revision without overrides keeps its version-2 bytes, so its fingerprint is stable.
+        val formatVersion = if (overrides.isEmpty()) NOTES_FORMAT_VERSION else FORMAT_VERSION
         val raw = ByteArrayOutputStream().use { buffer ->
             DataOutputStream(buffer).use { output ->
                 output.writeInt(MAGIC)
-                output.writeInt(FORMAT_VERSION)
+                output.writeInt(formatVersion)
                 output.writeLong(report.periodStart.toEpochDay())
                 output.writeLong(report.periodEnd.toEpochDay())
                 output.writeBoolean(report.isGunsmokeWeek)
@@ -45,6 +58,10 @@ internal object WeeklyReportHistoryCodec {
                 revision.notes.forEach { output.writeWeeklyNote(it) }
                 output.writeStringMap(revision.memberNamesByUid, MAX_STRING_BYTES)
                 output.writeStringMap(revision.memberPrivateNotesByUid, MAX_PRIVATE_NOTE_BYTES)
+                if (formatVersion >= OVERRIDES_FORMAT_VERSION) {
+                    output.writeInt(overrides.size)
+                    overrides.forEach { (dayIndex, override) -> output.writeOverride(dayIndex, override) }
+                }
             }
             buffer.toByteArray()
         }
@@ -54,9 +71,7 @@ internal object WeeklyReportHistoryCodec {
             compressed.toByteArray()
         }
         require(payload.size <= MAX_PAYLOAD_BYTES) { "Weekly history payload is too large" }
-        val fingerprint = MessageDigest.getInstance("SHA-256")
-            .digest(raw)
-            .joinToString("") { "%02x".format(it) }
+        val fingerprint = raw.sha256().toHex()
         return Encoded(payload, fingerprint)
     }
 
@@ -104,11 +119,65 @@ internal object WeeklyReportHistoryCodec {
                 val notes = List(noteCount) { input.readWeeklyNote(periodStart) }
                 val names = input.readStringMap(MAX_CONTEXT_MEMBERS, MAX_STRING_BYTES)
                 val privateNotes = input.readStringMap(MAX_MEMBERS, MAX_PRIVATE_NOTE_BYTES)
-                WeeklyTableRevision(report, events, notes, names, privateNotes)
+                val withOverrides = if (formatVersion >= OVERRIDES_FORMAT_VERSION) {
+                    input.readOverrides(report)
+                } else {
+                    report
+                }
+                WeeklyTableRevision(withOverrides, events, notes, names, privateNotes)
             }
             require(input.read() == -1) { "Trailing weekly history data" }
             ManagementConsistencyAudit.requireValid(revision)
         }
+    }
+
+    private fun DataOutputStream.writeOverride(dayIndex: Int, override: WeeklyCellOverride) {
+        writeLong(override.uid)
+        writeInt(dayIndex)
+        writeNullableLong(override.meritDelta)
+        writeNullableLong(override.scoreDelta)
+        writeNullableInt(override.attempts)
+        writeNullableBoolean(override.attended)
+        writeNullableBoolean(override.dailyPatrol)
+    }
+
+    /** Attaches each recorded manual override to its cell; every cell takes at most one. */
+    private fun DataInputStream.readOverrides(
+        report: WeeklyReportBuilder.Report,
+    ): WeeklyReportBuilder.Report {
+        val count = readBoundedCount(MAX_MEMBERS * DAYS_PER_WEEK)
+        val rowsByUid = report.members.associateBy { it.uid }
+        val overrides = mutableMapOf<Pair<Long, Int>, WeeklyCellOverride>()
+        repeat(count) {
+            val uid = readLong()
+            val dayIndex = readInt()
+            require(uid in rowsByUid && dayIndex in 0 until DAYS_PER_WEEK) {
+                "A manual override must belong to a recorded cell"
+            }
+            val override = WeeklyCellOverride(
+                uid = uid,
+                periodStart = report.periodStart,
+                gameDay = report.days[dayIndex],
+                meritDelta = readNullableLong(),
+                scoreDelta = readNullableLong(),
+                attempts = readNullableInt(),
+                attended = readNullableBoolean(),
+                dailyPatrol = readNullableBoolean(),
+            )
+            require(overrides.put(uid to dayIndex, override) == null) {
+                "A weekly cell can have only one override"
+            }
+        }
+        if (overrides.isEmpty()) return report
+        return report.copy(
+            members = report.members.map { member ->
+                member.copy(
+                    days = member.days.mapIndexed { index, cell ->
+                        overrides[member.uid to index]?.let { cell.copy(manualOverride = it) } ?: cell
+                    },
+                )
+            },
+        )
     }
 
     private fun DataOutputStream.writeMemberEvent(event: MemberEvent) {
@@ -406,15 +475,17 @@ internal object WeeklyReportHistoryCodec {
 
     private const val MAGIC = 0x47463248
     private const val LEGACY_FORMAT_VERSION = 1
-    private const val FORMAT_VERSION = 2
+    private const val NOTES_FORMAT_VERSION = 2
+    private const val OVERRIDES_FORMAT_VERSION = 3
+    private const val FORMAT_VERSION = OVERRIDES_FORMAT_VERSION
     private const val DAYS_PER_WEEK = 7
     private const val MAX_MEMBERS = 256
-    private const val MAX_CONTEXT_MEMBERS = 768
-    private const val MAX_EVENTS = 512
-    private const val MAX_NOTES = 128
-    private const val MAX_STRING_BYTES = 1_024
-    private const val MAX_NOTE_BYTES = 16 * 1_024
-    private const val MAX_PRIVATE_NOTE_BYTES = 2 * 1_024
+    const val MAX_CONTEXT_MEMBERS = 768
+    const val MAX_EVENTS = 512
+    const val MAX_NOTES = 128
+    const val MAX_STRING_BYTES = 1_024
+    const val MAX_NOTE_BYTES = 16 * 1_024
+    const val MAX_PRIVATE_NOTE_BYTES = 2 * 1_024
     private const val MAX_DECOMPRESSED_BYTES = 4 * 1024 * 1024
     private const val STREAM_BUFFER_BYTES = 8 * 1024
     const val MAX_PAYLOAD_BYTES = 2 * 1024 * 1024

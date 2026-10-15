@@ -32,17 +32,15 @@ class MemberOrderPreferences(
         if (isLegacy) {
             UserSettingsPreferences.clearMemberOrder(appContext)
         } else {
-            scoped.edit().remove(storageId).apply()
+            check(scoped.edit().remove(storageId).commit()) { "Unable to clear the member order" }
         }
     }
 
+    /** Saved UIDs first in saved order; everyone else keeps their incoming order (stable sort). */
     fun <T> apply(items: List<T>, uid: (T) -> Long): List<T> {
         val positions = read().withIndex().associate { it.value to it.index }
         if (positions.isEmpty()) return items
-        return items.sortedWith(
-            compareBy<T> { positions[uid(it)] ?: Int.MAX_VALUE }
-                .thenBy { items.indexOf(it) },
-        )
+        return items.sortedBy { positions[uid(it)] ?: Int.MAX_VALUE }
     }
 
     private val isLegacy: Boolean

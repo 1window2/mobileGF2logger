@@ -5,6 +5,7 @@ import dev.gf2log.app.ActivePlatoonScopeBinding
 import dev.gf2log.app.SupportedGamePackages
 import dev.gf2log.app.settings.GameServerRegion
 import dev.gf2log.app.settings.ClientServerRegionPreferences
+import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.MemberOrderPreferences
 import dev.gf2log.app.settings.WeeklyCutlinePreferences
 import dev.gf2log.app.settings.WeeklyCutlines
@@ -391,6 +392,36 @@ class PlatoonProfileRegistryIntegrationTest {
     }
 
     @Test
+    fun failedServerRegionChangeRestoresAManualTimezoneExactly() {
+        val registry = PlatoonProfileRegistry(context)
+        val profile = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            PlatoonProfileData(101818u, "Manual zone", 0u, 0u),
+        )
+        // A schema-v1-v3 complete backup restores a manual timezone for its Platoon.
+        val manualZone = java.time.ZoneId.of("America/New_York")
+        GameTimeZonePreferences.set(context, manualZone, profile.storageId)
+        var rebuilds = 0
+        val administration = PlatoonProfileAdministration(context) { _, _, _ ->
+            rebuilds += 1
+            check(rebuilds > 1) { "Simulated weekly-history rebuild failure" }
+        }
+
+        assertThrows(IllegalStateException::class.java) {
+            administration.changeServerRegion(profile.storageId, GameServerRegion.HAOPLAY_JAPAN)
+        }
+
+        assertEquals(2, rebuilds)
+        assertEquals(GameServerRegion.HAOPLAY_KOREA, registry.find(profile.storageId)?.serverRegion)
+        assertEquals(
+            GameServerRegion.MANUAL,
+            GameTimeZonePreferences.region(context, profile.storageId),
+        )
+        assertEquals(manualZone, GameTimeZonePreferences.get(context, profile.storageId))
+    }
+
+    @Test
     fun restoreCannotRegisterOneFullIdentityUnderTwoStorageScopes() {
         val registry = PlatoonProfileRegistry(context)
         val existing = registry.upsertDetected(
@@ -453,6 +484,89 @@ class PlatoonProfileRegistryIntegrationTest {
     }
 
     @Test
+    fun memberEditsRefreshOnlyTheWeeksThatShowTheMember() {
+        val profile = PlatoonProfileRegistry(context).upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            PlatoonProfileData(5u, "Weeks", 0u, 0u),
+        )
+        val scope = PlatoonStorageScope(profile.storageId)
+        val repository = PlatoonRepository(context, scope)
+        val firstCapture = Instant.parse("2026-08-04T12:00:00Z")
+        repository.ingest(firstCapture, listOf(member(1u, "Stayer")), "first.csv")
+        repository.ingest(
+            firstCapture.plusSeconds(7L * 24L * 60L * 60L),
+            listOf(member(1u, "Stayer"), member(2u, "Newcomer")),
+            "second.csv",
+        )
+        val zone = dev.gf2log.app.settings.GameTimeZonePreferences.get(context, profile.storageId)
+        val firstWeek = PlatoonPeriods.weekStart(PlatoonPeriods.gameDay(firstCapture, zone))
+        val secondWeek = firstWeek.plusDays(7)
+        // A stale latest revision makes any rebuild of the first week observable.
+        PlatoonRepository.withExclusiveDatabase(scope) {
+            PlatoonDatabase(context, scope.databaseName).use { database ->
+                database.recordWeeklyReportHistory(
+                    periodStartEpochDay = firstWeek.toEpochDay(),
+                    recordedAt = Instant.now(),
+                    fingerprint = "0".repeat(64),
+                    payload = byteArrayOf(1),
+                    clearActiveOnChange = false,
+                )
+            }
+        }
+        val firstWeekRevisions = repository.listWeeklyReportHistory(firstWeek).size
+        val secondWeekRevisions = repository.listWeeklyReportHistory(secondWeek).size
+
+        assertTrue(repository.updateMember(2L, "Renamed", ""))
+
+        assertEquals(firstWeekRevisions, repository.listWeeklyReportHistory(firstWeek).size)
+        assertEquals(secondWeekRevisions + 1, repository.listWeeklyReportHistory(secondWeek).size)
+        assertEquals(
+            "Renamed",
+            repository.buildWeeklyTableRevision(secondWeek, zone).memberNamesByUid[2L],
+        )
+    }
+
+    @Test
+    fun pendingDeletionRecoveryCannotDeadlockWithAnExclusiveRestore() {
+        val registry = PlatoonProfileRegistry(context)
+        val kept = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            PlatoonProfileData(1u, "Kept", 0u, 0u),
+        )
+        val pendingId = PlatoonProfileIdentity.randomStorageId()
+        context.getSharedPreferences("platoon_profile_deletions", android.content.Context.MODE_PRIVATE)
+            .edit().putStringSet("pending_storage_ids", setOf(pendingId)).commit()
+        val exclusiveHeld = java.util.concurrent.CountDownLatch(1)
+        val failures = java.util.concurrent.ConcurrentLinkedQueue<Throwable>()
+        val restore = Thread {
+            runCatching {
+                PlatoonRepository.withExclusiveDatabase(PlatoonStorageScope(kept.storageId)) {
+                    exclusiveHeld.countDown()
+                    Thread.sleep(300)
+                    registry.find(kept.storageId)
+                }
+            }.onFailure(failures::add)
+        }.apply { isDaemon = true }
+        val reader = Thread {
+            runCatching {
+                exclusiveHeld.await()
+                registry.list()
+            }.onFailure(failures::add)
+        }.apply { isDaemon = true }
+
+        restore.start()
+        reader.start()
+        restore.join(10_000)
+        reader.join(10_000)
+
+        assertFalse("registry and maintenance locks deadlocked", restore.isAlive || reader.isAlive)
+        assertTrue(failures.isEmpty())
+        assertEquals(listOf(kept.storageId), registry.list().map(PlatoonProfile::storageId))
+    }
+
+    @Test
     fun registryRejectsUnboundedNewProfilesAndCanRemoveInactiveMetadata() {
         val registry = PlatoonProfileRegistry(context)
         val profiles = (1..PlatoonProfileRegistry.MAX_PROFILES).map { id ->
@@ -495,6 +609,38 @@ class PlatoonProfileRegistryIntegrationTest {
     }
 
     @Test
+    fun autoDetectedRestoreOfAPlatoonOnlyBackupKeepsAppSettings() {
+        val registry = PlatoonProfileRegistry(context)
+        val profile = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_JAPAN,
+            PlatoonProfileData(101818u, "Larks", 0u, 0u),
+        )
+        registry.setActive(profile.storageId)
+        val scope = PlatoonStorageScope(profile.storageId)
+        PlatoonRepository(context, scope).ingest(
+            Instant.parse("2026-08-24T02:00:00Z"),
+            listOf(member(11u, "Archived member")),
+            "archived.csv",
+        )
+        val archive = ByteArrayOutputStream().also { output ->
+            PlatoonBackupManager(context, scope).export(output)
+        }.toByteArray()
+        MemberOrderPreferences(context, profile.storageId).write(listOf(11L, 12L))
+
+        assertEquals(
+            RestoredBackupKind.PLATOON,
+            PlatoonBackupManager.restoreSelected(context, ByteArrayInputStream(archive)),
+        )
+
+        assertEquals(listOf(11L, 12L), MemberOrderPreferences(context, profile.storageId).read())
+        assertEquals(
+            "Archived member",
+            PlatoonRepository(context, scope).listMemberStatuses().single().name,
+        )
+    }
+
+    @Test
     fun scopedCompleteBackupRecreatesItsProfileOnAFreshRegistry() {
         val registry = PlatoonProfileRegistry(context)
         val profile = registry.upsertDetected(
@@ -521,10 +667,9 @@ class PlatoonProfileRegistryIntegrationTest {
             .edit().clear().commit()
         File(context.filesDir, "platoons").deleteRecursively()
 
-        PlatoonBackupManager.restoreSelected(
-            context,
-            ByteArrayInputStream(archive),
-            complete = true,
+        assertEquals(
+            RestoredBackupKind.COMPLETE,
+            PlatoonBackupManager.restoreSelected(context, ByteArrayInputStream(archive)),
         )
 
         val restoredRegistry = PlatoonProfileRegistry(context)

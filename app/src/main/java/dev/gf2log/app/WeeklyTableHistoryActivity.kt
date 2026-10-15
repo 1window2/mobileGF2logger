@@ -1,164 +1,101 @@
 package dev.gf2log.app
 
-import android.app.Activity
 import android.content.Intent
-import android.graphics.Typeface
 import android.os.Bundle
-import android.view.Gravity
-import android.view.ViewGroup
-import android.widget.ImageButton
 import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
 import dev.gf2log.app.management.PlatoonRepository
-import dev.gf2log.app.management.WeeklyReportHistoryEntry
 import dev.gf2log.app.settings.GameTimeZonePreferences
+import dev.gf2log.app.ui.BackgroundWork
+import dev.gf2log.app.ui.Labels
+import dev.gf2log.app.ui.Screen
+import dev.gf2log.app.ui.StateViews
+import dev.gf2log.app.ui.TextRole
+import dev.gf2log.app.ui.column
+import dev.gf2log.app.ui.group
+import dev.gf2log.app.ui.lp
+import dev.gf2log.app.ui.navigationRow
+import dev.gf2log.app.ui.text
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
-import java.util.concurrent.Executors
 
-/** Lists the bounded immutable history for one weekly table. */
-class WeeklyTableHistoryActivity : LocalizedActivity() {
+/** Lists the bounded immutable revisions recorded for one weekly table. */
+class WeeklyTableHistoryActivity : BaseActivity() {
+
+    private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var repository: PlatoonRepository
-    private lateinit var body: LinearLayout
-    private val worker = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "GF2WeeklyHistory")
-    }
+    private lateinit var content: LinearLayout
+    private val work = BackgroundWork(this, "GF2WeeklyHistory")
     private val periodStart: LocalDate by lazy {
         LocalDate.ofEpochDay(intent.getLongExtra(EXTRA_PERIOD_START, Long.MIN_VALUE))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (!intent.hasExtra(EXTRA_PERIOD_START)) {
+        profileBinding = ActivePlatoonScopeBinding(this)
+        val scope = profileBinding.scope
+        if (!intent.hasExtra(EXTRA_PERIOD_START) || scope == null) {
             finish()
             return
         }
-        repository = PlatoonRepository(this)
-        body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(8), dp(16), dp(16))
-            addHeader()
-            addView(TextView(context).apply {
-                text = getString(R.string.weekly_table_history_description)
-                textSize = 13f
-                setTextColor(getColor(R.color.text_secondary))
-                setPadding(0, dp(2), 0, dp(12))
-            }, matchWidth())
-            addView(TextView(context).apply {
-                text = getString(R.string.weekly_report_loading)
-                gravity = Gravity.CENTER
-                setPadding(0, dp(28), 0, dp(28))
-            }, matchWidth())
+        repository = PlatoonRepository(this, scope)
+        val screen = Screen(this)
+        screen.topBar.setNavigation(::finish).setTitle(
+            getString(R.string.weekly_table_history),
+            getString(
+                R.string.week_range,
+                Labels.format(Labels.DATE, periodStart),
+                Labels.format(Labels.DATE, periodStart.plusDays(6)),
+            ),
+        )
+        content = column()
+        screen.setBody(Screen.scrollingBody(this, content))
+    }
+
+    override fun onScreenResumed() {
+        if (!profileBinding.isCurrent(this)) {
+            finish()
+            return
         }
-        setContentView(ScrollView(this).apply { addView(body, matchWidth()) })
-        loadHistory()
+        load()
     }
 
-    override fun onDestroy() {
-        worker.shutdownNow()
-        super.onDestroy()
-    }
-
-    private fun LinearLayout.addHeader() {
-        addView(LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(ImageButton(context).apply {
-                setImageResource(R.drawable.ic_arrow_back)
-                contentDescription = getString(R.string.back)
-                useModernIconStyle()
-                setPadding(dp(11), dp(11), dp(11), dp(11))
-                setOnClickListener { finish() }
-            }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginEnd = dp(4) })
-            addView(TextView(context).apply {
-                text = getString(R.string.weekly_table_history)
-                textSize = 22f
-                setTypeface(typeface, Typeface.BOLD)
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        }, matchWidth())
-    }
-
-    private fun loadHistory() {
-        worker.execute {
-            val entries = repository.listWeeklyReportHistory(periodStart)
-            val models = entries.mapNotNull { entry ->
-                repository.weeklyReportHistory(entry.id, periodStart)?.let { report ->
-                    HistoryRow(entry, report.members.size)
+    private fun load() {
+        if (content.childCount == 0) content.addView(StateViews.loading(this, getString(R.string.weekly_report_loading)))
+        work.run(
+            key = LOAD,
+            task = {
+                repository.listWeeklyReportHistory(periodStart) to
+                    GameTimeZonePreferences.get(this, requireNotNull(profileBinding.scope).storageId)
+            },
+        ) { result ->
+            content.removeAllViews()
+            val (entries, zone) = result.getOrElse {
+                content.addView(StateViews.failure(this, getString(R.string.weekly_report_load_failed)) { load() })
+                return@run
+            }
+            content.addView(text(getString(R.string.weekly_table_history_description), TextRole.SECONDARY), lp(top = 4, bottom = 12))
+            if (entries.isEmpty()) {
+                content.addView(StateViews.empty(this, R.drawable.ic_history_restore, getString(R.string.weekly_table_history_empty)))
+                return@run
+            }
+            content.addView(group(entries.map { entry ->
+                navigationRow(
+                    title = Labels.format(Labels.DATE_TIME_SECONDS, entry.recordedAt, zone),
+                    detail = if (entry.active) getString(R.string.weekly_table_history_active) else null,
+                    icon = if (entry.active) R.drawable.ic_check_circle else R.drawable.ic_history_restore,
+                ) {
+                    startActivity(
+                        Intent(this, WeeklyTableHistoryPreviewActivity::class.java)
+                            .putExtra(EXTRA_PERIOD_START, periodStart.toEpochDay())
+                            .putExtra(WeeklyTableHistoryPreviewActivity.EXTRA_HISTORY_ID, entry.id)
+                            .putExtra(WeeklyTableHistoryPreviewActivity.EXTRA_RECORDED_AT, entry.recordedAt.toEpochMilli()),
+                    )
                 }
-            }
-            runOnUiThread {
-                if (!isFinishing && !isDestroyed) renderRows(models)
-            }
+            }), lp())
         }
     }
-
-    private fun renderRows(rows: List<HistoryRow>) {
-        while (body.childCount > HEADER_CHILD_COUNT) body.removeViewAt(HEADER_CHILD_COUNT)
-        if (rows.isEmpty()) {
-            body.addView(TextView(this).apply {
-                text = getString(R.string.weekly_table_history_empty)
-                gravity = Gravity.CENTER
-                setTextColor(getColor(R.color.text_secondary))
-                setPadding(0, dp(28), 0, dp(28))
-            }, matchWidth())
-            return
-        }
-        val formatter = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM)
-            .withLocale(resources.configuration.locales[0])
-            .withZone(GameTimeZonePreferences.get(this))
-        rows.forEachIndexed { index, row ->
-            body.addView(
-                ModernUi.actionRow(
-                    context = this,
-                    title = formatter.format(row.entry.recordedAt),
-                    detail = buildString {
-                        append(getString(R.string.weekly_table_history_member_count, row.memberCount))
-                        if (row.entry.active) {
-                            append(" · ")
-                            append(getString(R.string.weekly_table_history_active))
-                        }
-                    },
-                    onClick = {
-                        startActivityForResult(
-                            Intent(this, WeeklyTableHistoryPreviewActivity::class.java)
-                                .putExtra(EXTRA_PERIOD_START, periodStart.toEpochDay())
-                                .putExtra(WeeklyTableHistoryPreviewActivity.EXTRA_HISTORY_ID, row.entry.id),
-                            REQUEST_PREVIEW,
-                        )
-                    },
-                ),
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply { if (index > 0) topMargin = dp(8) },
-            )
-        }
-    }
-
-    @Deprecated("Activity result is retained for API 26 compatibility")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_PREVIEW && resultCode == Activity.RESULT_OK) {
-            setResult(Activity.RESULT_OK)
-            finish()
-        }
-    }
-
-    private data class HistoryRow(
-        val entry: WeeklyReportHistoryEntry,
-        val memberCount: Int,
-    )
-
-    private fun matchWidth() = ViewGroup.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT,
-        ViewGroup.LayoutParams.WRAP_CONTENT,
-    )
 
     companion object {
         const val EXTRA_PERIOD_START = "weekly_history_period_start"
-        private const val REQUEST_PREVIEW = 80
-        private const val HEADER_CHILD_COUNT = 2
+        private const val LOAD = "load"
     }
 }

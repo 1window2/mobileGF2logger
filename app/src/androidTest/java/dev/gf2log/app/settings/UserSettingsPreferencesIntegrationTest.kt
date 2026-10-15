@@ -56,6 +56,59 @@ class UserSettingsPreferencesIntegrationTest {
         )
     }
 
+    @Test
+    fun anUnusableStoredTargetPackageDoesNotBlockCompleteBackups() {
+        // A v2.2 unified store copied the target package without validating it.
+        context.getSharedPreferences("user_settings", Context.MODE_PRIVATE).edit()
+            .putInt("schema_version", 1)
+            .putString("target_package", "not a package")
+            .commit()
+
+        val settings = UserSettingsPreferences.read(context)
+
+        assertEquals(dev.gf2log.app.TargetPackagePreferences.DEFAULT_TARGET_PACKAGE, settings.targetPackage)
+        assertEquals(settings, AppBackupSettingsCodec.decode(AppBackupSettingsCodec.encode(settings)))
+    }
+
+    @Test
+    fun cutlinesWrittenUnderTheExistingKeysRemainReadable() {
+        context.getSharedPreferences("user_settings", Context.MODE_PRIVATE).edit()
+            .putInt("schema_version", 4)
+            .putLong("cutline_daily_merit", 90L)
+            .putInt("cutline_weekly_gunsmoke_attempts", 21)
+            .commit()
+        val storageId = "0".repeat(32)
+        context.getSharedPreferences("platoon_weekly_cutlines", Context.MODE_PRIVATE).edit()
+            .putLong("$storageId.weekly_score", 70_000L)
+            .putInt("$storageId.weekly_patrol", 5)
+            .commit()
+
+        assertEquals(
+            WeeklyCutlines(dailyMerit = 90L, weeklyGunsmokeAttempts = 21),
+            UserSettingsPreferences.weeklyCutlines(context),
+        )
+        val scoped = WeeklyCutlinePreferences(context, storageId)
+        assertEquals(WeeklyCutlines(weeklyGunsmokeScore = 70_000L, weeklyPatrolDays = 5), scoped.read())
+        scoped.clear()
+        assertEquals(WeeklyCutlines(), scoped.read())
+    }
+
+    @Test
+    fun invalidStoredMemberOrderNeverBlocksAScopedSettingsReplacement() {
+        context.getSharedPreferences("user_settings", Context.MODE_PRIVATE).edit()
+            .putInt("schema_version", 4)
+            .putString("member_order", "0,-5,7,7")
+            .commit()
+        val storageId = "0".repeat(32)
+        val store = ScopedAppSettingsStore(context, storageId)
+
+        assertEquals(listOf(7L), UserSettingsPreferences.read(context).memberOrder)
+        store.replace(store.read().copy(memberOrder = listOf(3L)))
+
+        assertEquals(listOf(3L), MemberOrderPreferences(context, storageId).read())
+        assertEquals(listOf(7L), UserSettingsPreferences.memberOrder(context))
+    }
+
     private fun clearSettings() {
         listOf(
             "user_settings",
@@ -64,6 +117,9 @@ class UserSettingsPreferencesIntegrationTest {
             "payload_history_options",
             "weekly_member_order",
             "weekly_cutlines",
+            "platoon_weekly_cutlines",
+            "platoon_member_order",
+            "platoon_timezones",
             ".app.MainActivity",
         ).forEach { name ->
             context.getSharedPreferences(name, Context.MODE_PRIVATE).edit().clear().commit()

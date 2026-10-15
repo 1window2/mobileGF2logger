@@ -1,5 +1,6 @@
 package dev.gf2log.app.management
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
@@ -54,5 +55,29 @@ class BackupFormatPolicyTest {
                 hasSettings = false,
             )
         }
+    }
+
+    @Test
+    fun `auto-detected restore is complete only when the archive carries settings`() {
+        assertEquals(
+            RestoredBackupKind.COMPLETE,
+            BackupFormatPolicy.restoredKind(BackupFormatPolicy.SCOPED_VERSION, true, null),
+        )
+        assertEquals(
+            RestoredBackupKind.PLATOON,
+            BackupFormatPolicy.restoredKind(BackupFormatPolicy.SCOPED_VERSION, false, null),
+        )
+        assertEquals(
+            RestoredBackupKind.PLATOON,
+            BackupFormatPolicy.restoredKind(BackupFormatPolicy.PLATOON_ONLY_VERSION, true, null),
+        )
+        assertEquals(
+            RestoredBackupKind.COMPLETE,
+            BackupFormatPolicy.restoredKind(BackupFormatPolicy.SCOPED_VERSION, false, true),
+        )
+        assertEquals(
+            RestoredBackupKind.PLATOON,
+            BackupFormatPolicy.restoredKind(BackupFormatPolicy.SCOPED_VERSION, true, false),
+        )
     }
 }

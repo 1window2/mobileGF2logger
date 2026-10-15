@@ -1,7 +1,7 @@
 package dev.gf2log.app.management
 
 import android.content.Context
-import dev.gf2log.app.settings.AppSettingsStore
+import dev.gf2log.app.settings.ScopedAppSettingsStore
 import java.io.File
 import java.io.FileOutputStream
 
@@ -35,26 +35,28 @@ class CsvImportCheckpointManager internal constructor(
     private val root = File(profileRoot, CHECKPOINT_DIRECTORY)
     private val staging = File(profileRoot, STAGING_DIRECTORY)
     private val previous = File(profileRoot, PREVIOUS_DIRECTORY)
+    private val discarded = File(profileRoot, DISCARDED_DIRECTORY)
+
+    /** Claims are per scope: an operation in one Platoon never blocks another Platoon's import. */
+    private val scopeState = synchronized(SCOPE_STATES) {
+        SCOPE_STATES.getOrPut(storageScope.storageId, ::ScopeState)
+    }
 
     init {
-        synchronized(STATE_LOCK) {
-            if (!operationInProgress) recoverInterruptedState()
+        synchronized(scopeState) {
+            if (!scopeState.operationInProgress) recoverInterruptedState()
         }
     }
 
-    fun canUndo(): Boolean = synchronized(STATE_LOCK) {
-        !operationInProgress && hasBaseCheckpoint() && digest(root).isFile
+    fun canUndo(): Boolean = synchronized(scopeState) {
+        !scopeState.operationInProgress && hasBaseCheckpoint() && digest(root).isFile
     }
     private fun hasBaseCheckpoint(): Boolean = archive(root).isFile && manifest(root).isFile
 
-    // Function Name: create
-    // Description:
-    // - Exports the current database before any selected CSV is retained.
-    // - Atomically publishes the archive with the deterministic file identities the import may add.
-    // Parameters:
-    // - plannedFileNames: Validated retained CSV identities for non-duplicate selected files.
-    // Returns:
-    // - Unit after a durable provisional checkpoint is published beside its predecessor.
+    /**
+     * Exports the current database before any selected CSV is retained. Atomically publishes the
+     * archive with the deterministic file identities the import may add.
+     */
     fun create(plannedFileNames: Set<String>) {
         claimOperation()
         var published = false
@@ -68,11 +70,7 @@ class CsvImportCheckpointManager internal constructor(
             deleteDirectory(staging)
             check(staging.mkdirs()) { "Unable to stage the CSV import checkpoint" }
             FileOutputStream(archive(staging)).use { output ->
-                PlatoonBackupManager(
-                    appContext,
-                    AppSettingsStore(appContext),
-                    storageScope = storageScope,
-                ).export(output)
+                backupManager().export(output)
                 output.fd.sync()
             }
             FileOutputStream(manifest(staging)).use { output ->
@@ -101,6 +99,14 @@ class CsvImportCheckpointManager internal constructor(
 
     /** Seals a successful import so undo is refused after any later database mutation. */
     fun seal() {
+        try {
+            sealClaimed()
+        } finally {
+            releaseOperation()
+        }
+    }
+
+    private fun sealClaimed() {
         check(hasBaseCheckpoint()) { "No CSV import checkpoint is available" }
         val target = digest(root)
         check(!target.exists()) { "CSV import checkpoint is already sealed" }
@@ -108,12 +114,7 @@ class CsvImportCheckpointManager internal constructor(
         try {
             FileOutputStream(temporary).use { output ->
                 output.write(
-                    PlatoonBackupManager(
-                        appContext,
-                        AppSettingsStore(appContext),
-                        storageScope = storageScope,
-                    ).currentDatabaseSha256()
-                        .toByteArray(Charsets.US_ASCII),
+                    backupManager().currentDatabaseSha256().toByteArray(Charsets.US_ASCII),
                 )
                 output.fd.sync()
             }
@@ -121,18 +122,33 @@ class CsvImportCheckpointManager internal constructor(
         } finally {
             temporary.delete()
         }
-        deleteDirectory(previous)
-        releaseOperation()
+        discard(previous)
     }
 
-    // Function Name: restore
-    // Description:
-    // - Quarantines only files planned by the reverted import, then restores the database.
-    // - Restores quarantined evidence if database replacement fails.
-    // Parameters:
-    // - None.
-    // Returns:
-    // - Unit after the checkpoint is consumed.
+    /**
+     * Runs one complete import: checkpoint, [apply], then seal. Any failure, including an
+     * [Error], rolls the import back, and the scope's claim is always released.
+     */
+    fun <T> runImport(plannedFileNames: Set<String>, apply: () -> T): T {
+        create(plannedFileNames)
+        // The claim taken by create is held across apply, seal, and any rollback, and released
+        // exactly once, so no other operation on this scope can interleave with a rollback.
+        try {
+            val result = apply()
+            sealClaimed()
+            return result
+        } catch (failure: Throwable) {
+            runCatching(::rollbackClaimed).exceptionOrNull()?.let(failure::addSuppressed)
+            throw failure
+        } finally {
+            releaseOperation()
+        }
+    }
+
+    /**
+     * Quarantines only files planned by the reverted import, then restores the database. Restores
+     * quarantined evidence if database replacement fails.
+     */
     fun restore() {
         claimOperation()
         try {
@@ -141,13 +157,7 @@ class CsvImportCheckpointManager internal constructor(
             }
             val expectedDigest = digest(root).readText(Charsets.US_ASCII)
             require(expectedDigest.matches(SHA256)) { "Invalid CSV checkpoint digest" }
-            check(
-                PlatoonBackupManager(
-                    appContext,
-                    AppSettingsStore(appContext),
-                    storageScope = storageScope,
-                ).currentDatabaseSha256() == expectedDigest,
-            ) {
+            check(backupManager().currentDatabaseSha256() == expectedDigest) {
                 "Platoon data changed after the CSV import; undo would overwrite newer changes"
             }
             restoreUnchecked()
@@ -158,11 +168,15 @@ class CsvImportCheckpointManager internal constructor(
 
     internal fun rollbackFailedImport() {
         try {
-            check(hasBaseCheckpoint()) { "No CSV import checkpoint is available" }
-            restoreUnchecked()
+            rollbackClaimed()
         } finally {
             releaseOperation()
         }
+    }
+
+    private fun rollbackClaimed() {
+        check(hasBaseCheckpoint()) { "No CSV import checkpoint is available" }
+        restoreUnchecked()
     }
 
     private fun restoreUnchecked() {
@@ -188,17 +202,12 @@ class CsvImportCheckpointManager internal constructor(
                     check(source.renameTo(target)) { "Unable to quarantine an imported CSV" }
                 }
             }
-            val backupManager = PlatoonBackupManager(
-                context = appContext,
-                settingsStore = AppSettingsStore(appContext),
-                storageScope = storageScope,
-                restoreObserver = { checkpoint ->
-                    if (checkpoint == PlatoonBackupManager.RestoreCheckpoint.DATABASE_INSTALLED) {
-                        markRestoreDatabaseInstalled()
-                    }
-                    restoreObserver(checkpoint)
-                },
-            )
+            val backupManager = backupManager { checkpoint ->
+                if (checkpoint == PlatoonBackupManager.RestoreCheckpoint.DATABASE_INSTALLED) {
+                    markRestoreDatabaseInstalled()
+                }
+                restoreObserver(checkpoint)
+            }
             archive(root).inputStream().use(backupManager::restoreCheckpoint)
         } catch (error: Exception) {
             val marker = restoreMarker(root)
@@ -210,20 +219,17 @@ class CsvImportCheckpointManager internal constructor(
             restoreQuarantinedFiles(names, retained, quarantine, error)
             throw error
         }
-        deleteDirectory(root)
+        discard(root)
         restorePreviousCheckpoint()
     }
 
-    // Function Name: recoverInterruptedState
-    // Description:
-    // - Restores an interrupted checkpoint publication, import rollback, or undo operation.
-    // - Keeps a sealed latest checkpoint and discards its obsolete predecessor.
-    // Parameters:
-    // - None.
-    // Returns:
-    // - Unit after checkpoint state is usable or the interrupted mutation is rolled back.
+    /**
+     * Restores an interrupted checkpoint publication, import rollback, or undo operation. Keeps a
+     * sealed latest checkpoint and discards its obsolete predecessor.
+     */
     private fun recoverInterruptedState() {
         deleteDirectory(staging)
+        deleteDirectory(discarded)
         if (!root.exists()) {
             restorePreviousCheckpoint()
             return
@@ -233,7 +239,7 @@ class CsvImportCheckpointManager internal constructor(
         if (!digest(root).isFile || restoreMarker(root).isFile || quarantine.exists()) {
             restoreUnchecked()
         } else if (previous.exists()) {
-            deleteDirectory(previous)
+            discard(previous)
         }
     }
 
@@ -285,20 +291,51 @@ class CsvImportCheckpointManager internal constructor(
     }
 
     private fun claimOperation() {
-        synchronized(STATE_LOCK) {
-            check(!operationInProgress) { "Another CSV checkpoint operation is in progress" }
-            operationInProgress = true
+        synchronized(scopeState) {
+            check(!scopeState.operationInProgress) {
+                "Another CSV checkpoint operation is in progress"
+            }
+            scopeState.operationInProgress = true
         }
     }
 
     private fun releaseOperation() {
-        synchronized(STATE_LOCK) {
-            operationInProgress = false
+        synchronized(scopeState) {
+            scopeState.operationInProgress = false
         }
     }
 
+    private class ScopeState {
+        var operationInProgress = false
+    }
+
+    /**
+     * Always binds restore recovery to this scope's settings. The global store would roll an
+     * interrupted scoped restore back into the legacy keys instead of the Platoon's own settings.
+     */
+    private fun backupManager(
+        observer: (PlatoonBackupManager.RestoreCheckpoint) -> Unit = {},
+    ) = PlatoonBackupManager(
+        context = appContext,
+        settingsStore = ScopedAppSettingsStore(appContext, storageScope.storageId),
+        restoreObserver = observer,
+        storageScope = storageScope,
+    )
+
     private fun requireSafeImportName(name: String) {
         require(name.matches(SAFE_IMPORT_NAME)) { "Invalid CSV checkpoint identity" }
+    }
+
+    /**
+     * Retires a checkpoint directory with one atomic rename before deleting it. A recursive delete
+     * interrupted midway would otherwise leave a live-looking checkpoint without its archive.
+     * A leftover retired copy is inert and removed again by the next recovery.
+     */
+    private fun discard(directory: File) {
+        if (!directory.exists()) return
+        deleteDirectory(discarded)
+        check(directory.renameTo(discarded)) { "Unable to retire CSV import checkpoint state" }
+        discarded.deleteRecursively()
     }
 
     private fun deleteDirectory(directory: File) {
@@ -313,14 +350,12 @@ class CsvImportCheckpointManager internal constructor(
     private fun restoreMarker(directory: File) = File(directory, RESTORE_MARKER)
 
     private companion object {
-        val STATE_LOCK = Any()
-
-        @Volatile
-        var operationInProgress = false
+        val SCOPE_STATES = mutableMapOf<String, ScopeState>()
 
         const val CHECKPOINT_DIRECTORY = "csv-import-checkpoint"
         const val STAGING_DIRECTORY = "csv-import-checkpoint.staging"
         const val PREVIOUS_DIRECTORY = "csv-import-checkpoint.previous"
+        const val DISCARDED_DIRECTORY = "csv-import-checkpoint.discarded"
         const val QUARANTINE_DIRECTORY = "retained-quarantine"
         const val ARCHIVE_FILE = "platoon.gf2backup"
         const val MANIFEST_FILE = "planned-files.txt"

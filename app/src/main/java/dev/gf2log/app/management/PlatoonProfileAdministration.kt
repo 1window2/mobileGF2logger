@@ -6,40 +6,44 @@ import dev.gf2log.app.settings.GameServerRegion
 import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.MemberOrderPreferences
 import dev.gf2log.app.settings.WeeklyCutlinePreferences
+import java.io.File
+import java.time.ZoneId
 
 /** Owns destructive and derived-data maintenance for isolated Platoon profiles. */
-internal class PlatoonProfileAdministration(context: Context) {
+internal class PlatoonProfileAdministration internal constructor(
+    context: Context,
+    private val rebuildWeeklyHistory: (Context, PlatoonStorageScope, ZoneId) -> Unit,
+) {
+    constructor(context: Context) : this(context, { appContext, scope, zone ->
+        PlatoonRepository(appContext, scope).rebuildWeeklyHistoryForTimeZoneChange(zone)
+    })
+
     private val appContext = context.applicationContext
     private val registry = PlatoonProfileRegistry(appContext)
 
     /**
      * Updates verified server metadata while retaining the profile's immutable storage scope.
-     * Weekly history is rebuilt with the new reset zone and rolled back if rebuilding fails.
+     * Weekly history is rebuilt with the new reset zone. If rebuilding fails, the registry entry
+     * and the exact scoped timezone keys, including a restored manual zone, are put back.
      */
     fun changeServerRegion(storageId: String, region: GameServerRegion): PlatoonProfile {
         val before = requireNotNull(registry.find(storageId)) { "Unknown Platoon profile" }
         require(!before.legacy)
         if (before.serverRegion == region) return before
-        val wasAutomatic = GameTimeZonePreferences.isAutomatic(appContext, storageId)
-        val previousOverride = GameTimeZonePreferences.region(appContext, storageId)
+        val scope = PlatoonStorageScope(storageId)
+        val previousZoneState = GameTimeZonePreferences.scopedState(appContext, storageId)
         val previousZone = GameTimeZonePreferences.get(appContext, storageId)
         val updated = registry.updateServerRegion(storageId, region)
         return try {
             GameTimeZonePreferences.clearRegionOverride(appContext, storageId)
-            PlatoonRepository(appContext, PlatoonStorageScope(storageId))
-                .rebuildWeeklyHistoryForTimeZoneChange(requireNotNull(region.serverZone))
+            rebuildWeeklyHistory(appContext, scope, requireNotNull(region.serverZone))
             updated
         } catch (error: Exception) {
             runCatching { registry.updateServerRegion(storageId, before.serverRegion) }
                 .onFailure(error::addSuppressed)
             runCatching {
-                if (wasAutomatic) {
-                    GameTimeZonePreferences.clearRegionOverride(appContext, storageId)
-                } else {
-                    GameTimeZonePreferences.setRegion(appContext, previousOverride, storageId)
-                }
-                PlatoonRepository(appContext, PlatoonStorageScope(storageId))
-                    .rebuildWeeklyHistoryForTimeZoneChange(previousZone)
+                GameTimeZonePreferences.restoreScopedState(appContext, storageId, previousZoneState)
+                rebuildWeeklyHistory(appContext, scope, previousZone)
             }.onFailure(error::addSuppressed)
             throw error
         }
@@ -82,6 +86,9 @@ internal class PlatoonProfileAdministration(context: Context) {
         private const val KEY_PENDING = "pending_storage_ids"
 
         fun recoverPending(context: Context) {
+            // A thread already reading a repository cannot take the exclusive gate; the
+            // ReentrantReadWriteLock cannot upgrade. The next registry access finishes the work.
+            if (PlatoonRepository.holdsSharedDatabaseAccess()) return
             val appContext = context.applicationContext
             pending(appContext).forEach { storageId ->
                 if (PlatoonProfileIdentity.isValidStorageId(storageId) &&
@@ -105,7 +112,7 @@ internal class PlatoonProfileAdministration(context: Context) {
                         }
                     }
                     val root = scope.rootDirectory(context).canonicalFile
-                    val profilesRoot = java.io.File(context.filesDir, "platoons").canonicalFile
+                    val profilesRoot = File(context.filesDir, "platoons").canonicalFile
                     check(root.parentFile == profilesRoot) {
                         "Refusing to delete outside the isolated Platoon directory"
                     }

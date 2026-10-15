@@ -1,61 +1,171 @@
 package dev.gf2log.app.capture
 
+import android.content.Context
+import androidx.annotation.StringRes
+import dev.gf2log.app.R
+import java.util.concurrent.CopyOnWriteArraySet
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+
+enum class CapturePhase { STOPPED, STARTING, RUNNING }
+
+/** Every user-visible capture status message, localized through [messageRes]. */
+enum class CaptureNotice(@StringRes val messageRes: Int, val severity: Severity) {
+    PREPARING(R.string.capture_notice_preparing, Severity.INFO),
+    ALREADY_RUNNING(R.string.capture_notice_already_running, Severity.INFO),
+    /** Args: comma-separated captured package IDs. */
+    CAPTURING(R.string.capture_notice_capturing, Severity.INFO),
+    NATIVE_UNAVAILABLE(R.string.capture_notice_native_unavailable, Severity.ERROR),
+    HISTORY_IMPORT_FAILED(R.string.capture_notice_history_import_failed, Severity.ERROR),
+    NO_SUPPORTED_CLIENT(R.string.capture_notice_no_supported_client, Severity.ERROR),
+    /** Args: failure reason. */
+    VPN_ESTABLISH_FAILED(R.string.capture_notice_vpn_establish_failed, Severity.ERROR),
+    VPN_PERMISSION_REVOKED(R.string.capture_notice_vpn_permission_revoked, Severity.ERROR),
+    NATIVE_START_FAILED(R.string.capture_notice_native_start_failed, Severity.ERROR),
+    STOPPED_UNEXPECTEDLY(R.string.capture_notice_stopped_unexpectedly, Severity.ERROR),
+    CAPTURE_ONCE_COMPLETE(R.string.capture_notice_capture_once_complete, Severity.INFO),
+    /** Args: comma-separated missing payload tags. */
+    CAPTURE_ONCE_PARTIAL(R.string.capture_notice_capture_once_partial, Severity.WARNING),
+    /** Args: forwarded KiB, inspected KiB, decoded payloads, warnings, dropped chunks. */
+    TRAFFIC(R.string.capture_notice_traffic, Severity.INFO),
+    /** Args: exception class name. */
+    PROCESSING_FAILED(R.string.capture_notice_processing_failed, Severity.ERROR),
+    /** Args: total dropped chunks. */
+    PARSER_OVERLOADED(R.string.capture_notice_parser_overloaded, Severity.WARNING),
+    FLOW_BUFFER_OVERFLOW(R.string.capture_notice_flow_buffer_overflow, Severity.WARNING),
+    IDENTIFIED_FLOW_BUFFER_OVERFLOW(
+        R.string.capture_notice_identified_flow_buffer_overflow,
+        Severity.WARNING,
+    ),
+    CLIENT_UNVERIFIED(R.string.capture_notice_client_unverified, Severity.WARNING),
+    IDENTITY_CHANGED(R.string.capture_notice_identity_changed, Severity.WARNING),
+    PENDING_IDENTITY_CHANGED(R.string.capture_notice_pending_identity_changed, Severity.WARNING),
+    PROFILE_UPDATE_FAILED(R.string.capture_notice_profile_update_failed, Severity.ERROR),
+    /** Args: Platoon name, Platoon ID, client name. */
+    PLATOON_DETECTED(R.string.capture_notice_platoon_detected, Severity.INFO),
+    PENDING_DETECTED(R.string.capture_notice_pending_detected, Severity.INFO),
+    PENDING_QUEUE_FULL(R.string.capture_notice_pending_queue_full, Severity.WARNING),
+    PENDING_OVERFLOW(R.string.capture_notice_pending_overflow, Severity.WARNING),
+    ADMISSION_IN_PROGRESS(R.string.capture_notice_admission_in_progress, Severity.INFO),
+    ADMISSION_INVALID(R.string.capture_notice_admission_invalid, Severity.ERROR),
+    ADMISSION_REGION_MISMATCH(R.string.capture_notice_admission_region_mismatch, Severity.ERROR),
+    ADMISSION_LIMIT(R.string.capture_notice_admission_limit, Severity.WARNING),
+    ADMISSION_PROFILE_FAILED(R.string.capture_notice_admission_profile_failed, Severity.ERROR),
+    ADMISSION_REPLAY_FAILED(R.string.capture_notice_admission_replay_failed, Severity.ERROR),
+    /** Args: Platoon name, Platoon ID, client name. */
+    PLATOON_CONFIRMED(R.string.capture_notice_platoon_confirmed, Severity.INFO),
+    PENDING_DISCARDED(R.string.capture_notice_pending_discarded, Severity.INFO),
+    /** Args: member count, Platoon name. */
+    ROSTER_SAVED(R.string.capture_notice_roster_saved, Severity.INFO),
+    ROSTER_SAVE_FAILED(R.string.capture_notice_roster_save_failed, Severity.ERROR),
+    /** Args: Platoon name, joined count, left count. */
+    ROSTER_UPDATED(R.string.capture_notice_roster_updated, Severity.INFO),
+    /** Args: Platoon name. */
+    ROSTER_RECOVERED(R.string.capture_notice_roster_recovered, Severity.WARNING),
+    ACTIVITY_SAVE_FAILED(R.string.capture_notice_activity_save_failed, Severity.ERROR),
+    UPDATES_SAVE_FAILED(R.string.capture_notice_updates_save_failed, Severity.ERROR),
+    HISTORY_SAVE_FAILED(R.string.capture_notice_history_save_failed, Severity.ERROR),
+    ;
+
+    enum class Severity { INFO, WARNING, ERROR }
+}
+
+data class CaptureNoticeEvent(
+    val notice: CaptureNotice,
+    val args: List<String> = emptyList(),
+    val atMillis: Long,
+)
+
+fun CaptureNoticeEvent.format(context: Context): String =
+    context.getString(notice.messageRes, *args.toTypedArray())
+
+data class CaptureSnapshot(
+    val phase: CapturePhase,
+    val notice: CaptureNoticeEvent?,
+    val capturedTargets: List<String>,
+    val guided: CaptureStatus.GuidedProgress?,
+)
+
+/** Process-wide capture state, swapped atomically as one immutable [CaptureSnapshot]. */
 object CaptureStatus {
-    private const val DEFAULT_MESSAGE = "Capture is stopped"
+    private val state = AtomicReference(
+        CaptureSnapshot(CapturePhase.STOPPED, notice = null, capturedTargets = emptyList(), guided = null),
+    )
+    private val listeners = CopyOnWriteArraySet<(CaptureSnapshot) -> Unit>()
+    private val dispatchPending = AtomicBoolean(false)
 
-    @Volatile
-    private var message = DEFAULT_MESSAGE
+    fun snapshot(): CaptureSnapshot = state.get()
 
-    @Volatile
-    var isRunning: Boolean = false
-        private set
+    val isRunning: Boolean
+        get() = snapshot().phase == CapturePhase.RUNNING
 
-    @Volatile
-    var isStarting: Boolean = false
-        private set
-
-    @Volatile
-    private var guidedProgress: GuidedProgress? = null
-
-    fun read(): String = message
-
-    fun readGuidedProgress(): GuidedProgress? = guidedProgress
-
-    fun update(message: String) {
-        this.message = message
+    /** [listener] runs on the main looper: once immediately, then after every change. */
+    fun addListener(listener: (CaptureSnapshot) -> Unit) {
+        listeners += listener
+        MainThread.runOrPost { if (listener in listeners) listener(snapshot()) }
     }
 
-    fun markRunning(message: String, guided: Boolean = guidedProgress != null) {
-        isRunning = true
-        isStarting = false
-        this.message = message
-        if (guided && guidedProgress == null) guidedProgress = GuidedProgress()
+    fun removeListener(listener: (CaptureSnapshot) -> Unit) {
+        listeners -= listener
     }
 
-    fun markStarting(message: String = "Preparing capture") {
-        isRunning = false
-        isStarting = true
-        this.message = message
+    fun markStarting() = update {
+        it.copy(phase = CapturePhase.STARTING, notice = event(CaptureNotice.PREPARING))
     }
 
-    fun markStopped(message: String = DEFAULT_MESSAGE) {
-        isRunning = false
-        isStarting = false
-        this.message = message
+    fun markStopped() = markStopped(notice = null)
+
+    internal fun markStopped(notice: CaptureNotice?, vararg args: String) = update {
+        it.copy(
+            phase = CapturePhase.STOPPED,
+            notice = notice?.let { value -> event(value, args) },
+            capturedTargets = emptyList(),
+        )
     }
 
-    fun beginSession(guided: Boolean) {
-        guidedProgress = GuidedProgress().takeIf { guided }
+    internal fun markRunning(targets: List<String>) = update {
+        it.copy(
+            phase = CapturePhase.RUNNING,
+            notice = event(CaptureNotice.CAPTURING, arrayOf(targets.joinToString())),
+            capturedTargets = targets.toList(),
+        )
     }
 
-    fun markUsefulPayload(payloadType: Int) {
-        val current = guidedProgress ?: return
-        guidedProgress = current.copy(capturedPayloadTypes = current.capturedPayloadTypes + payloadType)
+    internal fun report(notice: CaptureNotice, vararg args: String) = update {
+        it.copy(notice = event(notice, args))
     }
 
-    fun clearSession() {
-        guidedProgress = null
+    internal fun beginSession(guided: Boolean) = update {
+        it.copy(guided = GuidedProgress().takeIf { guided })
     }
+
+    internal fun markUsefulPayload(payloadType: Int) = update { current ->
+        val guided = current.guided ?: return@update current
+        if (payloadType in guided.capturedPayloadTypes) return@update current
+        current.copy(guided = guided.copy(capturedPayloadTypes = guided.capturedPayloadTypes + payloadType))
+    }
+
+    private inline fun update(transform: (CaptureSnapshot) -> CaptureSnapshot) {
+        while (true) {
+            val previous = state.get()
+            val next = transform(previous)
+            if (next === previous) return
+            if (state.compareAndSet(previous, next)) break
+        }
+        notifyListeners()
+    }
+
+    private fun notifyListeners() {
+        if (listeners.isEmpty() || !dispatchPending.compareAndSet(false, true)) return
+        MainThread.post {
+            dispatchPending.set(false)
+            val current = snapshot()
+            listeners.forEach { it(current) }
+        }
+    }
+
+    private fun event(notice: CaptureNotice, args: Array<out String> = emptyArray()) =
+        CaptureNoticeEvent(notice, args.toList(), System.currentTimeMillis())
 
     data class GuidedProgress(
         val capturedPayloadTypes: Set<Int> = emptySet(),

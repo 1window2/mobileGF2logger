@@ -1,5 +1,6 @@
 package dev.gf2log.app.management
 
+import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.model.PlatoonActivityData
 import dev.gf2log.protocol.model.PlatoonUpdatesData
 import java.time.Instant
@@ -8,6 +9,10 @@ internal object PlatoonObservationPolicy {
     const val MAX_ACTIVITY_OBSERVATIONS = 250
     const val MAX_UPDATE_OBSERVATIONS = 250
     const val MAX_ACTIVITY_MEMBER_NAME_LENGTH = 128
+
+    /** An Updates name becomes a member and report name, so it obeys the roster bound. */
+    const val MAX_UPDATE_MEMBER_NAME_LENGTH = GuildMembersCsv.MAX_MEMBER_NAME_CHARS
+    const val MAX_UPDATE_MEMBERS_PER_OBSERVATION = GuildMembersCsv.MAX_ROSTER_MEMBERS
 
     fun activity(data: PlatoonActivityData): List<PlatoonActivityObservation> = activity(
         data.entries.mapNotNull { entry ->
@@ -68,7 +73,8 @@ internal object PlatoonObservationPolicy {
         observations: List<PlatoonUpdateObservation>,
     ): List<PlatoonUpdateObservation> = observations.asSequence()
         .filter {
-            it.members.isNotEmpty() &&
+            it.members.size in 1..MAX_UPDATE_MEMBERS_PER_OBSERVATION &&
+                it.members.all { member -> member.name.length <= MAX_UPDATE_MEMBER_NAME_LENGTH } &&
                 PlatoonUpdateSemantics.effect(it.kind) != PlatoonUpdateEffect.IGNORE
         }
         .distinctBy { observation ->

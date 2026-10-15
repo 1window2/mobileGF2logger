@@ -7,6 +7,13 @@ import org.junit.Test
 
 class PayloadCatalogTest {
     @Test
+    fun `hot path support check matches the supported type set`() {
+        (0..0xFFFF).forEach { type ->
+            assertEquals(type in Gfl2PayloadDecoder.supportedTypes, Gfl2PayloadDecoder.isSupported(type))
+        }
+    }
+
+    @Test
     fun `catalog names every supported payload type`() {
         assertEquals(Gfl2PayloadDecoder.supportedTypes, PayloadCatalog.categories.map { it.payloadType }.toSet())
         assertEquals("WEAPONS", PayloadCatalog.tag(11021))

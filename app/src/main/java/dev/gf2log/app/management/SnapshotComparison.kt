@@ -32,9 +32,9 @@ object SnapshotComparison {
                 MeritChange(
                     uid = current.uid,
                     name = current.name,
-                    weeklyMeritDelta = counterDelta(current.weeklyMerit, previous.weeklyMerit),
-                    totalMeritDelta = counterDelta(current.totalMerit, previous.totalMerit),
-                    totalScoreDelta = counterDelta(current.totalScore, previous.totalScore),
+                    weeklyMeritDelta = ActivityInference.counterDelta(previous.weeklyMerit, current.weeklyMerit),
+                    totalMeritDelta = ActivityInference.counterDelta(previous.totalMerit, current.totalMerit),
+                    totalScoreDelta = ActivityInference.counterDelta(previous.totalScore, current.totalScore),
                     lastLoginChanged = current.lastLogin != previous.lastLogin,
                 )
             }.filter {
@@ -45,7 +45,4 @@ object SnapshotComparison {
             }.sortedByDescending(MeritChange::weeklyMeritDelta),
         )
     }
-
-    private fun counterDelta(current: Long, previous: Long): Long =
-        if (current >= previous) current - previous else current
 }

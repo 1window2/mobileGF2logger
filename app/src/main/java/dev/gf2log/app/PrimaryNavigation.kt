@@ -13,6 +13,8 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import dev.gf2log.app.management.PlatoonProfileRegistry
+import dev.gf2log.app.ui.Feedback
+import dev.gf2log.app.ui.dp
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 
@@ -24,25 +26,12 @@ internal object PrimaryNavigation {
         WEEKLY,
     }
 
-    fun wrap(activity: Activity, content: View, selected: Destination): View =
-        LinearLayout(activity).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(activity.getColor(R.color.app_background))
-            addView(content, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1f,
-            ))
-            addView(View(activity).apply {
-                setBackgroundColor(activity.getColor(R.color.outline))
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, activity.dp(1)))
-            addView(navigationBar(activity, selected), LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                activity.dp(64),
-            ))
-        }
+    /** The bottom bar alone, for screens composed through [dev.gf2log.app.ui.Screen]. */
+    fun bar(activity: Activity, selected: Destination): View = navigationBar(activity, selected).apply {
+        minimumHeight = activity.dp(64)
+    }
 
-    private fun navigationBar(activity: Activity, selected: Destination): View =
+    private fun navigationBar(activity: Activity, selected: Destination): LinearLayout =
         LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(activity.getColor(R.color.surface))
@@ -81,7 +70,7 @@ internal object PrimaryNavigation {
         activityClass: Class<out Activity>,
     ) {
         val active = destination == selected
-        val color = activity.getColor(if (active) R.color.accent else R.color.text_secondary)
+        val color = activity.getColor(if (active) R.color.accent_text else R.color.text_secondary)
         addView(LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -89,16 +78,25 @@ internal object PrimaryNavigation {
             isFocusable = true
             isSelected = active
             contentDescription = activity.getString(label)
+            androidx.core.view.ViewCompat.setStateDescription(this, if (active) activity.getString(R.string.selected) else null)
             background = activity.selectableBackground()
             setPadding(0, activity.dp(6), 0, activity.dp(4))
+            // The selected destination sits on a soft accent pill, the rest stay neutral.
             addView(ImageView(activity).apply {
                 setImageResource(icon)
                 imageTintList = ColorStateList.valueOf(color)
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, LinearLayout.LayoutParams(activity.dp(24), activity.dp(24)))
+                scaleType = ImageView.ScaleType.CENTER
+                if (active) {
+                    background = GradientDrawable().apply {
+                        setColor(activity.getColor(R.color.accent_surface))
+                        cornerRadius = activity.dp(16).toFloat()
+                    }
+                }
+            }, LinearLayout.LayoutParams(activity.dp(56), activity.dp(32)))
             addView(TextView(activity).apply {
                 text = activity.getString(label)
-                textSize = 11f
+                textSize = 12f
                 setTextColor(color)
                 typeface = Typeface.create(
                     "sans-serif-medium",
@@ -114,11 +112,7 @@ internal object PrimaryNavigation {
                     if (destination != Destination.HOME &&
                         PlatoonProfileRegistry(activity).active() == null
                     ) {
-                        TransientMessage.show(
-                            activity,
-                            R.string.no_platoon_detected_detail,
-                            android.widget.Toast.LENGTH_LONG,
-                        )
+                        Feedback.show(activity, R.string.no_platoon_detected_detail, long = true)
                     } else {
                         activity.startActivity(
                             Intent(activity, activityClass).addFlags(

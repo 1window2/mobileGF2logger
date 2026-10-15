@@ -41,8 +41,16 @@ rules below take precedence over stale copied dates in archived templates.
   remain in a bounded in-memory candidate until the user selects one of the six
   supported regions compatible with the VPN-owner-verified client. Only then is
   its immutable scoped repository created and the buffered evidence ingested.
+  When Settings holds an explicit capture server for that client, the dialog
+  preselects it; the user still confirms before anything is stored.
 - Changing a profile's server rebuilds its weekly history without changing its
-  storage scope. Deleting a profile removes only that scope after two warnings
+  storage scope. A restore keeps the profile's server and its reset region
+  consistent: a complete backup stores only the effective reset region, so a
+  region equal to the archived profile's server is restored as automatic rather
+  than as an explicit override, and a Platoon-only restore that changes the
+  profile's server clears any reset-region or manual-zone override, as a server
+  change in Settings does. An interrupted restore puts the exact previous
+  timezone keys back. Deleting a profile removes only that scope after two warnings
   and an exact Platoon-name confirmation; interrupted cleanup resumes later.
 
 ## Merit calculation
@@ -144,6 +152,13 @@ transitions.
 - UID is the stable member identity; a display name can change over time.
 - A custom nickname is editable and immediately becomes the display name in
   Platoon management; the personal note remains private to member details.
+- Manual text is bounded where it is stored, not only by input fields. After
+  trimming, a custom nickname or manually added member name holds at most 256
+  characters (the roster name limit), and a private member note, membership-period
+  note, or weekly note holds at most 1,000 characters (the weekly-note field
+  limit). Longer text is rejected and nothing is written, so the draft is never
+  silently cut. Weekly history may still shorten a private note to its 2 KiB
+  per-member budget; a 1,000-character weekly note always fits its 16 KiB one.
 - The first observed roster creates an active membership period with an unknown historical
   join time unless the user supplies one.
 - A UID added between consecutive snapshots opens a join or rejoin membership period.
@@ -154,9 +169,14 @@ transitions.
 - Manual edits are accepted only when every period ends after it starts, no two
   fully dated periods overlap, and at most one period remains open. An absent
   snapshot-derived start remains unknown rather than being treated as an
-  infinitely old boundary. Current active state is
-  derived from that open period inside the same transaction; schema-v13 upgrade
-  repairs any stale derived flag left by an older installation.
+  infinitely old boundary. Snapshot and exact boundaries are dated in the
+  Platoon's game timezone for this check, the same calendar manual dates use,
+  so a manual same-day boundary with an unknown time is never a proven overlap
+  with a timed one. Every writer derives current active state from the
+  periods inside the same transaction with one rule: a member is active while an
+  open period remains effective. An open period started by an exact Updates join
+  is superseded by a later recorded exit or by a newer roster that omits the
+  member. Schema-v13 upgrade repairs any stale derived flag with the same rule.
 - A roster CSV imported after newer captures still contributes historical
   presence spans. The replay creates missing inactive members and inferred
   withdrawal/rejoin periods without replacing manual or exact Updates evidence.
@@ -184,15 +204,42 @@ transitions.
 - Each stored history item is a complete immutable weekly-table revision. The
   report cells, displayed membership events, weekly notes, names, and private
   notes are encoded together rather than combining an older table with current
-  member data.
+  member data. Each cell's manual override is encoded with it (history format
+  3), so a restored revision still shows which cells were edited and by how
+  much; a revision without overrides keeps format 2 and its fingerprint.
 - Every revision passes deterministic structural checks before persistence and
   after decoding: seven contiguous days, unique member UIDs, matching cell
   dates and report mode, in-period notes, and valid contextual identities.
 - Changing the configured game timezone clears incompatible derived history
   and rebuilds it from the unchanged UTC evidence using the new 05:00 boundary.
+- Captured evidence refreshes every listed week that reads it, not only the
+  week of its game day. A roster captured exactly at Sunday 05:00 is the
+  closing Saturday capture of the week it ends, so that week is re-recorded
+  too. A current roster, or a membership event before the next roster, is the
+  carried-in baseline and period-end roster of every later listed week until
+  the next stored roster, so those weeks are re-recorded as well; this covers a
+  roster captured just before the reset. An instant before 05:00 on a calendar
+  Sunday also refreshes the following week, whose Join / Withdraw section uses
+  calendar days. A roster that joins or withdraws members also refreshes the
+  weeks of the exact boundary times it correlates from earlier activity, which
+  can precede the roster's own week. The 32-period per-ingest bound still
+  applies, own weeks first.
 - Weekly history is a derived audit trail, not the primary store. If refreshing
   one revision fails after a successful data mutation, the affected restored
   selection is cleared so the live database projection remains authoritative.
+- A manual Daily Patrol requires manual attendance. When an edit sets one of
+  the two and the other stored choice contradicts it, the edited choice wins
+  (Patrol yes also sets Login yes; Login no also sets Patrol no); Login no with
+  Patrol yes in the same edit is rejected before saving, so no edit can produce
+  a pair that storage refuses.
+- Weekly notes and manual overrides must fall inside their own week; anything
+  else is rejected before it can make a revision fail its structural checks.
+- A captured roster older than the latest stored one, from a late packet or a
+  clock moved backwards, is replayed into history instead of being treated as
+  the current roster, so it never withdraws members of a newer roster.
+- A consumed CSV import checkpoint is retired by an atomic rename to
+  `csv-import-checkpoint.discarded` before deletion, so a crash mid-cleanup can
+  never block later imports or undo.
 
 ## Persistence and privacy
 
@@ -209,7 +256,7 @@ The same neutralization is applied to captured roster, activity, Updates, and
 formation packet tables before they can be copied or opened in spreadsheet
 software.
 
-Untrusted evidence is bounded at every persistence boundary. A roster import
+Untrusted evidence is bounded at every persistence boundary. A 21960 Updates entry is dropped whole when any name exceeds 256 characters or it lists more than 256 members. A roster import
 must contain no more than 256 unique UIDs, an activity payload contributes at
 most 250 distinct observations, and the database keeps the newest 10,000
 activity facts. If a newly selected roster CSV fails parsing, duplicate-UID

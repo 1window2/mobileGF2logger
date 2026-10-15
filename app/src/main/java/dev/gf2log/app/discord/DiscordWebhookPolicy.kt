@@ -16,7 +16,8 @@ object DiscordWebhookPolicy {
         require(uri.userInfo == null && uri.fragment == null && uri.query == null) {
             "Discord webhook URL cannot contain credentials, fragments, or query parameters"
         }
-        require(uri.path.matches(WEBHOOK_PATH)) { "Invalid Discord incoming-webhook path" }
+        // The raw path is what is sent, so percent-encoded spellings cannot pass as canonical.
+        require(uri.rawPath.orEmpty().matches(WEBHOOK_PATH)) { "Invalid Discord incoming-webhook path" }
         return uri
     }
 

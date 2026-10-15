@@ -109,3 +109,20 @@ internal class ProtoReader(
         }
     }
 }
+
+/** Visits every field until the message is exhausted; handlers must read or [ProtoReader.skip] it. */
+internal inline fun ProtoReader.forEachField(action: (ProtoField) -> Unit) {
+    while (true) action(nextField() ?: return)
+}
+
+/** Decodes every [fieldNumber] submessage and skips all other fields. */
+internal inline fun <T> ProtoReader.collectMessages(
+    fieldNumber: Int,
+    decode: (ProtoReader) -> T,
+): List<T> {
+    val items = mutableListOf<T>()
+    forEachField { field ->
+        if (field.number == fieldNumber) items += decode(readMessage(field)) else skip(field)
+    }
+    return items
+}

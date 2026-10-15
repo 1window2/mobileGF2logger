@@ -94,8 +94,10 @@ class GuildMembersCsvWriterTest {
         val writer = GuildMembersCsvWriter(output, clock, onBatchClosed = completed::add)
 
         writer.accept(payload(messageId = 0, uid = 1u, name = "Old", end = true))
-        writer.accept(payload(messageId = 44, uid = 1u, name = "Current", end = true))
+        val saved = writer.accept(payload(messageId = 44, uid = 1u, name = "Current", end = true))
 
+        assertEquals(1, saved?.rowCount)
+        assertEquals(2, saved?.file?.readLines(Charsets.UTF_8)?.size)
         assertEquals(1, completed.size)
         assertEquals("2026-07-21T19:11:09Z", completed.single().logTime)
         assertEquals("Current", completed.single().members.single().name)

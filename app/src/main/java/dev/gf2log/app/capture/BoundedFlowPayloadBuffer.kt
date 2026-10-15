@@ -2,7 +2,7 @@ package dev.gf2log.app.capture
 
 /**
  * Bounded pre-identity quarantine; overflow permanently rejects that flow until closure.
- * All state access is serialized because rejected-close cleanup can run off the parser executor.
+ * Capture confines it to the worker thread; access stays serialized so sharing it remains safe.
  */
 internal class BoundedFlowPayloadBuffer<T>(
     private val maxItemsPerFlow: Int,

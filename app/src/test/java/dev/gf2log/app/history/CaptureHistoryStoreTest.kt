@@ -75,6 +75,44 @@ class CaptureHistoryStoreTest {
         }
     }
 
+    @Test
+    fun listingNeverDeletesAndOnlySavingRotates() {
+        val directory = Files.createTempDirectory("gf2log-history-list-test").toFile()
+        try {
+            repeat(CaptureHistoryStore.MAX_ENTRIES + 5) { index ->
+                directory.resolve("${index + 1}_11138_$index.txt").apply {
+                    writeText("entry $index")
+                    setLastModified((index + 1) * 1_000L)
+                }
+            }
+            val store = CaptureHistoryStore(directory)
+
+            assertEquals(CaptureHistoryStore.MAX_ENTRIES + 5, store.list().size)
+            assertEquals(CaptureHistoryStore.MAX_ENTRIES + 5, store.list().size)
+
+            store.save(payload(1))
+            assertEquals(CaptureHistoryStore.MAX_ENTRIES, store.list().size)
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun storesForTheSameDirectoryShareOneLock() {
+        val directory = Files.createTempDirectory("gf2log-history-lock-test").toFile()
+        try {
+            assertTrue(
+                HistoryDirectory(directory).lock ===
+                    HistoryDirectory(directory.resolve("nested").resolve("..")).lock,
+            )
+            assertFalse(
+                HistoryDirectory(directory).lock === HistoryDirectory(directory.resolve("other")).lock,
+            )
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
     private fun payload(index: Int): ParsedPayload = ParsedPayload(
         messageId = index,
         payloadType = 11138,

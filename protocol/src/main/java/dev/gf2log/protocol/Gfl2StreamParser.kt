@@ -142,9 +142,10 @@ class Gfl2StreamParser(
     ) {
         val pending = pendingPayload
         if (pending != null) {
-            if (pending.type == type &&
+            val continues = pending.type == type &&
                 (pending.previousMessageId == 0 || pending.previousMessageId == messageId)
-            ) {
+            val merged = if (continues) merge(pending.data, data) else null
+            if (continues && merged != null) {
                 val accumulatedBytes = pending.accumulatedPayloadBytes + payloadBytes.toLong()
                 val continuationCount = pending.continuationCount + 1
                 if (
@@ -162,7 +163,7 @@ class Gfl2StreamParser(
                     )
                     return
                 }
-                pending.data = merge(pending.data, data)
+                pending.data = merged
                 pending.previousMessageId = messageId
                 pending.isEndOfMessage = isEndOfMessage
                 pending.accumulatedPayloadBytes = accumulatedBytes
@@ -170,6 +171,8 @@ class Gfl2StreamParser(
                 if (messageId != 0 && isEndOfMessage) emitPending(events)
                 return
             }
+            // A different dataset, or a continuation of a single-object payload such as
+            // 21905, keeps the earlier payload intact as its own event.
             emitPending(events)
         }
 
@@ -177,11 +180,7 @@ class Gfl2StreamParser(
             events += ParseEvent.Payload(ParsedPayload(messageId, type, true, data))
         } else {
             if (payloadBytes > maximumPendingPayloadBytes) {
-                quarantinedPayload = if (messageId != 0 && isEndOfMessage) {
-                    null
-                } else {
-                    QuarantinedPayload(type, messageId)
-                }
+                quarantinedPayload = QuarantinedPayload(type, messageId)
                 events += ParseEvent.Warning(
                     "Discarded payload $type continuation sequence exceeding parser limits",
                 )
@@ -229,7 +228,8 @@ class Gfl2StreamParser(
         pendingPayload = null
     }
 
-    private fun merge(first: GameData, second: GameData): GameData = when {
+    /** Returns null for payloads that are not lists and therefore cannot be concatenated. */
+    private fun merge(first: GameData, second: GameData): GameData? = when {
         first is WeaponsData && second is WeaponsData -> WeaponsData(first.weapons + second.weapons)
         first is WeaponModsData && second is WeaponModsData ->
             WeaponModsData(first.mods + second.mods)
@@ -246,7 +246,7 @@ class Gfl2StreamParser(
             PlatoonUpdatesData(first.entries + second.entries)
         first is FormationsData && second is FormationsData ->
             FormationsData(first.formations + second.formations)
-        else -> second
+        else -> null
     }
 
     private fun readUInt16Le(bytes: ByteArray, offset: Int): Int =

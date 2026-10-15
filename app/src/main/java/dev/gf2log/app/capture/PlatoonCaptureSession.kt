@@ -12,7 +12,6 @@ internal class PlatoonCaptureSession(
     context: Context,
     val profile: PlatoonProfile,
     private val onRosterCaptured: (String) -> Unit,
-    private val onStatus: (String) -> Unit,
 ) : AutoCloseable {
     private val scope = PlatoonStorageScope(profile.storageId)
     private val repository = PlatoonRepository(context, scope)
@@ -42,9 +41,11 @@ internal class PlatoonCaptureSession(
         if (directResult.isSuccess) {
             val result = directResult.getOrThrow()
             if (!result.duplicate) {
-                onStatus(
-                    "Updated ${profile.platoonName}: +${result.joined + result.rejoined}, " +
-                        "-${result.left}",
+                CaptureStatus.report(
+                    CaptureNotice.ROSTER_UPDATED,
+                    profile.platoonName,
+                    (result.joined + result.rejoined).toString(),
+                    result.left.toString(),
                 )
             }
             onRosterCaptured(profile.storageId)
@@ -63,7 +64,7 @@ internal class PlatoonCaptureSession(
                 ?: recovery.exceptionOrNull()
                 ?: IllegalStateException("Roster ingestion and recovery both failed")
         }
-        onStatus("Recovered ${profile.platoonName} from the completed roster CSV")
+        CaptureStatus.report(CaptureNotice.ROSTER_RECOVERED, profile.platoonName)
         onRosterCaptured(profile.storageId)
     }
 }

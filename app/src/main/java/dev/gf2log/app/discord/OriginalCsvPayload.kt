@@ -6,19 +6,16 @@ import dev.gf2log.protocol.ParsedPacketTableParser
 object OriginalCsvPayload {
     fun extract(historyContent: String): String {
         require(historyContent.length <= ParsedPacketTableParser.MAX_CONTENT_CHARS)
-        val normalized = historyContent.replace("\r\n", "\n").replace('\r', '\n')
-        val separator = normalized.indexOf("\n\n")
-        require(separator >= 0 && separator + 2 < normalized.length) {
+        val body = requireNotNull(ParsedPacketTableParser.csvBody(historyContent)) {
             "Parsed packet does not contain an original CSV body"
         }
-        requireNotNull(ParsedPacketTableParser.parse(normalized)) {
+        requireNotNull(ParsedPacketTableParser.parse(historyContent)) {
             "Parsed packet CSV failed bounded validation"
         }
-        return normalized.substring(separator + 2).also {
-            require(it.toByteArray(Charsets.UTF_8).size <= MAX_CSV_BYTES) {
-                "Original CSV exceeds the Discord send limit"
-            }
+        require(body.toByteArray(Charsets.UTF_8).size <= MAX_CSV_BYTES) {
+            "Original CSV exceeds the Discord send limit"
         }
+        return body
     }
 
     const val MAX_CSV_BYTES = 512 * 1024

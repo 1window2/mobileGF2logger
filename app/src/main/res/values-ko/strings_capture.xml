@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="capture_notice_preparing">캡처 준비 중</string>
+    <string name="capture_notice_already_running">캡처가 이미 실행 중입니다</string>
+    <string name="capture_notice_capturing">%1$s만 캡처 중</string>
+    <string name="capture_notice_native_unavailable">이 빌드에서는 네이티브 전달 코어를 사용할 수 없습니다</string>
+    <string name="capture_notice_history_import_failed">이전 서클 기록을 가져올 수 없습니다</string>
+    <string name="capture_notice_no_supported_client">지원되는 HaoPlay 또는 Darkwinter 클라이언트를 먼저 설치하세요</string>
+    <string name="capture_notice_vpn_establish_failed">VPN을 설정할 수 없습니다: %1$s</string>
+    <string name="capture_notice_vpn_permission_revoked">VPN 권한이 취소되었습니다</string>
+    <string name="capture_notice_native_start_failed">네이티브 전달 코어를 시작하지 못했습니다</string>
+    <string name="capture_notice_stopped_unexpectedly">캡처가 예기치 않게 중지되었습니다. 다시 시도하려면 캡처 준비를 누르세요</string>
+    <string name="capture_notice_capture_once_complete">서클 명단, 활동, 동향을 모두 캡처했습니다</string>
+    <string name="capture_notice_capture_once_partial">서클 명단을 캡처했지만 대기 시간이 지나도록 %1$s 항목이 없습니다</string>
+    <string name="capture_notice_traffic">전달 %1$s KiB · 검사 %2$s KiB · 디코딩 %3$s건 · 경고 %4$s건 · 누락 %5$s건</string>
+    <string name="capture_notice_processing_failed">프로토콜 처리 실패: %1$s</string>
+    <string name="capture_notice_parser_overloaded">파서 과부하로 대기 중인 청크 %1$s개를 버렸습니다</string>
+    <string name="capture_notice_flow_buffer_overflow">버퍼 한도를 넘은 미식별 서클 연결을 폐기했습니다</string>
+    <string name="capture_notice_identified_flow_buffer_overflow">식별 전 버퍼가 넘친 연결을 식별 후 폐기했습니다</string>
+    <string name="capture_notice_client_unverified">서클 정보를 감지했지만 게임 클라이언트를 확인할 수 없습니다</string>
+    <string name="capture_notice_identity_changed">서클 식별 정보가 바뀐 연결을 폐기했습니다</string>
+    <string name="capture_notice_pending_identity_changed">확인 대기 중인 서클의 식별 정보가 바뀐 연결을 폐기했습니다</string>
+    <string name="capture_notice_profile_update_failed">감지한 서클을 분리해 저장할 수 없습니다</string>
+    <string name="capture_notice_platoon_detected">%3$s에서 %1$s (%2$s) 서클을 감지했습니다</string>
+    <string name="capture_notice_pending_detected">새 서클을 감지했습니다. GF2logger로 돌아가 서버를 선택하세요</string>
+    <string name="capture_notice_pending_queue_full">확인 대기열이 가득 차서 새 서클을 폐기했습니다</string>
+    <string name="capture_notice_pending_overflow">한도를 초과한 확인 대기 서클 캡처를 폐기했습니다</string>
+    <string name="capture_notice_admission_in_progress">대기 중인 서클 확인이 끝나기를 기다리는 중입니다</string>
+    <string name="capture_notice_admission_invalid">대기 중인 서클을 확인할 수 없습니다</string>
+    <string name="capture_notice_admission_region_mismatch">선택한 서버가 확인된 클라이언트에 속하지 않습니다</string>
+    <string name="capture_notice_admission_limit">이 클라이언트에 다른 서클을 추가하려면 새 캡처를 시작하세요</string>
+    <string name="capture_notice_admission_profile_failed">확인한 서클 프로필을 만들 수 없습니다</string>
+    <string name="capture_notice_admission_replay_failed">확인한 서클 패킷을 적용할 수 없습니다</string>
+    <string name="capture_notice_platoon_confirmed">%3$s의 %1$s (%2$s) 서클을 확인했습니다</string>
+    <string name="capture_notice_pending_discarded">확인되지 않은 서클 패킷을 폐기했습니다</string>
+    <string name="capture_notice_roster_saved">%2$s 서클 멤버 %1$s명을 저장했습니다</string>
+    <string name="capture_notice_roster_save_failed">서클 CSV를 저장할 수 없습니다</string>
+    <string name="capture_notice_roster_updated">%1$s 갱신: +%2$s, -%3$s</string>
+    <string name="capture_notice_roster_recovered">완료된 명단 CSV에서 %1$s 서클을 복구했습니다</string>
+    <string name="capture_notice_activity_save_failed">서클 활동 기록을 갱신할 수 없습니다</string>
+    <string name="capture_notice_updates_save_failed">서클 동향 기록을 갱신할 수 없습니다</string>
+    <string name="capture_notice_history_save_failed">파싱 패킷 기록을 저장할 수 없습니다</string>
+    <string name="capture_notification_preparing">캡처 준비 중</string>
+    <string name="capture_notification_running">선택한 게임 트래픽 캡처 중</string>
+</resources>

@@ -16,43 +16,41 @@ internal data class CaptureFlowMetadata(
     val ownerPackage: String?,
 )
 
-/** Resolves an original VPN flow to a supported Android package without endpoint guessing. */
-internal object CaptureFlowOwnerResolver {
+/**
+ * Resolves an original VPN flow to a supported Android package without endpoint guessing.
+ * One instance serves one capture session, so package UIDs are looked up once, not per flow.
+ */
+internal class CaptureFlowOwnerResolver(private val context: Context) {
+    private val packageByUid: Map<Int, String> by lazy {
+        SupportedGamePackages.all.mapNotNull { packageName ->
+            runCatching {
+                context.packageManager.getApplicationInfo(packageName, 0).uid to packageName
+            }.getOrNull()
+        }.toMap()
+    }
+
     fun resolve(
-        context: Context,
         protocol: Int,
         localAddress: String,
         localPort: Int,
         remoteAddress: String,
         remotePort: Int,
     ): String? {
-        val visiblePackages = SupportedGamePackages.all.mapNotNull { packageName ->
-            runCatching {
-                packageName to context.packageManager.getApplicationInfo(packageName, 0).uid
-            }.getOrNull()
-        }
         val resolved = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val connectivity = context.getSystemService(ConnectivityManager::class.java)
             val local = InetSocketAddress(InetAddress.getByName(localAddress), localPort)
             val remote = InetSocketAddress(InetAddress.getByName(remoteAddress), remotePort)
-            val forwardUid = runCatching {
-                connectivity.getConnectionOwnerUid(
-                    protocol,
-                    local,
-                    remote,
-                )
-            }.getOrNull()?.takeIf { it >= 0 }
-            val forwardPackage = visiblePackages.firstOrNull { it.second == forwardUid }?.first
-            val reverseUid = if (forwardPackage == null) runCatching {
-                // Some vendor network stacks report VPN tuples in the opposite direction.
-                connectivity.getConnectionOwnerUid(protocol, remote, local)
-            }.getOrNull()?.takeIf { it >= 0 } else null
-            forwardPackage ?: visiblePackages.firstOrNull { it.second == reverseUid }?.first
+            fun owner(source: InetSocketAddress, destination: InetSocketAddress): String? =
+                runCatching { connectivity.getConnectionOwnerUid(protocol, source, destination) }
+                    .getOrNull()
+                    ?.takeIf { it >= 0 }
+                    ?.let(packageByUid::get)
+            // Some vendor network stacks report VPN tuples in the opposite direction.
+            owner(local, remote) ?: owner(remote, local)
         } else {
             null
         }
-        val installed = visiblePackages.map { it.first }
-        return CaptureFlowOwnerPolicy.choose(resolved, installed)
+        return CaptureFlowOwnerPolicy.choose(resolved, packageByUid.values)
     }
 }
 

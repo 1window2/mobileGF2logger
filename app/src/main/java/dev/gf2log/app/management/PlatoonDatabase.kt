@@ -12,11 +12,10 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Locale
 
-internal class PlatoonDatabase(
+internal class PlatoonDatabase private constructor(
     context: Context,
-    databaseName: String = PlatoonProfileRegistry(context).activeScope().databaseName,
-    private val storageScope: PlatoonStorageScope =
-        PlatoonStorageScope.fromDatabaseName(databaseName),
+    private val storageScope: PlatoonStorageScope,
+    databaseName: String?,
 ) :
     SQLiteOpenHelper(
         context.applicationContext,
@@ -24,6 +23,12 @@ internal class PlatoonDatabase(
         null,
         PlatoonSchema.CURRENT_VERSION,
     ) {
+    constructor(
+        context: Context,
+        databaseName: String = PlatoonProfileRegistry(context).activeScope().databaseName,
+        storageScope: PlatoonStorageScope = PlatoonStorageScope.fromDatabaseName(databaseName),
+    ) : this(context, storageScope, databaseName)
+
     private val appContext = context.applicationContext
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
@@ -4017,6 +4022,10 @@ internal class PlatoonDatabase(
     )
 
     companion object {
+        /** A fresh current-schema database that never touches storage, for schema comparison. */
+        fun inMemory(context: Context, storageScope: PlatoonStorageScope) =
+            PlatoonDatabase(context, storageScope, null)
+
         /**
          * A sparse positive signal: the member triggered a Daily Patrol supply
          * reward, which proves completion for that member and day. Its absence

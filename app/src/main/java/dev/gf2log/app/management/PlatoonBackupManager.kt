@@ -404,18 +404,14 @@ class PlatoonBackupManager internal constructor(
         }
     }
 
+    /** The reference schema lives in memory, so concurrent restores never share a file. */
     private fun validateCurrentSchema(database: SQLiteDatabase) {
-        appContext.deleteDatabase(SCHEMA_REFERENCE_DATABASE)
-        try {
-            PlatoonDatabase(appContext, SCHEMA_REFERENCE_DATABASE, storageScope).use { helper ->
-                val expected = DatabaseSchemaContract.read(helper.readableDatabase)
-                val actual = DatabaseSchemaContract.read(database)
-                require(actual == expected) {
-                    "Full backup database does not match the current Platoon schema"
-                }
+        PlatoonDatabase.inMemory(appContext, storageScope).use { helper ->
+            val expected = DatabaseSchemaContract.read(helper.readableDatabase)
+            val actual = DatabaseSchemaContract.read(database)
+            require(actual == expected) {
+                "Full backup database does not match the current Platoon schema"
             }
-        } finally {
-            appContext.deleteDatabase(SCHEMA_REFERENCE_DATABASE)
         }
     }
 
@@ -539,7 +535,6 @@ class PlatoonBackupManager internal constructor(
     companion object {
         const val FILE_EXTENSION = "gf2backup"
         const val MIME_TYPE = "application/vnd.dev.gf2log.backup"
-        private const val SCHEMA_REFERENCE_DATABASE = "platoon-schema-reference.db"
         private const val RESTORE_TRANSACTION_DIRECTORY = "platoon-full-restore"
         private const val RESTORE_STATE_FILE = "state"
         private const val RESTORE_SETTINGS_FILE = "settings.pre_restore"

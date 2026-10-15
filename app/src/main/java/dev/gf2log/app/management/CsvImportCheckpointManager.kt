@@ -36,14 +36,19 @@ class CsvImportCheckpointManager internal constructor(
     private val staging = File(profileRoot, STAGING_DIRECTORY)
     private val previous = File(profileRoot, PREVIOUS_DIRECTORY)
 
+    /** Claims are per scope: an operation in one Platoon never blocks another Platoon's import. */
+    private val scopeState = synchronized(SCOPE_STATES) {
+        SCOPE_STATES.getOrPut(storageScope.storageId, ::ScopeState)
+    }
+
     init {
-        synchronized(STATE_LOCK) {
-            if (!operationInProgress) recoverInterruptedState()
+        synchronized(scopeState) {
+            if (!scopeState.operationInProgress) recoverInterruptedState()
         }
     }
 
-    fun canUndo(): Boolean = synchronized(STATE_LOCK) {
-        !operationInProgress && hasBaseCheckpoint() && digest(root).isFile
+    fun canUndo(): Boolean = synchronized(scopeState) {
+        !scopeState.operationInProgress && hasBaseCheckpoint() && digest(root).isFile
     }
     private fun hasBaseCheckpoint(): Boolean = archive(root).isFile && manifest(root).isFile
 
@@ -97,23 +102,44 @@ class CsvImportCheckpointManager internal constructor(
 
     /** Seals a successful import so undo is refused after any later database mutation. */
     fun seal() {
-        check(hasBaseCheckpoint()) { "No CSV import checkpoint is available" }
-        val target = digest(root)
-        check(!target.exists()) { "CSV import checkpoint is already sealed" }
-        val temporary = File(root, "$DIGEST_FILE.tmp")
         try {
-            FileOutputStream(temporary).use { output ->
-                output.write(
-                    backupManager().currentDatabaseSha256().toByteArray(Charsets.US_ASCII),
-                )
-                output.fd.sync()
+            check(hasBaseCheckpoint()) { "No CSV import checkpoint is available" }
+            val target = digest(root)
+            check(!target.exists()) { "CSV import checkpoint is already sealed" }
+            val temporary = File(root, "$DIGEST_FILE.tmp")
+            try {
+                FileOutputStream(temporary).use { output ->
+                    output.write(
+                        backupManager().currentDatabaseSha256().toByteArray(Charsets.US_ASCII),
+                    )
+                    output.fd.sync()
+                }
+                check(temporary.renameTo(target)) { "Unable to seal the CSV import checkpoint" }
+            } finally {
+                temporary.delete()
             }
-            check(temporary.renameTo(target)) { "Unable to seal the CSV import checkpoint" }
+            deleteDirectory(previous)
         } finally {
-            temporary.delete()
+            releaseOperation()
         }
-        deleteDirectory(previous)
-        releaseOperation()
+    }
+
+    /**
+     * Runs one complete import: checkpoint, [apply], then seal. Any failure, including an
+     * [Error], rolls the import back, and the scope's claim is always released.
+     */
+    fun <T> runImport(plannedFileNames: Set<String>, apply: () -> T): T {
+        create(plannedFileNames)
+        try {
+            val result = apply()
+            seal()
+            return result
+        } catch (failure: Throwable) {
+            runCatching(::rollbackFailedImport).exceptionOrNull()?.let(failure::addSuppressed)
+            throw failure
+        } finally {
+            releaseOperation()
+        }
     }
 
     // Function Name: restore
@@ -265,16 +291,22 @@ class CsvImportCheckpointManager internal constructor(
     }
 
     private fun claimOperation() {
-        synchronized(STATE_LOCK) {
-            check(!operationInProgress) { "Another CSV checkpoint operation is in progress" }
-            operationInProgress = true
+        synchronized(scopeState) {
+            check(!scopeState.operationInProgress) {
+                "Another CSV checkpoint operation is in progress"
+            }
+            scopeState.operationInProgress = true
         }
     }
 
     private fun releaseOperation() {
-        synchronized(STATE_LOCK) {
-            operationInProgress = false
+        synchronized(scopeState) {
+            scopeState.operationInProgress = false
         }
+    }
+
+    private class ScopeState {
+        var operationInProgress = false
     }
 
     /**
@@ -306,10 +338,7 @@ class CsvImportCheckpointManager internal constructor(
     private fun restoreMarker(directory: File) = File(directory, RESTORE_MARKER)
 
     private companion object {
-        val STATE_LOCK = Any()
-
-        @Volatile
-        var operationInProgress = false
+        val SCOPE_STATES = mutableMapOf<String, ScopeState>()
 
         const val CHECKPOINT_DIRECTORY = "csv-import-checkpoint"
         const val STAGING_DIRECTORY = "csv-import-checkpoint.staging"

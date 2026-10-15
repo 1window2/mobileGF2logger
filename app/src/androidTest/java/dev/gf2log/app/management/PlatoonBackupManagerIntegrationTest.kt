@@ -499,6 +499,32 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     @Test
+    fun csvImportClaimsAreScopedAndReleasedAfterAFailedImport() {
+        seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
+        val otherScope = PlatoonStorageScope(
+            PlatoonProfileRegistry(context).upsertDetected(
+                SupportedGamePackages.DARKWINTER,
+                GameServerRegion.DARKWINTER_GLOBAL,
+                dev.gf2log.protocol.model.PlatoonProfileData(202u, "Other Platoon", 0u, 0u),
+            ).storageId,
+        )
+        val pending = CsvImportCheckpointManager(context, storageScope)
+        pending.create(emptySet())
+
+        CsvImportCheckpointManager(context, otherScope).runImport(emptySet()) {}
+        pending.seal()
+
+        assertThrows(IllegalStateException::class.java) {
+            CsvImportCheckpointManager(context, storageScope).runImport(emptySet()) {
+                error("simulated import failure")
+            }
+        }
+        val retried = CsvImportCheckpointManager(context, storageScope)
+        retried.runImport(emptySet()) {}
+        assertTrue(retried.canUndo())
+    }
+
+    @Test
     fun interruptedCsvUndoCompletesAfterDatabaseInstallationOnRestart() {
         seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
         val manager = CsvImportCheckpointManager(context, storageScope) { checkpoint ->

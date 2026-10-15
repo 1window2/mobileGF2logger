@@ -33,7 +33,8 @@ recoverable user-controlled backup and export.
 
 - Keep the existing Kotlin/Android Views architecture. Do not introduce a
   parallel UI framework or move repository, parser, capture, or report policy
-  into Activities.
+  into Activities. AndroidX Activity is the only UI library dependency; it
+  provides ComponentActivity, the Activity Result API, and edge-to-edge support.
 - Preserve English and Korean, System/Light/Dark appearance, Android Back
   behavior, private app storage, and explicit user-driven share/export.
 - Keep the three primary destinations clear: Home, Platoon, and Weekly.
@@ -57,8 +58,8 @@ is the binding visual direction for the v2.3.0 frontend:
   stop, destructive, or failed states;
 - layouts are compact, status-led, flat, and separated with hairlines or tonal
   surfaces instead of nested oversized cards;
-- Home uses a status dashboard, key Platoon/Weekly shortcuts, concise utilities,
-  recent evidence, and a three-destination bottom bar;
+- Home uses a status dashboard, the active Platoon, concise data tools, recent
+  evidence, and a three-destination bottom bar;
 - Settings uses a compact top bar and grouped list rows;
 - onboarding uses an editorial dark composition with the emblem, concise
   feature guidance, visible progress, top-right Skip, and bottom navigation.

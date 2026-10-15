@@ -119,7 +119,7 @@ The palette is warm, low-glare, and predominantly neutral; semantic color is nev
 
 ## Layout
 
-Use a 4dp grid, a 16dp default screen inset, and 16-24dp between sections. Every actionable region is at least 48dp high even when its visible fill is inset. Home remains status-led; Settings uses grouped rows; onboarding keeps fixed top controls and bottom navigation around a flexible central explanation. Home, Platoon, and Weekly alone use the three-item bottom navigation.
+Use a 4dp grid, a 16dp default screen inset, and 16-24dp between sections. Every actionable region is at least 48dp high even when its visible fill is inset. Content draws edge to edge with system-bar insets applied by the shared screen shell. Home remains status-led; Settings uses grouped rows and owns backup and restore; onboarding keeps fixed top controls and bottom navigation around a flexible central explanation. Home, Platoon, and Weekly alone use the three-item bottom navigation.
 
 ## Elevation & Depth
 
@@ -159,7 +159,11 @@ Home, Platoon, and Weekly share a 64dp bottom bar. Each destination has a 24dp i
 
 ### Capture Status Panel
 
-Capture state, two compact read-only supported-client package IDs, their concise help popover, and Start/One-time/Stop actions form one operational group. Start actions become unavailable while capture is preparing or active; Stop becomes unavailable while stopped.
+Capture state, its localized latest notice, the one-time capture checklist, the two supported clients with their package IDs and install state, and the capture actions form one operational group. While stopped the panel offers One-time capture (primary) and Continuous capture; while preparing or capturing those are replaced by a single Stop action.
+
+### Weekly Table
+
+The member column stays frozen while the seven day columns and the total scroll horizontally as one grid under a sticky day header. Each cell shows merit, the Gunsmoke score and attempts when relevant, and Login/Patrol marks; tapping it explains every metric's evidence in one sheet. Edit mode edits one member-day at a time and highlights changes until they are saved.
 
 ### Onboarding
 
@@ -170,6 +174,7 @@ Five dark editorial pages present the emblem, one concise topic, progress, three
 ### Do:
 
 - **Do** keep capture state and next actions visible without scrolling on the primary screen.
+- **Do** move secondary utilities into the top-bar overflow menu instead of stacking full-width buttons.
 - **Do** preserve 48dp targets, native checked semantics, and Android Back behavior.
 - **Do** verify English, Korean, light/dark themes, system bars, and enlarged text on a physical device.
 - **Do** use orange sparingly for primary action and selection.

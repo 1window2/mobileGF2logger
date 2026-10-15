@@ -27,7 +27,7 @@ import dev.gf2log.app.settings.GameTimeZonePreferences
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.Executors
 
-class PlatoonActivity : LocalizedActivity() {
+class PlatoonActivity : BaseActivity() {
     private lateinit var repository: PlatoonRepository
     private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var summary: TextView
@@ -63,8 +63,7 @@ class PlatoonActivity : LocalizedActivity() {
         )
     }
 
-    override fun onResume() {
-        super.onResume()
+    override fun onScreenResumed() {
         if (!profileBinding.isCurrent(this)) {
             recreate()
             return
@@ -323,7 +322,7 @@ class PlatoonActivity : LocalizedActivity() {
         val destination = data?.data
         if (resultCode != RESULT_OK || destination == null || content == null) return
         val exported = runCatching {
-            val output = TrustedExportDestination.openOutputStream(contentResolver, destination)
+            val output = dev.gf2log.app.ui.DocumentAccess.openOutput(contentResolver, destination)
                 ?: error("Document provider did not open an output stream")
             output.writer(Charsets.UTF_8).use { it.write(content) }
         }.isSuccess

@@ -25,7 +25,7 @@ import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.settings.MemberOrderPreferences
 
-class MemberOrderActivity : LocalizedActivity() {
+class MemberOrderActivity : BaseActivity() {
     private lateinit var listContainer: LinearLayout
     private lateinit var scrollView: ScrollView
     private lateinit var preferences: MemberOrderPreferences

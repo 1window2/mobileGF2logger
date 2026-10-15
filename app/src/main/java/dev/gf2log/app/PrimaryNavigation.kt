@@ -42,7 +42,12 @@ internal object PrimaryNavigation {
             ))
         }
 
-    private fun navigationBar(activity: Activity, selected: Destination): View =
+    /** The bottom bar alone, for screens composed through [dev.gf2log.app.ui.Screen]. */
+    fun bar(activity: Activity, selected: Destination): View = navigationBar(activity, selected).apply {
+        minimumHeight = activity.dp(64)
+    }
+
+    private fun navigationBar(activity: Activity, selected: Destination): LinearLayout =
         LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(activity.getColor(R.color.surface))

@@ -45,7 +45,7 @@ import java.time.LocalDateTime
 import java.util.concurrent.Executors
 import dev.gf2log.protocol.PayloadCatalog
 
-class OptionsActivity : LocalizedActivity() {
+class OptionsActivity : BaseActivity() {
     private lateinit var profileBinding: ActivePlatoonScopeBinding
     private val mainHandler = Handler(Looper.getMainLooper())
     private val fileIoExecutor = Executors.newSingleThreadExecutor { runnable ->
@@ -59,8 +59,7 @@ class OptionsActivity : LocalizedActivity() {
         setContentView(buildContentView())
     }
 
-    override fun onResume() {
-        super.onResume()
+    override fun onScreenResumed() {
         if (!profileBinding.isCurrent(this)) {
             recreate()
             return
@@ -84,7 +83,7 @@ class OptionsActivity : LocalizedActivity() {
                     successMessage = R.string.full_backup_exported,
                     failureMessage = { R.string.full_backup_export_failed },
                 ) {
-                    val output = TrustedExportDestination.openOutputStream(contentResolver, uri)
+                    val output = dev.gf2log.app.ui.DocumentAccess.openOutput(contentResolver, uri)
                         ?: error("Document provider did not open an output stream")
                     output.use { PlatoonBackupManager(this, scope).exportFull(it) }
                 }
@@ -98,7 +97,7 @@ class OptionsActivity : LocalizedActivity() {
                     successMessage = R.string.full_backup_restored,
                     failureMessage = ::fullBackupRestoreFailureMessage,
                 ) {
-                    val input = TrustedImportSource.openInputStream(contentResolver, uri)
+                    val input = dev.gf2log.app.ui.DocumentAccess.openInput(contentResolver, uri)
                         ?: error("Document provider did not open an input stream")
                     input.use { PlatoonBackupManager.restoreSelected(this, it, complete = true) }
                 }

@@ -49,7 +49,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.Executors
 
-class MainActivity : LocalizedActivity() {
+class MainActivity : BaseActivity() {
     private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var statusText: TextView
     private lateinit var captureStateText: TextView
@@ -111,8 +111,7 @@ class MainActivity : LocalizedActivity() {
         super.onSaveInstanceState(outState)
     }
 
-    override fun onResume() {
-        super.onResume()
+    override fun onScreenResumed() {
         if (!profileBinding.isCurrent(this)) {
             recreate()
             return
@@ -147,7 +146,7 @@ class MainActivity : LocalizedActivity() {
                     successMessage = { getString(R.string.status_exported, source.name) },
                     failureMessage = { getString(R.string.status_export_failed) },
                 ) {
-                    val output = TrustedExportDestination.openOutputStream(
+                    val output = dev.gf2log.app.ui.DocumentAccess.openOutput(
                         contentResolver,
                         destination,
                     )
@@ -168,7 +167,7 @@ class MainActivity : LocalizedActivity() {
                     successMessage = { getString(R.string.status_backup_exported) },
                     failureMessage = { getString(R.string.status_backup_failed) },
                 ) {
-                    val output = TrustedExportDestination.openOutputStream(
+                    val output = dev.gf2log.app.ui.DocumentAccess.openOutput(
                         contentResolver,
                         destination,
                     ) ?: error("Document provider did not open an output stream")
@@ -187,7 +186,7 @@ class MainActivity : LocalizedActivity() {
                     failureMessage = { getString(R.string.status_backup_failed) },
                     onSuccess = { recreate() },
                 ) {
-                    val input = TrustedImportSource.openInputStream(contentResolver, source)
+                    val input = dev.gf2log.app.ui.DocumentAccess.openInput(contentResolver, source)
                         ?: error("Document provider did not open an input stream")
                     input.use { PlatoonBackupManager.restoreSelected(this, it, complete = false) }
                 }
@@ -738,7 +737,7 @@ class MainActivity : LocalizedActivity() {
                 val selected = ArrayList<PlatoonCsvImportStore.PreparedImport>(sources.size)
                 var selectedBytes = 0L
                 sources.forEach { source ->
-                    val input = TrustedImportSource.openInputStream(contentResolver, source)
+                    val input = dev.gf2log.app.ui.DocumentAccess.openInput(contentResolver, source)
                         ?: error("Document provider did not open an input stream")
                     val prepared = input.use(store::prepare)
                     selectedBytes += prepared.byteCount

@@ -107,7 +107,7 @@ internal object WeeklyPngPendingState {
     )
 }
 
-class WeeklyReportActivity : LocalizedActivity() {
+class WeeklyReportActivity : BaseActivity() {
     private lateinit var repository: PlatoonRepository
     private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var body: LinearLayout
@@ -155,8 +155,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         )
     }
 
-    override fun onResume() {
-        super.onResume()
+    override fun onScreenResumed() {
         if (!profileBinding.isCurrent(this)) {
             recreate()
             return
@@ -1649,7 +1648,7 @@ class WeeklyReportActivity : LocalizedActivity() {
             val destination = data?.data
             if (resultCode != RESULT_OK || destination == null || source == null) return
             val exported = runCatching {
-                val output = TrustedExportDestination.openOutputStream(contentResolver, destination)
+                val output = dev.gf2log.app.ui.DocumentAccess.openOutput(contentResolver, destination)
                     ?: error("Document provider did not open an output stream")
                 output.use { target ->
                     source.inputStream().use { input -> input.copyTo(target) }
@@ -1673,7 +1672,7 @@ class WeeklyReportActivity : LocalizedActivity() {
         val destination = data?.data
         if (resultCode != RESULT_OK || destination == null || content == null) return
         val exported = runCatching {
-            val output = TrustedExportDestination.openOutputStream(contentResolver, destination)
+            val output = dev.gf2log.app.ui.DocumentAccess.openOutput(contentResolver, destination)
                 ?: error("Document provider did not open an output stream")
             output.writer(Charsets.UTF_8).use { it.write(content) }
         }.isSuccess

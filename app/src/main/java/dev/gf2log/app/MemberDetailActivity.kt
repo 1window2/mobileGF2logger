@@ -19,7 +19,7 @@ import dev.gf2log.app.settings.GameTimeZonePreferences
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 
-class MemberDetailActivity : LocalizedActivity() {
+class MemberDetailActivity : BaseActivity() {
     private lateinit var repository: PlatoonRepository
     private var uid: Long = -1
 

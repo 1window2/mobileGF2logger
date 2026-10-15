@@ -464,4 +464,7 @@
     <string name="no_platoon_detected_detail">No Platoon information has been collected yet.</string>
     <string name="haoplay_capture_region">HaoPlay capture server</string>
     <string name="darkwinter_capture_region">Darkwinter capture server</string>
+    <string name="more_options">More options</string>
+    <string name="profile_identity">%1$s · %2$s · ID %3$d</string>
+    <string name="payload_tag_profile">PROFILE</string>
 </resources>

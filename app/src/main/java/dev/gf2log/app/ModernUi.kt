@@ -565,7 +565,7 @@ object ModernUi {
         ),
     )
 
-    private fun controlTint(context: Context) = ColorStateList(
+    internal fun controlTint(context: Context) = ColorStateList(
         arrayOf(
             intArrayOf(-android.R.attr.state_enabled),
             intArrayOf(android.R.attr.state_checked),
@@ -574,6 +574,32 @@ object ModernUi {
         intArrayOf(
             context.getColor(R.color.outline_strong),
             context.getColor(R.color.accent),
+            context.getColor(R.color.outline_strong),
+        ),
+    )
+
+    internal fun switchThumbTint(context: Context) = ColorStateList(
+        arrayOf(
+            intArrayOf(-android.R.attr.state_enabled),
+            intArrayOf(android.R.attr.state_checked),
+            intArrayOf(),
+        ),
+        intArrayOf(
+            context.getColor(R.color.surface_variant),
+            context.getColor(R.color.accent),
+            context.getColor(R.color.surface),
+        ),
+    )
+
+    internal fun switchTrackTint(context: Context) = ColorStateList(
+        arrayOf(
+            intArrayOf(-android.R.attr.state_enabled),
+            intArrayOf(android.R.attr.state_checked),
+            intArrayOf(),
+        ),
+        intArrayOf(
+            context.getColor(R.color.outline),
+            context.getColor(R.color.accent_surface_pressed),
             context.getColor(R.color.outline_strong),
         ),
     )

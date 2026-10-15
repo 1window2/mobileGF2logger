@@ -460,4 +460,7 @@
     <string name="no_platoon_detected_detail">아직 수집된 서클 정보가 없습니다.</string>
     <string name="haoplay_capture_region">HaoPlay 캡처 서버</string>
     <string name="darkwinter_capture_region">Darkwinter 캡처 서버</string>
+    <string name="more_options">더보기</string>
+    <string name="profile_identity">%1$s · %2$s · ID %3$d</string>
+    <string name="payload_tag_profile">프로필</string>
 </resources>

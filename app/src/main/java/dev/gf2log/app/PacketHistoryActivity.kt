@@ -31,7 +31,7 @@ import java.io.File
 import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.management.PlatoonStorageScope
 
-class PacketHistoryActivity : LocalizedActivity() {
+class PacketHistoryActivity : BaseActivity() {
     private lateinit var actionButton: Button
     private lateinit var contentContainer: LinearLayout
     private lateinit var sendButton: Button
@@ -143,8 +143,7 @@ class PacketHistoryActivity : LocalizedActivity() {
     }
 
 
-    override fun onResume() {
-        super.onResume()
+    override fun onScreenResumed() {
         if (::sendButton.isInitialized) refreshSendAvailability()
     }
 

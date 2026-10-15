@@ -2,4 +2,12 @@
 <resources>
     <item name="gf2_ui_role" type="id" />
     <item name="gf2_ui_compact_multiline" type="id" />
+    <item name="gf2_base_bottom_padding" type="id" />
+    <item name="screen_scroll" type="id" />
+    <item name="screen_list" type="id" />
+    <item name="member_nickname_input" type="id" />
+    <item name="member_note_input" type="id" />
+    <item name="platoon_search_input" type="id" />
+    <item name="weekly_note_input" type="id" />
+    <item name="webhook_input" type="id" />
 </resources>

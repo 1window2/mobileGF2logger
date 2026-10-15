@@ -21,7 +21,7 @@ import java.time.LocalDate
 import java.util.concurrent.Executors
 
 /** Shows one immutable history projection and provides the explicit restore action. */
-class WeeklyTableHistoryPreviewActivity : LocalizedActivity() {
+class WeeklyTableHistoryPreviewActivity : BaseActivity() {
     private lateinit var repository: PlatoonRepository
     private lateinit var body: LinearLayout
     private val worker = Executors.newSingleThreadExecutor { runnable ->

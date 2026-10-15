@@ -15,7 +15,7 @@ import android.widget.Toast
 import dev.gf2log.app.settings.WeeklyCutlinePreferences
 import dev.gf2log.app.settings.WeeklyCutlines
 
-class WeeklySettingsActivity : LocalizedActivity() {
+class WeeklySettingsActivity : BaseActivity() {
     private lateinit var dailyMerit: ThresholdInput
     private lateinit var dailyScore: ThresholdInput
     private lateinit var dailyAttempts: ThresholdInput

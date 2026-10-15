@@ -16,7 +16,7 @@ import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.settings.GameTimeZonePreferences
 import java.time.format.DateTimeFormatter
 
-class SnapshotComparisonActivity : LocalizedActivity() {
+class SnapshotComparisonActivity : BaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val snapshots = PlatoonRepository(this).listSnapshots(2)

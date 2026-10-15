@@ -19,7 +19,7 @@ import java.time.format.FormatStyle
 import java.util.concurrent.Executors
 
 /** Lists the bounded immutable history for one weekly table. */
-class WeeklyTableHistoryActivity : LocalizedActivity() {
+class WeeklyTableHistoryActivity : BaseActivity() {
     private lateinit var repository: PlatoonRepository
     private lateinit var body: LinearLayout
     private val worker = Executors.newSingleThreadExecutor { runnable ->

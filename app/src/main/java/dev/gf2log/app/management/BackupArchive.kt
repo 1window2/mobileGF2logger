@@ -1,6 +1,7 @@
 package dev.gf2log.app.management
 
 import dev.gf2log.app.StrictProperties
+import dev.gf2log.app.settings.GameServerRegion
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.ByteArrayInputStream
@@ -197,7 +198,7 @@ internal object BackupArchive {
     internal data class BackupPlatoonProfile(
         val storageId: String,
         val client: PlatoonClient,
-        val serverRegion: dev.gf2log.app.settings.GameServerRegion,
+        val serverRegion: GameServerRegion,
         val platoonId: Long,
         val platoonName: String,
         val bannerFrameId: Long,
@@ -230,7 +231,7 @@ internal object BackupArchive {
 
     private fun Properties.profile(formatVersion: Int): BackupPlatoonProfile {
         val client = PlatoonClient.valueOf(required(KEY_PROFILE_CLIENT))
-        val region = dev.gf2log.app.settings.GameServerRegion.fromStored(required(KEY_PROFILE_REGION))
+        val region = GameServerRegion.fromStored(required(KEY_PROFILE_REGION))
         require(region.storedValue == required(KEY_PROFILE_REGION)) { "Backup server region is invalid" }
         val id = requireNotNull(required(KEY_PROFILE_PLATOON_ID).toLongOrNull()) {
             "Backup Platoon ID is invalid"

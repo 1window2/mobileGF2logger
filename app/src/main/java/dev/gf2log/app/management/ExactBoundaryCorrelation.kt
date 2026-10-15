@@ -94,7 +94,7 @@ internal object ExactBoundaryCorrelation {
         }
         val latestBoundary = db.rawQuery(
             """
-            SELECT event_type, note, occurred_at
+            SELECT note, occurred_at
             FROM member_events
             WHERE uid = ?
               AND source = ?
@@ -116,9 +116,8 @@ internal object ExactBoundaryCorrelation {
         ).use { cursor ->
             if (!cursor.moveToFirst()) return
             LatestMembershipBoundary(
-                type = MemberEventType.valueOf(cursor.getString(0)),
-                name = cursor.getString(1),
-                occurredAt = Instant.ofEpochMilli(cursor.getLong(2)),
+                name = cursor.getString(0),
+                occurredAt = Instant.ofEpochMilli(cursor.getLong(1)),
             )
         }
         db.update(
@@ -133,7 +132,6 @@ internal object ExactBoundaryCorrelation {
     }
 
     private data class LatestMembershipBoundary(
-        val type: MemberEventType,
         val name: String,
         val occurredAt: Instant,
     )

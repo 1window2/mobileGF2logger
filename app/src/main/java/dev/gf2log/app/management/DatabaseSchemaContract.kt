@@ -1,5 +1,6 @@
 package dev.gf2log.app.management
 
+import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 
 internal data class DatabaseSchemaContract(
@@ -121,7 +122,7 @@ internal data class DatabaseSchemaContract(
         }
 
         private fun readColumns(
-            cursor: android.database.Cursor,
+            cursor: Cursor,
             hiddenColumn: Int?,
         ): Map<String, ColumnContract> = cursor.run {
             buildMap {
@@ -228,7 +229,7 @@ internal data class DatabaseSchemaContract(
         private fun normalizeSql(value: String): String =
             value.trim().replace(WHITESPACE, " ").uppercase()
 
-        private fun android.database.Cursor.getStringOrNull(column: Int): String? =
+        private fun Cursor.getStringOrNull(column: Int): String? =
             if (isNull(column)) null else getString(column)
 
         private val AUTO_INCREMENT = Regex("\\bAUTOINCREMENT\\b", RegexOption.IGNORE_CASE)

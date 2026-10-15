@@ -6,6 +6,7 @@ import dev.gf2log.app.settings.GameServerRegion
 import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.MemberOrderPreferences
 import dev.gf2log.app.settings.WeeklyCutlinePreferences
+import java.io.File
 import java.time.ZoneId
 
 /** Owns destructive and derived-data maintenance for isolated Platoon profiles. */
@@ -111,7 +112,7 @@ internal class PlatoonProfileAdministration internal constructor(
                         }
                     }
                     val root = scope.rootDirectory(context).canonicalFile
-                    val profilesRoot = java.io.File(context.filesDir, "platoons").canonicalFile
+                    val profilesRoot = File(context.filesDir, "platoons").canonicalFile
                     check(root.parentFile == profilesRoot) {
                         "Refusing to delete outside the isolated Platoon directory"
                     }

@@ -42,10 +42,11 @@ internal object Dialogs {
      * and registers it with its screen so [dismissAll] closes it on recreation.
      */
     fun <D : android.app.Dialog> showTracked(dialog: D): D {
+        val owner = owner(dialog.context)
+        // Background results can arrive after finish(); a leaving screen gets no new window.
+        if (owner != null && (owner.isFinishing || owner.isDestroyed)) return dialog
         dialog.show()
-        owner(dialog.context)?.let { owner ->
-            open.getOrPut(owner) { mutableListOf() }.add(java.lang.ref.WeakReference(dialog))
-        }
+        owner?.let { open.getOrPut(it) { mutableListOf() }.add(java.lang.ref.WeakReference(dialog)) }
         return dialog
     }
 

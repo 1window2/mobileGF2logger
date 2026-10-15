@@ -3,28 +3,21 @@ package dev.gf2log.app
 import android.app.DatePickerDialog
 import android.content.Intent
 import android.os.Bundle
-import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.LinearLayout
-import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import dev.gf2log.app.management.MemberEvent
-import dev.gf2log.app.management.MemberEventType
-import dev.gf2log.app.management.MembershipEventPresentation
 import dev.gf2log.app.management.PlatoonPeriods
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.management.WeeklyEvidenceAnalyzer
 import dev.gf2log.app.management.WeeklyMemberNameProjection
 import dev.gf2log.app.management.WeeklyNote
-import dev.gf2log.app.management.WeeklyNoteLimitException
 import dev.gf2log.app.management.WeeklyOverrideEditing
 import dev.gf2log.app.management.WeeklyReportBuilder
 import dev.gf2log.app.management.WeeklyReportStateHolder
@@ -47,7 +40,6 @@ import dev.gf2log.app.ui.TextRole
 import dev.gf2log.app.ui.WRAP
 import dev.gf2log.app.ui.button
 import dev.gf2log.app.ui.column
-import dev.gf2log.app.ui.divider
 import dev.gf2log.app.ui.dp
 import dev.gf2log.app.ui.icon
 import dev.gf2log.app.ui.iconButton
@@ -55,10 +47,8 @@ import dev.gf2log.app.ui.lp
 import dev.gf2log.app.ui.navigationRow
 import dev.gf2log.app.ui.panel
 import dev.gf2log.app.ui.row
-import dev.gf2log.app.ui.sectionHeader
 import dev.gf2log.app.ui.selectableRect
 import dev.gf2log.app.ui.text
-import dev.gf2log.app.ui.textField
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -76,9 +66,7 @@ class WeeklyReportActivity : BaseActivity() {
     private lateinit var screen: Screen
     private lateinit var list: RecyclerView
     private lateinit var stickyHeader: FrameLayout
-    private lateinit var bottomSections: LinearLayout
-    private lateinit var noteInput: EditText
-    private lateinit var noteDayButton: TextView
+    private lateinit var journal: WeeklyJournalSection
     private val work = BackgroundWork(this, "GF2Weekly")
     private val exports = WeeklyExportFlow(this, work, { repository }, { scope.storageId })
 
@@ -95,7 +83,6 @@ class WeeklyReportActivity : BaseActivity() {
     private val tables = HashMap<Boolean, WeeklyTable>()
     private val horizontalSync = HorizontalSync()
     private val edits = WeeklyEditSession()
-    private var noteDay: LocalDate? = null
     private val editingBack = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() = cancelEditing()
     }
@@ -109,16 +96,11 @@ class WeeklyReportActivity : BaseActivity() {
             return
         }
         repository = PlatoonRepository(this, scope)
+        journal = WeeklyJournalSection(this, work, SAVE, { repository }, ::requestRender)
         restoreState(savedInstanceState)
         onBackPressedDispatcher.addCallback(this, editingBack)
         screen = Screen(this, PrimaryNavigation.Destination.WEEKLY)
-        buildNoteComposer()
-        savedInstanceState?.getString(STATE_NOTE_DRAFT)?.let(noteInput::setText)
-        bottomSections = column()
-        bottomAdapter.view = column {
-            setPadding(dp(16), 0, dp(16), dp(24))
-            addView(bottomSections, lp())
-        }
+        bottomAdapter.view = journal.view
         list = RecyclerView(this).apply {
             id = R.id.screen_list
             layoutManager = LinearLayoutManager(context)
@@ -154,9 +136,7 @@ class WeeklyReportActivity : BaseActivity() {
         }
         exports.saveState(outState)
         if (::scope.isInitialized) edits.save(outState, scope.storageId)
-        noteDay?.let { outState.putLong(STATE_NOTE_DAY, it.toEpochDay()) }
-        // The composer lives inside the RecyclerView, which does not save its children's state.
-        if (::noteInput.isInitialized) outState.putString(STATE_NOTE_DRAFT, noteInput.text.toString())
+        if (::journal.isInitialized) journal.saveState(outState)
         super.onSaveInstanceState(outState)
     }
 
@@ -170,9 +150,7 @@ class WeeklyReportActivity : BaseActivity() {
         )
         // Edits belong to one Platoon; a profile switch recreates this screen in another scope.
         edits.restore(state, scope.storageId)
-        noteDay = state?.takeIf { it.containsKey(STATE_NOTE_DAY) }
-            ?.getLong(STATE_NOTE_DAY)
-            ?.let(LocalDate::ofEpochDay)
+        journal.restoreState(state)
     }
 
     // region Loading and rendering
@@ -195,7 +173,7 @@ class WeeklyReportActivity : BaseActivity() {
                     headerAdapter.view = null
                     stickyHeader.visibility = View.GONE
                     rowsAdapter.submit(emptyList())
-                    bottomSections.removeAllViews()
+                    journal.clear()
                     stateAdapter.view = StateViews.failure(this, getString(R.string.weekly_report_load_failed)) {
                         requestRender()
                     }
@@ -257,7 +235,11 @@ class WeeklyReportActivity : BaseActivity() {
             stickyHeader.addView(weeklyTable.headerRow(report))
         }
         rowsAdapter.submit(next.displayedMembers)
-        renderBottom(next)
+        if (edits.isEditing(report.periodStart)) {
+            journal.clear()
+        } else {
+            journal.render(WeeklyJournalSection.Content(report, next.notes, next.events, next.namesByUid, next.zone))
+        }
         updateTopBar()
         list.post(::updateStickyHeader)
     }
@@ -382,139 +364,6 @@ class WeeklyReportActivity : BaseActivity() {
                 contentDescription = "$contentDescription. ${getString(R.string.how_it_works)}"
             }, lp())
         }
-    }
-
-    private fun renderBottom(next: RenderModel) {
-        bottomSections.removeAllViews()
-        if (edits.isEditing(next.report.periodStart)) return
-        renderMembershipEvents(next)
-        bottomSections.addView(sectionHeader(getString(R.string.notes)), lp())
-        val notesByDay = next.notes.groupBy(WeeklyNote::gameDay)
-        if (notesByDay.isEmpty()) {
-            bottomSections.addView(text(getString(R.string.no_notes), TextRole.SECONDARY) {
-                setPadding(dp(4), 0, dp(4), dp(8))
-            }, lp())
-        } else {
-            bottomSections.addView(panel(padding = 8) {
-                next.report.days.filter { it in notesByDay }.forEachIndexed { index, day ->
-                    if (index > 0) addView(divider(), lp(top = 4, bottom = 4))
-                    addView(text(Labels.dayHeader(context, day), TextRole.LABEL) {
-                        setPadding(dp(8), dp(4), dp(8), 0)
-                    }, lp())
-                    notesByDay[day].orEmpty().forEach { note -> addView(noteRow(note), lp()) }
-                }
-            }, lp())
-        }
-        bottomSections.addView(noteComposerPanel(next.report), lp(top = 8))
-    }
-
-    private fun renderMembershipEvents(next: RenderModel) {
-        val events = MembershipEventPresentation.deduplicate(next.events)
-        bottomSections.addView(sectionHeader(getString(R.string.join_withdraw)), lp())
-        if (events.isEmpty()) {
-            bottomSections.addView(text(getString(R.string.no_membership_events), TextRole.SECONDARY) {
-                setPadding(dp(4), 0, dp(4), dp(8))
-            }, lp())
-            return
-        }
-        val byDay = events.groupBy { MembershipEventPresentation.calendarDate(it, next.zone) }
-        val ordered: List<LocalDate?> = next.report.days.filter { it in byDay } +
-            if (null in byDay) listOf(null) else emptyList()
-        bottomSections.addView(panel(padding = 8) {
-            ordered.forEachIndexed { index, day ->
-                if (index > 0) addView(divider(), lp(top = 4, bottom = 4))
-                addView(text(day?.let { Labels.dayHeader(context, it) } ?: getString(R.string.unknown_date), TextRole.LABEL) {
-                    setPadding(dp(8), dp(4), dp(8), 0)
-                }, lp())
-                byDay[day].orEmpty().forEach { event -> addView(eventRow(event, next), lp()) }
-            }
-        }, lp())
-    }
-
-    private fun eventRow(event: MemberEvent, next: RenderModel): View {
-        val joined = event.type == MemberEventType.JOINED || event.type == MemberEventType.REJOINED
-        val label = getString(if (joined) R.string.join_label else R.string.withdraw_label)
-        val name = next.namesByUid[event.uid].orEmpty().ifBlank { event.note }
-        val identity = name.takeIf(String::isNotBlank)?.let { getString(R.string.member_name_uid, it, event.uid) }
-            ?: Labels.uid(this, event.uid)
-        val time = MembershipEventPresentation.timePrefix(event, next.zone)
-        return row {
-            minimumHeight = dp(40)
-            setPadding(dp(8), 0, dp(8), 0)
-            isFocusable = true
-            contentDescription = listOfNotNull(label, time, identity).joinToString(". ")
-            addView(icon(
-                if (joined) R.drawable.ic_arrow_down else R.drawable.ic_arrow_up,
-                if (joined) R.color.success_mark else R.color.failure_mark,
-                sizeDp = 18,
-            ), lp(18, 18, end = 8))
-            addView(text(label, TextRole.LABEL) {
-                setTextColor(getColor(if (joined) R.color.success_text else R.color.destructive_action))
-                minWidth = dp(44)
-            }, lp(WRAP, WRAP, end = 8))
-            addView(text(listOfNotNull(time, identity).joinToString("  "), TextRole.BODY) {
-                maxLines = 2
-                ellipsize = TextUtils.TruncateAt.END
-            }, lp(width = 0, weight = 1f))
-        }
-    }
-
-    private fun noteRow(note: WeeklyNote): View = row {
-        minimumHeight = dp(48)
-        setPadding(dp(8), 0, 0, 0)
-        addView(text(note.text, TextRole.BODY) { setTextIsSelectable(true) }, lp(width = 0, weight = 1f))
-        if (!note.isAutomatic) {
-            addView(
-                iconButton(R.drawable.ic_delete, getString(R.string.delete_note_description, note.text.take(40)), R.color.text_secondary) {
-                    confirmNoteDeletion(note)
-                },
-                lp(48, 48),
-            )
-        }
-    }
-
-    private fun buildNoteComposer() {
-        noteInput = textField(getString(R.string.note_hint), id = R.id.weekly_note_input, singleLine = false, maxLength = MAX_NOTE_LENGTH)
-        noteDayButton = text(null, TextRole.BODY) {
-            gravity = Gravity.CENTER_VERTICAL
-            minHeight = dp(48)
-            setPadding(dp(12), 0, dp(8), 0)
-            background = selectableRect()
-            setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_today, 0, R.drawable.ic_expand_more, 0)
-            compoundDrawablePadding = dp(8)
-            compoundDrawableTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.text_secondary))
-        }
-    }
-
-    private fun noteComposerPanel(report: WeeklyReportBuilder.Report): View {
-        val today = model?.let { PlatoonPeriods.gameDay(Instant.now(), it.zone) }
-        if (noteDay !in report.days) noteDay = today?.takeIf { it in report.days } ?: report.days.first()
-        updateNoteDay()
-        noteDayButton.setOnClickListener {
-            Dialogs.choose(
-                this,
-                getString(R.string.note_day),
-                report.days.map { Labels.dayHeader(this, it) },
-                report.days.indexOf(noteDay),
-            ) {
-                noteDay = report.days[it]
-                updateNoteDay()
-            }
-        }
-        (noteInput.parent as? ViewGroup)?.removeView(noteInput)
-        (noteDayButton.parent as? ViewGroup)?.removeView(noteDayButton)
-        return panel(padding = 12) {
-            addView(text(getString(R.string.add_note), TextRole.SUBTITLE), lp())
-            addView(noteDayButton, lp(top = 8))
-            addView(noteInput, lp(top = 8))
-            addView(button(getString(R.string.add_note), Controls.Role.PRIMARY) { addNote(report) }, lp(top = 8))
-        }
-    }
-
-    private fun updateNoteDay() {
-        val day = noteDay ?: return
-        noteDayButton.text = Labels.dayHeader(this, day)
-        noteDayButton.contentDescription = Labels.labeled(this, getString(R.string.note_day), noteDayButton.text)
     }
 
     // endregion
@@ -704,45 +553,6 @@ class WeeklyReportActivity : BaseActivity() {
         }
     }
 
-    private fun addNote(report: WeeklyReportBuilder.Report) {
-        val text = noteInput.text.toString().trim()
-        val day = noteDay ?: return
-        if (work.isBusy(SAVE)) return
-        if (text.isEmpty()) {
-            noteInput.error = getString(R.string.note_required)
-            return
-        }
-        work.run(
-            key = SAVE,
-            task = { repository.addWeeklyNote(report.periodStart.toEpochDay(), day.toEpochDay(), text) },
-        ) { result ->
-            result.fold(
-                onSuccess = {
-                    noteInput.text = null
-                    Feedback.show(this, R.string.note_added)
-                    requestRender()
-                },
-                onFailure = { error ->
-                    Feedback.show(
-                        this,
-                        if (error is WeeklyNoteLimitException) R.string.weekly_note_limit_reached else R.string.save_failed,
-                    )
-                },
-            )
-        }
-    }
-
-    private fun confirmNoteDeletion(note: WeeklyNote) {
-        Dialogs.confirm(this, getString(R.string.delete_note), note.text, getString(R.string.delete), destructive = true) {
-            work.run(task = { repository.deleteWeeklyNote(note.id) }) { result ->
-                if (result.getOrDefault(false)) {
-                    Feedback.show(this, R.string.note_deleted)
-                    requestRender()
-                }
-            }
-        }
-    }
-
     // endregion
 
     private inner class RowsAdapter : RecyclerView.Adapter<RowHolder>() {
@@ -796,9 +606,6 @@ class WeeklyReportActivity : BaseActivity() {
         const val STANDARD_ROW = 0
         const val GUNSMOKE_ROW = 1
         const val SAVE = "save"
-        const val MAX_NOTE_LENGTH = 1_000
         const val STATE_REFERENCE_DAY = "weekly.reference_day"
-        const val STATE_NOTE_DAY = "weekly.note_day"
-        const val STATE_NOTE_DRAFT = "weekly.note_draft"
     }
 }

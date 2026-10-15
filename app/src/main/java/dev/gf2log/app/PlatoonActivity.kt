@@ -3,12 +3,10 @@ package dev.gf2log.app
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.os.Bundle
-import android.text.InputType
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -24,16 +22,13 @@ import dev.gf2log.app.management.PlatoonMemberCsv
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonSnapshot
 import dev.gf2log.app.management.SnapshotMember
-import dev.gf2log.app.management.isValidMembershipRange
 import dev.gf2log.app.ui.searchField
 import dev.gf2log.app.ui.Controls
-import dev.gf2log.app.ui.AccessibleRow
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.BarAction
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.DocumentAccess
 import dev.gf2log.app.ui.Feedback
-import dev.gf2log.app.ui.LabeledField
 import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.MATCH
 import dev.gf2log.app.ui.MenuEntry
@@ -42,19 +37,13 @@ import dev.gf2log.app.ui.SingleViewAdapter
 import dev.gf2log.app.ui.StateViews
 import dev.gf2log.app.ui.TextRole
 import dev.gf2log.app.ui.WRAP
-import dev.gf2log.app.ui.badge
 import dev.gf2log.app.ui.column
 import dev.gf2log.app.ui.dp
-import dev.gf2log.app.ui.icon
 import dev.gf2log.app.ui.lp
 import dev.gf2log.app.ui.panel
 import dev.gf2log.app.ui.row
 import dev.gf2log.app.ui.selectableRect
-import dev.gf2log.app.ui.errorLine
-import dev.gf2log.app.ui.showMessage
 import dev.gf2log.app.ui.text
-import dev.gf2log.app.ui.textField
-import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 
@@ -321,7 +310,11 @@ class PlatoonActivity : BaseActivity() {
                     }),
                     overflow = listOf(
                         MenuEntry(getString(R.string.select_members)) { setSelecting(true) },
-                        MenuEntry(getString(R.string.add_withdrawn_member)) { showAddWithdrawnMemberDialog() },
+                        MenuEntry(getString(R.string.add_withdrawn_member)) {
+                            WithdrawnMemberDialog.show(this, work, repository, { uid ->
+                                model?.statuses?.any { it.uid == uid } == true
+                            }, ::load)
+                        },
                         MenuEntry(getString(R.string.edit_member_order)) {
                             startActivity(Intent(this, MemberOrderActivity::class.java))
                         },
@@ -351,172 +344,38 @@ class PlatoonActivity : BaseActivity() {
         exportMembers.launch("GF2logger-members-${Labels.FILE_STAMP.format(LocalDateTime.now())}.csv")
     }
 
-    private fun showAddWithdrawnMemberDialog() {
-        val zone = repository.gameZone()
-        val uid = LabeledField(
-            this,
-            getString(R.string.uid),
-            textField(getString(R.string.uid_hint), inputType = InputType.TYPE_CLASS_NUMBER),
-        )
-        val nickname = LabeledField(this, getString(R.string.member_nickname), textField(getString(R.string.member_nickname)))
-        val joined = DateTimePickerInput(this, getString(R.string.join_label), dateRequired = true, zone = zone)
-        val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_label), dateRequired = true, zone = zone)
-        val note = LabeledField(
-            this,
-            getString(R.string.membership_note_hint),
-            textField(getString(R.string.membership_note_hint), singleLine = false),
-        )
-        val error = errorLine()
-        val content = Dialogs.content(this) {
-            listOf<View>(uid, nickname, joined, withdrew, note, error).forEachIndexed { index, view ->
-                addView(view, lp(top = if (index == 0) 0 else 12))
-            }
-        }
-        Dialogs.show(
-            Dialogs.builder(this)
-                .setTitle(R.string.add_withdrawn_member)
-                .setView(content)
-                .setNegativeButton(R.string.cancel, null)
-                .setPositiveButton(R.string.add, null),
-        ) { dialog ->
-            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener { button ->
-                val uidValue = uid.input.text.toString().trim().toLongOrNull()?.takeIf { it > 0 }
-                val name = nickname.input.text.toString().trim()
-                val joinedBoundary = joined.boundary
-                val withdrewBoundary = withdrew.boundary
-                val problem = when {
-                    uidValue == null -> R.string.invalid_uid
-                    model?.statuses?.any { it.uid == uidValue } == true -> R.string.duplicate_uid
-                    name.isEmpty() -> R.string.invalid_nickname
-                    joinedBoundary == null || withdrewBoundary == null -> R.string.invalid_dates_required
-                    !isValidMembershipRange(joinedBoundary, withdrewBoundary) -> R.string.invalid_date_order
-                    else -> null
-                }
-                if (problem != null) {
-                    error.showMessage(getString(problem))
-                    return@setOnClickListener
-                }
-                button.isEnabled = false
-                val noteText = note.input.text.toString()
-                work.run(
-                    task = {
-                        repository.addWithdrawnMember(
-                            requireNotNull(uidValue),
-                            name,
-                            requireNotNull(joinedBoundary),
-                            requireNotNull(withdrewBoundary),
-                            noteText,
-                        )
-                    },
-                ) { result ->
-                    button.isEnabled = true
-                    if (result.getOrDefault(false)) {
-                        dialog.dismiss()
-                        Feedback.show(this, R.string.saved)
-                        load()
-                    } else {
-                        error.showMessage(getString(R.string.invalid_withdrawn_member))
-                    }
-                }
-            }
-        }
-    }
-
     private fun latestMembers(snapshot: PlatoonSnapshot?): Map<Long, SnapshotMember> =
         snapshot?.members.orEmpty().associateBy(SnapshotMember::uid)
 
     private inner class MemberAdapter : ListAdapter<MemberStatus, MemberHolder>(DIFF) {
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = MemberHolder()
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = MemberHolder(PlatoonMemberRow(this@PlatoonActivity))
 
-        override fun onBindViewHolder(holder: MemberHolder, position: Int) = holder.bind(getItem(position))
-    }
-
-    private inner class MemberHolder : RecyclerView.ViewHolder(AccessibleRow(this@PlatoonActivity)) {
-        private val row = itemView as AccessibleRow
-        private val check = CheckBox(this@PlatoonActivity).apply {
-            isClickable = false
-            isFocusable = false
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            buttonTintList = Controls.controlTint(this@PlatoonActivity)
-        }
-        private val name = text(null, TextRole.SUBTITLE) {
-            maxLines = 1
-            ellipsize = TextUtils.TruncateAt.END
-        }
-        private val status = badge("")
-        private val detail = text(null, TextRole.CAPTION) {
-            maxLines = 1
-            ellipsize = TextUtils.TruncateAt.END
-        }
-        private val merit = text(null, TextRole.SUBTITLE) { gravity = Gravity.END }
-
-        init {
-            row.orientation = LinearLayout.HORIZONTAL
-            row.gravity = Gravity.CENTER_VERTICAL
-            row.minimumHeight = dp(64)
-            row.setPadding(dp(8), dp(8), dp(8), dp(8))
-            row.background = selectableRect()
-            row.layoutParams = RecyclerView.LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(2) }
-            row.addView(check, lp(WRAP, WRAP, end = 4))
-            row.addView(column {
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-                addView(row {
-                    addView(name, lp(width = 0, weight = 1f))
-                    addView(status, lp(WRAP, WRAP, start = 8))
-                }, lp())
-                addView(detail, lp(top = 2))
-            }, lp(width = 0, weight = 1f))
-            row.addView(column {
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-                addView(merit, lp())
-                addView(text(getString(R.string.merit_this_week_short), TextRole.CAPTION) { gravity = Gravity.END }, lp())
-            }, lp(WRAP, WRAP, start = 12))
-            row.addView(icon(R.drawable.ic_chevron_right, sizeDp = 20), lp(20, 20, start = 4))
-        }
-
-        fun bind(member: MemberStatus) {
+        override fun onBindViewHolder(holder: MemberHolder, position: Int) {
+            val member = getItem(position)
             val loaded = model ?: return
-            val latest = loaded.latestMembers[member.uid]
-            check.visibility = if (selecting) View.VISIBLE else View.GONE
-            check.isChecked = member.uid in selected
-            name.text = member.name
-            status.text = getString(if (member.isActive) R.string.active_member else R.string.departed_member)
-            status.visibility = if (member.isActive) View.GONE else View.VISIBLE
-            detail.text = buildList {
-                add(Labels.uid(this@PlatoonActivity, member.uid))
-                add(getString(R.string.level_short, latest?.level ?: member.level))
-                latest?.lastLogin?.takeIf { it > 0 }?.let {
-                    add(getString(
-                        R.string.last_login_short,
-                        Labels.format(Labels.DATE_TIME, Instant.ofEpochSecond(it), loaded.zone),
-                    ))
-                }
-            }.joinToString(" · ")
-            merit.text = latest?.weeklyMerit?.toString() ?: "—"
-            row.isSelected = selecting && member.uid in selected
-            row.contentDescription = listOfNotNull(
-                getString(R.string.selected).takeIf { row.isSelected },
-                member.name,
-                status.text,
-                detail.text,
-                Labels.labeled(this@PlatoonActivity, getString(R.string.merit_this_week), merit.text),
-            ).joinToString(". ")
-            row.setOnClickListener {
-                if (selecting) {
-                    toggle(member.uid)
-                } else {
-                    startActivity(
-                        Intent(this@PlatoonActivity, MemberDetailActivity::class.java)
-                            .putExtra(MemberDetailActivity.EXTRA_UID, member.uid),
-                    )
-                }
-            }
-            row.setOnLongClickListener {
-                toggle(member.uid)
-                true
-            }
+            holder.row.bind(
+                member = member,
+                latest = loaded.latestMembers[member.uid],
+                zone = loaded.zone,
+                selecting = selecting,
+                selected = member.uid in selected,
+                onClick = {
+                    if (selecting) {
+                        toggle(member.uid)
+                    } else {
+                        startActivity(
+                            Intent(this@PlatoonActivity, MemberDetailActivity::class.java)
+                                .putExtra(MemberDetailActivity.EXTRA_UID, member.uid),
+                        )
+                    }
+                },
+                onLongClick = { toggle(member.uid) },
+            )
         }
     }
+
+    private class MemberHolder(val row: PlatoonMemberRow) : RecyclerView.ViewHolder(row.view)
+
 
     private data class Model(
         val latest: PlatoonSnapshot?,

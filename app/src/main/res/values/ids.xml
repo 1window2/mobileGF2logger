@@ -10,4 +10,6 @@
     <item name="platoon_search_input" type="id" />
     <item name="weekly_note_input" type="id" />
     <item name="webhook_input" type="id" />
+    <item name="action_move_up" type="id" />
+    <item name="action_move_down" type="id" />
 </resources>

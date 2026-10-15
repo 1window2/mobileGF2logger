@@ -1,385 +1,425 @@
 package dev.gf2log.app
 
 import android.app.AlertDialog
-import android.graphics.Typeface
 import android.os.Bundle
-import android.view.ViewGroup
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.Gravity
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
-import android.widget.Toast
+import dev.gf2log.app.management.EvidenceSource
 import dev.gf2log.app.management.MemberStatus
 import dev.gf2log.app.management.MembershipPeriod
 import dev.gf2log.app.management.PlatoonRepository
+import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.management.isImmutableMembershipBoundary
 import dev.gf2log.app.management.isValidMembershipRange
 import dev.gf2log.app.settings.GameTimeZonePreferences
+import dev.gf2log.app.ui.BackgroundWork
+import dev.gf2log.app.ui.Dialogs
+import dev.gf2log.app.ui.Feedback
+import dev.gf2log.app.ui.LabeledField
+import dev.gf2log.app.ui.Labels
+import dev.gf2log.app.ui.MenuEntry
+import dev.gf2log.app.ui.Screen
+import dev.gf2log.app.ui.StateViews
+import dev.gf2log.app.ui.TextRole
+import dev.gf2log.app.ui.WRAP
+import dev.gf2log.app.ui.badge
+import dev.gf2log.app.ui.button
+import dev.gf2log.app.ui.column
+import dev.gf2log.app.ui.group
+import dev.gf2log.app.ui.lp
+import dev.gf2log.app.ui.navigationRow
+import dev.gf2log.app.ui.panel
+import dev.gf2log.app.ui.row
+import dev.gf2log.app.ui.sectionHeader
+import dev.gf2log.app.ui.text
+import dev.gf2log.app.ui.textField
 import java.time.Instant
-import java.time.format.DateTimeFormatter
+import java.time.LocalDate
+import java.time.ZoneId
 
+/** One member's profile, private note, and editable membership history. */
 class MemberDetailActivity : BaseActivity() {
+    override val legacyStyling = false
+
+    private lateinit var profileBinding: ActivePlatoonScopeBinding
     private lateinit var repository: PlatoonRepository
-    private var uid: Long = -1
+    private lateinit var screen: Screen
+    private val work = BackgroundWork(this, "GF2MemberDetail")
+    private var uid = -1L
+    private var model: Model? = null
+    private var inputsInitialized = false
+
+    private lateinit var content: LinearLayout
+    private lateinit var statusPanel: LinearLayout
+    private lateinit var periods: LinearLayout
+    private lateinit var nickname: EditText
+    private lateinit var note: EditText
+    private lateinit var saveButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         uid = intent.getLongExtra(EXTRA_UID, -1)
-        repository = PlatoonRepository(this)
-        render()
-    }
-
-    private fun render() {
-        val status = repository.listMemberStatuses().firstOrNull { it.uid == uid } ?: run {
+        profileBinding = ActivePlatoonScopeBinding(this)
+        val scope = profileBinding.scope
+        if (uid <= 0 || scope == null) {
             finish()
             return
         }
-        val nameInput = EditText(this).apply {
-            hint = getString(R.string.member_nickname)
-            setText(status.name)
-            setSingleLine(true)
-        }
-        val noteInput = EditText(this).apply {
-            hint = getString(R.string.member_private_note)
-            setText(status.note)
-            minLines = 2
-        }
-        val content = ScrollView(this).apply {
-            addView(LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(16), dp(16), dp(16), dp(16))
-                addView(TextView(context).apply {
-                    text = getString(R.string.member_details)
-                    textSize = 24f
-                    setTypeface(typeface, Typeface.BOLD)
-                }, matchWidth())
-                addView(TextView(context).apply {
-                    text = getString(
-                        R.string.member_status_line,
-                        status.uid,
-                        getString(
-                            if (status.isActive) {
-                                R.string.active_member
-                            } else {
-                                R.string.departed_member
-                            },
-                        ),
-                    )
-                    textSize = 14f
-                    setTextColor(getColor(R.color.text_secondary))
-                    setPadding(0, dp(4), 0, dp(8))
-                }, matchWidth())
-                addView(nameInput, matchWidth())
-                addView(noteInput, LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = dp(8) })
-                addView(LinearLayout(context).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    addView(Button(context).apply {
-                        text = getString(R.string.save_member)
-                        usePrimaryActionStyle()
-                        setOnClickListener {
-                            val saved = runCatching {
-                                repository.updateMember(
-                                    status.uid,
-                                    nameInput.text.toString(),
-                                    noteInput.text.toString(),
-                                )
-                            }.getOrDefault(false)
-                            TransientMessage.show(
-                                this@MemberDetailActivity,
-                                getString(if (saved) R.string.saved else R.string.save_failed),
-                                Toast.LENGTH_SHORT,
-                            )
-                        }
-                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                        marginEnd = dp(4)
-                    })
-                    addView(Button(context).apply {
-                        text = getString(R.string.add_membership_history_short)
-                        useSecondaryActionStyle()
-                        setOnClickListener { addMembershipHistory(status) }
-                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                        marginStart = dp(4)
-                    })
-                }, matchWidth())
-                addView(Button(context).apply {
-                    text = getString(R.string.delete_member)
-                    useDestructiveTextActionStyle()
-                    setOnClickListener { confirmMemberDeletion(status) }
-                }, matchWidth())
-                addView(TextView(context).apply {
-                    text = getString(R.string.membership_history)
-                    textSize = 17f
-                    setTypeface(typeface, Typeface.BOLD)
-                    setPadding(0, dp(16), 0, dp(4))
-                }, matchWidth())
-                status.membershipPeriods.forEachIndexed { index, membershipPeriod ->
-                    addView(membershipPeriodRow(status, membershipPeriod, index), matchWidth())
-                }
-            }, matchWidth())
-        }
-        setContentView(content)
-        ModernUi.prepareContent(window.decorView)
+        repository = PlatoonRepository(this, scope)
+        inputsInitialized = savedInstanceState?.getBoolean(STATE_INPUTS_INITIALIZED) == true
+        screen = Screen(this)
+        screen.topBar
+            .setNavigation(::finish)
+            .setTitle(getString(R.string.member_details))
+            .setActions(
+                emptyList(),
+                overflow = listOf(MenuEntry(getString(R.string.delete_member)) { confirmMemberDeletion() }),
+            )
+        buildContent()
+        screen.setBody(Screen.scrollingBody(this, content))
     }
 
-    private fun confirmMemberDeletion(status: MemberStatus) {
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(R.string.delete_member)
-            .setMessage(R.string.delete_member_warning)
-            .setNegativeButton(R.string.cancel, null)
-            .setPositiveButton(R.string.delete, null)
-            .create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
-                setTextColor(getColor(R.color.destructive_action))
-                setOnClickListener {
-                    val deleted = runCatching {
-                        repository.deleteMember(status.uid)
-                    }.getOrDefault(false)
-                    if (deleted) {
-                        dialog.dismiss()
-                        TransientMessage.show(
-                            this@MemberDetailActivity,
-                            R.string.member_deleted,
-                            Toast.LENGTH_SHORT,
-                        )
-                        finish()
+    override fun onScreenResumed() {
+        if (!profileBinding.isCurrent(this)) {
+            // The member belongs to the previous Platoon scope.
+            finish()
+            return
+        }
+        load()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(STATE_INPUTS_INITIALIZED, inputsInitialized)
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun buildContent() {
+        nickname = textField(getString(R.string.member_nickname), id = R.id.member_nickname_input, maxLength = 256)
+        note = textField(getString(R.string.member_private_note_hint), id = R.id.member_note_input, singleLine = false)
+        saveButton = button(getString(R.string.save_member), ModernUi.ControlRole.PRIMARY) { saveProfile() }
+        val watcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = updateSaveState()
+            override fun afterTextChanged(s: Editable?) = Unit
+        }
+        nickname.addTextChangedListener(watcher)
+        note.addTextChangedListener(watcher)
+        statusPanel = panel()
+        periods = column()
+        content = column {
+            addView(statusPanel, lp(top = 4))
+            addView(sectionHeader(getString(R.string.member_profile)), lp())
+            addView(panel {
+                addView(LabeledField(context, getString(R.string.member_nickname), nickname, getString(R.string.member_nickname_detail)), lp())
+                addView(LabeledField(context, getString(R.string.member_private_note), note, getString(R.string.member_private_note_detail)), lp(top = 12))
+                addView(saveButton, lp(top = 12))
+            }, lp())
+            addView(row {
+                addView(sectionHeader(getString(R.string.membership_history)), lp(width = 0, weight = 1f))
+                addView(button(getString(R.string.add_membership_history_short), ModernUi.ControlRole.TERTIARY, R.drawable.ic_add_circle) {
+                    addMembershipPeriod()
+                }, lp(WRAP, WRAP, top = 8))
+            }, lp())
+            addView(periods, lp())
+        }
+        statusPanel.addView(StateViews.loading(this, getString(R.string.loading_members)))
+        updateSaveState()
+    }
+
+    private fun load() {
+        work.run(
+            key = LOAD,
+            task = {
+                val status = repository.listMemberStatuses().firstOrNull { it.uid == uid }
+                status?.let {
+                    Model(
+                        status = it,
+                        latest = repository.listSnapshots(1).firstOrNull()?.members?.firstOrNull { member -> member.uid == uid },
+                        zone = GameTimeZonePreferences.get(this),
+                    )
+                }
+            },
+        ) { result ->
+            val loaded = result.getOrNull()
+            if (loaded == null) {
+                if (result.isSuccess) finish() else render(null)
+                return@run
+            }
+            model = loaded
+            if (!inputsInitialized) {
+                nickname.setText(loaded.status.name)
+                note.setText(loaded.status.note)
+                inputsInitialized = true
+            }
+            render(loaded)
+        }
+    }
+
+    private fun render(loaded: Model?) {
+        statusPanel.removeAllViews()
+        periods.removeAllViews()
+        if (loaded == null) {
+            statusPanel.addView(StateViews.failure(this, getString(R.string.platoon_load_failed)) { load() })
+            return
+        }
+        val status = loaded.status
+        screen.topBar.setTitle(status.name, "#${status.uid}")
+        statusPanel.addView(row {
+            addView(text(status.name, TextRole.TITLE), lp(width = 0, weight = 1f))
+            addView(badge(
+                getString(if (status.isActive) R.string.active_member else R.string.departed_member),
+                if (status.isActive) R.color.success_surface else R.color.surface_variant,
+                if (status.isActive) R.color.success_text else R.color.text_secondary,
+            ), lp(WRAP, WRAP))
+        }, lp())
+        val latest = loaded.latest
+        val stats = listOf(
+            getString(R.string.level) to (latest?.level ?: status.level).toString(),
+            getString(R.string.merit_this_week) to (latest?.weeklyMerit?.toString() ?: "—"),
+            getString(R.string.total_merit) to (latest?.totalMerit?.toString() ?: "—"),
+            getString(R.string.last_login) to (latest?.lastLogin?.takeIf { it > 0 }?.let {
+                Labels.format(Labels.DATE_TIME, Instant.ofEpochSecond(it), loaded.zone)
+            } ?: "—"),
+        )
+        stats.chunked(2).forEach { pair ->
+            statusPanel.addView(row(Gravity.TOP) {
+                pair.forEachIndexed { index, (label, value) ->
+                    addView(column {
+                        isFocusable = true
+                        contentDescription = "$label: $value"
+                        addView(text(label, TextRole.CAPTION) { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, lp())
+                        addView(text(value, TextRole.SUBTITLE) { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, lp(top = 2))
+                    }, lp(width = 0, weight = 1f, start = if (index == 0) 0 else 12))
+                }
+            }, lp(top = 12))
+        }
+        val rows = status.membershipPeriods.mapIndexed { index, period ->
+            navigationRow(
+                title = getString(R.string.membership_period_title, index + 1) +
+                    if (period.leftAt == null && period.leftDate == null) " · " + getString(R.string.current_period) else "",
+                detail = getString(
+                    R.string.membership_period_detail,
+                    boundaryText(period.joinedDate, period.joinedAt, period.joinedTimeKnown, loaded.zone),
+                    if (period.leftAt == null && period.leftDate == null) {
+                        getString(R.string.present)
                     } else {
-                        TransientMessage.show(
-                            this@MemberDetailActivity,
-                            R.string.member_delete_failed,
-                            Toast.LENGTH_SHORT,
-                        )
-                    }
+                        boundaryText(period.leftDate, period.leftAt, period.leftTimeKnown ?: (period.leftAt != null), loaded.zone)
+                    },
+                    sourceLabel(period.joinedSource),
+                    period.leftSource?.let(::sourceLabel) ?: "—",
+                ) + period.note.takeIf(String::isNotBlank)?.let { "\n$it" }.orEmpty(),
+                icon = R.drawable.ic_calendar,
+            ) { editMembershipPeriod(status, period) }
+        }
+        periods.addView(
+            if (rows.isEmpty()) StateViews.empty(this, R.drawable.ic_calendar, getString(R.string.no_membership_periods)) else group(rows),
+            lp(),
+        )
+        updateSaveState()
+    }
+
+    private fun updateSaveState() {
+        val loaded = model?.status
+        saveButton.isEnabled = loaded != null && !work.isBusy(SAVE) &&
+            (nickname.text.toString() != loaded.name || note.text.toString() != loaded.note) &&
+            nickname.text.isNotBlank()
+    }
+
+    private fun saveProfile() {
+        val name = nickname.text.toString()
+        val noteText = note.text.toString()
+        work.run(key = SAVE, task = { repository.updateMember(uid, name, noteText) }) { result ->
+            Feedback.show(this, if (result.getOrDefault(false)) R.string.saved else R.string.save_failed)
+            load()
+        }
+        updateSaveState()
+    }
+
+    private fun confirmMemberDeletion() {
+        Dialogs.confirm(this, R.string.delete_member, R.string.delete_member_warning, R.string.delete, destructive = true) {
+            work.run(task = { repository.deleteMember(uid) }) { result ->
+                if (result.getOrDefault(false)) {
+                    Feedback.show(this, R.string.member_deleted)
+                    finish()
+                } else {
+                    Feedback.show(this, R.string.member_delete_failed)
                 }
             }
         }
-        dialog.show()
     }
 
-    private fun membershipPeriodRow(
-        status: MemberStatus,
-        membershipPeriod: MembershipPeriod,
-        index: Int,
-    ) = ModernUi.actionRow(
-        context = this,
-        title = getString(R.string.membership_period_title, index + 1),
-        detail = getString(
-            R.string.membership_period_dates,
-            format(
-                membershipPeriod.joinedDate,
-                membershipPeriod.joinedAt,
-                membershipPeriod.joinedTimeKnown,
-            ),
-            format(
-                membershipPeriod.leftDate,
-                membershipPeriod.leftAt,
-                membershipPeriod.leftTimeKnown ?: (membershipPeriod.leftAt != null),
-            ),
-        ),
-        onClick = { editMembershipPeriod(status, membershipPeriod) },
-    )
-
-    private fun editMembershipPeriod(status: MemberStatus, membershipPeriod: MembershipPeriod) {
+    private fun editMembershipPeriod(status: MemberStatus, period: MembershipPeriod) {
+        val zone = model?.zone ?: return
         val joined = DateTimePickerInput(
             context = this,
-            label = getString(R.string.join_field),
-            initialValue = membershipPeriod.joinedAt,
-            initialDate = membershipPeriod.joinedDate,
-            initialTimeKnown = membershipPeriod.joinedTimeKnown,
+            label = getString(R.string.join_label),
+            initialValue = period.joinedAt,
+            initialDate = period.joinedDate,
+            initialTimeKnown = period.joinedTimeKnown,
             dateRequired = true,
-            editable = !membershipPeriod.joinedSource.isImmutableMembershipBoundary(),
-            zone = GameTimeZonePreferences.get(this),
+            editable = !period.joinedSource.isImmutableMembershipBoundary(),
+            zone = zone,
         )
         val left = DateTimePickerInput(
             context = this,
-            label = getString(R.string.withdraw_field),
-            initialValue = membershipPeriod.leftAt,
-            initialDate = membershipPeriod.leftDate,
-            initialTimeKnown = membershipPeriod.leftTimeKnown ?: (membershipPeriod.leftAt != null),
-            editable = membershipPeriod.leftSource?.isImmutableMembershipBoundary() != true,
-            zone = GameTimeZonePreferences.get(this),
+            label = getString(R.string.withdraw_label),
+            initialValue = period.leftAt,
+            initialDate = period.leftDate,
+            initialTimeKnown = period.leftTimeKnown ?: (period.leftAt != null),
+            editable = period.leftSource?.isImmutableMembershipBoundary() != true,
+            zone = zone,
         )
-        val note = EditText(this).apply {
-            hint = getString(R.string.membership_note_hint)
-            setText(membershipPeriod.note)
+        val noteInput = textField(getString(R.string.membership_note_hint), singleLine = false).apply { setText(period.note) }
+        val error = errorText()
+        val canDelete = status.membershipPeriods.size > 1
+        val body = Dialogs.content(this) {
+            addView(joined, lp())
+            addView(left, lp(top = 12))
+            addView(LabeledField(context, getString(R.string.membership_note_hint), noteInput), lp(top = 12))
+            addView(error, lp(top = 8))
+            if (!canDelete) addView(text(getString(R.string.membership_period_delete_last_hint), TextRole.CAPTION), lp(top = 8))
         }
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), 0, dp(16), 0)
-            addView(joined, matchWidth())
-            addView(left, matchWidth())
-            addView(note, matchWidth())
-            if (status.membershipPeriods.size == 1) {
-                addView(TextView(context).apply {
-                    setText(R.string.membership_period_delete_last_hint)
-                    setTextColor(getColor(R.color.text_secondary))
-                    setPadding(0, dp(8), 0, 0)
-                }, matchWidth())
-            }
-        }
-        val dialog = AlertDialog.Builder(this)
+        val builder = Dialogs.builder(this)
             .setTitle(R.string.edit_membership)
-            .setView(content)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setNeutralButton(R.string.delete, null)
+            .setView(body)
+            .setNegativeButton(R.string.cancel, null)
             .setPositiveButton(R.string.save_member, null)
-            .create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).apply {
+        if (canDelete) builder.setNeutralButton(R.string.delete, null)
+        Dialogs.show(builder) { dialog ->
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.apply {
                 setTextColor(getColor(R.color.destructive_action))
-                isEnabled = status.membershipPeriods.size > 1
-                setOnClickListener {
-                    if (isEnabled) confirmMembershipPeriodDeletion(dialog, membershipPeriod)
-                }
+                setOnClickListener { confirmMembershipPeriodDeletion(dialog, period) }
             }
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { button ->
                 val joinedBoundary = joined.boundary
                 val leftBoundary = left.boundary
-                val saved = joinedBoundary != null &&
-                    isValidMembershipRange(joinedBoundary, leftBoundary) &&
-                    runCatching {
-                    repository.updateMembershipPeriod(
-                        membershipPeriod.id,
-                        joinedBoundary,
-                        leftBoundary,
-                        note.text.toString(),
-                    )
-                }.getOrDefault(false)
-                TransientMessage.show(
-                    this,
-                    getString(if (saved) R.string.saved else R.string.invalid_date),
-                    Toast.LENGTH_SHORT,
-                )
-                if (saved) {
-                    dialog.dismiss()
-                    render()
+                if (joinedBoundary == null || !isValidMembershipRange(joinedBoundary, leftBoundary)) {
+                    error.show(R.string.invalid_date)
+                    return@setOnClickListener
                 }
-            }
-        }
-        dialog.show()
-    }
-
-    private fun confirmMembershipPeriodDeletion(
-        editor: AlertDialog,
-        membershipPeriod: MembershipPeriod,
-    ) {
-        val confirmation = AlertDialog.Builder(this)
-            .setTitle(R.string.delete_membership_period)
-            .setMessage(R.string.delete_membership_period_warning)
-            .setNegativeButton(R.string.cancel, null)
-            .setPositiveButton(R.string.delete, null)
-            .create()
-        confirmation.setOnShowListener {
-            confirmation.getButton(AlertDialog.BUTTON_POSITIVE).apply {
-                setTextColor(getColor(R.color.destructive_action))
-                setOnClickListener {
-                    val deleted = runCatching {
-                        repository.deleteMembershipPeriod(membershipPeriod.id)
-                    }.getOrDefault(false)
-                    if (deleted) {
-                        confirmation.dismiss()
-                        editor.dismiss()
-                        TransientMessage.show(
-                            this@MemberDetailActivity,
-                            R.string.membership_period_deleted,
-                            Toast.LENGTH_SHORT,
-                        )
-                        render()
+                button.isEnabled = false
+                work.run(
+                    task = { repository.updateMembershipPeriod(period.id, joinedBoundary, leftBoundary, noteInput.text.toString()) },
+                ) { result ->
+                    button.isEnabled = true
+                    if (result.getOrDefault(false)) {
+                        dialog.dismiss()
+                        Feedback.show(this, R.string.saved)
+                        load()
                     } else {
-                        TransientMessage.show(
-                            this@MemberDetailActivity,
-                            R.string.membership_period_delete_failed,
-                            Toast.LENGTH_SHORT,
-                        )
+                        error.show(R.string.membership_period_save_failed)
                     }
                 }
             }
         }
-        confirmation.show()
     }
 
-    private fun addMembershipHistory(status: MemberStatus) {
-        val joined = DateTimePickerInput(
+    private fun confirmMembershipPeriodDeletion(editor: AlertDialog, period: MembershipPeriod) {
+        Dialogs.confirm(
             this,
-            getString(R.string.join_field),
-            dateRequired = true,
-            zone = GameTimeZonePreferences.get(this),
-        )
-        val withdrew = DateTimePickerInput(
-            this,
-            getString(R.string.withdraw_field),
-            zone = GameTimeZonePreferences.get(this),
-        )
-        val note = EditText(this).apply {
-            hint = getString(R.string.membership_note_hint)
-            minLines = 2
-        }
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), 0, dp(16), 0)
-            addView(joined, matchWidth())
-            addView(withdrew, matchWidth())
-            addView(note, matchWidth())
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(R.string.add_membership_history)
-            .setView(content)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(R.string.add, null)
-            .create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val joinedBoundary = joined.boundary
-                val withdrewBoundary = withdrew.boundary
-                val saved = joinedBoundary != null &&
-                    isValidMembershipRange(joinedBoundary, withdrewBoundary) &&
-                    runCatching {
-                    repository.addMembershipPeriod(
-                        status.uid,
-                        joinedBoundary,
-                        withdrewBoundary,
-                        note.text.toString(),
-                    )
-                }.getOrDefault(false)
-                if (saved) {
-                    dialog.dismiss()
-                    render()
+            R.string.delete_membership_period,
+            R.string.delete_membership_period_warning,
+            R.string.delete,
+            destructive = true,
+        ) {
+            work.run(task = { repository.deleteMembershipPeriod(period.id) }) { result ->
+                if (result.getOrDefault(false)) {
+                    editor.dismiss()
+                    Feedback.show(this, R.string.membership_period_deleted)
+                    load()
                 } else {
-                    TransientMessage.show(this, R.string.invalid_date)
+                    Feedback.show(this, R.string.membership_period_delete_failed, long = true)
                 }
             }
         }
-        dialog.show()
     }
 
-    private fun format(
-        date: java.time.LocalDate?,
-        instant: Instant?,
-        timeKnown: Boolean,
-    ): String {
-        val zone = GameTimeZonePreferences.get(this)
-        val displayDate = date ?: instant?.atZone(zone)?.toLocalDate()
-            ?: return getString(R.string.unknown)
-        return if (timeKnown && instant != null) {
-            instant.atZone(zone).format(DISPLAY_TIME)
-        } else {
-            displayDate.format(DISPLAY_DATE)
+    private fun addMembershipPeriod() {
+        val zone = model?.zone ?: return
+        val joined = DateTimePickerInput(this, getString(R.string.join_label), dateRequired = true, zone = zone)
+        val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_label), zone = zone)
+        val noteInput = textField(getString(R.string.membership_note_hint), singleLine = false)
+        val error = errorText()
+        val body = Dialogs.content(this) {
+            addView(joined, lp())
+            addView(withdrew, lp(top = 12))
+            addView(LabeledField(context, getString(R.string.membership_note_hint), noteInput), lp(top = 12))
+            addView(error, lp(top = 8))
+        }
+        Dialogs.show(
+            Dialogs.builder(this)
+                .setTitle(R.string.add_membership_history)
+                .setView(body)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.add, null),
+        ) { dialog ->
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { button ->
+                val joinedBoundary = joined.boundary
+                val withdrewBoundary = withdrew.boundary
+                if (joinedBoundary == null || !isValidMembershipRange(joinedBoundary, withdrewBoundary)) {
+                    error.show(R.string.invalid_date)
+                    return@setOnClickListener
+                }
+                button.isEnabled = false
+                work.run(
+                    task = { repository.addMembershipPeriod(uid, joinedBoundary, withdrewBoundary, noteInput.text.toString()) },
+                ) { result ->
+                    button.isEnabled = true
+                    if (result.getOrDefault(false)) {
+                        dialog.dismiss()
+                        load()
+                    } else {
+                        error.show(R.string.membership_period_overlap)
+                    }
+                }
+            }
         }
     }
 
-    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
-    private fun matchWidth() = ViewGroup.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT,
-        ViewGroup.LayoutParams.WRAP_CONTENT,
+    private fun errorText() = text(null, TextRole.CAPTION) {
+        setTextColor(getColor(R.color.destructive_action))
+        visibility = View.GONE
+    }
+
+    private fun android.widget.TextView.show(message: Int) {
+        text = getString(message)
+        visibility = View.VISIBLE
+        announceForAccessibility(text)
+    }
+
+    private fun boundaryText(date: LocalDate?, instant: Instant?, timeKnown: Boolean, zone: ZoneId): String {
+        val displayDate = date ?: instant?.atZone(zone)?.toLocalDate() ?: return getString(R.string.unknown)
+        return if (timeKnown && instant != null) {
+            Labels.format(Labels.DATE_TIME, instant, zone)
+        } else {
+            Labels.format(Labels.DATE, displayDate)
+        }
+    }
+
+    private fun sourceLabel(source: EvidenceSource): String = getString(
+        when (source) {
+            EvidenceSource.GAME_UPDATES -> R.string.source_updates
+            EvidenceSource.SNAPSHOT -> R.string.source_roster
+            EvidenceSource.MANUAL -> R.string.source_manual
+            EvidenceSource.LEGACY_IMPORT -> R.string.source_legacy
+        },
+    )
+
+    private data class Model(
+        val status: MemberStatus,
+        val latest: SnapshotMember?,
+        val zone: ZoneId,
     )
 
     companion object {
         const val EXTRA_UID = "uid"
-        private val DISPLAY_TIME = DateTimeFormatter.ofPattern("yy/MM/dd HH:mm")
-        private val DISPLAY_DATE = DateTimeFormatter.ofPattern("yy/MM/dd")
+        private const val LOAD = "load"
+        private const val SAVE = "save"
+        private const val STATE_INPUTS_INITIALIZED = "member.inputs_initialized"
     }
 }

@@ -109,8 +109,14 @@ internal object Dialogs {
 internal object Feedback {
     private var active: Toast? = null
 
-    @Synchronized
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
     fun show(context: Context, message: CharSequence, long: Boolean = false) {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            val appContext = context.applicationContext
+            main.post { show(appContext, message, long) }
+            return
+        }
         active?.cancel()
         active = Toast.makeText(
             context.applicationContext,

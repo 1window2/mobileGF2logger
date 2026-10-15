@@ -320,7 +320,7 @@
     <string name="csv_import_capture_range">%1$s — %2$s</string>
     <string name="csv_import_preparing_preview">Validating CSV files and preparing preview…</string>
     <string name="csv_import_applying">Creating checkpoint and importing CSV files…</string>
-    <string name="status_platoon_csv_imported_with_checkpoint">Imported: %1$d files kept, %2$d current, %3$d older snapshots, %4$d skipped. You can undo this from Home.</string>
+    <string name="status_platoon_csv_imported_with_checkpoint">Import done. Files kept: %1$d · current: %2$d · older snapshots: %3$d · skipped: %4$d. You can undo this from Home.</string>
     <string name="undo_last_csv_import">Undo last CSV import</string>
     <string name="undo_last_csv_import_warning">Restore the automatic checkpoint from immediately before the last CSV import? Undo is refused if Platoon data changed after that import.</string>
     <string name="no_csv_import_checkpoint">No CSV import checkpoint is available.</string>

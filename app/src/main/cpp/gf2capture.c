@@ -306,6 +306,11 @@ static void connection_close_callback(zdtun_t *tunnel, const zdtun_conn_t *conne
         return;
     }
 
+    // zdtun invokes this callback twice when the RST it sends while closing cannot be written to
+    // the TUN (send_to_client re-enters zdtun_conn_close). Detach first so the second invocation is
+    // a no-op instead of a duplicate onFlowClosed and a double free.
+    zdtun_conn_set_userdata((zdtun_conn_t *) connection, NULL);
+
     if (flow->tracked && context->env != NULL) {
         (*context->env)->CallVoidMethod(
                 context->env,

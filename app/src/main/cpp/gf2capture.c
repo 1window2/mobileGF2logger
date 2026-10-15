@@ -26,7 +26,7 @@
 #define PACKET_BUFFER_SIZE 65535
 #define VPN_MTU 1500
 #define SELECT_TIMEOUT_USEC 250000
-#define PURGE_INTERVAL_SECONDS 1
+#define PURGE_INTERVAL_MILLIS 1000
 #define TUN_WRITE_TIMEOUT_MILLIS 100
 #define TUN_WRITE_POLL_SLICE_MILLIS 25
 
@@ -436,7 +436,8 @@ static void *capture_thread_main(void *argument) {
         goto detach;
     }
 
-    time_t last_purge = time(NULL);
+    // Monotonic, so a wall-clock adjustment cannot postpone purging or traffic updates.
+    int64_t last_purge = monotonic_millis();
     LOGI("Native packet loop started");
 
     while (atomic_load(&context->running)) {
@@ -486,8 +487,8 @@ static void *capture_thread_main(void *argument) {
             zdtun_handle_fd(tunnel, &read_fds, &write_fds);
         }
 
-        time_t now = time(NULL);
-        if (now - last_purge >= PURGE_INTERVAL_SECONDS) {
+        const int64_t now = monotonic_millis();
+        if (now - last_purge >= PURGE_INTERVAL_MILLIS) {
             zdtun_purge_expired(tunnel);
             notify_traffic(context);
             last_purge = now;

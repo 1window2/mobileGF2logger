@@ -8,6 +8,7 @@ import dev.gf2log.protocol.model.PlatoonUpdatesData
 import java.time.Instant
 import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlatoonObservationPolicyTest {
@@ -129,6 +130,37 @@ class PlatoonObservationPolicyTest {
         assertEquals(
             Instant.ofEpochSecond(PlatoonObservationPolicy.MAX_UPDATE_OBSERVATIONS.toLong()),
             accepted.last().occurredAt,
+        )
+    }
+
+    @Test
+    fun `updates reject names and member lists that persisted rows cannot represent`() {
+        val valid = update(members = listOf(member(1)))
+        val oversizedName = update(
+            kind = PlatoonUpdateSemantics.KIND_REMOVED,
+            occurredAt = Instant.parse("2026-07-31T00:00:01Z"),
+            members = listOf(
+                member(2),
+                member(3).copy(
+                    name = "x".repeat(PlatoonObservationPolicy.MAX_UPDATE_MEMBER_NAME_LENGTH + 1),
+                ),
+            ),
+        )
+        val oversizedEntry = update(
+            occurredAt = Instant.parse("2026-07-31T00:00:02Z"),
+            members = (1L..PlatoonObservationPolicy.MAX_UPDATE_MEMBERS_PER_OBSERVATION + 1L)
+                .map(::member),
+        )
+
+        assertEquals(
+            listOf(valid),
+            PlatoonObservationPolicy.updates(listOf(valid, oversizedName, oversizedEntry)),
+        )
+        // Every accepted name stays encodable as a weekly-history member name (UTF-8 <= 3 bytes
+        // per UTF-16 unit).
+        assertTrue(
+            PlatoonObservationPolicy.MAX_UPDATE_MEMBER_NAME_LENGTH * 3 <=
+                WeeklyReportHistoryCodec.MAX_STRING_BYTES,
         )
     }
 

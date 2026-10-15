@@ -12,7 +12,6 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -28,9 +27,7 @@ import dev.gf2log.app.management.WeeklyNote
 import dev.gf2log.app.management.WeeklyNoteLimitException
 import dev.gf2log.app.management.WeeklyOverrideEditing
 import dev.gf2log.app.management.WeeklyReportBuilder
-import dev.gf2log.app.management.WeeklyReportCsv
 import dev.gf2log.app.management.WeeklyReportStateHolder
-import dev.gf2log.app.management.WeeklyShareProjection
 import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.MemberOrderPreferences
 import dev.gf2log.app.settings.WeeklyCutlinePreferences
@@ -39,7 +36,6 @@ import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.BarAction
 import dev.gf2log.app.ui.Dialogs
-import dev.gf2log.app.ui.DocumentAccess
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.MATCH
@@ -63,7 +59,6 @@ import dev.gf2log.app.ui.sectionHeader
 import dev.gf2log.app.ui.selectableRect
 import dev.gf2log.app.ui.text
 import dev.gf2log.app.ui.textField
-import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -85,6 +80,7 @@ class WeeklyReportActivity : BaseActivity() {
     private lateinit var noteInput: EditText
     private lateinit var noteDayButton: TextView
     private val work = BackgroundWork(this, "GF2Weekly")
+    private val exports = WeeklyExportFlow(this, work, { repository }, { scope.storageId })
 
     private val topAdapter = SingleViewAdapter()
     private val headerAdapter = SingleViewAdapter()
@@ -100,49 +96,6 @@ class WeeklyReportActivity : BaseActivity() {
     private val horizontalSync = HorizontalSync()
     private val edits = WeeklyEditSession()
     private var noteDay: LocalDate? = null
-    private var pendingExport: String? = null
-    private var pendingPng: File? = null
-
-    private val exportCsv = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
-        val request = pendingExport
-        pendingExport = null
-        if (uri == null || request == null) return@registerForActivityResult
-        work.run(
-            task = {
-                val zone = GameTimeZonePreferences.get(this, scope.storageId)
-                val csv = if (request == EXPORT_ALL) {
-                    WeeklyReportCsv.formatAll(repository.listAllWeeklyReports(zone))
-                } else {
-                    WeeklyReportCsv.format(
-                        repository.buildWeeklyTableRevision(LocalDate.ofEpochDay(request.toLong()), zone).report,
-                    )
-                }
-                DocumentAccess.openOutput(contentResolver, uri).writer(Charsets.UTF_8).use { it.write(csv) }
-            },
-        ) { result ->
-            Feedback.show(this, if (result.isSuccess) R.string.weekly_csv_exported else R.string.weekly_csv_export_failed)
-        }
-    }
-
-    private val exportPng = registerForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
-        val source = pendingPng
-        pendingPng = null
-        if (uri == null || source == null) {
-            source?.delete()
-            return@registerForActivityResult
-        }
-        work.run(
-            task = {
-                DocumentAccess.openOutput(contentResolver, uri).use { output ->
-                    source.inputStream().use { it.copyTo(output) }
-                }
-            },
-        ) { result ->
-            source.delete()
-            Feedback.show(this, if (result.isSuccess) R.string.weekly_png_saved else R.string.weekly_png_failed)
-        }
-    }
-
     private val editingBack = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() = cancelEditing()
     }
@@ -199,8 +152,7 @@ class WeeklyReportActivity : BaseActivity() {
         if (::reportState.isInitialized) {
             outState.putLong(STATE_REFERENCE_DAY, reportState.referenceDay.toEpochDay())
         }
-        WeeklyPngExport.nameForState(cacheDir, pendingPng)?.let { outState.putString(STATE_PENDING_PNG_NAME, it) }
-        pendingExport?.let { outState.putString(STATE_PENDING_EXPORT, it) }
+        exports.saveState(outState)
         if (::scope.isInitialized) edits.save(outState, scope.storageId)
         noteDay?.let { outState.putLong(STATE_NOTE_DAY, it.toEpochDay()) }
         // The composer lives inside the RecyclerView, which does not save its children's state.
@@ -209,8 +161,7 @@ class WeeklyReportActivity : BaseActivity() {
     }
 
     private fun restoreState(state: Bundle?) {
-        pendingPng = WeeklyPngExport.restore(cacheDir, state?.getString(STATE_PENDING_PNG_NAME))
-        pendingExport = state?.getString(STATE_PENDING_EXPORT)
+        exports.restoreState(state)
         reportState = WeeklyReportStateHolder(
             state?.takeIf { it.containsKey(STATE_REFERENCE_DAY) }
                 ?.getLong(STATE_REFERENCE_DAY)
@@ -596,16 +547,24 @@ class WeeklyReportActivity : BaseActivity() {
             .setTitle(getString(R.string.weekly_table))
             .setActions(
                 listOf(
-                    BarAction(R.drawable.ic_share, getString(R.string.share_weekly_table), hasMembers) { share() },
+                    BarAction(R.drawable.ic_share, getString(R.string.share_weekly_table), hasMembers) {
+                        exports.share {
+                            model?.let { WeeklyExportFlow.Source(it.report, it.displayedMembers, it.memberNotesByUid) }
+                        }
+                    },
                     BarAction(R.drawable.ic_edit, getString(R.string.edit_weekly_table), hasMembers) { confirmEditing() },
                 ),
                 overflow = listOf(
                     MenuEntry(getString(R.string.weekly_table_history_with_count, historyCount), historyCount > 0) {
                         current?.let { openHistory(it.report.periodStart) }
                     },
-                    MenuEntry(getString(R.string.export_weekly_csv), hasMembers) { exportWeek() },
-                    MenuEntry(getString(R.string.copy_weekly_csv), hasMembers) { copyWeek() },
-                    MenuEntry(getString(R.string.export_all_weekly_tables)) { exportAll() },
+                    MenuEntry(getString(R.string.export_weekly_csv), hasMembers) {
+                        current?.let { exports.exportWeek(it.report.periodStart) }
+                    },
+                    MenuEntry(getString(R.string.copy_weekly_csv), hasMembers) {
+                        current?.let { exports.copyWeek(it.report) }
+                    },
+                    MenuEntry(getString(R.string.export_all_weekly_tables)) { exports.exportAll() },
                     MenuEntry(getString(R.string.edit_member_order)) {
                         startActivity(Intent(this, MemberOrderActivity::class.java))
                     },
@@ -745,66 +704,6 @@ class WeeklyReportActivity : BaseActivity() {
         }
     }
 
-    private fun exportWeek() {
-        val current = model ?: return
-        pendingExport = current.report.periodStart.toEpochDay().toString()
-        exportCsv.launch("GF2logger-week-${Labels.format(Labels.FILE_DATE, current.report.periodStart)}.csv")
-    }
-
-    private fun exportAll() {
-        work.run(
-            task = { repository.listAllWeeklyReports(GameTimeZonePreferences.get(this, scope.storageId)).isNotEmpty() },
-        ) { result ->
-            if (result.getOrDefault(false)) {
-                pendingExport = EXPORT_ALL
-                exportCsv.launch("GF2logger-all-weekly-tables.csv")
-            } else {
-                Feedback.show(this, R.string.no_weekly_tables_to_export)
-            }
-        }
-    }
-
-    private fun copyWeek() {
-        val report = model?.report ?: return
-        Feedback.copy(this, getString(R.string.weekly_csv_clipboard_label), WeeklyReportCsv.format(report), R.string.weekly_csv_copied)
-    }
-
-    private fun share() {
-        if (model == null || work.isBusy(PNG)) return
-        WeeklyDialogs.showShare(this) { privacy, shareAfter ->
-            // A second share sheet opened by a double tap must not start another render.
-            val current = model ?: return@showShare
-            if (work.isBusy(PNG)) return@showShare
-            Feedback.show(this, R.string.weekly_png_rendering)
-            work.run(
-                key = PNG,
-                task = {
-                    WeeklyPngExport.render(
-                        this,
-                        WeeklyShareProjection.build(
-                            current.report,
-                            current.displayedMembers,
-                            current.memberNotesByUid,
-                            privacy,
-                            WeeklyPngExport.labels(this),
-                        ),
-                        current.report.periodStart,
-                    )
-                },
-            ) { result ->
-                val file = result.getOrNull()
-                when {
-                    file == null -> Feedback.show(this, R.string.weekly_png_failed, long = true)
-                    shareAfter -> WeeklyPngExport.share(this, file)
-                    else -> {
-                        pendingPng = file
-                        exportPng.launch(WeeklyPngExport.exportName(current.report.periodStart))
-                    }
-                }
-            }
-        }
-    }
-
     private fun addNote(report: WeeklyReportBuilder.Report) {
         val text = noteInput.text.toString().trim()
         val day = noteDay ?: return
@@ -897,12 +796,8 @@ class WeeklyReportActivity : BaseActivity() {
         const val STANDARD_ROW = 0
         const val GUNSMOKE_ROW = 1
         const val SAVE = "save"
-        const val PNG = "png"
-        const val EXPORT_ALL = "all"
         const val MAX_NOTE_LENGTH = 1_000
         const val STATE_REFERENCE_DAY = "weekly.reference_day"
-        const val STATE_PENDING_PNG_NAME = "weekly.pending_png_name"
-        const val STATE_PENDING_EXPORT = "weekly.pending_export"
         const val STATE_NOTE_DAY = "weekly.note_day"
         const val STATE_NOTE_DRAFT = "weekly.note_draft"
     }

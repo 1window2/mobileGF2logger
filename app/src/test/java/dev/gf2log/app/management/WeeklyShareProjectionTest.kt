@@ -1,6 +1,6 @@
 package dev.gf2log.app.management
 
-import dev.gf2log.app.WeeklyPngPendingState
+import dev.gf2log.app.WeeklyPngExport
 
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
@@ -18,23 +18,23 @@ class WeeklyShareProjectionTest {
     @Test
     fun pendingWeeklyPngRestoresOnlyFromTheBoundedShareCache() {
         val cache = temporary.newFolder("cache")
-        WeeklyPngPendingState.directory(cache).mkdirs()
+        WeeklyPngExport.directory(cache).mkdirs()
         val periodStart = LocalDate.of(2026, 8, 9)
-        val published = WeeklyPngPendingState.newRenderTarget(cache, periodStart).apply {
+        val published = WeeklyPngExport.newRenderTarget(cache, periodStart).apply {
             writeBytes(byteArrayOf(1, 2, 3))
         }
-        val nextRender = WeeklyPngPendingState.newRenderTarget(cache, periodStart)
+        val nextRender = WeeklyPngExport.newRenderTarget(cache, periodStart)
 
-        val savedName = WeeklyPngPendingState.nameForState(cache, published)
+        val savedName = WeeklyPngExport.nameForState(cache, published)
 
         assertNotEquals(published.name, nextRender.name)
-        assertEquals("GF2logger-week-20260809.png", WeeklyPngPendingState.exportName(periodStart))
-        assertEquals(published.canonicalFile, WeeklyPngPendingState.restore(cache, savedName))
-        assertEquals(null, WeeklyPngPendingState.restore(cache, "../outside.png"))
-        assertEquals(null, WeeklyPngPendingState.restore(cache, "GF2logger-week-20260809.png"))
-        assertEquals(null, WeeklyPngPendingState.restore(cache, nextRender.name))
+        assertEquals("GF2logger-week-20260809.png", WeeklyPngExport.exportName(periodStart))
+        assertEquals(published.canonicalFile, WeeklyPngExport.restore(cache, savedName))
+        assertEquals(null, WeeklyPngExport.restore(cache, "../outside.png"))
+        assertEquals(null, WeeklyPngExport.restore(cache, "GF2logger-week-20260809.png"))
+        assertEquals(null, WeeklyPngExport.restore(cache, nextRender.name))
         val outside = temporary.newFile(published.name)
-        assertEquals(null, WeeklyPngPendingState.nameForState(cache, outside))
+        assertEquals(null, WeeklyPngExport.nameForState(cache, outside))
     }
 
     @Test

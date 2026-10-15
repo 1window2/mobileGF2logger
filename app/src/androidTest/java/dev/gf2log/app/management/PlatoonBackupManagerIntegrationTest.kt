@@ -9,7 +9,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.gf2log.app.TargetPackagePreferences
 import dev.gf2log.app.SupportedGamePackages
-import dev.gf2log.app.WeeklyPngPendingState
+import dev.gf2log.app.WeeklyPngExport
 import dev.gf2log.app.WeeklyReportActivity
 import dev.gf2log.app.settings.AppBackupSettings
 import dev.gf2log.app.settings.AppBackupSettingsCodec
@@ -979,37 +979,20 @@ class WeeklyReportActivityStateTest {
                 closingBoundaries = 0,
             ),
         )
-        val writeMethod = WeeklyReportActivity::class.java.getDeclaredMethod(
-            "writeWeeklyPng",
-            WeeklyShareProjection.Document::class.java,
-            LocalDate::class.java,
-        ).apply { isAccessible = true }
         try {
-            ActivityScenario.launch(WeeklyReportActivity::class.java).use { scenario ->
-                scenario.onActivity { activity ->
-                    val first = writeMethod.invoke(activity, document, periodStart) as java.io.File
-                    val firstUri = FileProvider.getUriForFile(
-                        activity,
-                        activity.packageName + ".fileprovider",
-                        first,
-                    )
-                    val second = writeMethod.invoke(activity, document, periodStart) as java.io.File
-                    val secondUri = FileProvider.getUriForFile(
-                        activity,
-                        activity.packageName + ".fileprovider",
-                        second,
-                    )
+            val first = WeeklyPngExport.render(context, document, periodStart)
+            val firstUri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", first)
+            val second = WeeklyPngExport.render(context, document, periodStart)
+            val secondUri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", second)
 
-                    assertFalse(first.exists())
-                    assertNotEquals(first.canonicalPath, second.canonicalPath)
-                    assertNotEquals(firstUri, secondUri)
-                    activity.contentResolver.openInputStream(secondUri).use { input ->
-                        assertTrue(input != null && input.read() >= 0)
-                    }
-                }
+            assertFalse(first.exists())
+            assertNotEquals(first.canonicalPath, second.canonicalPath)
+            assertNotEquals(firstUri, secondUri)
+            context.contentResolver.openInputStream(secondUri).use { input ->
+                assertTrue(input != null && input.read() >= 0)
             }
         } finally {
-            WeeklyPngPendingState.directory(context.cacheDir)
+            WeeklyPngExport.directory(context.cacheDir)
                 .listFiles()
                 .orEmpty()
                 .forEach(java.io.File::delete)
@@ -1018,8 +1001,8 @@ class WeeklyReportActivityStateTest {
 
     @Test
     fun pendingWeeklyPngSurvivesActivityRecreation() {
-        WeeklyPngPendingState.directory(context.cacheDir).mkdirs()
-        val target = WeeklyPngPendingState
+        WeeklyPngExport.directory(context.cacheDir).mkdirs()
+        val target = WeeklyPngExport
             .newRenderTarget(context.cacheDir, LocalDate.of(2026, 8, 9))
             .apply { writeBytes(byteArrayOf(1, 2, 3)) }
         val field = WeeklyReportActivity::class.java.getDeclaredField("pendingPng").apply {

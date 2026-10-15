@@ -494,8 +494,7 @@ class PlatoonActivity : BaseActivity() {
             check.isChecked = member.uid in selected
             name.text = member.name
             status.text = getString(if (member.isActive) R.string.active_member else R.string.departed_member)
-            status.background.setTint(getColor(if (member.isActive) R.color.success_surface else R.color.surface_variant))
-            status.setTextColor(getColor(if (member.isActive) R.color.success_text else R.color.text_secondary))
+            status.visibility = if (member.isActive) View.GONE else View.VISIBLE
             detail.text = buildList {
                 add("#${member.uid}")
                 add(getString(R.string.level_short, latest?.level ?: member.level))

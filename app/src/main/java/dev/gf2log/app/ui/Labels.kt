@@ -43,11 +43,23 @@ internal object Labels {
         },
     )
 
+    /** Server name without the client prefix, for places where the client is already shown. */
+    fun regionShort(context: Context, region: GameServerRegion): String = context.getString(
+        when (region) {
+            GameServerRegion.MANUAL -> R.string.server_region_manual
+            GameServerRegion.DARKWINTER_GLOBAL, GameServerRegion.HAOPLAY_GLOBAL -> R.string.server_short_global
+            GameServerRegion.DARKWINTER_CHINA -> R.string.server_short_china
+            GameServerRegion.HAOPLAY_JAPAN -> R.string.server_short_japan
+            GameServerRegion.HAOPLAY_KOREA -> R.string.server_short_korea
+            GameServerRegion.HAOPLAY_ASIA -> R.string.server_short_asia
+        },
+    )
+
     /** "HaoPlay · South Korea · ID 1234" */
     fun profileIdentity(context: Context, profile: PlatoonProfile): String = context.getString(
         R.string.profile_identity,
         profile.client.displayName,
-        region(context, profile.serverRegion),
+        regionShort(context, profile.serverRegion),
         profile.platoonId,
     )
 

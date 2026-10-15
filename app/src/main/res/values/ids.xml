@@ -12,4 +12,12 @@
     <item name="webhook_input" type="id" />
     <item name="action_move_up" type="id" />
     <item name="action_move_down" type="id" />
+    <item name="cutline_daily_merit" type="id" />
+    <item name="cutline_daily_score" type="id" />
+    <item name="cutline_daily_attempts" type="id" />
+    <item name="cutline_weekly_merit" type="id" />
+    <item name="cutline_weekly_score" type="id" />
+    <item name="cutline_weekly_attempts" type="id" />
+    <item name="cutline_login_days" type="id" />
+    <item name="cutline_patrol_days" type="id" />
 </resources>

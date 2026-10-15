@@ -484,12 +484,16 @@ class PlatoonBackupManager internal constructor(
         private const val RESTORE_PROFILE_FILE = "profile.pre_restore"
         private val SQLITE_HEADER = "SQLite format 3\u0000".toByteArray(Charsets.US_ASCII)
 
-        /** Restores a scoped archive even when a fresh installation has no active profile. */
+        /**
+         * Restores a scoped archive even when a fresh installation has no active profile.
+         * [complete] forces the kind; null restores app settings exactly when the archive
+         * carries restorable settings. Returns the kind that was restored.
+         */
         fun restoreSelected(
             context: Context,
             input: InputStream,
-            complete: Boolean,
-        ) {
+            complete: Boolean? = null,
+        ): RestoredBackupKind {
             val appContext = context.applicationContext
             val stagingDirectory = File(appContext.cacheDir, "platoon-restore-selected").apply {
                 check(mkdirs() || isDirectory) { "Unable to create the restore staging directory" }
@@ -503,11 +507,18 @@ class PlatoonBackupManager internal constructor(
                     PlatoonStorageScope(profile.storageId),
                 )
                 val target = manager.managerFor(staged)
-                if (complete) {
-                    manager.restoreStagedComplete(stagedDatabase, staged, target)
-                } else {
-                    manager.restoreStagedPlatoon(stagedDatabase, staged, target)
+                val kind = BackupFormatPolicy.restoredKind(
+                    staged.formatVersion,
+                    staged.settings != null,
+                    complete,
+                )
+                when (kind) {
+                    RestoredBackupKind.COMPLETE ->
+                        manager.restoreStagedComplete(stagedDatabase, staged, target)
+                    RestoredBackupKind.PLATOON ->
+                        manager.restoreStagedPlatoon(stagedDatabase, staged, target)
                 }
+                return kind
             } finally {
                 stagedDatabase.delete()
                 stagingDirectory.delete()
@@ -801,6 +812,15 @@ class PlatoonBackupManager internal constructor(
         PREPARED,
         COMMITTED,
     }
+}
+
+/** What [PlatoonBackupManager.restoreSelected] restored. */
+enum class RestoredBackupKind {
+    /** The Platoon database only; app settings were left untouched. */
+    PLATOON,
+
+    /** The Platoon database together with app and Platoon settings. */
+    COMPLETE,
 }
 
 // Class Name: InvalidBackupException

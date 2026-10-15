@@ -534,6 +534,38 @@ class PlatoonProfileRegistryIntegrationTest {
     }
 
     @Test
+    fun autoDetectedRestoreOfAPlatoonOnlyBackupKeepsAppSettings() {
+        val registry = PlatoonProfileRegistry(context)
+        val profile = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_JAPAN,
+            PlatoonProfileData(101818u, "Larks", 0u, 0u),
+        )
+        registry.setActive(profile.storageId)
+        val scope = PlatoonStorageScope(profile.storageId)
+        PlatoonRepository(context, scope).ingest(
+            Instant.parse("2026-08-24T02:00:00Z"),
+            listOf(member(11u, "Archived member")),
+            "archived.csv",
+        )
+        val archive = ByteArrayOutputStream().also { output ->
+            PlatoonBackupManager(context, scope).export(output)
+        }.toByteArray()
+        MemberOrderPreferences(context, profile.storageId).write(listOf(11L, 12L))
+
+        assertEquals(
+            RestoredBackupKind.PLATOON,
+            PlatoonBackupManager.restoreSelected(context, ByteArrayInputStream(archive)),
+        )
+
+        assertEquals(listOf(11L, 12L), MemberOrderPreferences(context, profile.storageId).read())
+        assertEquals(
+            "Archived member",
+            PlatoonRepository(context, scope).listMemberStatuses().single().name,
+        )
+    }
+
+    @Test
     fun scopedCompleteBackupRecreatesItsProfileOnAFreshRegistry() {
         val registry = PlatoonProfileRegistry(context)
         val profile = registry.upsertDetected(
@@ -560,10 +592,9 @@ class PlatoonProfileRegistryIntegrationTest {
             .edit().clear().commit()
         File(context.filesDir, "platoons").deleteRecursively()
 
-        PlatoonBackupManager.restoreSelected(
-            context,
-            ByteArrayInputStream(archive),
-            complete = true,
+        assertEquals(
+            RestoredBackupKind.COMPLETE,
+            PlatoonBackupManager.restoreSelected(context, ByteArrayInputStream(archive)),
         )
 
         val restoredRegistry = PlatoonProfileRegistry(context)

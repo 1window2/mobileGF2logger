@@ -161,8 +161,10 @@ class PlatoonBackupManagerIntegrationTest {
         writeRetainedCsv(CURRENT_UID, "Cached current member")
         PlatoonBackupManager(context).restore(ByteArrayInputStream(archive))
 
+        // The stored value is untouched; settings reads project an unusable one to the default.
+        assertEquals(INVALID_TARGET_PACKAGE, TargetPackagePreferences.get(context))
         assertEquals(
-            currentSettings().copy(targetPackage = INVALID_TARGET_PACKAGE),
+            currentSettings().copy(targetPackage = TargetPackagePreferences.DEFAULT_TARGET_PACKAGE),
             settingsStore.read(),
         )
         assertFalse(FilePaths.retainedCsvDirectory(context).exists())

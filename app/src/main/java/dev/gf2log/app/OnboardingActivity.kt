@@ -52,6 +52,18 @@ class OnboardingActivity : BaseActivity() {
         }
         setContentView(root)
         renderPage(animate = false)
+        // System back steps through the pages before leaving onboarding.
+        onBackPressedDispatcher.addCallback(this, backToPreviousPage)
+    }
+
+    private val backToPreviousPage = object : androidx.activity.OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = previousPage()
+    }
+
+    private fun previousPage() {
+        if (pageIndex == 0) return
+        pageIndex--
+        renderPage(animate = true, direction = -1)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -100,12 +112,7 @@ class OnboardingActivity : BaseActivity() {
 
         addView(LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
-            backButton = button(getString(R.string.onboarding_back), Controls.Role.SECONDARY) {
-                if (pageIndex > 0) {
-                    pageIndex--
-                    renderPage(animate = true, direction = -1)
-                }
-            }
+            backButton = button(getString(R.string.onboarding_back), Controls.Role.SECONDARY) { previousPage() }
             addView(backButton, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
                 marginEnd = dp(6)
             })
@@ -147,6 +154,7 @@ class OnboardingActivity : BaseActivity() {
         stepLabel.text = getString(R.string.onboarding_step, pageIndex + 1, PAGES.size)
         stepLabel.contentDescription = stepLabel.text
         backButton.isEnabled = pageIndex > 0
+        backToPreviousPage.isEnabled = pageIndex > 0
         nextButton.text = getString(
             if (pageIndex == PAGES.lastIndex) R.string.onboarding_finish else R.string.onboarding_next,
         )

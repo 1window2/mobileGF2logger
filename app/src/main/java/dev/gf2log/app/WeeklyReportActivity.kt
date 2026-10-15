@@ -668,7 +668,9 @@ class WeeklyReportActivity : BaseActivity() {
                 return
             }
             val key = member.uid to cell.gameDay
-            WeeklyDialogs.showEdit(this, title, current.report.isGunsmokeWeek, member.uid, cell, edits[key]) { edit ->
+            val nextCell = member.days.getOrNull(member.days.indexOf(cell) + 1)
+            val next = nextCell?.let { { onCellTapped(member, it) } }
+            WeeklyDialogs.showEdit(this, title, current.report.isGunsmokeWeek, member.uid, cell, edits[key], next) { edit ->
                 if (edit.isEmpty) edits.remove(key) else edits[key] = edit
                 rowsAdapter.notifyItemChanged(current.displayedMembers.indexOfFirst { it.uid == member.uid })
                 updateTopBar()

@@ -18,6 +18,7 @@ import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.LabeledField
 import dev.gf2log.app.ui.TextRole
 import dev.gf2log.app.ui.WRAP
+import dev.gf2log.app.ui.button
 import dev.gf2log.app.ui.badge
 import dev.gf2log.app.ui.column
 import dev.gf2log.app.ui.divider
@@ -80,6 +81,7 @@ internal object WeeklyDialogs {
         uid: Long,
         cell: WeeklyReportBuilder.DayCell,
         current: WeeklyOverrideEditing.CellEdit?,
+        next: (() -> Unit)? = null,
         onDone: (WeeklyOverrideEditing.CellEdit) -> Unit,
     ) {
         fun numberField(label: Int, initial: String, hint: Int): Pair<LabeledField, String> {
@@ -106,6 +108,7 @@ internal object WeeklyDialogs {
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
             visibility = View.GONE
         }
+        val clear = activity.button(activity.getString(R.string.clear_manual_values), Controls.Role.DESTRUCTIVE_TEXT) {}
         val content = Dialogs.content(activity) {
             addView(activity.text(activity.getString(R.string.manual_edit_hint), TextRole.SECONDARY), activity.lp())
             addView(merit, activity.lp(top = 12))
@@ -118,17 +121,19 @@ internal object WeeklyDialogs {
             addView(choiceRow(activity, R.string.login_short, loginInitial) { login = it }, activity.lp(top = 12))
             addView(choiceRow(activity, R.string.patrol_short, patrolInitial) { patrol = it }, activity.lp(top = 12))
             addView(error, activity.lp(top = 8))
+            if (cell.manualOverride != null) addView(clear, activity.lp(WRAP, WRAP, top = 4))
         }
+        // The neutral slot walks the member's week so a whole row can be corrected in one pass.
         val builder = Dialogs.builder(activity)
             .setTitle(title)
             .setView(content)
             .setNegativeButton(R.string.cancel, null)
             .setPositiveButton(R.string.apply, null)
-        if (cell.manualOverride != null) builder.setNeutralButton(R.string.clear_manual_values, null)
+        if (next != null) builder.setNeutralButton(R.string.apply_and_next_day, null)
         Dialogs.show(builder) { dialog ->
             fun changed(field: Pair<LabeledField, String>?): String? =
                 field?.let { (view, initial) -> view.input.text.toString().takeIf { it != initial } }
-            fun finish(edit: WeeklyOverrideEditing.CellEdit) {
+            fun finish(edit: WeeklyOverrideEditing.CellEdit, then: (() -> Unit)? = null) {
                 val probe = WeeklyOverrideEditing.merge(
                     cell.manualOverride?.periodStart ?: cell.gameDay,
                     isGunsmokeWeek,
@@ -144,21 +149,20 @@ internal object WeeklyDialogs {
                 }
                 dialog.dismiss()
                 onDone(edit)
+                then?.invoke()
             }
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                finish(
-                    WeeklyOverrideEditing.CellEdit(
-                        uid = uid,
-                        gameDay = cell.gameDay,
-                        merit = changed(merit to meritInitial) ?: current?.merit,
-                        score = changed(score) ?: current?.score,
-                        attempts = changed(attempts) ?: current?.attempts,
-                        attended = login.takeIf { it != loginInitial } ?: current?.attended,
-                        dailyPatrol = patrol.takeIf { it != patrolInitial } ?: current?.dailyPatrol,
-                    ),
-                )
-            }
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener {
+            fun edited() = WeeklyOverrideEditing.CellEdit(
+                uid = uid,
+                gameDay = cell.gameDay,
+                merit = changed(merit to meritInitial) ?: current?.merit,
+                score = changed(score) ?: current?.score,
+                attempts = changed(attempts) ?: current?.attempts,
+                attended = login.takeIf { it != loginInitial } ?: current?.attended,
+                dailyPatrol = patrol.takeIf { it != patrolInitial } ?: current?.dailyPatrol,
+            )
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { finish(edited()) }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setOnClickListener { finish(edited(), next) }
+            clear.setOnClickListener {
                 finish(
                     WeeklyOverrideEditing.CellEdit(
                         uid = uid,

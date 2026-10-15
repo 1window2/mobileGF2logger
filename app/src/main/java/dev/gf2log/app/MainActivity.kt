@@ -26,6 +26,7 @@ import dev.gf2log.app.capture.CaptureVpnService
 import dev.gf2log.app.capture.format
 import dev.gf2log.app.history.CaptureHistoryStore
 import dev.gf2log.app.history.SavedHistoryStore
+import dev.gf2log.app.management.CsvImportCheckpointManager
 import dev.gf2log.app.management.PlatoonCsvImportStore
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.SnapshotComparison
@@ -51,6 +52,7 @@ import dev.gf2log.app.ui.group
 import dev.gf2log.app.ui.icon
 import dev.gf2log.app.ui.lp
 import dev.gf2log.app.ui.navigationRow
+import dev.gf2log.app.ui.setShownInGroup
 import dev.gf2log.app.ui.panel
 import dev.gf2log.app.ui.row
 import dev.gf2log.app.ui.sectionHeader
@@ -80,6 +82,7 @@ class MainActivity : BaseActivity() {
     private lateinit var checklist: LinearLayout
     private lateinit var captureActions: LinearLayout
     private lateinit var clients: LinearLayout
+    private lateinit var undoRow: View
     private lateinit var progressBanner: LinearLayout
     private lateinit var progressText: TextView
     private lateinit var historySection: LinearLayout
@@ -181,6 +184,7 @@ class MainActivity : BaseActivity() {
         if (::clients.isInitialized) renderClients()
         loadHistory()
         loadRosterSummary()
+        loadUndoAvailability()
         csvImport.onScreenReady()
     }
 
@@ -220,7 +224,7 @@ class MainActivity : BaseActivity() {
             },
             navigationRow(getString(R.string.undo_last_csv_import), getString(R.string.undo_last_csv_import_detail), R.drawable.ic_undo) {
                 csvImport.undo()
-            },
+            }.also { undoRow = it },
             navigationRow(
                 getString(R.string.export_latest_platoon_csv),
                 getString(R.string.export_latest_platoon_csv_detail),
@@ -232,6 +236,7 @@ class MainActivity : BaseActivity() {
         )), lp())
         historySection = column()
         addView(historySection, lp())
+        undoRow.setShownInGroup(false)
     }
 
     // region Capture
@@ -451,6 +456,19 @@ class MainActivity : BaseActivity() {
     private fun showProgress(message: CharSequence?) {
         progressBanner.visibility = if (message == null) View.GONE else View.VISIBLE
         progressText.text = message
+        if (message == null) {
+            // An import or undo just finished: the roster and the undo checkpoint may have changed.
+            loadRosterSummary()
+            loadUndoAvailability()
+        }
+    }
+
+    /** The undo row only appears while a CSV import checkpoint exists. */
+    private fun loadUndoAvailability() {
+        val scope = profileBinding.scope ?: return
+        work.run(key = UNDO, task = { CsvImportCheckpointManager(this, scope).canUndo() }) { result ->
+            undoRow.setShownInGroup(result.getOrDefault(false))
+        }
     }
 
     private fun exportLatestRoster() {
@@ -740,6 +758,7 @@ class MainActivity : BaseActivity() {
     private companion object {
         const val HISTORY = "history"
         const val SUMMARY = "summary"
+        const val UNDO = "undo"
         const val RECENT = "recent"
         const val SAVED = "saved"
         const val COLLAPSED_COUNT = 20

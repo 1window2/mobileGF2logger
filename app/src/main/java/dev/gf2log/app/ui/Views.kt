@@ -370,6 +370,15 @@ internal fun Context.group(rows: List<View>): LinearLayout = column {
     }
 }
 
+/** Shows or hides a row added through [group] together with the divider above it. */
+internal fun View.setShownInGroup(shown: Boolean) {
+    val visibility = if (shown) View.VISIBLE else View.GONE
+    this.visibility = visibility
+    val parent = parent as? ViewGroup ?: return
+    val index = parent.indexOfChild(this)
+    if (index > 0) parent.getChildAt(index - 1).visibility = visibility
+}
+
 /** A tappable grouped row with an optional icon, supporting text, and trailing value. */
 internal fun Context.navigationRow(
     title: CharSequence,

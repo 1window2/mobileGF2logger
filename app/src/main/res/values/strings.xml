@@ -597,4 +597,5 @@
     <string name="confirming_platoon">Saving this Platoon…</string>
     <string name="clear_search">Clear search</string>
     <string name="apply_sort_warning">This replaces the current order, including any members you moved by hand.</string>
+    <string name="apply_and_next_day">Apply, next day</string>
 </resources>

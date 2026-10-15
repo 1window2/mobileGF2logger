@@ -45,6 +45,20 @@ object Gfl2PayloadDecoder {
         TYPE_FORMATIONS,
     )
 
+    /** Allocation-free equivalent of `type in supportedTypes` for the per-frame hot path. */
+    fun isSupported(type: Int): Boolean = when (type) {
+        TYPE_WEAPONS,
+        TYPE_WEAPON_MODS,
+        TYPE_PUBLIC_SKILL_ITEMS,
+        TYPE_PLATOON_PROFILE,
+        TYPE_GUILD_MEMBERS,
+        TYPE_PLATOON_ACTIVITY,
+        TYPE_PLATOON_UPDATES,
+        TYPE_FORMATIONS,
+        -> true
+        else -> false
+    }
+
     @Throws(ProtocolException::class)
     fun decode(type: Int, bytes: ByteArray): GameData? = when (type) {
         TYPE_WEAPONS -> decodeWeapons(ProtoReader(bytes))

@@ -1,98 +1,50 @@
 package dev.gf2log.app.history
 
+import dev.gf2log.protocol.LogTime
 import dev.gf2log.protocol.ParsedPayloadTextFormatter
 import dev.gf2log.protocol.model.ParsedPayload
 import java.io.File
-import java.nio.file.AtomicMoveNotSupportedException
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
 import java.util.concurrent.atomic.AtomicLong
 
+/** Recent parsed-packet history; each save rotates out the oldest entries beyond [MAX_ENTRIES]. */
 class CaptureHistoryStore(
-    private val directory: File,
+    directory: File,
     private val clock: Clock = Clock.systemUTC(),
-    private val displayZone: ZoneId? = null,
+    displayZone: ZoneId? = null,
 ) {
-    @Synchronized
-    fun save(payload: ParsedPayload): Entry {
-        check(directory.isDirectory || directory.mkdirs()) { "Unable to create history directory" }
+    private val entries = HistoryDirectory(directory, displayZone)
+
+    fun save(payload: ParsedPayload): Entry = synchronized(entries.lock) {
+        entries.ensureExists("history")
         val instant = Instant.now(clock)
-        val capturedAt = LOG_TIME_FORMAT.format(instant)
-        val id = "${instant.toEpochMilli()}_${payload.payloadType}_${sequence.incrementAndGet()}.txt"
-        val destination = File(directory, id)
-        val temporary = File.createTempFile("packet_", ".tmp", directory)
-        try {
-            val content = ParsedPayloadTextFormatter.format(payload, capturedAt)
-                .toByteArray(Charsets.UTF_8)
-            require(content.size <= MAX_ENTRY_BYTES) {
-                "Parsed-packet history entry exceeds the storage limit"
-            }
-            temporary.writeBytes(content)
-            try {
-                Files.move(
-                    temporary.toPath(),
-                    destination.toPath(),
-                    StandardCopyOption.ATOMIC_MOVE,
-                )
-            } catch (_: AtomicMoveNotSupportedException) {
-                Files.move(temporary.toPath(), destination.toPath())
-            }
-        } finally {
-            temporary.delete()
+        val content = ParsedPayloadTextFormatter.format(payload, LogTime.format(instant))
+            .toByteArray(Charsets.UTF_8)
+        require(content.size <= MAX_ENTRY_BYTES) {
+            "Parsed-packet history entry exceeds the storage limit"
         }
+        val id = "${instant.toEpochMilli()}_${payload.payloadType}_${sequence.incrementAndGet()}" +
+            ".${HistoryDirectory.ENTRY_EXTENSION}"
+        val destination = File(entries.directory, id)
+        AtomicFiles.write(destination, content, "packet_")
         destination.setLastModified(instant.toEpochMilli())
         trimToLimit()
-        return destination.toEntry()
+        entries.toEntry(destination)
     }
 
-    @Synchronized
-    fun list(): List<Entry> {
-        directory.mkdirs()
-        trimToLimit()
-        return historyFiles()
-            .sortedWith(compareByDescending<File> { it.lastModified() }.thenByDescending { it.name })
-            .map { it.toEntry() }
-    }
+    fun list(): List<Entry> = entries.list()
 
-    @Synchronized
-    fun read(id: String): String? {
-        if (id.isBlank() || File(id).name != id) return null
-        val file = File(directory, id)
-        if (!file.isFile || file.parentFile?.canonicalFile != directory.canonicalFile) return null
-        if (file.length() > MAX_ENTRY_BYTES) return null
-        return file.readText(Charsets.UTF_8)
-    }
+    fun read(id: String): String? = entries.read(id)
 
-    @Synchronized
-    fun delete(ids: Collection<String>): Int = ids
-        .asSequence()
-        .filter { it.isNotBlank() && File(it).name == it }
-        .map { File(directory, it) }
-        .filter { it.isFile && it.parentFile?.canonicalFile == directory.canonicalFile }
-        .count(File::delete)
+    fun delete(ids: Collection<String>): Int = entries.delete(ids)
 
     private fun trimToLimit() {
-        val oldestFirst = historyFiles()
+        val oldestFirst = entries.files()
             .sortedWith(compareBy<File> { it.lastModified() }.thenBy { it.name })
         oldestFirst.take((oldestFirst.size - MAX_ENTRIES).coerceAtLeast(0)).forEach(File::delete)
     }
-
-    private fun historyFiles(): List<File> = directory.listFiles()
-        .orEmpty()
-        .filter { it.isFile && it.extension == "txt" }
-
-    private fun File.toEntry(): Entry = Entry(
-        id = name,
-        title = TITLE_TIME_FORMAT
-            .withZone(displayZone ?: ZoneId.systemDefault())
-            .format(Instant.ofEpochMilli(lastModified())),
-        payloadType = name.split('_').getOrNull(1)?.toIntOrNull(),
-    )
 
     data class Entry(
         val id: String,
@@ -105,10 +57,5 @@ class CaptureHistoryStore(
         const val MAX_ENTRY_BYTES = 2 * 1024 * 1024
         const val HISTORY_DIRECTORY = "capture-history"
         private val sequence = AtomicLong()
-        private val LOG_TIME_FORMAT = DateTimeFormatter
-            .ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'")
-            .withZone(ZoneOffset.UTC)
-        private val TITLE_TIME_FORMAT = DateTimeFormatter
-            .ofPattern("yy/MM/dd HH:mm:ss")
     }
 }

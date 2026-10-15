@@ -29,6 +29,17 @@ internal object PlatoonReadQueries {
         if (cursor.moveToFirst() && !cursor.isNull(0)) Instant.ofEpochMilli(cursor.getLong(0)) else null
     }
 
+    /** When the timed membership events observed at [observedAt] happened, newest last. */
+    fun eventInstantsObservedAt(db: SQLiteDatabase, observedAt: Instant): List<Instant> = db.rawQuery(
+        "SELECT DISTINCT COALESCE(occurred_at, observed_at) FROM member_events " +
+            "WHERE observed_at = ? AND event_date IS NULL ORDER BY 1",
+        arrayOf(observedAt.toEpochMilli().toString()),
+    ).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) add(Instant.ofEpochMilli(cursor.getLong(0)))
+        }
+    }
+
     fun snapshotSourceFiles(db: SQLiteDatabase): Set<String> = db.rawQuery(
         "SELECT source_file FROM snapshots WHERE source_file IS NOT NULL",
         null,

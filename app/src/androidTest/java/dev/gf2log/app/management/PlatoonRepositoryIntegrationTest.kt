@@ -6,6 +6,8 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.protocol.model.GuildMember
+import dev.gf2log.protocol.model.PlatoonActivityData
+import dev.gf2log.protocol.model.PlatoonActivityEntry
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
@@ -98,6 +100,39 @@ class PlatoonRepositoryIntegrationTest {
         val after = latestStoredRevision(repository, OPENING_WEEK)
         assertEquals(listOf(UID), after?.members?.map { it.uid })
         assertEquals(liveReport(repository, OPENING_WEEK), after)
+    }
+
+    @Test
+    fun aRosterJoinCorrelatedIntoAnEarlierWeekRefreshesThatWeek() {
+        val repository = utcRepository()
+        repository.ingest(Instant.parse("2026-07-29T12:00:00Z"), listOf(member(UID, "A")), "a.csv")
+        // B's first activity on Saturday evening is the only candidate for B's join time.
+        repository.ingestActivity(
+            PlatoonActivityData(
+                summaries = emptyList(),
+                entries = listOf(
+                    PlatoonActivityEntry(
+                        kind = 1u,
+                        occurredAt = Instant.parse("2026-08-01T23:00:00Z").epochSecond.toUInt(),
+                        actionId = 1u,
+                        memberName = "B",
+                    ),
+                ),
+            ),
+            capturedAt = Instant.parse("2026-08-01T23:05:00Z"),
+        )
+        assertEquals(listOf(UID), latestStoredRevision(repository, CLOSING_WEEK)?.members?.map { it.uid })
+
+        // Monday's roster shows B; the exact join it correlates lies in the closing week.
+        repository.ingest(
+            Instant.parse("2026-08-03T12:00:00Z"),
+            listOf(member(UID, "A"), member(OTHER_UID, "B")),
+            "b.csv",
+        )
+
+        val after = latestStoredRevision(repository, CLOSING_WEEK)
+        assertEquals(setOf(UID, OTHER_UID), after?.members?.map { it.uid }?.toSet())
+        assertEquals(liveReport(repository, CLOSING_WEEK), after)
     }
 
     @Test

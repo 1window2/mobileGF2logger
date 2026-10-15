@@ -98,6 +98,10 @@ internal class PlatoonDatabase private constructor(
         PlatoonReadQueries.firstSnapshotCapturedAfter(readableDatabase, instant)
 
     @Synchronized
+    fun eventInstantsObservedAt(observedAt: Instant): List<Instant> =
+        PlatoonReadQueries.eventInstantsObservedAt(readableDatabase, observedAt)
+
+    @Synchronized
     fun snapshotSourceFiles(): Set<String> = PlatoonReadQueries.snapshotSourceFiles(readableDatabase)
 
     @Synchronized

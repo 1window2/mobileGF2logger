@@ -220,7 +220,10 @@ transitions.
   the next stored roster, so those weeks are re-recorded as well; this covers a
   roster captured just before the reset. An instant before 05:00 on a calendar
   Sunday also refreshes the following week, whose Join / Withdraw section uses
-  calendar days. The 32-period per-ingest bound still applies, own weeks first.
+  calendar days. A roster that joins or withdraws members also refreshes the
+  weeks of the exact boundary times it correlates from earlier activity, which
+  can precede the roster's own week. The 32-period per-ingest bound still
+  applies, own weeks first.
 - Weekly history is a derived audit trail, not the primary store. If refreshing
   one revision fails after a successful data mutation, the affected restored
   selection is cleared so the live database projection remains authoritative.

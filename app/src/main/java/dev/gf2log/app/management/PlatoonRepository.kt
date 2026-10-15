@@ -52,9 +52,24 @@ internal class PlatoonRepository(
             result.duplicate -> Unit
             // A replayed older roster can rebuild membership periods across every week.
             result.historical -> recordAllLiveWeeklyReports()
-            else -> recordChangedWeeks(setOf(capturedAt))
+            else -> recordChangedWeeks(sequenceOf(capturedAt) + rosterBoundaryInstants(result, capturedAt))
         }
         return result
+    }
+
+    /**
+     * A roster that joins or withdraws members can correlate each boundary to an exact activity
+     * time anywhere after the previous roster, possibly in an earlier week. Those events are
+     * observed at [capturedAt], so their times name every week the roster changed.
+     */
+    private fun rosterBoundaryInstants(result: SnapshotIngestResult, capturedAt: Instant): List<Instant> {
+        if (result.joined + result.rejoined + result.left == 0) return emptyList()
+        return try {
+            access { it.eventInstantsObservedAt(capturedAt) }
+        } catch (error: Exception) {
+            Log.e(TAG, "Unable to read roster boundary times; refreshing the roster's week", error)
+            emptyList()
+        }
     }
 
     fun ingestActivity(

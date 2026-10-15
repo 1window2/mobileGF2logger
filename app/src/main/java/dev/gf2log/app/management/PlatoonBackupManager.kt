@@ -14,7 +14,6 @@ import java.io.EOFException
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
-import java.security.MessageDigest
 import java.util.zip.ZipException
 
 class PlatoonBackupManager internal constructor(
@@ -62,20 +61,9 @@ class PlatoonBackupManager internal constructor(
     /** Returns a stable digest after closing SQLite so WAL state is checkpointed. */
     internal fun currentDatabaseSha256(): String =
         PlatoonRepository.withExclusiveDatabase(storageScope) {
-        ensureDatabaseExists()
-        val digest = MessageDigest.getInstance("SHA-256")
-        databaseFile.inputStream().use { input ->
-            val buffer = ByteArray(8 * 1024)
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                digest.update(buffer, 0, count)
-            }
+            ensureDatabaseExists()
+            databaseFile.sha256Hex()
         }
-        digest.digest().joinToString("") { value ->
-            String.format("%02x", value.toInt() and 0xff)
-        }
-    }
 
     fun exportFull(output: OutputStream) {
         PlatoonRepository(appContext, storageScope).reconcileRetainedCsvFiles()

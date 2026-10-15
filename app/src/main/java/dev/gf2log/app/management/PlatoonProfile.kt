@@ -7,7 +7,6 @@ import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.app.settings.GameServerRegion
 import dev.gf2log.protocol.model.PlatoonProfileData
 import java.io.File
-import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.Instant
 
@@ -84,17 +83,12 @@ internal object PlatoonProfileIdentity {
         require(platoonId > 0L)
         val material = "${client.packageName}\u0000${region.storedValue}\u0000$platoonId"
             .toByteArray(Charsets.UTF_8)
-        return MessageDigest.getInstance("SHA-256")
-            .digest(material)
-            .take(16)
-            .joinToString("") { value -> "%02x".format(value) }
+        return material.sha256().copyOf(16).toHex()
     }
 
     fun isValidStorageId(value: String): Boolean = STORAGE_ID.matches(value)
 
-    fun randomStorageId(): String = ByteArray(16)
-        .also(SecureRandom()::nextBytes)
-        .joinToString("") { value -> "%02x".format(value) }
+    fun randomStorageId(): String = ByteArray(16).also(SecureRandom()::nextBytes).toHex()
 }
 
 /** Resolves every database and retained-evidence path from one validated profile ID. */

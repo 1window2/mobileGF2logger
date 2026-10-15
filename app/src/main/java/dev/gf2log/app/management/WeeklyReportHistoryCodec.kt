@@ -5,7 +5,6 @@ import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
 import java.util.zip.GZIPInputStream
@@ -54,9 +53,7 @@ internal object WeeklyReportHistoryCodec {
             compressed.toByteArray()
         }
         require(payload.size <= MAX_PAYLOAD_BYTES) { "Weekly history payload is too large" }
-        val fingerprint = MessageDigest.getInstance("SHA-256")
-            .digest(raw)
-            .joinToString("") { "%02x".format(it) }
+        val fingerprint = raw.sha256().toHex()
         return Encoded(payload, fingerprint)
     }
 

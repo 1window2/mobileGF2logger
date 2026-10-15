@@ -3,6 +3,7 @@ package dev.gf2log.app
 import android.app.Activity
 import android.app.AlertDialog
 import android.text.InputType
+import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -18,6 +19,7 @@ import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.LabeledField
 import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.TextRole
+import dev.gf2log.app.ui.WRAP
 import dev.gf2log.app.ui.button
 import dev.gf2log.app.ui.dp
 import dev.gf2log.app.ui.lp
@@ -46,12 +48,13 @@ internal object PlatoonCsvImportPrompt {
             } else {
                 addView(choices, activity.lp(top = 8))
             }
+            // Start-aligned and content-sized so the plus icon sits beside its label like a choice row.
             addView(activity.button(activity.getString(R.string.add_new_platoon_profile), Controls.Role.TERTIARY, R.drawable.ic_add) {
                 showCreate(activity) { created ->
                     dialog.dismiss()
                     showSelector(activity, created.storageId, onSelected)
                 }
-            }, activity.lp(top = 8))
+            }.apply { gravity = Gravity.START or Gravity.CENTER_VERTICAL }, activity.lp(WRAP, WRAP, top = 8))
         }
         dialog = Dialogs.show(
             Dialogs.builder(activity)

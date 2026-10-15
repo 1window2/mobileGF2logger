@@ -204,7 +204,9 @@ transitions.
 - Each stored history item is a complete immutable weekly-table revision. The
   report cells, displayed membership events, weekly notes, names, and private
   notes are encoded together rather than combining an older table with current
-  member data.
+  member data. Each cell's manual override is encoded with it (history format
+  3), so a restored revision still shows which cells were edited and by how
+  much; a revision without overrides keeps format 2 and its fingerprint.
 - Every revision passes deterministic structural checks before persistence and
   after decoding: seven contiguous days, unique member UIDs, matching cell
   dates and report mode, in-period notes, and valid contextual identities.

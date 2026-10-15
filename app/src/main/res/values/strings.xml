@@ -595,4 +595,6 @@
     <string name="roster_joined_count">joined %1$d</string>
     <string name="roster_withdrew_count">withdrew %1$d</string>
     <string name="confirming_platoon">Saving this Platoon…</string>
+    <string name="clear_search">Clear search</string>
+    <string name="apply_sort_warning">This replaces the current order, including any members you moved by hand.</string>
 </resources>

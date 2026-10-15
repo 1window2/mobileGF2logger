@@ -9,6 +9,7 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 import dev.gf2log.app.management.MembershipBoundaryValue
+import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.TextRole
 import dev.gf2log.app.ui.dp
 import dev.gf2log.app.ui.dpf
@@ -20,7 +21,6 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 /**
  * Calendar input with an optional clock value.
@@ -117,16 +117,16 @@ internal class DateTimePickerInput(
             },
             seed.hour,
             seed.minute,
-            true,
+            android.text.format.DateFormat.is24HourFormat(context),
         ).show()
     }
 
     private fun renderValue() {
         val date = selection.date
         val time = selection.time
-        dateField.text = date?.format(DATE) ?: context.getString(R.string.date_unset)
+        dateField.text = date?.format(Labels.DATE) ?: context.getString(R.string.date_unset)
         dateField.setTextColor(context.getColor(if (date == null) R.color.text_secondary else R.color.text_primary))
-        timeField.text = time?.format(TIME) ?: context.getString(R.string.time_optional)
+        timeField.text = time?.format(Labels.TIME) ?: context.getString(R.string.time_optional)
         timeField.setTextColor(context.getColor(if (time == null) R.color.text_secondary else R.color.text_primary))
         dateField.isEnabled = editable
         timeField.isEnabled = editable && date != null
@@ -139,10 +139,5 @@ internal class DateTimePickerInput(
         clearButton.contentDescription = context.getString(
             if (time != null) R.string.clear_time else R.string.clear_date,
         )
-    }
-
-    private companion object {
-        val DATE: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
-        val TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     }
 }

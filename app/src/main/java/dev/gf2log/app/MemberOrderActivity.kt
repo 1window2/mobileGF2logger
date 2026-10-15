@@ -108,7 +108,7 @@ class MemberOrderActivity : BaseActivity() {
                 addView(fieldButton, lp(width = 0, height = 48, weight = 1.4f))
                 addView(directionButton, lp(width = 0, height = 48, weight = 1f, start = 8))
             }, lp(top = 8))
-            addView(button(getString(R.string.apply_sort), Controls.Role.SECONDARY) { applySort() }, lp(top = 8))
+            addView(button(getString(R.string.apply_sort), Controls.Role.SECONDARY) { confirmSort() }, lp(top = 8))
         }, lp(top = 12, bottom = 8))
         updateSortLabels()
     }
@@ -184,6 +184,11 @@ class MemberOrderActivity : BaseActivity() {
         MemberSortField.JOIN_DATE -> R.string.sort_join_date
         MemberSortField.WEEKLY_MERIT -> R.string.sort_weekly_merit
         MemberSortField.TOTAL_MERIT -> R.string.sort_total_merit
+    }
+
+    /** Sorting replaces any hand-arranged order, so it is confirmed first. */
+    private fun confirmSort() {
+        Dialogs.confirm(this, R.string.apply_sort, R.string.apply_sort_warning, R.string.apply_sort) { applySort() }
     }
 
     private fun applySort() {

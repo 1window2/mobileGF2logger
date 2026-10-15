@@ -211,7 +211,7 @@ internal class CsvImportFlow(
             R.string.csv_preview_name_changes to preview.nameDifferences.toString(),
             R.string.csv_preview_joins to preview.potentialJoins.toString(),
             R.string.csv_preview_withdrawals to preview.potentialWithdrawals.toString(),
-            R.string.csv_preview_size to activity.getString(R.string.kib, preview.totalBytes / 1024),
+            R.string.csv_preview_size to activity.getString(R.string.kib, (preview.totalBytes + 1023) / 1024),
             R.string.csv_preview_range to range,
         )
         val content = Dialogs.content(activity) {

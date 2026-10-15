@@ -3,10 +3,8 @@ package dev.gf2log.app
 import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.drawable.GradientDrawable
-import android.text.Editable
 import android.text.InputType
 import android.text.TextUtils
-import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.widget.ImageView
@@ -16,6 +14,7 @@ import dev.gf2log.app.management.PlatoonProfile
 import dev.gf2log.app.management.PlatoonProfileAdministration
 import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.settings.ClientServerRegionPreferences
+import dev.gf2log.app.ui.onTextChanged
 import dev.gf2log.app.ui.AccessibleRow
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.captureActive
@@ -79,10 +78,6 @@ internal object PlatoonProfileSelector {
             addView(activity.icon(R.drawable.ic_expand_more), activity.lp(24, 24, start = 8))
         }
     }
-
-    /** Transitional entry point for screens that still embed the selector inline. */
-    fun controls(activity: Activity, compact: Boolean = false, showManageButton: Boolean = true): View =
-        card(activity, compact)
 
     fun showSelector(activity: Activity) {
         val registry = PlatoonProfileRegistry(activity)
@@ -273,13 +268,7 @@ internal object PlatoonProfileSelector {
                     }
                 }
             }
-            input.addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    delete.isEnabled = s?.toString() == profile.platoonName
-                }
-                override fun afterTextChanged(s: Editable?) = Unit
-            })
+            input.onTextChanged { delete.isEnabled = it == profile.platoonName }
         }
     }
 

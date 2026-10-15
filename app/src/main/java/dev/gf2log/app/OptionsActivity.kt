@@ -331,7 +331,7 @@ class OptionsActivity : BaseActivity() {
             Feedback.show(this, R.string.stop_capture_before_backup, long = true)
             return
         }
-        Dialogs.confirm(this, R.string.restore_full_backup, R.string.restore_backup_warning, R.string.choose_file) {
+        Dialogs.confirm(this, R.string.restore_full_backup, R.string.restore_backup_warning, R.string.choose_file, destructive = true) {
             restoreBackup.launch(arrayOf(PlatoonBackupManager.MIME_TYPE, "application/zip", "application/octet-stream"))
         }
     }

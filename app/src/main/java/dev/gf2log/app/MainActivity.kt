@@ -79,6 +79,7 @@ class MainActivity : BaseActivity() {
     private lateinit var stateDetail: TextView
     private lateinit var checklist: LinearLayout
     private lateinit var captureActions: LinearLayout
+    private lateinit var clients: LinearLayout
     private lateinit var progressBanner: LinearLayout
     private lateinit var progressText: TextView
     private lateinit var historySection: LinearLayout
@@ -177,6 +178,7 @@ class MainActivity : BaseActivity() {
             recreate()
             return
         }
+        if (::clients.isInitialized) renderClients()
         loadHistory()
         loadRosterSummary()
         csvImport.onScreenReady()
@@ -243,6 +245,8 @@ class MainActivity : BaseActivity() {
         stateDetail = text(null, TextRole.SECONDARY) { maxLines = 4 }
         checklist = column { visibility = View.GONE }
         captureActions = row(Gravity.TOP)
+        clients = column()
+        renderClients()
         capturePanel = panel(outlined = true) {
             addView(row {
                 addView(stateDot, lp(10, 10, end = 8))
@@ -251,13 +255,15 @@ class MainActivity : BaseActivity() {
             addView(stateTitle, lp(top = 6))
             addView(stateDetail, lp(top = 2))
             addView(checklist, lp(top = 8))
-            addView(clientRows(), lp(top = 12))
+            addView(clients, lp(top = 12))
             addView(captureActions, lp(top = 12))
         }
         return capturePanel
     }
 
-    private fun clientRows(): View = column {
+    /** Rebuilt on every resume so installing or removing a client shows up immediately. */
+    private fun renderClients() = clients.apply {
+        removeAllViews()
         SupportedGamePackages.all.forEachIndexed { index, packageName ->
             val installed = isInstalled(packageName)
             val client = clientName(packageName)

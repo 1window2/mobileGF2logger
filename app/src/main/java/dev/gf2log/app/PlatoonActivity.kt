@@ -3,10 +3,8 @@ package dev.gf2log.app
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.os.Bundle
-import android.text.Editable
 import android.text.InputType
 import android.text.TextUtils
-import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -28,6 +26,7 @@ import dev.gf2log.app.management.PlatoonSnapshot
 import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.management.isValidMembershipRange
 import dev.gf2log.app.settings.GameTimeZonePreferences
+import dev.gf2log.app.ui.searchField
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.AccessibleRow
 import dev.gf2log.app.ui.BackgroundWork
@@ -181,17 +180,8 @@ class PlatoonActivity : BaseActivity() {
     }
 
     private fun buildHeader(query: String): View {
-        searchInput = textField(getString(R.string.search_members), id = R.id.platoon_search_input).apply {
-            setText(query)
-            setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_search, 0, 0, 0)
-            compoundDrawablePadding = dp(8)
-            compoundDrawableTintList = ColorStateList.valueOf(getColor(R.color.text_secondary))
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = renderMembers()
-                override fun afterTextChanged(s: Editable?) = Unit
-            })
-        }
+        val search = searchField(getString(R.string.search_members), R.id.platoon_search_input, query) { renderMembers() }
+        searchInput = search.findViewById(R.id.platoon_search_input)
         sortButton = text(null, TextRole.LABEL) {
             setTextColor(getColor(R.color.text_primary))
             gravity = Gravity.CENTER_VERTICAL
@@ -211,7 +201,7 @@ class PlatoonActivity : BaseActivity() {
         return column {
             addView(PlatoonProfileSelector.card(this@PlatoonActivity), lp(top = 4))
             addView(summary, lp(top = 12))
-            addView(searchInput, lp(top = 16))
+            addView(search, lp(top = 16))
             addView(Controls.segmentedControl(
                 context = this@PlatoonActivity,
                 options = Filter.entries.map { it.name to getString(it.label) },

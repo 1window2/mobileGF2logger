@@ -2,8 +2,6 @@ package dev.gf2log.app
 
 import android.app.AlertDialog
 import android.os.Bundle
-import android.text.Editable
-import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -17,6 +15,7 @@ import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.management.isImmutableMembershipBoundary
 import dev.gf2log.app.management.isValidMembershipRange
 import dev.gf2log.app.settings.GameTimeZonePreferences
+import dev.gf2log.app.ui.onTextChanged
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Dialogs
@@ -105,13 +104,8 @@ class MemberDetailActivity : BaseActivity() {
         nickname = textField(getString(R.string.member_nickname), id = R.id.member_nickname_input, maxLength = 256)
         note = textField(getString(R.string.member_private_note_hint), id = R.id.member_note_input, singleLine = false)
         saveButton = button(getString(R.string.save_member), Controls.Role.PRIMARY) { saveProfile() }
-        val watcher = object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = updateSaveState()
-            override fun afterTextChanged(s: Editable?) = Unit
-        }
-        nickname.addTextChangedListener(watcher)
-        note.addTextChangedListener(watcher)
+        nickname.onTextChanged { updateSaveState() }
+        note.onTextChanged { updateSaveState() }
         statusPanel = panel()
         periods = column()
         content = column {

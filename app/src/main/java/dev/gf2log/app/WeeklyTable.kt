@@ -43,9 +43,19 @@ internal class HorizontalSync {
         views[view] = Unit
     }
 
+    private var placedFor: Any? = null
+
     fun publish(source: SyncedScrollView, x: Int) {
         offset = x
         views.keys.forEach { if (it !== source) it.syncTo(x) }
+    }
+
+    /** Sets the start position once per [key], so re-renders of the same week keep the user's scroll. */
+    fun placeOnce(key: Any, x: Int) {
+        if (placedFor == key) return
+        placedFor = key
+        offset = x
+        views.keys.forEach { it.syncTo(x) }
     }
 }
 
@@ -111,7 +121,14 @@ internal class WeeklyTable(
 
     val rowHeight = height(if (isGunsmokeWeek) GUNSMOKE_ROW_HEIGHT else STANDARD_ROW_HEIGHT)
 
-    fun headerRow(report: WeeklyReportBuilder.Report): View = gridRow(
+    fun headerRow(report: WeeklyReportBuilder.Report): View {
+        // Open the current week at yesterday so today's column is on screen without swiping.
+        val todayIndex = report.days.indexOf(PlatoonPeriods.gameDay(now, zone))
+        sync.placeOnce(report.days.first(), (width(DAY_WIDTH) + hairline) * (todayIndex - 1).coerceAtLeast(0))
+        return headerGridRow(report)
+    }
+
+    private fun headerGridRow(report: WeeklyReportBuilder.Report): View = gridRow(
         frozen = headerCell(context.getString(R.string.member), null, MEMBER_WIDTH, Gravity.START or Gravity.CENTER_VERTICAL),
         cells = report.days.map { day ->
             headerCell(
@@ -378,8 +395,9 @@ internal class WeeklyTable(
     }
 
     /** Grid row: hairline separators come from a 1px gap over the outline-colored row. */
+    private val hairline = maxOf(1, context.dp(1) / 2)
+
     private fun gridRow(frozen: View, cells: List<View>, height: Int): View {
-        val hairline = maxOf(1, context.dp(1) / 2)
         val scroller = SyncedScrollView(context, sync).apply {
             addView(LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL

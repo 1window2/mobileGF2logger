@@ -2,9 +2,7 @@ package dev.gf2log.app
 
 import android.app.Activity
 import android.app.AlertDialog
-import android.text.Editable
 import android.text.InputType
-import android.text.TextWatcher
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -14,6 +12,7 @@ import dev.gf2log.app.management.PlatoonProfile
 import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.app.settings.GameServerRegion
+import dev.gf2log.app.ui.onTextChanged
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.LabeledField
@@ -133,16 +132,12 @@ internal object PlatoonCsvImportPrompt {
                 .setNegativeButton(R.string.cancel, null)
                 .setPositiveButton(R.string.add, null),
         ) { shown ->
-            val watcher = object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+            listOf(name.input, platoonId.input).forEach { field ->
+                field.onTextChanged {
                     error.visibility = View.GONE
                     updateEnabled()
                 }
-                override fun afterTextChanged(s: Editable?) = Unit
             }
-            name.input.addTextChangedListener(watcher)
-            platoonId.input.addTextChangedListener(watcher)
             shown.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { button ->
                 val selectedRegion = region ?: return@setOnClickListener
                 val id = validId() ?: return@setOnClickListener

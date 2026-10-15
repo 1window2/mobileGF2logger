@@ -183,10 +183,8 @@ internal object Controls {
 
         fun moveSelection(index: Int, animated: Boolean, finished: (() -> Unit)? = null) {
             val segment = choices.getChildAt(index)
-            if (segment == null || segment.width <= 0) {
-                rail.post { moveSelection(index, animated, finished) }
-                return
-            }
+            // Not laid out yet: the rail's layout listener places the thumb once widths exist.
+            if (segment == null || segment.width <= 0) return
             selection.layoutParams = (selection.layoutParams as FrameLayout.LayoutParams).apply { width = segment.width }
             val target = segment.left.toFloat()
             selection.animate().cancel()

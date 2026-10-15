@@ -105,7 +105,8 @@ internal fun TextView.applyRole(role: TextRole) {
 /** Section label used above grouped rows. */
 internal fun Context.sectionHeader(value: CharSequence): TextView = text(value, TextRole.LABEL) {
     isAllCaps = false
-    setTextColor(getColor(R.color.accent_text))
+    // Neutral ink: the accent stays reserved for things that can be tapped or are selected.
+    setTextColor(getColor(R.color.text_secondary))
     setPadding(dp(4), dp(20), dp(4), dp(6))
     isFocusable = false
     accessibilityHeading()
@@ -181,6 +182,40 @@ internal fun Context.textField(
     if (singleLine) setSingleLine(true) else minLines = 2
     maxLength?.let { filters = arrayOf(InputFilter.LengthFilter(it)) }
     elevation = 0f
+}
+
+/** Runs [action] with the new text on every edit. */
+internal fun EditText.onTextChanged(action: (String) -> Unit) {
+    addTextChangedListener(object : android.text.TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = action(s?.toString().orEmpty())
+        override fun afterTextChanged(s: android.text.Editable?) = Unit
+    })
+}
+
+/** Search input with a leading magnifier and a trailing clear button shown while text is present. */
+internal fun Context.searchField(hintText: CharSequence, @IdRes id: Int, query: String, onQuery: (String) -> Unit): View {
+    val input = textField(hintText, id = id).apply {
+        setText(query)
+        setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_search, 0, 0, 0)
+        compoundDrawablePadding = dp(8)
+        compoundDrawableTintList = ColorStateList.valueOf(getColor(R.color.text_secondary))
+        imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+        setPaddingRelative(paddingStart, paddingTop, dp(48), paddingBottom)
+    }
+    val clear = iconButton(R.drawable.ic_close, getString(R.string.clear_search)) {
+        input.setText("")
+        input.requestFocus()
+    }
+    clear.visibility = if (query.isEmpty()) View.GONE else View.VISIBLE
+    input.onTextChanged { text ->
+        clear.visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
+        onQuery(text)
+    }
+    return FrameLayout(this).apply {
+        addView(input, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.CENTER_VERTICAL))
+        addView(clear, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.END or Gravity.CENTER_VERTICAL))
+    }
 }
 
 /** Labeled input with an optional supporting or error line. */

@@ -212,6 +212,42 @@ class Gfl2StreamParserTest {
     }
 
     @Test
+    fun unmergeableProfileContinuationKeepsBothPayloads() {
+        val parser = Gfl2StreamParser()
+        val first = outerMessage(
+            0,
+            payload(Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE, platoonProfilePayload(11uL, "First")),
+        )
+        val last = outerMessage(
+            42,
+            payload(Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE, platoonProfilePayload(11uL, "Second")),
+        )
+
+        assertTrue(parser.accept(first).isEmpty())
+        val payloads = parser.accept(last).filterIsInstance<ParseEvent.Payload>()
+
+        assertEquals(
+            listOf("First", "Second"),
+            payloads.map { (it.value.data as PlatoonProfileData).platoonName },
+        )
+        assertEquals(listOf(0, 42), payloads.map { it.value.messageId })
+        assertTrue(parser.finish().isEmpty())
+    }
+
+    @Test
+    fun unmergeablePendingPayloadSurvivesALaterContinuation() {
+        val parser = Gfl2StreamParser()
+        val profile = outerMessage(
+            0,
+            payload(Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE, platoonProfilePayload(11uL, "Only")),
+        )
+
+        assertTrue(parser.accept(profile).isEmpty())
+        assertTrue(parser.accept(profile).filterIsInstance<ParseEvent.Payload>().size == 1)
+        assertEquals(1, parser.finish().filterIsInstance<ParseEvent.Payload>().size)
+    }
+
+    @Test
     fun pendingContinuationIsEmittedWhenFlowFinishes() {
         val parser = Gfl2StreamParser()
         val first = outerMessage(
@@ -413,6 +449,9 @@ class Gfl2StreamParserTest {
             uintField(8, 3333uL)
         return messageField(1, member)
     }
+
+    private fun platoonProfilePayload(id: ULong, name: String): ByteArray =
+        messageField(1, uintField(1, id) + stringField(2, name))
 
     private fun formationsPayload(): ByteArray {
         val doll = uintField(1, 12uL) +

@@ -86,6 +86,11 @@ class PacketHistoryActivity : BaseActivity() {
         }
     }
 
+    override fun onScreenResumed() {
+        // The entry belongs to the Platoon it was opened from; a switch elsewhere closes it.
+        if (PlatoonProfileRegistry(this).active()?.storageId != intent.getStringExtra(EXTRA_STORAGE_ID)) finish()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean(STATE_RAW, showingRaw)
         super.onSaveInstanceState(outState)

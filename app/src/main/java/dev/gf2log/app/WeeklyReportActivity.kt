@@ -442,8 +442,10 @@ class WeeklyReportActivity : BaseActivity() {
                     health.unknownMetrics,
                 ),
                 icon = if (health.isComplete) R.drawable.ic_check_circle else R.drawable.ic_warning,
-                trailing = getString(R.string.how_it_works),
-            ) { WeeklyDialogs.showGuide(this@WeeklyReportActivity, report.isGunsmokeWeek) }, lp())
+            ) { WeeklyDialogs.showGuide(this@WeeklyReportActivity, report.isGunsmokeWeek) }.apply {
+                // The chevron carries the guide affordance so the counts keep the full row width.
+                contentDescription = "$contentDescription. ${getString(R.string.how_it_works)}"
+            }, lp())
         }
     }
 

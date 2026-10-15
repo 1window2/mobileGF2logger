@@ -467,7 +467,7 @@
     <string name="edited">Edited</string>
     <string name="evidence_complete">All values confirmed</string>
     <string name="evidence_guide_marks">Login and Daily Patrol: ✓ yes, × confirmed no, - not observed, ? undetermined.</string>
-    <string name="evidence_health_compact">Observed %1$d/%2$d days · exact %3$d · minimum %4$d · unknown %5$d</string>
+    <string name="evidence_health_compact">Observed %1$d/%2$d days\nExact %3$d · minimum %4$d · unknown %5$d</string>
     <string name="evidence_incomplete">Some values are minimums or unknown</string>
     <string name="evidence_unknown_short">unknown</string>
     <string name="go_to_current_week">This week</string>

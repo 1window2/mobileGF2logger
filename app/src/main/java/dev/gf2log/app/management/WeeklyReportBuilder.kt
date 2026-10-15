@@ -36,9 +36,6 @@ object WeeklyReportBuilder {
         val resolvedStandardTotals: ResolvedStandardTotals? = null,
         val gunsmokeAttemptsFloor: Int? = null,
     ) {
-        val observedDays: List<DayCell>
-            get() = days.filter { it.observed }
-
         val totalAttempts: Int?
             get() {
                 val known = days.mapNotNull(DayCell::attempts)
@@ -144,14 +141,6 @@ object WeeklyReportBuilder {
                 loginDaysCertainty,
                 patrolDaysCertainty,
             ).any { certainty -> certainty != MetricCertainty.EXACT }
-
-        val hasIncompleteEvidence: Boolean
-            get() = days.any {
-                it.evidence == DailyEvidence.NO_OBSERVATION ||
-                    it.evidence == DailyEvidence.INCOMPLETE_BOUNDARY ||
-                    it.evidence == DailyEvidence.PARTIAL_DAY ||
-                    it.evidence == DailyEvidence.SPARSE_INFERRED
-            }
     }
 
     data class ResolvedGunsmokeTotals(
@@ -285,16 +274,6 @@ object WeeklyReportBuilder {
                 evidence == DailyEvidence.ATTRIBUTED ||
                 evidence == DailyEvidence.PARTIAL_DAY ||
                 evidence == DailyEvidence.SPARSE_INFERRED
-
-        val isGunsmokeActivityUnknown: Boolean
-            get() = manualOverride == null &&
-                !hasDailyPatrolFact &&
-                evidence in setOf(
-                    DailyEvidence.NO_OBSERVATION,
-                    DailyEvidence.INCOMPLETE_BOUNDARY,
-                    DailyEvidence.PARTIAL_DAY,
-                    DailyEvidence.SPARSE_INFERRED,
-                )
     }
 
     fun build(

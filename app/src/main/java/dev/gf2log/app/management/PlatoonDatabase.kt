@@ -94,6 +94,14 @@ internal class PlatoonDatabase private constructor(
         PlatoonReadQueries.latestSnapshotIdentity(readableDatabase)
 
     @Synchronized
+    fun firstSnapshotCapturedAfter(instant: Instant): Instant? =
+        PlatoonReadQueries.firstSnapshotCapturedAfter(readableDatabase, instant)
+
+    @Synchronized
+    fun eventInstantsObservedAt(observedAt: Instant): List<Instant> =
+        PlatoonReadQueries.eventInstantsObservedAt(readableDatabase, observedAt)
+
+    @Synchronized
     fun snapshotSourceFiles(): Set<String> = PlatoonReadQueries.snapshotSourceFiles(readableDatabase)
 
     @Synchronized
@@ -119,7 +127,7 @@ internal class PlatoonDatabase private constructor(
         joined: MembershipBoundaryValue,
         withdrew: MembershipBoundaryValue,
         note: String,
-    ): Boolean = MembershipEditing.addWithdrawnMember(writableDatabase, uid, name, joined, withdrew, note)
+    ): Boolean = MembershipEditing.addWithdrawnMember(writableDatabase, ::gameZone, uid, name, joined, withdrew, note)
 
     @Synchronized
     fun addMembershipPeriod(
@@ -127,7 +135,7 @@ internal class PlatoonDatabase private constructor(
         joined: MembershipBoundaryValue,
         withdrew: MembershipBoundaryValue?,
         note: String,
-    ): Boolean = MembershipEditing.addMembershipPeriod(writableDatabase, uid, joined, withdrew, note)
+    ): Boolean = MembershipEditing.addMembershipPeriod(writableDatabase, ::gameZone, uid, joined, withdrew, note)
 
     @Synchronized
     fun listSnapshots(limit: Int = 100): List<PlatoonSnapshot> {
@@ -166,7 +174,7 @@ internal class PlatoonDatabase private constructor(
 
     @Synchronized
     fun deleteMembershipPeriod(membershipPeriodId: Long): Boolean =
-        MembershipEditing.deleteMembershipPeriod(writableDatabase, membershipPeriodId)
+        MembershipEditing.deleteMembershipPeriod(writableDatabase, ::gameZone, membershipPeriodId)
 
     @Synchronized
     fun updateMembershipPeriod(

@@ -1,10 +1,14 @@
 package dev.gf2log.app.management
 
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.DataInputStream
 import java.time.Instant
 import java.time.LocalDate
+import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -134,5 +138,75 @@ class WeeklyReportHistoryCodecTest {
         }
 
         WeeklyReportHistoryCodec.decode(payload)
+    }
+
+    @Test
+    fun roundTripKeepsManualOverridesOnTheirCells() {
+        val start = LocalDate.of(2026, 7, 26)
+        val merit = WeeklyCellOverride(42L, start, start.plusDays(1), 90L, null, null, true, null)
+        val patrol = WeeklyCellOverride(42L, start, start.plusDays(3), null, null, null, null, false)
+        val report = standardReport(start) { day ->
+            when (day) {
+                merit.gameDay -> merit
+                patrol.gameDay -> patrol
+                else -> null
+            }
+        }
+
+        val decoded = WeeklyReportHistoryCodec.decode(WeeklyReportHistoryCodec.encode(report).payload)
+
+        val cells = decoded.members.single().days
+        assertEquals(report.members.single().days.map { it.manualOverride }, cells.map { it.manualOverride })
+        assertEquals(EvidencePrecision.MANUAL, cells[1].precision)
+        assertEquals(report.members.single().days.map { it.observed }, cells.map { it.observed })
+    }
+
+    @Test
+    fun aRevisionWithoutOverridesKeepsItsEarlierFormatAndFingerprint() {
+        val start = LocalDate.of(2026, 7, 26)
+        val encoded = WeeklyReportHistoryCodec.encode(standardReport(start) { null })
+
+        val header = DataInputStream(GZIPInputStream(ByteArrayInputStream(encoded.payload))).use {
+            it.readInt()
+            it.readInt()
+        }
+
+        assertEquals(2, header)
+        assertNull(
+            WeeklyReportHistoryCodec.decode(encoded.payload).members.single().days
+                .firstNotNullOfOrNull { it.manualOverride },
+        )
+    }
+
+    private fun standardReport(
+        start: LocalDate,
+        overrideOn: (LocalDate) -> WeeklyCellOverride?,
+    ): WeeklyReportBuilder.Report {
+        val days = List(7) { start.plusDays(it.toLong()) }
+        return WeeklyReportBuilder.Report(
+            periodStart = start,
+            periodEnd = start.plusDays(6),
+            isGunsmokeWeek = false,
+            days = days,
+            members = listOf(
+                WeeklyReportBuilder.MemberRow(
+                    uid = 42L,
+                    name = "Edited member",
+                    days = days.map { day ->
+                        val override = overrideOn(day)
+                        WeeklyReportBuilder.DayCell(
+                            gameDay = day,
+                            meritDelta = override?.meritDelta,
+                            scoreDelta = null,
+                            inference = null,
+                            evidence = DailyEvidence.NO_OBSERVATION,
+                            manualOverride = override,
+                        )
+                    },
+                    totalMerit = 90L,
+                    totalScore = 0L,
+                ),
+            ),
+        )
     }
 }

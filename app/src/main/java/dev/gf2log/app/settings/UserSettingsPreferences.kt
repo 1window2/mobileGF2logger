@@ -182,10 +182,9 @@ internal object UserSettingsPreferences {
         gameTimeZoneId = preferences.getString(KEY_GAME_TIME_ZONE, ZoneId.systemDefault().id).orEmpty(),
         onboardingCompleted = preferences.getBoolean(KEY_ONBOARDING_COMPLETED, false),
         detailedNotifications = preferences.getBoolean(KEY_DETAILED_NOTIFICATIONS, true),
-        targetPackage = preferences.getString(
-            KEY_TARGET_PACKAGE,
-            TargetPackagePreferences.DEFAULT_TARGET_PACKAGE,
-        ).orEmpty(),
+        // The target package is no longer chosen at runtime, so an unusable stored value (an
+        // unvalidated copy from the v2.2 store) falls back instead of failing every backup.
+        targetPackage = backupTargetPackage(preferences.getString(KEY_TARGET_PACKAGE, null)),
         payloadHistory = PayloadCatalog.categories.associate { category ->
             category.payloadType to
                 (category.isRequired || preferences.getBoolean(payloadKey(category.payloadType), false))
@@ -218,8 +217,7 @@ internal object UserSettingsPreferences {
             Context.MODE_PRIVATE,
         ).safeString(TargetPackagePreferences.KEY_TARGET_PACKAGE)
             ?.trim()
-            ?.takeIf { TARGET_PACKAGE.matches(it) }
-            ?: TargetPackagePreferences.DEFAULT_TARGET_PACKAGE
+            .let(::backupTargetPackage)
         return AppBackupSettings(
             language = language,
             themeMode = "system",
@@ -325,6 +323,11 @@ internal object UserSettingsPreferences {
         .distinct()
 
     private fun payloadKey(payloadType: Int) = "payload_$payloadType"
+
+    /** [value] when the complete-backup codec accepts it, otherwise the default package. */
+    private fun backupTargetPackage(value: String?): String = value
+        ?.takeIf { it.length in 3..255 && TARGET_PACKAGE.matches(it) }
+        ?: TargetPackagePreferences.DEFAULT_TARGET_PACKAGE
 
     private val TARGET_PACKAGE = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
 }

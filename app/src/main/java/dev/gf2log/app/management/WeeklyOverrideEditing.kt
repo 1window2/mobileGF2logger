@@ -10,7 +10,8 @@ import java.time.LocalDate
  * set for the week, because the repository replaces a week's overrides as one unit.
  */
 object WeeklyOverrideEditing {
-    enum class Field { MERIT, SCORE, ATTEMPTS }
+    /** The invalid input; [ACTIVITY] is a Login NO with a Daily Patrol YES in the same edit. */
+    enum class Field { MERIT, SCORE, ATTEMPTS, ACTIVITY }
 
     /** A tri-state activity choice: unset clears the manual value, yes/no confirms it. */
     enum class Choice(val value: Boolean?) {
@@ -59,6 +60,21 @@ object WeeklyOverrideEditing {
             val merit = edit?.merit?.let { parseCounter(it) ?: return invalid(Field.MERIT) }
             val score = edit?.score?.let { parseCounter(it) ?: return invalid(Field.SCORE) }
             val attempts = edit?.attempts?.let { parseAttempts(it) ?: return invalid(Field.ATTEMPTS) }
+            if (edit?.attended == Choice.NO && edit.dailyPatrol == Choice.YES) {
+                return invalid(Field.ACTIVITY)
+            }
+            // A completed Daily Patrol requires attendance, so an edited choice settles a
+            // contradiction with the other stored one instead of producing an unstorable pair.
+            val attended = when {
+                edit?.attended != null -> edit.attended.value
+                edit?.dailyPatrol == Choice.YES && stored?.attended == false -> true
+                else -> stored?.attended
+            }
+            val dailyPatrol = when {
+                edit?.dailyPatrol != null -> edit.dailyPatrol.value
+                attended == false && stored?.dailyPatrol == true -> false
+                else -> stored?.dailyPatrol
+            }
             WeeklyCellOverride(
                 uid = cell.first,
                 periodStart = periodStart,
@@ -74,8 +90,8 @@ object WeeklyOverrideEditing {
                     edit?.attempts != null -> attempts?.value
                     else -> stored?.attempts
                 },
-                attended = if (edit?.attended != null) edit.attended.value else stored?.attended,
-                dailyPatrol = if (edit?.dailyPatrol != null) edit.dailyPatrol.value else stored?.dailyPatrol,
+                attended = attended,
+                dailyPatrol = dailyPatrol,
             ).takeIf { it.hasAnyValue() }
         }
         return Result.Valid(merged.sortedWith(compareBy({ it.gameDay }, { it.uid })))

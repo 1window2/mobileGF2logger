@@ -12,7 +12,8 @@ internal object WeeklyAnnotationStore {
         gameDayEpochDay: Long,
         text: String,
     ): Long {
-        require(text.isNotBlank())
+        val storedText = ManualTextPolicy.note(text)
+        require(storedText.isNotEmpty())
         require(
             WeeklyNotePolicy.isWithinWeek(
                 LocalDate.ofEpochDay(periodStartEpochDay),
@@ -33,7 +34,7 @@ internal object WeeklyAnnotationStore {
             ContentValues().apply {
                 put("period_start", periodStartEpochDay)
                 put("game_day", gameDayEpochDay)
-                put("text", text.trim())
+                put("text", storedText)
                 putNull("event_id")
                 put("is_automatic", 0)
             },

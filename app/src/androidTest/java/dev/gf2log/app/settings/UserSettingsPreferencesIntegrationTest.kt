@@ -57,6 +57,20 @@ class UserSettingsPreferencesIntegrationTest {
     }
 
     @Test
+    fun anUnusableStoredTargetPackageDoesNotBlockCompleteBackups() {
+        // A v2.2 unified store copied the target package without validating it.
+        context.getSharedPreferences("user_settings", Context.MODE_PRIVATE).edit()
+            .putInt("schema_version", 1)
+            .putString("target_package", "not a package")
+            .commit()
+
+        val settings = UserSettingsPreferences.read(context)
+
+        assertEquals(dev.gf2log.app.TargetPackagePreferences.DEFAULT_TARGET_PACKAGE, settings.targetPackage)
+        assertEquals(settings, AppBackupSettingsCodec.decode(AppBackupSettingsCodec.encode(settings)))
+    }
+
+    @Test
     fun cutlinesWrittenUnderTheExistingKeysRemainReadable() {
         context.getSharedPreferences("user_settings", Context.MODE_PRIVATE).edit()
             .putInt("schema_version", 4)

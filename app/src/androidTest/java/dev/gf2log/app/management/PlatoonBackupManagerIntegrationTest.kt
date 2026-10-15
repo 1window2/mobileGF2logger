@@ -17,6 +17,7 @@ import dev.gf2log.app.settings.AppSettingsStore
 import dev.gf2log.app.settings.BackupSettingsStore
 import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.app.settings.GameServerRegion
+import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.ScopedAppSettingsStore
 import dev.gf2log.app.settings.WeeklyCutlines
 import dev.gf2log.protocol.GuildMembersCsv
@@ -160,8 +161,10 @@ class PlatoonBackupManagerIntegrationTest {
         writeRetainedCsv(CURRENT_UID, "Cached current member")
         PlatoonBackupManager(context).restore(ByteArrayInputStream(archive))
 
+        // The stored value is untouched; settings reads project an unusable one to the default.
+        assertEquals(INVALID_TARGET_PACKAGE, TargetPackagePreferences.get(context))
         assertEquals(
-            currentSettings().copy(targetPackage = INVALID_TARGET_PACKAGE),
+            currentSettings().copy(targetPackage = TargetPackagePreferences.DEFAULT_TARGET_PACKAGE),
             settingsStore.read(),
         )
         assertFalse(FilePaths.retainedCsvDirectory(context).exists())
@@ -251,6 +254,24 @@ class PlatoonBackupManagerIntegrationTest {
         PlatoonBackupManager.recoverInterruptedFullRestore(context, settingsStore)
 
         assertEquals(archivedSettings(), settingsStore.read())
+        assertFalse(FilePaths.restoreTransactionDirectory(context).exists())
+    }
+
+    @Test
+    fun rollbackInterruptedWhileCleaningUpFinishesOnTheNextStart() {
+        settingsStore.replace(currentSettings())
+        // Older cleanup deleted the settings snapshot before the state, so an interruption there
+        // left a PREPARED state with only the rollback marker of an already completed rollback.
+        FilePaths.restoreStateFile(context).apply {
+            parentFile?.mkdirs()
+            writeText("PREPARED", Charsets.US_ASCII)
+        }
+        java.io.File(FilePaths.restoreTransactionDirectory(context), "settings.rollback_required")
+            .writeBytes(ByteArray(0))
+
+        PlatoonBackupManager.recoverInterruptedFullRestore(context)
+
+        assertEquals(currentSettings(), settingsStore.read())
         assertFalse(FilePaths.restoreTransactionDirectory(context).exists())
     }
 
@@ -552,6 +573,32 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     @Test
+    fun aFailedSealKeepsTheImportClaimUntilItsRollbackFinishes() {
+        seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
+        var undoAvailableDuringRollback: Boolean? = null
+        lateinit var manager: CsvImportCheckpointManager
+        manager = CsvImportCheckpointManager(context, storageScope) { checkpoint ->
+            if (checkpoint == PlatoonBackupManager.RestoreCheckpoint.DATABASE_INSTALLED) {
+                undoAvailableDuringRollback = manager.canUndo()
+            }
+        }
+
+        assertThrows(IllegalStateException::class.java) {
+            manager.runImport(emptySet()) {
+                // A digest that is already present makes seal fail after the import applied.
+                java.io.File(FilePaths.csvCheckpointDirectory(context), "post-import.sha256")
+                    .writeText("0".repeat(64), Charsets.US_ASCII)
+            }
+        }
+
+        // Another operation sees the claim for the whole rollback, then can take it again.
+        assertEquals(false, undoAvailableDuringRollback)
+        val retried = CsvImportCheckpointManager(context, storageScope)
+        retried.runImport(emptySet()) {}
+        assertTrue(retried.canUndo())
+    }
+
+    @Test
     fun interruptedCsvUndoCompletesAfterDatabaseInstallationOnRestart() {
         seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
         val manager = CsvImportCheckpointManager(context, storageScope) { checkpoint ->
@@ -741,6 +788,113 @@ class PlatoonBackupManagerIntegrationTest {
             ClientServerRegionPreferences(context).get(SupportedGamePackages.DARKWINTER),
         )
         assertFalse(context.getDatabasePath(restoredScope.databaseName).exists())
+    }
+
+    @Test
+    fun completeRestoreOfAnAutomaticResetRegionKeepsItFollowingTheProfile() {
+        seedDatabase(ARCHIVED_UID, "Archived member", "archived-source.csv")
+        assertTrue(GameTimeZonePreferences.isAutomatic(context, storageScope.storageId))
+        val archive = ByteArrayOutputStream().also {
+            PlatoonBackupManager(context).exportFull(it)
+        }.toByteArray()
+
+        PlatoonBackupManager(context).restoreFull(ByteArrayInputStream(archive))
+
+        // The archive records only the effective region, which equals the profile region, so
+        // no explicit override is fabricated that a later server change would leave stale.
+        assertTrue(GameTimeZonePreferences.isAutomatic(context, storageScope.storageId))
+        PlatoonProfileAdministration(context) { _, _, _ -> }
+            .changeServerRegion(storageScope.storageId, GameServerRegion.HAOPLAY_GLOBAL)
+        assertTimeZoneFollows(GameServerRegion.HAOPLAY_GLOBAL)
+    }
+
+    @Test
+    fun platoonOnlyRestoreThatChangesTheServerRegionClearsTheStaleOverride() {
+        seedDatabase(ARCHIVED_UID, "Archived member", "archived-source.csv")
+        val registry = PlatoonProfileRegistry(context)
+        registry.updateServerRegion(storageScope.storageId, GameServerRegion.HAOPLAY_GLOBAL)
+        val archive = ByteArrayOutputStream().also {
+            PlatoonBackupManager(context).export(it)
+        }.toByteArray()
+        registry.updateServerRegion(storageScope.storageId, GameServerRegion.HAOPLAY_KOREA)
+        // An override for the previous region, as an earlier complete restore wrote it.
+        GameTimeZonePreferences.setRegion(context, GameServerRegion.HAOPLAY_KOREA, storageScope.storageId)
+
+        PlatoonBackupManager(context).restore(ByteArrayInputStream(archive))
+
+        assertEquals(
+            GameServerRegion.HAOPLAY_GLOBAL,
+            registry.find(storageScope.storageId)?.serverRegion,
+        )
+        assertTimeZoneFollows(GameServerRegion.HAOPLAY_GLOBAL)
+    }
+
+    @Test
+    fun platoonOnlyRestoreThatKeepsTheServerRegionKeepsAnExplicitOverride() {
+        seedDatabase(ARCHIVED_UID, "Archived member", "archived-source.csv")
+        val archive = ByteArrayOutputStream().also {
+            PlatoonBackupManager(context).export(it)
+        }.toByteArray()
+        GameTimeZonePreferences.setRegion(context, GameServerRegion.HAOPLAY_GLOBAL, storageScope.storageId)
+
+        PlatoonBackupManager(context).restore(ByteArrayInputStream(archive))
+
+        assertFalse(GameTimeZonePreferences.isAutomatic(context, storageScope.storageId))
+        assertEquals(
+            GameServerRegion.HAOPLAY_GLOBAL,
+            GameTimeZonePreferences.region(context, storageScope.storageId),
+        )
+    }
+
+    @Test
+    fun interruptedRestoresPutTheExactTimeZoneKeysBack() {
+        seedDatabase(ARCHIVED_UID, "Archived member", "archived-source.csv")
+        val registry = PlatoonProfileRegistry(context)
+        registry.updateServerRegion(storageScope.storageId, GameServerRegion.HAOPLAY_GLOBAL)
+        val platoonArchive = ByteArrayOutputStream().also {
+            PlatoonBackupManager(context).export(it)
+        }.toByteArray()
+        registry.updateServerRegion(storageScope.storageId, GameServerRegion.HAOPLAY_KOREA)
+        val completeArchive = ByteArrayOutputStream().also {
+            PlatoonBackupManager(context).exportFull(it)
+        }.toByteArray()
+        val dying = PlatoonBackupManager(
+            context = context,
+            settingsStore = settingsStore,
+            restoreObserver = { checkpoint ->
+                if (checkpoint == PlatoonBackupManager.RestoreCheckpoint.PROFILE_METADATA_INSTALLED) {
+                    throw SimulatedProcessDeath()
+                }
+            },
+            storageScope = storageScope,
+        )
+
+        // An automatic region survives an interrupted complete restore as automatic.
+        val automatic = GameTimeZonePreferences.scopedState(context, storageScope.storageId)
+        assertThrows(SimulatedProcessDeath::class.java) {
+            dying.restoreFull(ByteArrayInputStream(completeArchive))
+        }
+        PlatoonBackupManager.recoverInterruptedFullRestore(context)
+        assertEquals(automatic, GameTimeZonePreferences.scopedState(context, storageScope.storageId))
+
+        // An explicit override cleared by a region-changing restore comes back on rollback.
+        GameTimeZonePreferences.setRegion(context, GameServerRegion.HAOPLAY_JAPAN, storageScope.storageId)
+        val explicit = GameTimeZonePreferences.scopedState(context, storageScope.storageId)
+        assertThrows(SimulatedProcessDeath::class.java) {
+            dying.restore(ByteArrayInputStream(platoonArchive))
+        }
+        PlatoonBackupManager.recoverInterruptedFullRestore(context)
+        assertEquals(explicit, GameTimeZonePreferences.scopedState(context, storageScope.storageId))
+        assertEquals(
+            GameServerRegion.HAOPLAY_KOREA,
+            registry.find(storageScope.storageId)?.serverRegion,
+        )
+    }
+
+    private fun assertTimeZoneFollows(region: GameServerRegion) {
+        assertTrue(GameTimeZonePreferences.isAutomatic(context, storageScope.storageId))
+        assertEquals(region, GameTimeZonePreferences.region(context, storageScope.storageId))
+        assertEquals(region.serverZone, GameTimeZonePreferences.get(context, storageScope.storageId))
     }
 
     private fun replaceDatabaseWithCurrentState() {

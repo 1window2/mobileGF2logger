@@ -2,6 +2,8 @@ package dev.gf2log.app.management
 
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
+import java.time.ZoneOffset
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -14,13 +16,13 @@ class MembershipConsistencyPolicyTest {
             interval(2, "2026-02-01T00:00:00Z", null),
         )
 
-        assertNull(MembershipConsistencyPolicy.violation(periods))
+        assertNull(violation(periods))
     }
 
     @Test
     fun overlappingAndMultipleOpenPeriodsAreRejected() {
         assertNotNull(
-            MembershipConsistencyPolicy.violation(
+            violation(
                 listOf(
                     interval(1, "2026-01-01T00:00:00Z", "2026-03-01T00:00:00Z"),
                     interval(2, "2026-02-01T00:00:00Z", "2026-04-01T00:00:00Z"),
@@ -28,7 +30,7 @@ class MembershipConsistencyPolicyTest {
             ),
         )
         assertNotNull(
-            MembershipConsistencyPolicy.violation(
+            violation(
                 listOf(
                     interval(1, "2026-01-01T00:00:00Z", null),
                     interval(2, "2026-02-01T00:00:00Z", null),
@@ -41,7 +43,7 @@ class MembershipConsistencyPolicyTest {
     fun closedTimelineIsValid() {
         val periods = listOf(interval(1, "2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z"))
 
-        assertNull(MembershipConsistencyPolicy.violation(periods))
+        assertNull(violation(periods))
     }
 
     @Test
@@ -51,7 +53,7 @@ class MembershipConsistencyPolicyTest {
             interval(2, "2026-02-01T00:00:00Z", null),
         )
 
-        assertNull(MembershipConsistencyPolicy.violation(periods))
+        assertNull(violation(periods))
     }
 
     @Test
@@ -67,7 +69,7 @@ class MembershipConsistencyPolicyTest {
             leftTimeKnown = false,
         )
 
-        assertNull(MembershipConsistencyPolicy.violation(listOf(period)))
+        assertNull(violation(listOf(period)))
     }
 
     @Test
@@ -88,7 +90,7 @@ class MembershipConsistencyPolicyTest {
             joinedTimeKnown = false,
         )
 
-        assertNull(MembershipConsistencyPolicy.violation(listOf(first, second)))
+        assertNull(violation(listOf(first, second)))
     }
 
     @Test
@@ -109,7 +111,7 @@ class MembershipConsistencyPolicyTest {
         )
 
         assertNull(
-            MembershipConsistencyPolicy.violation(
+            violation(
                 listOf(laterInsertedFirst, earlierInsertedSecond),
             ),
         )
@@ -141,7 +143,7 @@ class MembershipConsistencyPolicyTest {
             leftDate = LocalDate.of(2026, 5, 4),
         )
 
-        assertNull(MembershipConsistencyPolicy.violation(listOf(knownLate, dateOnly, knownEarly)))
+        assertNull(violation(listOf(knownLate, dateOnly, knownEarly)))
     }
 
     private fun interval(id: Long, joined: String?, left: String?) = MembershipInterval(
@@ -149,4 +151,43 @@ class MembershipConsistencyPolicyTest {
         joinedAt = joined?.let(Instant::parse),
         leftAt = left?.let(Instant::parse),
     )
+
+    @Test
+    fun boundariesWithoutAStoredDateAreDatedInTheGameZone() {
+        val shanghai = ZoneId.of("Asia/Shanghai")
+        // A manual stay from 06:00 to 07:00 on 10-16, then an exact open join at 07:30 that day.
+        // In UTC the exact join falls on 10-15 and would sort, open, before the manual stay.
+        val manual = MembershipInterval(
+            id = 1,
+            joinedAt = Instant.parse("2026-10-15T22:00:00Z"),
+            leftAt = Instant.parse("2026-10-15T23:00:00Z"),
+            joinedDate = LocalDate.of(2026, 10, 16),
+            leftDate = LocalDate.of(2026, 10, 16),
+        )
+        val exact = MembershipInterval(id = 2, joinedAt = Instant.parse("2026-10-15T23:30:00Z"), leftAt = null)
+
+        assertNull(MembershipConsistencyPolicy.violation(listOf(manual, exact), shanghai))
+    }
+
+    @Test
+    fun aDateOnlyRejoinOnTheDayOfAnExactWithdrawalIsNotAProvenOverlap() {
+        val shanghai = ZoneId.of("Asia/Shanghai")
+        val withdrawn = MembershipInterval(
+            id = 1,
+            joinedAt = Instant.parse("2026-10-01T02:00:00Z"),
+            leftAt = Instant.parse("2026-10-16T02:00:00Z"),
+        )
+        val rejoined = MembershipInterval(
+            id = 2,
+            joinedAt = Instant.parse("2026-10-15T16:00:00Z"),
+            leftAt = null,
+            joinedDate = LocalDate.of(2026, 10, 16),
+            joinedTimeKnown = false,
+        )
+
+        assertNull(MembershipConsistencyPolicy.violation(listOf(withdrawn, rejoined), shanghai))
+    }
+
+    private fun violation(periods: List<MembershipInterval>) =
+        MembershipConsistencyPolicy.violation(periods, ZoneOffset.UTC)
 }

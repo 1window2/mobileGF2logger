@@ -2,7 +2,7 @@ package dev.gf2log.app.management
 
 import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneOffset
+import java.time.ZoneId
 
 /** One persisted membership interval used by the deterministic consistency audit. */
 internal data class MembershipInterval(
@@ -17,7 +17,18 @@ internal data class MembershipInterval(
 
 /** Enforces chronology rules shared by manual edits and post-mutation verification. */
 internal object MembershipConsistencyPolicy {
-    fun violation(periods: List<MembershipInterval>): String? {
+    /**
+     * Manual boundaries store the calendar date they were entered for in the game zone, while
+     * snapshot and exact boundaries store only an instant. Each missing date is derived in
+     * [zoneId], so both kinds are compared on the same calendar.
+     */
+    fun violation(intervals: List<MembershipInterval>, zoneId: ZoneId): String? {
+        val periods = intervals.map { period ->
+            period.copy(
+                joinedDate = period.joinedDate ?: period.joinedAt?.atZone(zoneId)?.toLocalDate(),
+                leftDate = period.leftDate ?: period.leftAt?.atZone(zoneId)?.toLocalDate(),
+            )
+        }
         periods.forEach { period ->
             if (!hasValidOwnChronology(period)) {
                 return "Membership period ${period.id} does not end after it starts"
@@ -55,8 +66,8 @@ internal object MembershipConsistencyPolicy {
     private fun compareStarts(first: MembershipInterval, second: MembershipInterval): Int {
         val firstInstant = requireNotNull(first.joinedAt)
         val secondInstant = requireNotNull(second.joinedAt)
-        val firstDate = first.joinedDate ?: firstInstant.atZone(ZoneOffset.UTC).toLocalDate()
-        val secondDate = second.joinedDate ?: secondInstant.atZone(ZoneOffset.UTC).toLocalDate()
+        val firstDate = requireNotNull(first.joinedDate)
+        val secondDate = requireNotNull(second.joinedDate)
         val dateOrder = firstDate.compareTo(secondDate)
         if (dateOrder != 0) return dateOrder
         // Keep known instants contiguous and ordered before date-only boundaries.

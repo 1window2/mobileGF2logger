@@ -78,6 +78,26 @@ class WeeklyShareProjectionTest {
         assertEquals("Member 1", document.rows.single().member)
     }
 
+    @Test
+    fun shortenedLabelsAndNotesNeverSplitASurrogatePair() {
+        val emoji = "\uD83D\uDE00"
+        // An even run of ASCII leaves the 128th and 512th UTF-16 unit on an emoji's high half.
+        val name = "a".repeat(127) + emoji + "tail"
+        val note = "b".repeat(511) + emoji + "tail"
+        val base = report()
+        val report = base.copy(members = base.members.map { it.copy(name = name) })
+
+        val row = WeeklyShareProjection.build(
+            report,
+            report.members,
+            privateNotesByUid = mapOf(123L to note),
+            privacy = WeeklyShareProjection.Privacy(includePrivateNotes = true),
+        ).rows.single()
+
+        assertEquals("a".repeat(127), row.member)
+        assertEquals("b".repeat(511), row.privateNote)
+    }
+
     private fun report(): WeeklyReportBuilder.Report {
         val start = LocalDate.of(2026, 8, 10)
         val days = (0L..6L).map(start::plusDays)

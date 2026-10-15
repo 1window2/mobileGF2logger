@@ -52,9 +52,24 @@ internal class PlatoonRepository(
             result.duplicate -> Unit
             // A replayed older roster can rebuild membership periods across every week.
             result.historical -> recordAllLiveWeeklyReports()
-            else -> recordChangedWeeks(setOf(capturedAt))
+            else -> recordChangedWeeks(sequenceOf(capturedAt) + rosterBoundaryInstants(result, capturedAt))
         }
         return result
+    }
+
+    /**
+     * A roster that joins or withdraws members can correlate each boundary to an exact activity
+     * time anywhere after the previous roster, possibly in an earlier week. Those events are
+     * observed at [capturedAt], so their times name every week the roster changed.
+     */
+    private fun rosterBoundaryInstants(result: SnapshotIngestResult, capturedAt: Instant): List<Instant> {
+        if (result.joined + result.rejoined + result.left == 0) return emptyList()
+        return try {
+            access { it.eventInstantsObservedAt(capturedAt) }
+        } catch (error: Exception) {
+            Log.e(TAG, "Unable to read roster boundary times; refreshing the roster's week", error)
+            emptyList()
+        }
     }
 
     fun ingestActivity(
@@ -470,12 +485,26 @@ internal class PlatoonRepository(
     private fun recordChangedWeeks(instants: Iterable<Instant>) =
         recordChangedWeeks(instants.asSequence())
 
+    /**
+     * Refreshes the weeks that evidence at [instants] can change, including neighbouring weeks
+     * that read it across a 05:00 reset (see [WeeklyHistoryWorkPolicy.affectedPeriodStarts]).
+     * If the neighbour scan fails, the instants' own game weeks are still refreshed.
+     */
     private fun recordChangedWeeks(instants: Sequence<Instant>) {
         val zone = gameZone()
-        WeeklyHistoryWorkPolicy.changedPeriodStarts(instants, zone)
-            .forEach { periodStart ->
-                recordLiveWeeklyRevisionSafely(periodStart, zone)
-            }
+        val changed = instants.toList()
+        val weeks = try {
+            WeeklyHistoryWorkPolicy.affectedPeriodStarts(
+                instants = changed.asSequence(),
+                zoneId = zone,
+                listedPeriodStarts = weeklyPeriodStarts(zone),
+                nextSnapshotAfter = { instant -> access { it.firstSnapshotCapturedAfter(instant) } },
+            )
+        } catch (error: Exception) {
+            Log.e(TAG, "Unable to scope neighbouring weekly history; refreshing own weeks", error)
+            WeeklyHistoryWorkPolicy.affectedPeriodStarts(changed.asSequence(), zone, emptyList()) { null }
+        }
+        weeks.forEach { periodStart -> recordLiveWeeklyRevisionSafely(periodStart, zone) }
     }
 
     /** Refreshes every derived weekly revision after a primary-data mutation. */

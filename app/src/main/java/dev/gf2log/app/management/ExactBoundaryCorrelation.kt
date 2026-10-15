@@ -246,11 +246,7 @@ internal object ExactBoundaryCorrelation {
               AND source != ?
               AND ABS(COALESCE(occurred_at, observed_at) - ?) <= ?
             ORDER BY distance,
-                     CASE source
-                       WHEN '${EvidenceSource.GAME_UPDATES.name}' THEN 0
-                       WHEN '${EvidenceSource.MANUAL.name}' THEN 1
-                       ELSE 2
-                     END,
+                     CASE source WHEN '${EvidenceSource.MANUAL.name}' THEN 0 ELSE 1 END,
                      id DESC
             """.trimIndent(),
             arrayOf(

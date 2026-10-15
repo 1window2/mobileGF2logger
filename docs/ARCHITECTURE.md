@@ -212,7 +212,11 @@ payload with 128-character names, and Updates ingestion accepts at most 250
 distinct supported observations. Packet-triggered weekly-history work derives
 only from those accepted observations and is independently capped at 32
 distinct periods per ingest, so rejected timestamps cannot amplify report or
-SQLite work. SQLite retains the newest 10,000 activity
+SQLite work. Within that cap, `WeeklyHistoryWorkPolicy` adds the listed
+neighbouring weeks that read an instant across a 05:00 reset (the closed week
+of an exact-reset roster, the calendar-day Join / Withdraw week, and later
+weeks up to the next stored roster), so their stored revisions never lag the
+live projection. SQLite retains the newest 10,000 activity
 facts, and one ingestion resolves at most 250 unresolved facts. A database-local
 cursor rotates those bounded batches through the complete retained backlog.
 Schema v11 owns the rotation cursor and a global `(captured_at, id)` retention
@@ -220,7 +224,11 @@ index. Schema v13 repairs the derived active-member projection from canonical
 membership periods during upgrade; supported older backups are upgraded before
 strict current-schema validation.
 These limits are enforced again at repository and persistence boundaries so a
-future caller cannot bypass the protocol-layer checks.
+future caller cannot bypass the protocol-layer checks. User-entered text has
+the same treatment: `ManualTextPolicy` trims and then rejects a member name
+over 256 characters or a private, membership-period, or weekly note over
+1,000 characters inside `MembershipEditing` and `WeeklyAnnotationStore`,
+before any row is written.
 
 ## HTTPS and application-layer encryption
 
@@ -293,8 +301,13 @@ from two clients cannot be combined into a false completion.
 CSV preview and apply retain the same immutable scope even if an Activity is
 recreated. A scoped backup is validated before profile metadata changes. Its
 database, settings, retained CSV retirement, registry metadata, active profile,
-and client-region routing then commit under one durable journal; interrupted
-restores roll all of those resources back together.
+client-region routing, and the scoped reset-zone keys then commit under one
+durable journal; interrupted restores roll all of those resources back
+together. The journal keeps the exact previous timezone keys because replaying
+effective settings would turn an automatic region into an explicit one.
+`RestoredTimeZonePolicy` decides, after the profile is installed, whether the
+restored override is redundant (complete restore) or stale (Platoon-only
+restore that changed the server region) and clears it.
 
 Profile server edits retain the immutable scope and rebuild weekly history under
 the repository's exclusive database gate. Full profile deletion uses a durable
@@ -363,7 +376,10 @@ the repository maintenance lock. The previous database and a settings snapshot
 are retained until both resources commit, so any failure restores the prior
 state instead of leaving a partial import. A fresh install records that no
 database existed so rollback removes the staged replacement rather than
-mistaking it for prior state. Schema introspection uses the extended SQLite
+mistaking it for prior state. Cleanup deletes the transaction state file
+first, so a process death during cleanup leaves only leftovers to delete
+rather than a half-cleaned PREPARED transaction that recovery would reject on
+every start. Schema introspection uses the extended SQLite
 column metadata where available and the equivalent ordinary-column metadata on
 the older SQLite engine shipped with the supported Android 8 minimum.
 

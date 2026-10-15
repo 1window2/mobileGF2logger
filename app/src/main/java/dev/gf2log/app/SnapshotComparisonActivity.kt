@@ -1,7 +1,5 @@
 package dev.gf2log.app
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.os.Bundle
 import android.text.TextUtils
 import android.view.View
@@ -72,10 +70,12 @@ class SnapshotComparisonActivity : BaseActivity() {
             return
         }
         screen.topBar.setActions(listOf(BarAction(R.drawable.ic_copy, getString(R.string.copy_csv)) {
-            getSystemService(ClipboardManager::class.java).setPrimaryClip(
-                ClipData.newPlainText(getString(R.string.snapshot_csv_clipboard_label), SnapshotComparisonCsv.format(result)),
+            Feedback.copy(
+                this,
+                getString(R.string.snapshot_csv_clipboard_label),
+                SnapshotComparisonCsv.format(result),
+                R.string.snapshot_csv_copied,
             )
-            Feedback.show(this, R.string.snapshot_csv_copied)
         }))
         content.addView(panel {
             addView(text(getString(R.string.comparison_window), TextRole.LABEL), lp())

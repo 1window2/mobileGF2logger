@@ -1,7 +1,5 @@
 package dev.gf2log.app
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Typeface
 import android.os.Bundle
@@ -158,9 +156,7 @@ class PacketHistoryActivity : BaseActivity() {
     }
 
     private fun copy(content: String) {
-        getSystemService(ClipboardManager::class.java)
-            .setPrimaryClip(ClipData.newPlainText(getString(R.string.clipboard_label), content))
-        Feedback.show(this, R.string.status_packet_copied)
+        Feedback.copy(this, getString(R.string.clipboard_label), content, R.string.status_packet_copied)
     }
 
     private fun confirmSend(content: String) {

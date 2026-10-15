@@ -1,8 +1,6 @@
 package dev.gf2log.app
 
 import android.app.AlertDialog
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -42,6 +40,8 @@ import dev.gf2log.app.ui.navigationRow
 import dev.gf2log.app.ui.panel
 import dev.gf2log.app.ui.sectionHeader
 import dev.gf2log.app.ui.switchRow
+import dev.gf2log.app.ui.errorLine
+import dev.gf2log.app.ui.showMessage
 import dev.gf2log.app.ui.text
 import dev.gf2log.app.ui.textField
 import dev.gf2log.protocol.PayloadCatalog
@@ -394,11 +394,7 @@ class OptionsActivity : BaseActivity() {
             id = R.id.webhook_input,
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI,
         )
-        val error = text(null, TextRole.CAPTION) {
-            setTextColor(getColor(R.color.destructive_action))
-            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-            visibility = View.GONE
-        }
+        val error = errorLine()
         val builder = Dialogs.builder(this)
             .setTitle(R.string.discord_webhook)
             .setView(Dialogs.content(this) {
@@ -419,8 +415,7 @@ class OptionsActivity : BaseActivity() {
                         Feedback.show(this, R.string.discord_webhook_saved)
                         renderWebhookRow(container)
                     } else {
-                        error.text = getString(R.string.discord_webhook_invalid)
-                        error.visibility = View.VISIBLE
+                        error.showMessage(getString(R.string.discord_webhook_invalid))
                     }
                 }
             }
@@ -464,9 +459,7 @@ class OptionsActivity : BaseActivity() {
                 .setPositiveButton(R.string.done, null)
             if (diagnostics != null) {
                 builder.setNeutralButton(R.string.copy) { _, _ ->
-                    getSystemService(ClipboardManager::class.java)
-                        .setPrimaryClip(ClipData.newPlainText(getString(R.string.last_capture_diagnostics), message))
-                    Feedback.show(this, R.string.copied)
+                    Feedback.copy(this, getString(R.string.last_capture_diagnostics), message, R.string.copied)
                 }
             }
             Dialogs.show(builder)

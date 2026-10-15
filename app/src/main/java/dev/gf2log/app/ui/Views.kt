@@ -218,6 +218,18 @@ internal fun Context.searchField(hintText: CharSequence, @IdRes id: Int, query: 
     }
 }
 
+/** Hidden inline error for dialogs and forms; [showMessage] reveals it and announces the change. */
+internal fun Context.errorLine(): TextView = text(null, TextRole.CAPTION) {
+    setTextColor(getColor(R.color.destructive_action))
+    accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+    visibility = View.GONE
+}
+
+internal fun TextView.showMessage(message: CharSequence) {
+    text = message
+    visibility = View.VISIBLE
+}
+
 /** Labeled input with an optional supporting or error line. */
 internal class LabeledField(
     context: Context,

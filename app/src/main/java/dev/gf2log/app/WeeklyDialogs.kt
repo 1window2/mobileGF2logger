@@ -25,6 +25,8 @@ import dev.gf2log.app.ui.dp
 import dev.gf2log.app.ui.lp
 import dev.gf2log.app.ui.row
 import dev.gf2log.app.ui.switchRow
+import dev.gf2log.app.ui.errorLine
+import dev.gf2log.app.ui.showMessage
 import dev.gf2log.app.ui.text
 import dev.gf2log.app.ui.textField
 
@@ -102,11 +104,7 @@ internal object WeeklyDialogs {
         val patrolInitial = current?.dailyPatrol ?: Choice.of(cell.dailyPatrol)
         var login = loginInitial
         var patrol = patrolInitial
-        val error = activity.text(null, TextRole.CAPTION) {
-            setTextColor(activity.getColor(R.color.destructive_action))
-            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-            visibility = View.GONE
-        }
+        val error = activity.errorLine()
         val clear = activity.button(activity.getString(R.string.clear_manual_values), Controls.Role.DESTRUCTIVE_TEXT) {}
         val content = Dialogs.content(activity) {
             addView(activity.text(activity.getString(R.string.manual_edit_hint), TextRole.SECONDARY), activity.lp())
@@ -140,10 +138,9 @@ internal object WeeklyDialogs {
                     listOf(edit),
                 )
                 if (probe is WeeklyOverrideEditing.Result.Invalid) {
-                    error.text = activity.getString(
+                    error.showMessage(activity.getString(
                         if (probe.field == WeeklyOverrideEditing.Field.ATTEMPTS) R.string.invalid_attempts else R.string.invalid_counter,
-                    )
-                    error.visibility = View.VISIBLE
+                    ))
                     return
                 }
                 dialog.dismiss()

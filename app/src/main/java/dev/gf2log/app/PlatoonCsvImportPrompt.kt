@@ -23,6 +23,8 @@ import dev.gf2log.app.ui.WRAP
 import dev.gf2log.app.ui.button
 import dev.gf2log.app.ui.dp
 import dev.gf2log.app.ui.lp
+import dev.gf2log.app.ui.errorLine
+import dev.gf2log.app.ui.showMessage
 import dev.gf2log.app.ui.text
 import dev.gf2log.app.ui.textField
 import java.util.concurrent.Executors
@@ -89,11 +91,7 @@ internal object PlatoonCsvImportPrompt {
             activity.textField(activity.getString(R.string.platoon_id_hint), inputType = InputType.TYPE_CLASS_NUMBER),
         )
         val servers = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-        val error = activity.text(null, TextRole.CAPTION) {
-            setTextColor(activity.getColor(R.color.destructive_action))
-            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-            visibility = View.GONE
-        }
+        val error = activity.errorLine()
         lateinit var dialog: AlertDialog
         fun validId(): Long? = platoonId.input.text.toString().toLongOrNull()?.takeIf { it in 1L..UInt.MAX_VALUE.toLong() }
         fun updateEnabled() {
@@ -160,8 +158,7 @@ internal object PlatoonCsvImportPrompt {
                                 onCreated(it)
                             },
                             onFailure = {
-                                error.text = activity.getString(R.string.unable_to_add_platoon_profile)
-                                error.visibility = View.VISIBLE
+                                error.showMessage(activity.getString(R.string.unable_to_add_platoon_profile))
                             },
                         )
                     }

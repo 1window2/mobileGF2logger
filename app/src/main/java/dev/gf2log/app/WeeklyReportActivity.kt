@@ -1,8 +1,6 @@
 package dev.gf2log.app
 
 import android.app.DatePickerDialog
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Intent
 import android.os.Bundle
 import android.text.TextUtils
@@ -787,10 +785,7 @@ class WeeklyReportActivity : BaseActivity() {
 
     private fun copyWeek() {
         val report = model?.report ?: return
-        getSystemService(ClipboardManager::class.java).setPrimaryClip(
-            ClipData.newPlainText(getString(R.string.weekly_csv_clipboard_label), WeeklyReportCsv.format(report)),
-        )
-        Feedback.show(this, R.string.weekly_csv_copied)
+        Feedback.copy(this, getString(R.string.weekly_csv_clipboard_label), WeeklyReportCsv.format(report), R.string.weekly_csv_copied)
     }
 
     private fun share() {

@@ -50,6 +50,8 @@ import dev.gf2log.app.ui.lp
 import dev.gf2log.app.ui.panel
 import dev.gf2log.app.ui.row
 import dev.gf2log.app.ui.selectableRect
+import dev.gf2log.app.ui.errorLine
+import dev.gf2log.app.ui.showMessage
 import dev.gf2log.app.ui.text
 import dev.gf2log.app.ui.textField
 import java.time.Instant
@@ -364,11 +366,7 @@ class PlatoonActivity : BaseActivity() {
             getString(R.string.membership_note_hint),
             textField(getString(R.string.membership_note_hint), singleLine = false),
         )
-        val error = text(null, TextRole.CAPTION) {
-            setTextColor(getColor(R.color.destructive_action))
-            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-            visibility = View.GONE
-        }
+        val error = errorLine()
         val content = Dialogs.content(this) {
             listOf<View>(uid, nickname, joined, withdrew, note, error).forEachIndexed { index, view ->
                 addView(view, lp(top = if (index == 0) 0 else 12))
@@ -395,8 +393,7 @@ class PlatoonActivity : BaseActivity() {
                     else -> null
                 }
                 if (problem != null) {
-                    error.text = getString(problem)
-                    error.visibility = View.VISIBLE
+                    error.showMessage(getString(problem))
                     return@setOnClickListener
                 }
                 button.isEnabled = false
@@ -418,8 +415,7 @@ class PlatoonActivity : BaseActivity() {
                         Feedback.show(this, R.string.saved)
                         load()
                     } else {
-                        error.text = getString(R.string.invalid_withdrawn_member)
-                        error.visibility = View.VISIBLE
+                        error.showMessage(getString(R.string.invalid_withdrawn_member))
                     }
                 }
             }

@@ -36,6 +36,8 @@ import dev.gf2log.app.ui.navigationRow
 import dev.gf2log.app.ui.panel
 import dev.gf2log.app.ui.row
 import dev.gf2log.app.ui.sectionHeader
+import dev.gf2log.app.ui.errorLine
+import dev.gf2log.app.ui.showMessage
 import dev.gf2log.app.ui.text
 import dev.gf2log.app.ui.textField
 import java.time.Instant
@@ -291,7 +293,7 @@ class MemberDetailActivity : BaseActivity() {
             zone = zone,
         )
         val noteInput = textField(getString(R.string.membership_note_hint), singleLine = false).apply { setText(period.note) }
-        val error = errorText()
+        val error = errorLine()
         val canDelete = status.membershipPeriods.size > 1
         val body = Dialogs.content(this) {
             addView(joined, lp())
@@ -315,7 +317,7 @@ class MemberDetailActivity : BaseActivity() {
                 val joinedBoundary = joined.boundary
                 val leftBoundary = left.boundary
                 if (joinedBoundary == null || !isValidMembershipRange(joinedBoundary, leftBoundary)) {
-                    error.show(R.string.invalid_date)
+                    error.showMessage(getString(R.string.invalid_date))
                     return@setOnClickListener
                 }
                 button.isEnabled = false
@@ -329,7 +331,7 @@ class MemberDetailActivity : BaseActivity() {
                         Feedback.show(this, R.string.saved)
                         load()
                     } else {
-                        error.show(R.string.membership_period_save_failed)
+                        error.showMessage(getString(R.string.membership_period_save_failed))
                     }
                 }
             }
@@ -362,7 +364,7 @@ class MemberDetailActivity : BaseActivity() {
         val joined = DateTimePickerInput(this, getString(R.string.join_label), dateRequired = true, zone = zone)
         val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_label), zone = zone)
         val noteInput = textField(getString(R.string.membership_note_hint), singleLine = false)
-        val error = errorText()
+        val error = errorLine()
         val body = Dialogs.content(this) {
             addView(joined, lp())
             addView(withdrew, lp(top = 12))
@@ -380,7 +382,7 @@ class MemberDetailActivity : BaseActivity() {
                 val joinedBoundary = joined.boundary
                 val withdrewBoundary = withdrew.boundary
                 if (joinedBoundary == null || !isValidMembershipRange(joinedBoundary, withdrewBoundary)) {
-                    error.show(R.string.invalid_date)
+                    error.showMessage(getString(R.string.invalid_date))
                     return@setOnClickListener
                 }
                 button.isEnabled = false
@@ -393,22 +395,11 @@ class MemberDetailActivity : BaseActivity() {
                         dialog.dismiss()
                         load()
                     } else {
-                        error.show(R.string.membership_period_overlap)
+                        error.showMessage(getString(R.string.membership_period_overlap))
                     }
                 }
             }
         }
-    }
-
-    private fun errorText() = text(null, TextRole.CAPTION) {
-        setTextColor(getColor(R.color.destructive_action))
-        accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-        visibility = View.GONE
-    }
-
-    private fun android.widget.TextView.show(message: Int) {
-        text = getString(message)
-        visibility = View.VISIBLE
     }
 
     private fun boundaryText(date: LocalDate?, instant: Instant?, timeKnown: Boolean, zone: ZoneId): String {

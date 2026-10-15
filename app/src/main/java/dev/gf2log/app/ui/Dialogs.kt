@@ -152,4 +152,11 @@ internal object Feedback {
     fun show(context: Context, @StringRes message: Int, long: Boolean = false) {
         show(context, context.getString(message), long)
     }
+
+    /** Copies plain [value] under the clipboard [label] and confirms with [confirmation]. */
+    fun copy(context: Context, label: CharSequence, value: CharSequence, @StringRes confirmation: Int) {
+        context.getSystemService(android.content.ClipboardManager::class.java)
+            .setPrimaryClip(android.content.ClipData.newPlainText(label, value))
+        show(context, confirmation)
+    }
 }

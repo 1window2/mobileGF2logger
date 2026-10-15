@@ -121,7 +121,7 @@ class MemberDetailActivity : BaseActivity() {
             }, lp())
             addView(row {
                 addView(sectionHeader(getString(R.string.membership_history)), lp(width = 0, weight = 1f))
-                addView(button(getString(R.string.add_membership_history_short), Controls.Role.TERTIARY, R.drawable.ic_add_circle) {
+                addView(button(getString(R.string.add_membership_history_short), Controls.Role.TERTIARY, R.drawable.ic_add) {
                     addMembershipPeriod()
                 }, lp(WRAP, WRAP, top = 8))
             }, lp())
@@ -170,7 +170,7 @@ class MemberDetailActivity : BaseActivity() {
         val status = loaded.status
         screen.topBar.setTitle(status.name, "#${status.uid}")
         statusPanel.addView(row {
-            addView(text(status.name, TextRole.TITLE), lp(width = 0, weight = 1f))
+            addView(text(getString(R.string.member_since, firstSeen(status, loaded.zone)), TextRole.SECONDARY), lp(width = 0, weight = 1f))
             addView(badge(
                 getString(if (status.isActive) R.string.active_member else R.string.departed_member),
                 if (status.isActive) R.color.success_surface else R.color.surface_variant,
@@ -400,6 +400,9 @@ class MemberDetailActivity : BaseActivity() {
             Labels.format(Labels.DATE, displayDate)
         }
     }
+
+    private fun firstSeen(status: MemberStatus, zone: ZoneId): String =
+        Labels.format(Labels.DATE, status.firstSeenAt.atZone(zone).toLocalDate())
 
     private fun sourceLabel(source: EvidenceSource): String = getString(
         when (source) {

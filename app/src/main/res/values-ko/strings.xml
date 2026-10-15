@@ -409,8 +409,7 @@
     <string name="member_private_note_detail">이 기기에만 보관됩니다. 직접 포함하지 않으면 공유 이미지에 나타나지 않습니다.</string>
     <string name="member_private_note_hint">이 멤버에 대한 개인 메모</string>
     <string name="member_profile">프로필</string>
-    <string name="membership_period_detail">%1$s → %2$s
-가입: %3$s · 탈퇴: %4$s</string>
+    <string name="membership_period_detail">%1$s → %2$s\n가입: %3$s · 탈퇴: %4$s</string>
     <string name="membership_period_overlap">다른 이력과 겹치거나 열린 이력이 둘이 됩니다.</string>
     <string name="membership_period_save_failed">저장할 수 없습니다. 이력은 겹칠 수 없으며 열린 이력은 하나만 가능합니다.</string>
     <string name="merit_this_week_short">이번 주</string>
@@ -577,4 +576,5 @@
     <plurals name="delete_history_message">
         <item quantity="other">패킷 %1$d개를 삭제할까요? 되돌릴 수 없습니다.</item>
     </plurals>
+    <string name="member_since">%1$s 처음 확인</string>
 </resources>

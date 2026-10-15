@@ -47,7 +47,7 @@ internal object PlatoonCsvImportPrompt {
             } else {
                 addView(choices, activity.lp(top = 8))
             }
-            addView(activity.button(activity.getString(R.string.add_new_platoon_profile), Controls.Role.TERTIARY, R.drawable.ic_add_circle) {
+            addView(activity.button(activity.getString(R.string.add_new_platoon_profile), Controls.Role.TERTIARY, R.drawable.ic_add) {
                 showCreate(activity) { created ->
                     dialog.dismiss()
                     showSelector(activity, created.storageId, onSelected)

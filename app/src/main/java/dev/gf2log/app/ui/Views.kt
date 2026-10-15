@@ -176,6 +176,7 @@ internal fun Context.textField(
 ): EditText = EditText(this).apply {
     if (id != View.NO_ID) this.id = id
     hint = hintText
+    textSize = 15f
     this.inputType = if (singleLine) inputType else inputType or InputType.TYPE_TEXT_FLAG_MULTI_LINE
     if (singleLine) setSingleLine(true) else minLines = 2
     maxLength?.let { filters = arrayOf(InputFilter.LengthFilter(it)) }

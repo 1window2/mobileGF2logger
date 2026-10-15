@@ -23,7 +23,7 @@ never stored.
 - Decodes each Platoon's banner frame and mark from `21905` and displays the
   matching original in-game emblem in profile selectors.
 - Tracks active and withdrawn members, non-overlapping repeat membership periods, exact Updates timestamps, editable nicknames, and private notes.
-- Builds Sunday-to-Saturday Standard or Gunsmoke Frontline weekly tables around the selected server's daily reset, with cut-off points and manual correction for missing data.
+- Builds Sunday-to-Saturday Standard or Gunsmoke Frontline weekly tables around the selected server's daily reset, with a frozen member column, a sticky day header, cut-off points, and per-day manual correction for missing data.
 - Offers One-time Capture that tracks the four useful Platoon payloads and stops automatically when the checklist is complete.
 - Explains every weekly cell on tap and summarizes missing or uncertain evidence in an Evidence Health panel.
 - Keeps up to 15 complete automatic revisions per weekly table so an earlier projection and its displayed member context can be previewed and restored after an accidental import.
@@ -35,10 +35,11 @@ never stored.
 - Saves or shares a weekly PNG with opt-in controls for names, UIDs, and private notes.
 - Can send a validated original CSV to an optional user-owned Discord incoming webhook after confirmation.
 - Stores the latest 100 parsed packets and up to 50 saved packets, with table and raw views, copy, export, selection, and deletion.
-- Supports member sorting, persistent drag ordering, snapshot comparison, single-week and all-week CSV export, and profile-aware `.gf2backup` export/restore that leaves other Platoons unchanged.
+- Supports member sorting, persistent drag ordering, snapshot comparison, single-week and all-week CSV export, and profile-aware `.gf2backup` export/restore in Settings that detects whether a backup includes app settings and leaves other Platoons unchanged.
 - Keeps a newly detected Platoon's packets in bounded memory until the user confirms one of the verified client's compatible servers; unconfirmed data is discarded on force-stop or process death.
 - Provides profile management for correcting server metadata without moving data and for deleting one isolated Platoon behind two confirmations and an exact-name check.
-- Guides first-time users through Main, Settings, Platoon management, weekly controls, and parsed-packet pages, with a persistent English/Korean selector and Skip action.
+- Guides first-time users through Main, Settings, Platoon management, weekly controls, and parsed-packet pages, with a persistent English/Korean selector and Skip action; the guide can be replayed from Settings.
+- Draws edge to edge and keeps drafts, selections, and pending exports across rotation, theme or language changes, and process recreation.
 - Supports English and Korean, System/Light/Dark themes, and the six known
   Darkwinter/HaoPlay server-region reset presets converted to the phone timezone.
   Selecting a detected Platoon automatically follows that profile's saved region.

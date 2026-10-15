@@ -2,6 +2,67 @@
 
 All notable changes to mobileGF2logger are documented here.
 
+## 2.5.0 - 2026-10-15
+
+### Added
+
+- Draw every screen edge to edge with system-bar, cutout, and keyboard insets,
+  and keep drafts, selections, and pending exports across rotation, theme or
+  language changes, and process recreation.
+- Rebuild the weekly table around a frozen member column, synced horizontal day
+  columns, and a sticky day header; tapping a cell explains every metric of
+  that day in one sheet.
+- Edit weekly cells one day at a time with tri-state Login/Patrol choices,
+  highlighted changes, an explicit cancel, and a discard confirmation.
+- Add Platoon roster filters (Active, Withdrawn, All), a sort chooser, summary
+  tiles, and long-press selection for CSV export; add move up/down
+  accessibility actions to member ordering.
+- Show capture notices in English and Korean, the install state of both
+  supported clients, and a live one-time-capture checklist without polling.
+- Restore either backup kind from one Settings entry, which detects whether the
+  archive includes app settings; replay the welcome guide from Settings.
+- Localize every label in shared weekly PNGs.
+
+### Changed
+
+- Move backups into Settings and keep Home focused on capture, the active
+  Platoon, data tools, and Recent/Saved packet history tabs.
+- Move secondary weekly and Platoon utilities into top-bar overflow menus.
+- Request the notification permission when capture starts instead of at launch.
+- Render table-history previews as the native table instead of a bitmap.
+- Split the management database into focused SQL objects behind the same
+  single transactional owner, and split the capture service into a serial
+  worker, flow engine, admission coordinator, and notification helper.
+- Add AndroidX Activity as the only new dependency.
+
+### Fixed
+
+- Release native global references, join each capture thread exactly once, and
+  classify TLS/HTTP flows only on their first payload so plaintext game data
+  can no longer silently disable inspection.
+- Stop capture without blocking the main thread, keep pending Platoon
+  confirm/discard working after capture stops, and remove cross-thread races in
+  capture state and status.
+- Serialize parsed-packet history per directory, stop deleting files while
+  listing, and write each roster CSV once with distinct row counts.
+- Keep unmergeable continuation payloads instead of silently dropping them.
+- Recover CSV checkpoint restores into the Platoon's own settings, release
+  checkpoint claims on every failure, and remove a lock-order deadlock between
+  profile deletion recovery and backup restore.
+- Compare restored schemas against an in-memory reference, run restore
+  recovery only when artifacts exist, and roll back partially replaced scoped
+  settings.
+- Derive member active state from one canonical membership-period rule.
+- Load member periods in one query, batch inferred boundary correlation, solve
+  only period-end roster rows, and refresh only weekly revisions a member edit
+  affects.
+- Stop wiping member name and note edits after editing a membership period,
+  stop deleting a weekly note on tap, make the packet raw/table toggle
+  reversible, and prevent double restores.
+- Move every repository, file, and network call off the main thread.
+- Truncate document-provider files when exporting so overwritten files cannot
+  keep stale trailing bytes.
+
 ## 2.4.2 - 2026-08-27
 
 ### Added

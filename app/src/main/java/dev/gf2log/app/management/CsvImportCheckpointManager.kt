@@ -35,6 +35,7 @@ class CsvImportCheckpointManager internal constructor(
     private val root = File(profileRoot, CHECKPOINT_DIRECTORY)
     private val staging = File(profileRoot, STAGING_DIRECTORY)
     private val previous = File(profileRoot, PREVIOUS_DIRECTORY)
+    private val discarded = File(profileRoot, DISCARDED_DIRECTORY)
 
     /** Claims are per scope: an operation in one Platoon never blocks another Platoon's import. */
     private val scopeState = synchronized(SCOPE_STATES) {
@@ -118,7 +119,7 @@ class CsvImportCheckpointManager internal constructor(
             } finally {
                 temporary.delete()
             }
-            deleteDirectory(previous)
+            discard(previous)
         } finally {
             releaseOperation()
         }
@@ -216,7 +217,7 @@ class CsvImportCheckpointManager internal constructor(
             restoreQuarantinedFiles(names, retained, quarantine, error)
             throw error
         }
-        deleteDirectory(root)
+        discard(root)
         restorePreviousCheckpoint()
     }
 
@@ -230,6 +231,7 @@ class CsvImportCheckpointManager internal constructor(
     // - Unit after checkpoint state is usable or the interrupted mutation is rolled back.
     private fun recoverInterruptedState() {
         deleteDirectory(staging)
+        deleteDirectory(discarded)
         if (!root.exists()) {
             restorePreviousCheckpoint()
             return
@@ -239,7 +241,7 @@ class CsvImportCheckpointManager internal constructor(
         if (!digest(root).isFile || restoreMarker(root).isFile || quarantine.exists()) {
             restoreUnchecked()
         } else if (previous.exists()) {
-            deleteDirectory(previous)
+            discard(previous)
         }
     }
 
@@ -326,6 +328,18 @@ class CsvImportCheckpointManager internal constructor(
         require(name.matches(SAFE_IMPORT_NAME)) { "Invalid CSV checkpoint identity" }
     }
 
+    /**
+     * Retires a checkpoint directory with one atomic rename before deleting it. A recursive delete
+     * interrupted midway would otherwise leave a live-looking checkpoint without its archive.
+     * A leftover retired copy is inert and removed again by the next recovery.
+     */
+    private fun discard(directory: File) {
+        if (!directory.exists()) return
+        deleteDirectory(discarded)
+        check(directory.renameTo(discarded)) { "Unable to retire CSV import checkpoint state" }
+        discarded.deleteRecursively()
+    }
+
     private fun deleteDirectory(directory: File) {
         if (directory.exists()) check(directory.deleteRecursively()) {
             "Unable to remove CSV import checkpoint state"
@@ -343,6 +357,7 @@ class CsvImportCheckpointManager internal constructor(
         const val CHECKPOINT_DIRECTORY = "csv-import-checkpoint"
         const val STAGING_DIRECTORY = "csv-import-checkpoint.staging"
         const val PREVIOUS_DIRECTORY = "csv-import-checkpoint.previous"
+        const val DISCARDED_DIRECTORY = "csv-import-checkpoint.discarded"
         const val QUARANTINE_DIRECTORY = "retained-quarantine"
         const val ARCHIVE_FILE = "platoon.gf2backup"
         const val MANIFEST_FILE = "planned-files.txt"

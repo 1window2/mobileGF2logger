@@ -582,6 +582,32 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     @Test
+    fun interruptedCheckpointRetirementNeverBlocksLaterImports() {
+        seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
+        CsvImportCheckpointManager(context, storageScope).runImport(emptySet()) {
+            replaceDatabaseForCheckpoint(CURRENT_UID, "After import", "after-import.csv")
+        }
+        // A process death while deleting a consumed checkpoint leaves only part of its
+        // retired copy; it must never be mistaken for, or block, a live checkpoint.
+        val retired = FilePaths.csvCheckpointDiscardedDirectory(context).apply { mkdirs() }
+        java.io.File(retired, "planned-files.txt").writeText("\n", Charsets.UTF_8)
+
+        val recovered = CsvImportCheckpointManager(context, storageScope)
+
+        assertTrue(recovered.canUndo())
+        assertFalse(retired.exists())
+        recovered.restore()
+        assertFalse(FilePaths.csvCheckpointDirectory(context).exists())
+        assertFalse(FilePaths.csvCheckpointDiscardedDirectory(context).exists())
+        PlatoonDatabase(context).use { database ->
+            assertEquals(1L, count(database.readableDatabase, "members", "uid = ?", ARCHIVED_UID))
+        }
+        val next = CsvImportCheckpointManager(context, storageScope)
+        next.runImport(emptySet()) {}
+        assertTrue(next.canUndo())
+    }
+
+    @Test
     fun unfinishedCsvImportRecoversBeforePreviewRepositoryReads() {
         seedDatabase(ARCHIVED_UID, "Before interrupted import", "before-interrupted-import.csv")
         val checkpoint = FilePaths.csvCheckpointDirectory(context)
@@ -989,6 +1015,9 @@ class PlatoonBackupManagerIntegrationTest {
 
         fun csvCheckpointPreviousDirectory(context: Context) =
             java.io.File(scope(context).rootDirectory(context), "csv-import-checkpoint.previous")
+
+        fun csvCheckpointDiscardedDirectory(context: Context) =
+            java.io.File(scope(context).rootDirectory(context), "csv-import-checkpoint.discarded")
     }
 
     private class SimulatedProcessDeath : Error()

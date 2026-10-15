@@ -283,7 +283,14 @@ internal object ActivityIngestion {
         }
     }
 
+    /**
+     * Upgrades an inferred roster boundary to an exact one when a single linked activity fact
+     * falls within the correlation window. Candidate boundaries are loaded once per ingest; an
+     * applied boundary becomes exact and therefore leaves the candidate set.
+     */
     private fun reconcileInferredMembershipBoundaries(db: SQLiteDatabase) {
+        val boundariesByUid = readInferredBoundaries(db)
+        if (boundariesByUid.isEmpty()) return
         val activities = db.rawQuery(
             """
             SELECT id, occurred_at, member_name, resolved_uid
@@ -291,11 +298,17 @@ internal object ActivityIngestion {
             WHERE member_event_id IS NULL
               AND resolved_uid IS NOT NULL
               AND action_id NOT IN (?, ?)
+              AND resolved_uid IN (
+                SELECT uid FROM membership_periods
+                WHERE joined_precision = ? OR left_precision = ?
+              )
             ORDER BY occurred_at, id
             """.trimIndent(),
             arrayOf(
                 DAILY_PATROL_REWARD_ACTION_ID.toString(),
                 DAILY_PATROL_RELATED_ACTION_ID.toString(),
+                EvidencePrecision.INFERRED.name,
+                EvidencePrecision.INFERRED.name,
             ),
         ).use { cursor ->
             buildList {
@@ -312,8 +325,12 @@ internal object ActivityIngestion {
             }
         }
         activities.forEach { activity ->
-            val boundaries = readNearbyInferredBoundaries(db, activity)
-            val boundary = boundaries.singleOrNull() ?: return@forEach
+            val candidates = boundariesByUid[activity.uid] ?: return@forEach
+            val boundary = candidates.singleOrNull { candidate ->
+                kotlin.math.abs(
+                    candidate.inferredAt.toEpochMilli() - activity.occurredAt.toEpochMilli(),
+                ) <= MEMBERSHIP_CORRELATION_WINDOW_MILLIS
+            } ?: return@forEach
             val eventType = when (boundary.boundary) {
                 MembershipBoundary.WITHDRAW -> MemberEventType.LEFT
                 MembershipBoundary.JOIN ->
@@ -330,70 +347,36 @@ internal object ActivityIngestion {
                 observedAt = boundary.inferredAt,
                 activityIds = listOf(activity.id),
             )
+            candidates.remove(boundary)
         }
     }
 
-    private fun readNearbyInferredBoundaries(
-        db: SQLiteDatabase,
-        activity: ResolvedActivityCandidate,
-    ): List<InferredBoundary> = db.rawQuery(
-        """
-        SELECT id, uid, joined_at, left_at, joined_precision, left_precision
-        FROM membership_periods
-        WHERE uid = ?
-          AND (
-            (joined_at IS NOT NULL AND joined_precision = ? AND ABS(joined_at - ?) <= ?)
-            OR
-            (left_at IS NOT NULL AND left_precision = ? AND ABS(left_at - ?) <= ?)
-          )
-        """.trimIndent(),
-        arrayOf(
-            activity.uid.toString(),
-            EvidencePrecision.INFERRED.name,
-            activity.occurredAt.toEpochMilli().toString(),
-            MEMBERSHIP_CORRELATION_WINDOW_MILLIS.toString(),
-            EvidencePrecision.INFERRED.name,
-            activity.occurredAt.toEpochMilli().toString(),
-            MEMBERSHIP_CORRELATION_WINDOW_MILLIS.toString(),
-        ),
-    ).use { cursor ->
-        buildList {
+    private fun readInferredBoundaries(db: SQLiteDatabase): Map<Long, MutableList<InferredBoundary>> =
+        db.rawQuery(
+            """
+            SELECT id, uid, joined_at, left_at, joined_precision, left_precision
+            FROM membership_periods
+            WHERE (joined_at IS NOT NULL AND joined_precision = ?)
+               OR (left_at IS NOT NULL AND left_precision = ?)
+            """.trimIndent(),
+            arrayOf(EvidencePrecision.INFERRED.name, EvidencePrecision.INFERRED.name),
+        ).use { cursor ->
+            val boundaries = mutableMapOf<Long, MutableList<InferredBoundary>>()
             while (cursor.moveToNext()) {
                 val membershipPeriodId = cursor.getLong(0)
                 val uid = cursor.getLong(1)
-                val joinedAt = cursor.getNullableLong(2)
-                val leftAt = cursor.getNullableLong(3)
-                if (joinedAt != null &&
-                    cursor.getString(4) == EvidencePrecision.INFERRED.name &&
-                    kotlin.math.abs(joinedAt - activity.occurredAt.toEpochMilli()) <=
-                    MEMBERSHIP_CORRELATION_WINDOW_MILLIS
-                ) {
-                    add(
-                        InferredBoundary(
-                            membershipPeriodId,
-                            uid,
-                            MembershipBoundary.JOIN,
-                            Instant.ofEpochMilli(joinedAt),
-                        ),
-                    )
+                val forMember = boundaries.getOrPut(uid, ::mutableListOf)
+                val joinedAt = cursor.getNullableInstant(2)
+                if (joinedAt != null && cursor.getString(4) == EvidencePrecision.INFERRED.name) {
+                    forMember += InferredBoundary(membershipPeriodId, uid, MembershipBoundary.JOIN, joinedAt)
                 }
-                if (leftAt != null &&
-                    cursor.getNullableString(5) == EvidencePrecision.INFERRED.name &&
-                    kotlin.math.abs(leftAt - activity.occurredAt.toEpochMilli()) <=
-                    MEMBERSHIP_CORRELATION_WINDOW_MILLIS
-                ) {
-                    add(
-                        InferredBoundary(
-                            membershipPeriodId,
-                            uid,
-                            MembershipBoundary.WITHDRAW,
-                            Instant.ofEpochMilli(leftAt),
-                        ),
-                    )
+                val leftAt = cursor.getNullableInstant(3)
+                if (leftAt != null && cursor.getNullableString(5) == EvidencePrecision.INFERRED.name) {
+                    forMember += InferredBoundary(membershipPeriodId, uid, MembershipBoundary.WITHDRAW, leftAt)
                 }
             }
+            boundaries
         }
-    }
 
     private data class ActivityCandidate(
         val id: Long,

@@ -154,9 +154,11 @@ transitions.
 - Manual edits are accepted only when every period ends after it starts, no two
   fully dated periods overlap, and at most one period remains open. An absent
   snapshot-derived start remains unknown rather than being treated as an
-  infinitely old boundary. Current active state is
-  derived from that open period inside the same transaction; schema-v13 upgrade
-  repairs any stale derived flag left by an older installation.
+  infinitely old boundary. Every writer derives current active state from the
+  periods inside the same transaction with one rule: a member is active while an
+  open period remains effective. An open period started by an exact Updates join
+  is superseded by a later recorded exit or by a newer roster that omits the
+  member. Schema-v13 upgrade repairs any stale derived flag with the same rule.
 - A roster CSV imported after newer captures still contributes historical
   presence spans. The replay creates missing inactive members and inferred
   withdrawal/rejoin periods without replacing manual or exact Updates evidence.

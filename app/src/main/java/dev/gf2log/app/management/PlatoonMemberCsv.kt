@@ -1,6 +1,8 @@
 package dev.gf2log.app.management
 
 import dev.gf2log.protocol.CsvCell
+import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -52,8 +54,8 @@ object PlatoonMemberCsv {
     }.trimEnd() + "\n"
 
     private fun formatBoundary(
-        date: java.time.LocalDate?,
-        instant: java.time.Instant?,
+        date: LocalDate?,
+        instant: Instant?,
         timeKnown: Boolean,
         zoneId: ZoneId,
     ): String {

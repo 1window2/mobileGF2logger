@@ -4,6 +4,7 @@ import dev.gf2log.app.StrictProperties
 import dev.gf2log.protocol.PayloadCatalog
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.time.ZoneId
 import java.util.Properties
 
 data class AppBackupSettings(
@@ -34,14 +35,6 @@ object AppBackupSettingsCodec {
     private const val KEY_DETAILED_NOTIFICATIONS = "detailedNotifications"
     private const val KEY_TARGET_PACKAGE = "targetPackage"
     private const val KEY_MEMBER_ORDER = "memberOrder"
-    private const val KEY_DAILY_MERIT = "cutline.dailyMerit"
-    private const val KEY_DAILY_SCORE = "cutline.dailyGunsmokeScore"
-    private const val KEY_DAILY_ATTEMPTS = "cutline.dailyGunsmokeAttempts"
-    private const val KEY_WEEKLY_MERIT = "cutline.weeklyMerit"
-    private const val KEY_WEEKLY_SCORE = "cutline.weeklyGunsmokeScore"
-    private const val KEY_WEEKLY_ATTEMPTS = "cutline.weeklyGunsmokeAttempts"
-    private const val KEY_WEEKLY_LOGIN_DAYS = "cutline.weeklyLoginDays"
-    private const val KEY_WEEKLY_PATROL_DAYS = "cutline.weeklyPatrolDays"
 
     fun encode(settings: AppBackupSettings): ByteArray {
         validate(settings)
@@ -55,14 +48,9 @@ object AppBackupSettingsCodec {
             setProperty(KEY_DETAILED_NOTIFICATIONS, settings.detailedNotifications.toString())
             setProperty(KEY_TARGET_PACKAGE, settings.targetPackage)
             setProperty(KEY_MEMBER_ORDER, settings.memberOrder.joinToString(","))
-            setProperty(KEY_DAILY_MERIT, settings.weeklyCutlines.dailyMerit.encoded())
-            setProperty(KEY_DAILY_SCORE, settings.weeklyCutlines.dailyGunsmokeScore.encoded())
-            setProperty(KEY_DAILY_ATTEMPTS, settings.weeklyCutlines.dailyGunsmokeAttempts.encoded())
-            setProperty(KEY_WEEKLY_MERIT, settings.weeklyCutlines.weeklyMerit.encoded())
-            setProperty(KEY_WEEKLY_SCORE, settings.weeklyCutlines.weeklyGunsmokeScore.encoded())
-            setProperty(KEY_WEEKLY_ATTEMPTS, settings.weeklyCutlines.weeklyGunsmokeAttempts.encoded())
-            setProperty(KEY_WEEKLY_LOGIN_DAYS, settings.weeklyCutlines.weeklyLoginDays.encoded())
-            setProperty(KEY_WEEKLY_PATROL_DAYS, settings.weeklyCutlines.weeklyPatrolDays.encoded())
+            WeeklyCutlineField.entries.forEach { field ->
+                setProperty(field.backupKey, field.valueIn(settings.weeklyCutlines)?.toString() ?: NONE)
+            }
             settings.payloadHistory.toSortedMap().forEach { (payloadType, enabled) ->
                 setProperty(payloadKey(payloadType), enabled.toString())
             }
@@ -100,7 +88,7 @@ object AppBackupSettingsCodec {
             gameTimeZoneId = if (schemaVersion >= TIME_ZONE_SCHEMA_VERSION) {
                 properties.required(KEY_GAME_TIME_ZONE)
             } else {
-                java.time.ZoneId.systemDefault().id
+                ZoneId.systemDefault().id
             },
             onboardingCompleted = if (schemaVersion >= THEME_SCHEMA_VERSION) {
                 properties.strictBoolean(KEY_ONBOARDING_COMPLETED)
@@ -120,16 +108,13 @@ object AppBackupSettingsCodec {
                 }
             },
             memberOrder = properties.memberOrder(),
-            weeklyCutlines = WeeklyCutlines(
-                dailyMerit = properties.optionalLong(KEY_DAILY_MERIT),
-                dailyGunsmokeScore = properties.optionalLong(KEY_DAILY_SCORE),
-                dailyGunsmokeAttempts = properties.optionalInt(KEY_DAILY_ATTEMPTS),
-                weeklyMerit = properties.optionalLong(KEY_WEEKLY_MERIT),
-                weeklyGunsmokeScore = properties.optionalLong(KEY_WEEKLY_SCORE),
-                weeklyGunsmokeAttempts = properties.optionalInt(KEY_WEEKLY_ATTEMPTS),
-                weeklyLoginDays = properties.optionalInt(KEY_WEEKLY_LOGIN_DAYS),
-                weeklyPatrolDays = properties.optionalInt(KEY_WEEKLY_PATROL_DAYS),
-            ),
+            weeklyCutlines = WeeklyCutlineField.cutlinesOf { field ->
+                if (field.storedAsInt) {
+                    properties.optionalInt(field.backupKey)?.toLong()
+                } else {
+                    properties.optionalLong(field.backupKey)
+                }
+            },
         )
         validate(settings)
         return settings
@@ -144,7 +129,7 @@ object AppBackupSettingsCodec {
             GameServerRegion.fromStored(settings.gameServerRegion).storedValue ==
                 settings.gameServerRegion,
         ) { "Unsupported game server region" }
-        require(runCatching { java.time.ZoneId.of(settings.gameTimeZoneId) }.isSuccess) {
+        require(runCatching { ZoneId.of(settings.gameTimeZoneId) }.isSuccess) {
             "Unsupported game timezone"
         }
         require(
@@ -162,15 +147,11 @@ object AppBackupSettingsCodec {
         require(settings.memberOrder.distinct().size == settings.memberOrder.size) {
             "Member order contains duplicate UIDs"
         }
-        settings.weeklyCutlines.run {
-            requireNonNegative(dailyMerit, KEY_DAILY_MERIT)
-            requireNonNegative(dailyGunsmokeScore, KEY_DAILY_SCORE)
-            requireInRange(dailyGunsmokeAttempts, 0..3, KEY_DAILY_ATTEMPTS)
-            requireNonNegative(weeklyMerit, KEY_WEEKLY_MERIT)
-            requireNonNegative(weeklyGunsmokeScore, KEY_WEEKLY_SCORE)
-            requireInRange(weeklyGunsmokeAttempts, 0..21, KEY_WEEKLY_ATTEMPTS)
-            requireInRange(weeklyLoginDays, 0..7, KEY_WEEKLY_LOGIN_DAYS)
-            requireInRange(weeklyPatrolDays, 0..7, KEY_WEEKLY_PATROL_DAYS)
+        WeeklyCutlineField.entries.forEach { field ->
+            val value = field.valueIn(settings.weeklyCutlines)
+            require(value == null || value in field.range) {
+                "Backup setting ${field.backupKey} is out of range"
+            }
         }
     }
 
@@ -222,17 +203,6 @@ object AppBackupSettingsCodec {
         }
     }
 
-    private fun Long?.encoded() = this?.toString() ?: NONE
-    private fun Int?.encoded() = this?.toString() ?: NONE
-
-    private fun requireNonNegative(value: Long?, key: String) {
-        require(value == null || value >= 0L) { "Backup setting $key is out of range" }
-    }
-
-    private fun requireInRange(value: Int?, range: IntRange, key: String) {
-        require(value == null || value in range) { "Backup setting $key is out of range" }
-    }
-
     private val PACKAGE_NAME = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
     private val BASE_KEYS = setOf(
         KEY_SCHEMA_VERSION,
@@ -244,15 +214,7 @@ object AppBackupSettingsCodec {
         KEY_DETAILED_NOTIFICATIONS,
         KEY_TARGET_PACKAGE,
         KEY_MEMBER_ORDER,
-        KEY_DAILY_MERIT,
-        KEY_DAILY_SCORE,
-        KEY_DAILY_ATTEMPTS,
-        KEY_WEEKLY_MERIT,
-        KEY_WEEKLY_SCORE,
-        KEY_WEEKLY_ATTEMPTS,
-        KEY_WEEKLY_LOGIN_DAYS,
-        KEY_WEEKLY_PATROL_DAYS,
-    )
+    ) + WeeklyCutlineField.entries.map(WeeklyCutlineField::backupKey)
     private val LEGACY_BASE_KEYS = BASE_KEYS -
         setOf(
             KEY_THEME_MODE,

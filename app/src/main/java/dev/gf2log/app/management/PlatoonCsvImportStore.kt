@@ -11,7 +11,6 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.security.MessageDigest
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -36,9 +35,7 @@ class PlatoonCsvImportStore(private val directory: File) {
         val parsed = requireNotNull(GuildMembersCsv.parse(text)) { "Invalid Platoon CSV" }
         require(parsed.members.isNotEmpty()) { "Platoon CSV contains no roster members" }
         val capturedAt = Instant.parse(parsed.logTime)
-        val hash = MessageDigest.getInstance("SHA-256").digest(bytes)
-            .take(HASH_BYTES)
-            .joinToString("") { "%02x".format(it) }
+        val hash = bytes.sha256().copyOf(HASH_BYTES).toHex()
         return PreparedImport(
             encoded = bytes,
             snapshot = parsed,

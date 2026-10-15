@@ -9,7 +9,7 @@ import java.io.File
 import java.io.FilterOutputStream
 import java.io.InputStream
 import java.io.OutputStream
-import java.security.MessageDigest
+import java.time.Instant
 import java.util.Properties
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
@@ -38,7 +38,7 @@ internal object BackupArchive {
             zip.putNextEntry(ZipEntry(MANIFEST_ENTRY))
             Properties().apply {
                 setProperty(KEY_FORMAT_VERSION, formatVersion.toString())
-                setProperty(KEY_DATABASE_SHA256, database.sha256())
+                setProperty(KEY_DATABASE_SHA256, database.sha256Hex())
                 if (profile != null) {
                     setProperty(KEY_APPLICATION_ID, APPLICATION_ID)
                     setProperty(
@@ -46,11 +46,11 @@ internal object BackupArchive {
                         if (settings == null) PLATOON_SCOPE else COMPLETE_SCOPE,
                     )
                     putProfile(profile)
-                    if (settings != null) setProperty(KEY_SETTINGS_SHA256, settings.sha256())
+                    if (settings != null) setProperty(KEY_SETTINGS_SHA256, settings.sha256().toHex())
                 } else if (settings != null) {
                     setProperty(KEY_APPLICATION_ID, APPLICATION_ID)
                     setProperty(KEY_BACKUP_SCOPE, COMPLETE_SCOPE)
-                    setProperty(KEY_SETTINGS_SHA256, settings.sha256())
+                    setProperty(KEY_SETTINGS_SHA256, settings.sha256().toHex())
                 }
             }.store(zip, "mobileGF2logger backup")
             zip.closeEntry()
@@ -143,7 +143,7 @@ internal object BackupArchive {
             }
             require(
                 metadata.getProperty(KEY_DATABASE_SHA256)
-                    .equals(stagedDatabase.sha256(), ignoreCase = true),
+                    .equals(stagedDatabase.sha256Hex(), ignoreCase = true),
             ) { "Backup database checksum does not match" }
 
             val profile = if (
@@ -176,7 +176,7 @@ internal object BackupArchive {
                 val settings = requireNotNull(settingsBytes) { "Backup settings are missing" }
                 require(
                     metadata.getProperty(KEY_SETTINGS_SHA256)
-                        .equals(settings.sha256(), ignoreCase = true),
+                        .equals(settings.sha256().toHex(), ignoreCase = true),
                 ) { "Backup settings checksum does not match" }
             } else {
                 require(settingsBytes == null) { "Legacy backup contains unexpected settings" }
@@ -212,7 +212,7 @@ internal object BackupArchive {
             platoonName = platoonName,
             bannerFrameId = bannerFrameId,
             bannerMarkId = bannerMarkId,
-            lastSeenAt = java.time.Instant.now(),
+            lastSeenAt = Instant.now(),
             legacy = legacy,
         )
     }
@@ -284,25 +284,6 @@ internal object BackupArchive {
             output.write(buffer, 0, count)
         }
     }
-
-    private fun File.sha256(): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        inputStream().use { input ->
-            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                digest.update(buffer, 0, count)
-            }
-        }
-        return digest.digest().hex()
-    }
-
-    private fun ByteArray.sha256(): String = MessageDigest.getInstance("SHA-256")
-        .digest(this)
-        .hex()
-
-    private fun ByteArray.hex(): String = joinToString("") { "%02x".format(it) }
 
     /** Lets ZIP cleanup release its deflater without closing the caller-owned destination. */
     private class NonClosingOutputStream(output: OutputStream) : FilterOutputStream(output) {

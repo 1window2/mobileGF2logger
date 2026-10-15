@@ -5,7 +5,6 @@ import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
 import java.util.zip.GZIPInputStream
@@ -54,9 +53,7 @@ internal object WeeklyReportHistoryCodec {
             compressed.toByteArray()
         }
         require(payload.size <= MAX_PAYLOAD_BYTES) { "Weekly history payload is too large" }
-        val fingerprint = MessageDigest.getInstance("SHA-256")
-            .digest(raw)
-            .joinToString("") { "%02x".format(it) }
+        val fingerprint = raw.sha256().toHex()
         return Encoded(payload, fingerprint)
     }
 
@@ -409,12 +406,12 @@ internal object WeeklyReportHistoryCodec {
     private const val FORMAT_VERSION = 2
     private const val DAYS_PER_WEEK = 7
     private const val MAX_MEMBERS = 256
-    private const val MAX_CONTEXT_MEMBERS = 768
-    private const val MAX_EVENTS = 512
-    private const val MAX_NOTES = 128
-    private const val MAX_STRING_BYTES = 1_024
-    private const val MAX_NOTE_BYTES = 16 * 1_024
-    private const val MAX_PRIVATE_NOTE_BYTES = 2 * 1_024
+    const val MAX_CONTEXT_MEMBERS = 768
+    const val MAX_EVENTS = 512
+    const val MAX_NOTES = 128
+    const val MAX_STRING_BYTES = 1_024
+    const val MAX_NOTE_BYTES = 16 * 1_024
+    const val MAX_PRIVATE_NOTE_BYTES = 2 * 1_024
     private const val MAX_DECOMPRESSED_BYTES = 4 * 1024 * 1024
     private const val STREAM_BUFFER_BYTES = 8 * 1024
     const val MAX_PAYLOAD_BYTES = 2 * 1024 * 1024

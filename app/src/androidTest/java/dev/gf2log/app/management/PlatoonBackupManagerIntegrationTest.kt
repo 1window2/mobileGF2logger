@@ -480,6 +480,78 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     @Test
+    fun constructingRepositoriesAndManagersDoesNotWaitForTheExclusiveGate() {
+        val held = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val holder = Thread {
+            PlatoonRepository.withExclusiveDatabase(storageScope) {
+                held.countDown()
+                release.await()
+            }
+        }.apply {
+            isDaemon = true
+            start()
+        }
+        held.await()
+        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        try {
+            executor.submit {
+                PlatoonRepository(context, storageScope)
+                PlatoonBackupManager(context, storageScope)
+            }.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        } finally {
+            release.countDown()
+            holder.join()
+            executor.shutdown()
+        }
+    }
+
+    @Test
+    fun csvCheckpointRecoversAnInterruptedRestoreIntoTheScopedSettings() {
+        settingsStore.replace(currentSettings())
+        FilePaths.restoreSettingsFile(context).apply {
+            parentFile?.mkdirs()
+            writeBytes(AppBackupSettingsCodec.encode(archivedSettings()))
+        }
+        FilePaths.restoreStateFile(context).writeText("PREPARED", Charsets.US_ASCII)
+
+        CsvImportCheckpointManager(context, storageScope).apply {
+            create(emptySet())
+            seal()
+        }
+
+        assertEquals(archivedSettings(), settingsStore.read())
+        assertTrue(dev.gf2log.app.settings.UserSettingsPreferences.memberOrder(context).isEmpty())
+        assertFalse(FilePaths.restoreTransactionDirectory(context).exists())
+    }
+
+    @Test
+    fun csvImportClaimsAreScopedAndReleasedAfterAFailedImport() {
+        seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
+        val otherScope = PlatoonStorageScope(
+            PlatoonProfileRegistry(context).upsertDetected(
+                SupportedGamePackages.DARKWINTER,
+                GameServerRegion.DARKWINTER_GLOBAL,
+                dev.gf2log.protocol.model.PlatoonProfileData(202u, "Other Platoon", 0u, 0u),
+            ).storageId,
+        )
+        val pending = CsvImportCheckpointManager(context, storageScope)
+        pending.create(emptySet())
+
+        CsvImportCheckpointManager(context, otherScope).runImport(emptySet()) {}
+        pending.seal()
+
+        assertThrows(IllegalStateException::class.java) {
+            CsvImportCheckpointManager(context, storageScope).runImport(emptySet()) {
+                error("simulated import failure")
+            }
+        }
+        val retried = CsvImportCheckpointManager(context, storageScope)
+        retried.runImport(emptySet()) {}
+        assertTrue(retried.canUndo())
+    }
+
+    @Test
     fun interruptedCsvUndoCompletesAfterDatabaseInstallationOnRestart() {
         seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
         val manager = CsvImportCheckpointManager(context, storageScope) { checkpoint ->

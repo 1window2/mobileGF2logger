@@ -11,6 +11,8 @@ data class PlatoonSnapshot(
     val gameVersion: String? = null,
 )
 
+internal fun PlatoonSnapshot.member(uid: Long): SnapshotMember? = members.firstOrNull { it.uid == uid }
+
 data class SnapshotMember(
     val uid: Long,
     val name: String,
@@ -149,6 +151,10 @@ enum class MetricCertainty {
     LOWER_BOUND,
     EXACT,
 }
+
+/** EXACT when a value's bounds coincide, otherwise only its minimum is known. */
+internal fun rangeCertainty(minimum: Number, maximum: Number): MetricCertainty =
+    if (minimum.toLong() == maximum.toLong()) MetricCertainty.EXACT else MetricCertainty.LOWER_BOUND
 
 data class WeeklyNote(
     val id: Long,

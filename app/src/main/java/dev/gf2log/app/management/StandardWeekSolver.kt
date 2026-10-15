@@ -251,20 +251,13 @@ object StandardWeekSolver {
         val maximumPatrol = maximumPatrolTotals.maxOrNull() ?: return null
         return WeeklyReportBuilder.ResolvedStandardTotals(
             merit = minimumMerit,
-            meritCertainty = certainty(minimumMerit, maximumMerit),
+            meritCertainty = rangeCertainty(minimumMerit, maximumMerit),
             loginDays = minimumLogin,
-            loginDaysCertainty = certainty(minimumLogin, maximumLogin),
+            loginDaysCertainty = rangeCertainty(minimumLogin, maximumLogin),
             patrolDays = minimumPatrol,
-            patrolDaysCertainty = certainty(minimumPatrol, maximumPatrol),
+            patrolDaysCertainty = rangeCertainty(minimumPatrol, maximumPatrol),
         )
     }
-
-    private fun certainty(minimum: Number, maximum: Number): MetricCertainty =
-        if (minimum.toLong() == maximum.toLong()) {
-            MetricCertainty.EXACT
-        } else {
-            MetricCertainty.LOWER_BOUND
-        }
 
     private fun compatibleAllocations(
         indexes: List<Int>,
@@ -341,9 +334,6 @@ object StandardWeekSolver {
         return stage.takeIf { loginStageCompatible }
     }
 
-    private fun PlatoonSnapshot.member(uid: Long): SnapshotMember? =
-        members.firstOrNull { it.uid == uid }
-
     private data class CounterObservation(
         val capturedAt: Instant,
         val gameDay: LocalDate,
@@ -351,9 +341,9 @@ object StandardWeekSolver {
         val lastLoginDay: LocalDate?,
     )
 
-    private const val MAX_DAILY_MERIT = 90L
-    private const val LOGIN_MERIT = 50L
-    private const val PATROL_MERIT = 90L
-    private val DAILY_MERIT = longArrayOf(90L, 50L, 0L)
-    private val DAILY_STAGE = setOf(0L, 50L, 90L)
+    private const val MAX_DAILY_MERIT = ActivityInference.LOGIN_AND_PATROL_MERIT
+    private const val LOGIN_MERIT = ActivityInference.LOGIN_MERIT
+    private const val PATROL_MERIT = ActivityInference.LOGIN_AND_PATROL_MERIT
+    private val DAILY_MERIT = longArrayOf(PATROL_MERIT, LOGIN_MERIT, 0L)
+    private val DAILY_STAGE = setOf(0L, LOGIN_MERIT, PATROL_MERIT)
 }

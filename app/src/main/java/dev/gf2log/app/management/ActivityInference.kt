@@ -171,13 +171,13 @@ object ActivityInference {
     ): Boolean = score / attempts > maximumAttemptScore ||
         (score / attempts == maximumAttemptScore && score % attempts != 0L)
 
-    private fun saturatedMultiply(value: Long, factor: Int): Long = when {
+    fun saturatedMultiply(value: Long, factor: Int): Long = when {
         factor == 0 -> 0L
         value > Long.MAX_VALUE / factor -> Long.MAX_VALUE
         else -> value * factor
     }
 
-    private fun saturatedAdd(left: Long, right: Long): Long =
+    fun saturatedAdd(left: Long, right: Long): Long =
         if (left > Long.MAX_VALUE - right) Long.MAX_VALUE else left + right
 
     fun counterDelta(previous: Long, current: Long): Long =
@@ -220,6 +220,11 @@ object ActivityInference {
         val attended: Boolean,
         val dailyPatrol: Boolean,
     )
+
+    /** Daily non-Gunsmoke merit: login attendance, and Daily Patrol on top of it. */
+    const val LOGIN_MERIT = 50L
+    const val DAILY_PATROL_MERIT = 40L
+    const val LOGIN_AND_PATROL_MERIT = LOGIN_MERIT + DAILY_PATROL_MERIT
 
     const val MAX_DAILY_ATTEMPTS = 3
     const val MAX_WEEKLY_ATTEMPTS = MAX_DAILY_ATTEMPTS * 7

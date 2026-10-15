@@ -127,8 +127,8 @@ object WeeklyEvidenceAnalyzer {
         val certainties = cells.flatMap { cell ->
             buildList {
                 add(cell.meritCertainty)
-                add(cell.attended.toCertainty(cell.observed))
-                add(cell.dailyPatrol.toCertainty(cell.observed))
+                add(cell.attended.toCertainty())
+                add(cell.dailyPatrol.toCertainty())
                 if (report.isGunsmokeWeek) {
                     add(cell.scoreCertainty)
                     add(cell.attemptsCertainty)
@@ -162,8 +162,8 @@ object WeeklyEvidenceAnalyzer {
         Metric.MERIT -> cell.meritCertainty
         Metric.SCORE -> cell.scoreCertainty
         Metric.ATTEMPTS -> cell.attemptsCertainty
-        Metric.LOGIN -> cell.attended.toCertainty(cell.observed)
-        Metric.DAILY_PATROL -> cell.dailyPatrol.toCertainty(cell.observed)
+        Metric.LOGIN -> cell.attended.toCertainty()
+        Metric.DAILY_PATROL -> cell.dailyPatrol.toCertainty()
     }
 
     private fun totalCertainty(
@@ -193,9 +193,6 @@ object WeeklyEvidenceAnalyzer {
         Metric.DAILY_PATROL -> dailyPatrol != null
     }
 
-    private fun Boolean?.toCertainty(observed: Boolean): MetricCertainty = when {
-        this != null -> MetricCertainty.EXACT
-        observed -> MetricCertainty.UNKNOWN
-        else -> MetricCertainty.UNKNOWN
-    }
+    private fun Boolean?.toCertainty(): MetricCertainty =
+        if (this != null) MetricCertainty.EXACT else MetricCertainty.UNKNOWN
 }

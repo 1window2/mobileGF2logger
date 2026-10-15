@@ -82,6 +82,9 @@ internal class PlatoonProfileAdministration(context: Context) {
         private const val KEY_PENDING = "pending_storage_ids"
 
         fun recoverPending(context: Context) {
+            // A thread already reading a repository cannot take the exclusive gate; the
+            // ReentrantReadWriteLock cannot upgrade. The next registry access finishes the work.
+            if (PlatoonRepository.holdsSharedDatabaseAccess()) return
             val appContext = context.applicationContext
             pending(appContext).forEach { storageId ->
                 if (PlatoonProfileIdentity.isValidStorageId(storageId) &&

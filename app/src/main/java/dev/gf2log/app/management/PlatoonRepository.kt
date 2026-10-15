@@ -177,20 +177,18 @@ internal class PlatoonRepository(
     fun listEvents(
         from: Instant,
         until: Instant,
-        fromDate: java.time.LocalDate,
-        untilDate: java.time.LocalDate,
+        fromDate: LocalDate,
+        untilDate: LocalDate,
     ): List<MemberEvent> = access { it.listEvents(from, until, fromDate, untilDate) }
 
     fun listDailyPatrolFacts(from: Instant, until: Instant): List<DailyPatrolFact> =
         access { it.listDailyPatrolFacts(from, until) }
 
     fun updateMember(uid: Long, name: String, note: String): Boolean =
-        access { it.updateMember(uid, name, note) }.also { changed ->
-            if (changed) recordAllLiveWeeklyReports()
-        }
+        refreshingWeeksOf(uid) { access { it.updateMember(uid, name, note) } }
 
-    fun deleteMember(uid: Long): Boolean {
-        val deleted = withExclusiveDatabase(storageScope) {
+    fun deleteMember(uid: Long): Boolean = refreshingWeeksOf(uid) {
+        withExclusiveDatabase(storageScope) {
             val order = MemberOrderPreferences(appContext, storageScope.storageId)
             val previousOrder = order.read()
             val updatedOrder = previousOrder.filterNot { it == uid }
@@ -216,8 +214,6 @@ internal class PlatoonRepository(
                 throw error
             }
         }
-        if (deleted) recordAllLiveWeeklyReports()
-        return deleted
     }
 
     fun updateMembershipPeriod(
@@ -225,12 +221,14 @@ internal class PlatoonRepository(
         joined: MembershipBoundaryValue,
         left: MembershipBoundaryValue?,
         note: String,
-    ): Boolean = access { it.updateMembershipPeriod(membershipPeriodId, joined, left, note) }
-        .also { changed -> if (changed) recordAllLiveWeeklyReports() }
+    ): Boolean = refreshingWeeksOfPeriodOwner(membershipPeriodId) {
+        access { it.updateMembershipPeriod(membershipPeriodId, joined, left, note) }
+    }
 
     fun deleteMembershipPeriod(membershipPeriodId: Long): Boolean =
-        access { it.deleteMembershipPeriod(membershipPeriodId) }
-            .also { changed -> if (changed) recordAllLiveWeeklyReports() }
+        refreshingWeeksOfPeriodOwner(membershipPeriodId) {
+            access { it.deleteMembershipPeriod(membershipPeriodId) }
+        }
 
     fun addWithdrawnMember(
         uid: Long,
@@ -238,16 +236,18 @@ internal class PlatoonRepository(
         joined: MembershipBoundaryValue,
         withdrew: MembershipBoundaryValue,
         note: String,
-    ): Boolean = access { it.addWithdrawnMember(uid, name, joined, withdrew, note) }
-        .also { changed -> if (changed) recordAllLiveWeeklyReports() }
+    ): Boolean = refreshingWeeksOf(uid) {
+        access { it.addWithdrawnMember(uid, name, joined, withdrew, note) }
+    }
 
     fun addMembershipPeriod(
         uid: Long,
         joined: MembershipBoundaryValue,
         withdrew: MembershipBoundaryValue?,
         note: String,
-    ): Boolean = access { it.addMembershipPeriod(uid, joined, withdrew, note) }
-        .also { changed -> if (changed) recordAllLiveWeeklyReports() }
+    ): Boolean = refreshingWeeksOf(uid) {
+        access { it.addMembershipPeriod(uid, joined, withdrew, note) }
+    }
 
     fun addWeeklyNote(periodStartEpochDay: Long, gameDayEpochDay: Long, text: String): Long =
         access { it.addWeeklyNote(periodStartEpochDay, gameDayEpochDay, text) }.also {
@@ -267,12 +267,18 @@ internal class PlatoonRepository(
     fun listWeeklyOverrides(periodStartEpochDay: Long): List<WeeklyCellOverride> =
         access { it.listWeeklyOverrides(periodStartEpochDay) }
 
+    /** The displayed report (a restored revision when selected) without writing history. */
     fun buildWeeklyReport(
         referenceDay: LocalDate,
         zoneId: ZoneId,
         asOf: Instant = Instant.now(),
-    ): WeeklyReportBuilder.Report = buildWeeklyTableRevision(referenceDay, zoneId, asOf).report
+    ): WeeklyReportBuilder.Report = readWeeklyTableRevision(referenceDay, zoneId, asOf).report
 
+    /**
+     * The weekly screen's load: returns the displayed revision and records the live projection
+     * it was derived from, so the history list includes what the user saw. A stored selection
+     * that no longer decodes is cleared and the live projection is shown instead.
+     */
     fun buildWeeklyTableRevision(
         referenceDay: LocalDate,
         zoneId: ZoneId,
@@ -280,16 +286,29 @@ internal class PlatoonRepository(
     ): WeeklyTableRevision {
         val live = buildLiveWeeklyRevision(referenceDay, zoneId, asOf)
         recordHistory(live, Instant.now(), clearActiveOnChange = false)
-        val activePayload = access {
+        return activeRevision(live) ?: live.also {
+            access { database ->
+                database.clearActiveWeeklyReportHistory(live.report.periodStart.toEpochDay())
+            }
+        }
+    }
+
+    /** Like [buildWeeklyTableRevision] but strictly read-only. */
+    fun readWeeklyTableRevision(
+        referenceDay: LocalDate,
+        zoneId: ZoneId,
+        asOf: Instant = Instant.now(),
+    ): WeeklyTableRevision {
+        val live = buildLiveWeeklyRevision(referenceDay, zoneId, asOf)
+        return activeRevision(live) ?: live
+    }
+
+    /** The selected historical revision, [live] when none is selected, or null if undecodable. */
+    private fun activeRevision(live: WeeklyTableRevision): WeeklyTableRevision? {
+        val payload = access {
             it.activeWeeklyReportHistoryPayload(live.report.periodStart.toEpochDay())
         } ?: return live
-        return runCatching { WeeklyReportHistoryCodec.decodeRevision(activePayload) }
-            .getOrElse {
-                access { database ->
-                    database.clearActiveWeeklyReportHistory(live.report.periodStart.toEpochDay())
-                }
-                live
-            }
+        return runCatching { WeeklyReportHistoryCodec.decodeRevision(payload) }.getOrNull()
     }
 
     private fun buildLiveWeeklyRevision(
@@ -297,65 +316,91 @@ internal class PlatoonRepository(
         zoneId: ZoneId,
         asOf: Instant,
     ): WeeklyTableRevision {
-        val report = buildLiveWeeklyReport(referenceDay, zoneId, asOf)
-        val periodStart = report.periodStart
-        val statuses = listMemberStatuses()
-        val membershipEvents = listEvents(
-            periodStart.atStartOfDay(zoneId).toInstant(),
-            periodStart.plusDays(7).atStartOfDay(zoneId).toInstant(),
-            periodStart,
-            periodStart.plusDays(7),
-        ).filter {
+        val inputs = readRevisionInputs(PlatoonPeriods.weekStart(referenceDay), zoneId, asOf)
+        val report = WeeklyReportBuilder.build(
+            referenceDay = referenceDay,
+            zoneId = zoneId,
+            snapshots = inputs.snapshots,
+            membershipEvents = inputs.reportEvents,
+            overrides = inputs.overrides,
+            dailyPatrolFacts = inputs.dailyPatrolFacts,
+            asOf = asOf,
+        )
+        val membershipEvents = inputs.revisionEvents.filter {
             it.type in MembershipEventPresentation.displayedTypes &&
                 it.source in MembershipEventPresentation.displayedSources
         }.take(MAX_REVISION_EVENTS)
             .map { it.copy(note = it.note.boundedUtf8(MAX_REVISION_NOTE_BYTES)) }
-        val relevantNameUids = (
-            report.members.asSequence().map { it.uid } + membershipEvents.asSequence().map { it.uid }
-            ).toSet()
+        val reportUids = report.members.mapTo(mutableSetOf()) { it.uid }
+        val relevantNameUids = reportUids + membershipEvents.map { it.uid }
         return ManagementConsistencyAudit.requireValid(WeeklyTableRevision(
             report = report,
             membershipEvents = membershipEvents,
-            notes = listWeeklyNotes(periodStart.toEpochDay())
+            notes = inputs.notes
                 .filterNot(WeeklyNote::isAutomatic)
                 .take(MAX_REVISION_NOTES)
                 .map { it.copy(text = it.text.boundedUtf8(MAX_REVISION_NOTE_BYTES)) },
-            memberNamesByUid = statuses.asSequence()
+            memberNamesByUid = inputs.statuses.asSequence()
                 .filter { it.uid in relevantNameUids }
                 .take(MAX_REVISION_NAMES)
                 .associate { it.uid to it.name.boundedUtf8(MAX_REVISION_NAME_BYTES) },
-            memberPrivateNotesByUid = statuses.asSequence()
-                .filter { status -> report.members.any { it.uid == status.uid } }
+            memberPrivateNotesByUid = inputs.statuses.asSequence()
+                .filter { it.uid in reportUids }
                 .associate { it.uid to it.note.boundedUtf8(MAX_REVISION_PRIVATE_NOTE_BYTES) },
         ))
     }
 
-    private fun buildLiveWeeklyReport(
-        referenceDay: LocalDate,
+    /** Every input of one weekly revision, read under a single consistent database state. */
+    private fun readRevisionInputs(
+        periodStart: LocalDate,
         zoneId: ZoneId,
         asOf: Instant,
-    ): WeeklyReportBuilder.Report {
-        val periodStart = PlatoonPeriods.weekStart(referenceDay)
+    ): RevisionInputs = access { database ->
+        database.readConsistently {
+            val roster = readRosterInputs(database, periodStart, zoneId, asOf)
+            RevisionInputs(
+                snapshots = roster.snapshots,
+                reportEvents = roster.reportEvents,
+                revisionEvents = roster.revisionEvents,
+                overrides = database.listWeeklyOverrides(periodStart.toEpochDay()),
+                dailyPatrolFacts = database.listDailyPatrolFacts(
+                    PlatoonPeriods.periodStartInstant(periodStart, zoneId),
+                    PlatoonPeriods.periodStartInstant(periodStart.plusDays(7), zoneId),
+                ),
+                notes = database.listWeeklyNotes(periodStart.toEpochDay()),
+                statuses = database.listMemberStatuses(),
+            )
+        }
+    }
+
+    private fun readRosterInputs(
+        database: PlatoonDatabase,
+        periodStart: LocalDate,
+        zoneId: ZoneId,
+        asOf: Instant,
+    ): RosterInputs {
         val from = PlatoonPeriods.periodStartInstant(periodStart, zoneId)
         val until = PlatoonPeriods.periodStartInstant(periodStart.plusDays(7), zoneId)
-        val snapshots = listSnapshotsForPeriod(from, until)
+        val snapshots = database.listSnapshotsForPeriod(from, until)
         val membershipEventFrom = minOf(
             from,
             snapshots.minOfOrNull(PlatoonSnapshot::capturedAt) ?: Instant.EPOCH,
         )
-        return WeeklyReportBuilder.build(
-            referenceDay = referenceDay,
-            zoneId = zoneId,
+        return RosterInputs(
             snapshots = snapshots,
-            membershipEvents = listEvents(
+            reportEvents = database.listEvents(
                 membershipEventFrom,
                 minOf(until, asOf.plusMillis(1)),
                 PlatoonPeriods.gameDay(membershipEventFrom, zoneId),
                 periodStart.plusDays(7),
             ),
-            overrides = listWeeklyOverrides(periodStart.toEpochDay()),
-            dailyPatrolFacts = listDailyPatrolFacts(from, until),
-            asOf = asOf,
+            // The Join / Withdraw section uses calendar-day bounds rather than 05:00 resets.
+            revisionEvents = database.listEvents(
+                periodStart.atStartOfDay(zoneId).toInstant(),
+                periodStart.plusDays(7).atStartOfDay(zoneId).toInstant(),
+                periodStart,
+                periodStart.plusDays(7),
+            ),
         )
     }
 
@@ -420,27 +465,69 @@ internal class PlatoonRepository(
             }
     }
 
-    // Function Name: recordAllLiveWeeklyReports
-    // Description:
-    // - Refreshes every derived weekly revision after a primary-data mutation.
-    // - Keeps committed member or packet data authoritative when optional history maintenance fails.
-    // Parameters:
-    // - failFast: Propagates failures for explicit maintenance operations such as timezone rebuilds.
-    private fun recordAllLiveWeeklyReports(failFast: Boolean = false) {
+    /** Refreshes every derived weekly revision after a primary-data mutation. */
+    private fun recordAllLiveWeeklyReports() {
         val zone = GameTimeZonePreferences.get(appContext, storageScope.storageId)
+        weeklyPeriodStarts(zone).forEach { periodStart ->
+            recordLiveWeeklyRevisionSafely(periodStart, zone)
+        }
+    }
+
+    private fun weeklyPeriodStarts(zone: ZoneId): List<LocalDate> =
         WeeklyReportRange.periodStarts(access { it.listWeeklyEvidenceDays(zone) })
-            .forEach { periodStart ->
-                if (failFast) {
-                    val now = Instant.now()
-                    recordHistory(
-                        buildLiveWeeklyRevision(periodStart, zone, now),
-                        now,
-                        clearActiveOnChange = true,
-                    )
-                } else {
-                    recordLiveWeeklyRevisionSafely(periodStart, zone)
-                }
+
+    /**
+     * Runs a mutation confined to one member's rows and refreshes only the weeks whose revision
+     * can show that member before or after it: weeks whose period-end roster or Join / Withdraw
+     * section contains the member, or whose notes cite the member's events. Every other row,
+     * name, and note of a revision depends on other members' evidence alone. If the pre-scan
+     * fails, every week is refreshed so the mutation stays authoritative.
+     */
+    private fun refreshingWeeksOf(uid: Long?, mutation: () -> Boolean): Boolean {
+        val zone = GameTimeZonePreferences.get(appContext, storageScope.storageId)
+        val asOf = Instant.now()
+        val before = uid?.let { runCatching { weeksShowingMember(it, zone, asOf) }.getOrNull() }
+        if (!mutation()) return false
+        try {
+            val weeks = weeklyPeriodStarts(zone)
+            val affected = if (uid == null || before == null) {
+                weeks
+            } else {
+                val current = weeks.toSet()
+                (before.filter { it in current } + weeksShowingMember(uid, zone, asOf)).distinct()
+                    .sorted()
             }
+            affected.forEach { recordLiveWeeklyRevisionSafely(it, zone) }
+        } catch (error: Exception) {
+            Log.e(TAG, "Unable to scope weekly history refresh; refreshing every week", error)
+            recordAllLiveWeeklyReports()
+        }
+        return true
+    }
+
+    private fun refreshingWeeksOfPeriodOwner(
+        membershipPeriodId: Long,
+        mutation: () -> Boolean,
+    ): Boolean = refreshingWeeksOf(
+        runCatching { access { it.membershipPeriodOwner(membershipPeriodId) } }.getOrNull(),
+        mutation,
+    )
+
+    private fun weeksShowingMember(uid: Long, zone: ZoneId, asOf: Instant): Set<LocalDate> {
+        val citingNotes = access { it.weeklyNotePeriodsCitingMember(uid) }
+        return weeklyPeriodStarts(zone).filterTo(citingNotes.toMutableSet()) { periodStart ->
+            val inputs = access { database ->
+                database.readConsistently { readRosterInputs(database, periodStart, zone, asOf) }
+            }
+            inputs.revisionEvents.any { it.uid == uid } ||
+                uid in WeeklyReportBuilder.rosterAtPeriodEnd(
+                    periodStart,
+                    zone,
+                    inputs.snapshots,
+                    inputs.reportEvents,
+                    asOf,
+                )
+        }
     }
 
     private fun recordHistory(
@@ -465,13 +552,10 @@ internal class PlatoonRepository(
         recordLiveWeeklyRevisionSafely(periodStart, zone)
     }
 
-    // Function Name: recordLiveWeeklyRevisionSafely
-    // Description:
-    // - Records a derived table revision without changing the result of an already committed mutation.
-    // - Clears a restored projection on failure so the next screen render uses authoritative live data.
-    // Parameters:
-    // - periodStart: Sunday key of the weekly table to refresh.
-    // - zone: Persisted game timezone used by every date boundary in the projection.
+    /**
+     * Records a derived revision without changing the result of an already committed mutation.
+     * On failure the restored selection is cleared so the next render uses live data.
+     */
     private fun recordLiveWeeklyRevisionSafely(periodStart: LocalDate, zone: ZoneId) {
         try {
             val now = Instant.now()
@@ -517,17 +601,41 @@ internal class PlatoonRepository(
         val sourceFile: String?,
     )
 
+    private class RosterInputs(
+        val snapshots: List<PlatoonSnapshot>,
+        val reportEvents: List<MemberEvent>,
+        val revisionEvents: List<MemberEvent>,
+    )
+
+    private class RevisionInputs(
+        val snapshots: List<PlatoonSnapshot>,
+        val reportEvents: List<MemberEvent>,
+        val revisionEvents: List<MemberEvent>,
+        val overrides: List<WeeklyCellOverride>,
+        val dailyPatrolFacts: List<DailyPatrolFact>,
+        val notes: List<WeeklyNote>,
+        val statuses: List<MemberStatus>,
+    )
+
     companion object {
         const val RETAINED_CSV_DIRECTORY = "guild-members"
-        private const val MAX_REVISION_EVENTS = 512
-        private const val MAX_REVISION_NOTES = 128
-        private const val MAX_REVISION_NAMES = 768
-        private const val MAX_REVISION_NAME_BYTES = 1_024
-        private const val MAX_REVISION_NOTE_BYTES = 16 * 1_024
-        private const val MAX_REVISION_PRIVATE_NOTE_BYTES = 2 * 1_024
+        private const val MAX_REVISION_EVENTS = WeeklyReportHistoryCodec.MAX_EVENTS
+        private const val MAX_REVISION_NOTES = WeeklyReportHistoryCodec.MAX_NOTES
+        private const val MAX_REVISION_NAMES = WeeklyReportHistoryCodec.MAX_CONTEXT_MEMBERS
+        private const val MAX_REVISION_NAME_BYTES = WeeklyReportHistoryCodec.MAX_STRING_BYTES
+        private const val MAX_REVISION_NOTE_BYTES = WeeklyReportHistoryCodec.MAX_NOTE_BYTES
+        private const val MAX_REVISION_PRIVATE_NOTE_BYTES = WeeklyReportHistoryCodec.MAX_PRIVATE_NOTE_BYTES
         private const val TAG = "GF2PlatoonRepository"
+        /*
+         * Global lock order; acquire left to right and never in reverse:
+         * CsvImportCheckpointManager scope state -> maintenanceLock -> PlatoonDatabase monitor ->
+         * PlatoonProfileRegistry lock -> settings preference locks. databaseLock only guards the
+         * helper cache; it is taken after the maintenance lock and only closes evicted helpers.
+         */
         private val databaseLock = Any()
         private val maintenanceLock = ReentrantReadWriteLock(true)
+
+        internal fun holdsSharedDatabaseAccess(): Boolean = maintenanceLock.readHoldCount > 0
 
         private val databaseInstances = mutableMapOf<String, PlatoonDatabase>()
 

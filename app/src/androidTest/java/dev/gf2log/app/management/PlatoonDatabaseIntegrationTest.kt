@@ -569,6 +569,49 @@ class PlatoonDatabaseIntegrationTest {
     }
 
     @Test
+    fun everyWriterAgreesWithTheCanonicalActiveStateRule() {
+        val rosterAt = Instant.parse("2026-07-31T00:00:00Z")
+        database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = rosterAt,
+                sourceFile = "current.csv",
+                members = listOf(member(OTHER_UID, "Current")),
+            ),
+            EvidenceSource.SNAPSHOT,
+        )
+        database.ingestPlatoonUpdates(
+            listOf(
+                update(
+                    PlatoonUpdateSemantics.KIND_JOIN,
+                    rosterAt.minusSeconds(3_600),
+                    TARGET_UID,
+                    "Backfilled",
+                ),
+            ),
+            rosterAt.plusSeconds(60),
+        )
+        assertFalse(database.listMemberStatuses().single { it.uid == TARGET_UID }.isActive)
+
+        database.ingestSnapshot(
+            PlatoonSnapshot(
+                id = 0,
+                capturedAt = rosterAt.minusSeconds(7_200),
+                sourceFile = "older.csv",
+                members = listOf(member(OTHER_UID, "Current")),
+            ),
+            EvidenceSource.LEGACY_IMPORT,
+            historicalOnly = true,
+        )
+        val written = database.listMemberStatuses().associate { it.uid to it.isActive }
+        assertEquals(mapOf(OTHER_UID to true, TARGET_UID to false), written)
+
+        MembershipRows.synchronizeAllActiveStates(database.writableDatabase)
+
+        assertEquals(written, database.listMemberStatuses().associate { it.uid to it.isActive })
+    }
+
+    @Test
     fun schemaTwelveUpgradeRepairsDerivedActiveState() {
         val databaseName = "platoon-v12-membership-state-test.db"
         context.deleteDatabase(databaseName)

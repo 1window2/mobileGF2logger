@@ -513,7 +513,7 @@ class GunsmokeWeekSolverTest {
             }
         }
 
-        return GunsmokeWeekSolver.solve(UID, days, zone, snapshots, cells, facts)
+        return GunsmokeWeekSolver.resolve(UID, days, zone, snapshots, cells, facts).cells
     }
 
     private fun member(

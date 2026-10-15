@@ -1,5 +1,7 @@
 package dev.gf2log.app.management
 
+import dev.gf2log.app.management.ActivityInference.saturatedAdd
+import dev.gf2log.app.management.ActivityInference.saturatedMultiply
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -15,22 +17,6 @@ import java.time.ZoneId
  * usable evidence. Only values shared by every compatible path are published.
  */
 internal object GunsmokeWeekSolver {
-    fun solve(
-        uid: Long,
-        days: List<LocalDate>,
-        zoneId: ZoneId,
-        snapshots: List<PlatoonSnapshot>,
-        cells: List<WeeklyReportBuilder.DayCell>,
-        dailyPatrolFacts: List<DailyPatrolFact>,
-    ): List<WeeklyReportBuilder.DayCell> = resolve(
-        uid,
-        days,
-        zoneId,
-        snapshots,
-        cells,
-        dailyPatrolFacts,
-    ).cells
-
     // Function Name: resolve
     // Description:
     // - Solves daily Gunsmoke states and preserves whole-week totals shared by every valid path.
@@ -1000,15 +986,6 @@ internal object GunsmokeWeekSolver {
             Long.MAX_VALUE
         }
 
-    private fun saturatedMultiply(value: Long, factor: Int): Long = when {
-        factor == 0 -> 0L
-        value > Long.MAX_VALUE / factor -> Long.MAX_VALUE
-        else -> value * factor
-    }
-
-    private fun saturatedAdd(left: Long, right: Long): Long =
-        if (left > Long.MAX_VALUE - right) Long.MAX_VALUE else left + right
-
     private fun matchesFinalEvidence(
         state: ActivityState,
         cell: WeeklyReportBuilder.DayCell,
@@ -1127,8 +1104,6 @@ internal object GunsmokeWeekSolver {
         }
     }
 
-    private fun PlatoonSnapshot.member(uid: Long): SnapshotMember? = members.firstOrNull { it.uid == uid }
-
     private fun SnapshotMember.hasValidActivityCounters(): Boolean =
         weeklyMerit >= 0L && totalMerit >= 0L && highScore >= 0L && totalScore >= 0L
 
@@ -1201,13 +1176,13 @@ internal object GunsmokeWeekSolver {
         val maximumPatrolDays: Int,
     ) {
         val meritCertainty: MetricCertainty
-            get() = certainty(minimumMerit, maximumMerit)
+            get() = rangeCertainty(minimumMerit, maximumMerit)
         val attemptsCertainty: MetricCertainty
-            get() = certainty(minimumAttempts, maximumAttempts)
+            get() = rangeCertainty(minimumAttempts, maximumAttempts)
         val loginDaysCertainty: MetricCertainty
-            get() = certainty(minimumLoginDays, maximumLoginDays)
+            get() = rangeCertainty(minimumLoginDays, maximumLoginDays)
         val patrolDaysCertainty: MetricCertainty
-            get() = certainty(minimumPatrolDays, maximumPatrolDays)
+            get() = rangeCertainty(minimumPatrolDays, maximumPatrolDays)
 
         operator fun plus(state: ActivityState): ActivityTotalBounds = ActivityTotalBounds(
             minimumMerit = minimumMerit + state.merit,
@@ -1243,12 +1218,6 @@ internal object GunsmokeWeekSolver {
                 maximumPatrolDays = 0,
             )
 
-            private fun certainty(minimum: Number, maximum: Number): MetricCertainty =
-                if (minimum.toLong() == maximum.toLong()) {
-                    MetricCertainty.EXACT
-                } else {
-                    MetricCertainty.LOWER_BOUND
-                }
         }
     }
 
@@ -1382,8 +1351,8 @@ internal object GunsmokeWeekSolver {
     private const val MAX_PARTIAL_SOLUTIONS = 2_000
     private const val MAX_SEARCH_OPERATIONS = 100_000
     private const val MAX_AGGREGATE_SEARCH_OPERATIONS = 100_000
-    private const val LOGIN_MERIT = 50L
-    private const val PATROL_MERIT = 40L
+    private const val LOGIN_MERIT = ActivityInference.LOGIN_MERIT
+    private const val PATROL_MERIT = ActivityInference.DAILY_PATROL_MERIT
     private const val MAX_PRE_GUNSMOKE_WEEKLY_MERIT = 6L * (LOGIN_MERIT + PATROL_MERIT)
     private const val DAILY_BASELINE_AND_ATTEMPT_MERIT =
         LOGIN_MERIT + PATROL_MERIT +

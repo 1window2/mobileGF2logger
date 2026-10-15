@@ -229,7 +229,7 @@ class PlatoonActivity : BaseActivity() {
         tiles.forEachIndexed { index, (label, value) ->
             summary.addView(panel(padding = 12) {
                 isFocusable = true
-                contentDescription = "$label: $value"
+                contentDescription = Labels.labeled(context, label, value)
                 addView(text(label, TextRole.CAPTION) {
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                     maxLines = 1
@@ -290,7 +290,7 @@ class PlatoonActivity : BaseActivity() {
 
     private fun updateSortLabel() {
         sortButton.text = getString(sort.label)
-        sortButton.contentDescription = getString(R.string.sort_by) + ": " + getString(sort.label)
+        sortButton.contentDescription = Labels.labeled(this, getString(R.string.sort_by), getString(sort.label))
     }
 
     private fun setSelecting(enabled: Boolean) {
@@ -487,7 +487,7 @@ class PlatoonActivity : BaseActivity() {
             status.text = getString(if (member.isActive) R.string.active_member else R.string.departed_member)
             status.visibility = if (member.isActive) View.GONE else View.VISIBLE
             detail.text = buildList {
-                add("#${member.uid}")
+                add(Labels.uid(this@PlatoonActivity, member.uid))
                 add(getString(R.string.level_short, latest?.level ?: member.level))
                 latest?.lastLogin?.takeIf { it > 0 }?.let {
                     add(getString(
@@ -503,7 +503,7 @@ class PlatoonActivity : BaseActivity() {
                 member.name,
                 status.text,
                 detail.text,
-                getString(R.string.merit_this_week) + " " + merit.text,
+                Labels.labeled(this@PlatoonActivity, getString(R.string.merit_this_week), merit.text),
             ).joinToString(". ")
             row.setOnClickListener {
                 if (selecting) {

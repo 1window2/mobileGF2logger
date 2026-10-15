@@ -92,8 +92,8 @@ class SnapshotComparisonActivity : BaseActivity() {
                 TextRole.CAPTION,
             ), lp(top = 4))
         }, lp(top = 4))
-        section(getString(R.string.joined_members), result.joined.size, result.joined.map { it.name to "#${it.uid}" })
-        section(getString(R.string.departed_members), result.left.size, result.left.map { it.name to "#${it.uid}" })
+        section(getString(R.string.joined_members), result.joined.size, result.joined.map { it.name to Labels.uid(this, it.uid) })
+        section(getString(R.string.departed_members), result.left.size, result.left.map { it.name to Labels.uid(this, it.uid) })
         content.addView(sectionHeader(getString(R.string.member_changes_count, result.changes.size)), lp())
         if (result.changes.isEmpty()) {
             content.addView(text(getString(R.string.none), TextRole.SECONDARY), lp(start = 4))
@@ -110,7 +110,7 @@ class SnapshotComparisonActivity : BaseActivity() {
                             maxLines = 1
                             ellipsize = TextUtils.TruncateAt.END
                         }, lp(width = 0, weight = 1f))
-                        addView(text("#${change.uid}", TextRole.CAPTION), lp(WRAP, WRAP, start = 8))
+                        addView(text(Labels.uid(context, change.uid), TextRole.CAPTION), lp(WRAP, WRAP, start = 8))
                     }, lp())
                     addView(row {
                         listOf(

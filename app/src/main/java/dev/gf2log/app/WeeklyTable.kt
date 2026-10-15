@@ -176,7 +176,7 @@ internal class WeeklyTable(
             onCell: (WeeklyReportBuilder.DayCell?) -> Unit,
         ) {
             name.text = member.name
-            detail.text = "#${member.uid}"
+            detail.text = Labels.uid(context, member.uid)
             rank.text = rankValue?.toString().orEmpty()
             // Only the podium carries the accent; the rest of the ranking stays quiet.
             val podium = rankValue != null && rankValue <= PODIUM
@@ -185,7 +185,7 @@ internal class WeeklyTable(
             frozen.contentDescription = listOfNotNull(
                 rankValue?.let { context.getString(R.string.rank_description, it) },
                 member.name,
-                "#${member.uid}",
+                Labels.uid(context, member.uid),
             ).joinToString(". ")
             frozen.isFocusable = true
             member.days.forEachIndexed { index, cell ->

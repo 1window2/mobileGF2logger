@@ -21,6 +21,13 @@ internal object Labels {
     val FILE_STAMP: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
     val FILE_DATE: DateTimeFormatter = DateTimeFormatter.BASIC_ISO_DATE
 
+    /** "#1234": member UIDs read the same everywhere and stay out of string concatenation. */
+    fun uid(context: Context, uid: Long): String = context.getString(R.string.member_uid, uid)
+
+    /** "Label: value" for spoken descriptions, with locale-controlled punctuation. */
+    fun labeled(context: Context, label: CharSequence, value: CharSequence): String =
+        context.getString(R.string.labeled_value, label, value)
+
     fun format(formatter: DateTimeFormatter, instant: Instant, zone: ZoneId): String =
         formatter.format(instant.atZone(zone))
 

@@ -498,6 +498,9 @@
     <string name="week_range">%1$s – %2$s</string>
     <string name="week_reset_zone">Reset 05:00 · %1$s</string>
     <string name="weekly_cell_description">%1$s, %2$s</string>
+    <string name="labeled_value">%1$s: %2$s</string>
+    <string name="member_uid">#%1$d</string>
+    <string name="member_name_uid">%1$s (#%2$d)</string>
     <string name="weekly_cell_title">%1$s · %2$s</string>
     <string name="weekly_edit_banner">Tap a day to change its values. Edited cells are highlighted until you save.</string>
     <string name="weekly_table_history_preview_notice">This is a recorded version of the table. Restoring shows it until new evidence changes the table.</string>

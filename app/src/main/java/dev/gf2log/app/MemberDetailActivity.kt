@@ -165,7 +165,7 @@ class MemberDetailActivity : BaseActivity() {
             return
         }
         val status = loaded.status
-        screen.topBar.setTitle(status.name, "#${status.uid}")
+        screen.topBar.setTitle(status.name, Labels.uid(this, status.uid))
         statusPanel.addView(row {
             addView(text(getString(R.string.member_since, firstSeen(status, loaded.zone)), TextRole.SECONDARY), lp(width = 0, weight = 1f))
             addView(badge(
@@ -188,7 +188,7 @@ class MemberDetailActivity : BaseActivity() {
                 pair.forEachIndexed { index, (label, value) ->
                     addView(column {
                         isFocusable = true
-                        contentDescription = "$label: $value"
+                        contentDescription = Labels.labeled(context, label, value)
                         addView(text(label, TextRole.CAPTION) { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, lp())
                         addView(text(value, TextRole.SUBTITLE) { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, lp(top = 2))
                     }, lp(width = 0, weight = 1f, start = if (index == 0) 0 else 12))

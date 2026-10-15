@@ -28,6 +28,7 @@ import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Feedback
+import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.MATCH
 import dev.gf2log.app.ui.MenuEntry
 import dev.gf2log.app.ui.Screen
@@ -184,11 +185,11 @@ class MemberOrderActivity : BaseActivity() {
 
     private fun updateSortLabels() {
         fieldButton.text = getString(fieldLabel(sortField))
-        fieldButton.contentDescription = getString(R.string.sort_criterion) + ": " + fieldButton.text
+        fieldButton.contentDescription = Labels.labeled(this, getString(R.string.sort_criterion), fieldButton.text)
         directionButton.text = getString(
             if (sortDirection == MemberSortDirection.ASCENDING) R.string.ascending else R.string.descending,
         )
-        directionButton.contentDescription = getString(R.string.sort_direction) + ": " + directionButton.text
+        directionButton.contentDescription = Labels.labeled(this, getString(R.string.sort_direction), directionButton.text)
     }
 
     private fun fieldLabel(field: MemberSortField) = when (field) {
@@ -286,7 +287,7 @@ class MemberOrderActivity : BaseActivity() {
         fun bind(member: MemberStatus, index: Int) {
             position.text = (index + 1).toString()
             name.text = member.name
-            detail.text = "#${member.uid}"
+            detail.text = Labels.uid(this@MemberOrderActivity, member.uid)
             itemView.contentDescription = getString(R.string.member_order_position, index + 1, members.size, member.name)
             handle.contentDescription = getString(R.string.drag_member, member.name)
             ViewCompat.removeAccessibilityAction(itemView, R.id.action_move_up)

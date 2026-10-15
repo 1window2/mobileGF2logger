@@ -500,7 +500,8 @@ class WeeklyReportActivity : BaseActivity() {
         val joined = event.type == MemberEventType.JOINED || event.type == MemberEventType.REJOINED
         val label = getString(if (joined) R.string.join_label else R.string.withdraw_label)
         val name = next.namesByUid[event.uid].orEmpty().ifBlank { event.note }
-        val identity = name.takeIf(String::isNotBlank)?.let { "$it (#${event.uid})" } ?: "#${event.uid}"
+        val identity = name.takeIf(String::isNotBlank)?.let { getString(R.string.member_name_uid, it, event.uid) }
+            ?: Labels.uid(this, event.uid)
         val time = MembershipEventPresentation.timePrefix(event, next.zone)
         return row {
             minimumHeight = dp(40)
@@ -578,7 +579,7 @@ class WeeklyReportActivity : BaseActivity() {
     private fun updateNoteDay() {
         val day = noteDay ?: return
         noteDayButton.text = Labels.dayHeader(this, day)
-        noteDayButton.contentDescription = getString(R.string.note_day) + ": " + noteDayButton.text
+        noteDayButton.contentDescription = Labels.labeled(this, getString(R.string.note_day), noteDayButton.text)
     }
 
     // endregion
@@ -738,7 +739,7 @@ class WeeklyReportActivity : BaseActivity() {
         val existing = report.members.flatMap { member -> member.days.mapNotNull { it.manualOverride } }
         when (val merged = WeeklyOverrideEditing.merge(report.periodStart, report.isGunsmokeWeek, existing, edits.values)) {
             is WeeklyOverrideEditing.Result.Invalid -> {
-                val name = current.namesByUid[merged.uid] ?: "#${merged.uid}"
+                val name = current.namesByUid[merged.uid] ?: Labels.uid(this, merged.uid)
                 Feedback.show(
                     this,
                     getString(R.string.invalid_weekly_edit_cell, name, Labels.dayHeader(this, merged.gameDay)),

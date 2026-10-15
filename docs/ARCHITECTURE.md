@@ -110,6 +110,7 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   fragments. The first continuation is checked before retention; exceeding
   either limit discards the pending payload and quarantines its remaining
   fragments through the logical terminal frame before later datasets are parsed.
+  A malformed or truncated continuation frame discards its dataset the same way.
   Quarantine is advanced from frame metadata before protobuf decoding, so even
   a malformed terminal fragment clears the discarded dataset deterministically.
 - One serial `CaptureWorker` owns every parser, flow, session, and admission
@@ -165,7 +166,7 @@ preserving in-flow ordering.
 1. Start forwarding using the supplied TUN file descriptor.
 2. Stop and release native resources.
 
-The listener reports candidate plaintext payloads after TCP reassembly, flow closure, unexpected native termination, and aggregate byte counters. Every upstream socket is passed through `VpnService.protect()` so forwarded traffic cannot re-enter the VPN.
+The listener reports candidate plaintext payloads after TCP reassembly, flow closure, unexpected native termination, and aggregate byte counters. Flow ids are unique for the life of the process, so a pending Platoon that outlives one capture can never refer to a flow of the next. Every upstream socket is passed through `VpnService.protect()` so forwarded traffic cannot re-enter the VPN.
 
 The implementation uses zdtun rather than introducing a new TCP/IP stack.
 General PCAP export, nDPI classification, TLS decryption, root capture, remote

@@ -83,7 +83,7 @@ preferred source for Join/Withdraw history and Daily Patrol facts. Type `21917`
 remains the authoritative current roster, and type `21935` remains incremental
 supporting activity evidence.
 
-The reference may receive one logical dataset across multiple inner payloads. It continues when the payload type matches and the previous outer message id is `0`, or when both outer message ids match. mobileGF2logger preserves that batching rule when writing CSV files.
+The reference may receive one logical dataset across multiple inner payloads. It continues when the payload type matches and the previous outer message id is `0`, or when both outer message ids match. mobileGF2logger applies that batching rule once, in the stream parser. A dataset cut short by a malformed frame, an unrelated payload, or flow closure is discarded whole and never merged into a later roster, so a partial roster can never mark the missing members as withdrawn.
 
 The reference reports Platoon data during login, sometimes twice during login,
 after reconnection, and on Platoon pages. The 21935 and 21960 responses are

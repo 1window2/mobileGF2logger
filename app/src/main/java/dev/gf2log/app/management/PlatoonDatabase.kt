@@ -61,6 +61,19 @@ internal class PlatoonDatabase private constructor(
     @Synchronized
     internal fun <T> runInTransaction(block: () -> T): T = writableDatabase.inTransaction(block)
 
+    /** Runs several reads against one state: every writer is serialized on this helper. */
+    @Synchronized
+    internal fun <T> readConsistently(block: () -> T): T = block()
+
+    @Synchronized
+    fun membershipPeriodOwner(membershipPeriodId: Long): Long? =
+        PlatoonReadQueries.membershipPeriodOwner(readableDatabase, membershipPeriodId)
+
+    /** Period starts of manual weekly notes that cite one of [uid]'s membership events. */
+    @Synchronized
+    fun weeklyNotePeriodsCitingMember(uid: Long): Set<LocalDate> =
+        WeeklyAnnotationStore.notePeriodsCitingMember(readableDatabase, uid)
+
     @Synchronized
     fun ingestSnapshot(
         snapshot: PlatoonSnapshot,

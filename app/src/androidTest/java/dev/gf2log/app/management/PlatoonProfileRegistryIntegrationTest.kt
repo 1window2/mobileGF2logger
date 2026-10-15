@@ -453,6 +453,50 @@ class PlatoonProfileRegistryIntegrationTest {
     }
 
     @Test
+    fun memberEditsRefreshOnlyTheWeeksThatShowTheMember() {
+        val profile = PlatoonProfileRegistry(context).upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            PlatoonProfileData(5u, "Weeks", 0u, 0u),
+        )
+        val scope = PlatoonStorageScope(profile.storageId)
+        val repository = PlatoonRepository(context, scope)
+        val firstCapture = Instant.parse("2026-08-04T12:00:00Z")
+        repository.ingest(firstCapture, listOf(member(1u, "Stayer")), "first.csv")
+        repository.ingest(
+            firstCapture.plusSeconds(7L * 24L * 60L * 60L),
+            listOf(member(1u, "Stayer"), member(2u, "Newcomer")),
+            "second.csv",
+        )
+        val zone = dev.gf2log.app.settings.GameTimeZonePreferences.get(context, profile.storageId)
+        val firstWeek = PlatoonPeriods.weekStart(PlatoonPeriods.gameDay(firstCapture, zone))
+        val secondWeek = firstWeek.plusDays(7)
+        // A stale latest revision makes any rebuild of the first week observable.
+        PlatoonRepository.withExclusiveDatabase(scope) {
+            PlatoonDatabase(context, scope.databaseName).use { database ->
+                database.recordWeeklyReportHistory(
+                    periodStartEpochDay = firstWeek.toEpochDay(),
+                    recordedAt = Instant.now(),
+                    fingerprint = "0".repeat(64),
+                    payload = byteArrayOf(1),
+                    clearActiveOnChange = false,
+                )
+            }
+        }
+        val firstWeekRevisions = repository.listWeeklyReportHistory(firstWeek).size
+        val secondWeekRevisions = repository.listWeeklyReportHistory(secondWeek).size
+
+        assertTrue(repository.updateMember(2L, "Renamed", ""))
+
+        assertEquals(firstWeekRevisions, repository.listWeeklyReportHistory(firstWeek).size)
+        assertEquals(secondWeekRevisions + 1, repository.listWeeklyReportHistory(secondWeek).size)
+        assertEquals(
+            "Renamed",
+            repository.buildWeeklyTableRevision(secondWeek, zone).memberNamesByUid[2L],
+        )
+    }
+
+    @Test
     fun pendingDeletionRecoveryCannotDeadlockWithAnExclusiveRestore() {
         val registry = PlatoonProfileRegistry(context)
         val kept = registry.upsertDetected(

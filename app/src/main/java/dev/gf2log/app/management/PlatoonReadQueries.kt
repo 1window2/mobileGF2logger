@@ -212,6 +212,12 @@ internal object PlatoonReadQueries {
         return days.distinct()
     }
 
+    fun membershipPeriodOwner(db: SQLiteDatabase, membershipPeriodId: Long): Long? =
+        db.rawQuery(
+            "SELECT uid FROM membership_periods WHERE id = ?",
+            arrayOf(membershipPeriodId.toString()),
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
+
     fun count(db: SQLiteDatabase, table: String): Long =
         db.rawQuery("SELECT COUNT(*) FROM $table", null).use { cursor ->
             cursor.moveToFirst()

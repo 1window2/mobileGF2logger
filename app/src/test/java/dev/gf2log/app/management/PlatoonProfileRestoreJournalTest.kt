@@ -50,6 +50,8 @@ class PlatoonProfileRestoreJournalTest {
             GameTimeZonePreferences.ScopedZoneState(region = null, zone = null),
             GameTimeZonePreferences.ScopedZoneState(GameServerRegion.HAOPLAY_JAPAN.storedValue, null),
             GameTimeZonePreferences.ScopedZoneState(GameServerRegion.MANUAL.storedValue, "Asia/Seoul"),
+            // Raw keys the timezone reader tolerates must roll back verbatim, not abort recovery.
+            GameTimeZonePreferences.ScopedZoneState("region_from_a_newer_app", "Not/AZone"),
             null,
         ).forEach { state ->
             val value = PlatoonProfileRestoreJournal(

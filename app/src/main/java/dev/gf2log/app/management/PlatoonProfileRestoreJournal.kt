@@ -7,7 +7,6 @@ import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.time.Instant
-import java.time.ZoneId
 
 /**
  * Durable rollback state for profile metadata changed by a scoped backup restore. The exact
@@ -96,14 +95,12 @@ internal object PlatoonProfileRestoreJournalCodec {
             } else {
                 null
             }
+            // The raw keys are rolled back verbatim: the timezone reader already tolerates an
+            // unknown region or zone, so rejecting one here would only abort recovery.
             val previousTimeZone = if (version >= TIME_ZONE_VERSION && input.readBoolean()) {
                 GameTimeZonePreferences.ScopedZoneState(
-                    region = input.readNullable()?.also {
-                        require(GameServerRegion.fromStored(it).storedValue == it) {
-                            "Profile restore journal contains an unknown server region"
-                        }
-                    },
-                    zone = input.readNullable()?.also { ZoneId.of(it) },
+                    region = input.readNullable(),
+                    zone = input.readNullable(),
                 )
             } else {
                 null

@@ -1,6 +1,7 @@
 package dev.gf2log.app.management
 
 import android.content.Context
+import android.content.SharedPreferences
 import dev.gf2log.app.SupportedGamePackages
 import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.app.settings.GameServerRegion
@@ -223,15 +224,8 @@ internal class PlatoonProfileRegistry(context: Context) {
         val platoonId = data.platoonId.toLong()
         val existing = readAllLocked().firstOrNull { it.hasIdentity(client, region, platoonId) }
         val storageId = existing?.storageId ?: allocateStorageIdLocked(client, region, platoonId)
-        require(readLocked(storageId) != null || readAllLocked().size < MAX_PROFILES) {
-            "Too many Platoon profiles are already registered"
-        }
-        val normalizedName = data.platoonName
-            .replace(Regex("\\s+"), " ")
-            .filterNot(Char::isISOControl)
-            .trim()
-            .take(PlatoonProfile.MAX_NAME_LENGTH)
-        require(normalizedName.isNotBlank()) { "Platoon name is empty after normalization" }
+        requireCapacityLocked(storageId)
+        val normalizedName = normalizeName(data.platoonName)
         val bannerIds = normalizedBannerIds(
             data = data,
             fallbackFrameId = existing?.bannerFrameId ?: 0L,
@@ -270,11 +264,10 @@ internal class PlatoonProfileRegistry(context: Context) {
         require(readAllLocked().none { it.hasIdentity(client, region, platoonId) }) {
             "That client/server Platoon profile already exists"
         }
-        require(readAllLocked().size < MAX_PROFILES) {
-            "Too many Platoon profiles are already registered"
-        }
+        val storageId = allocateStorageIdLocked(client, region, platoonId)
+        requireCapacityLocked(storageId)
         val profile = PlatoonProfile(
-            storageId = allocateStorageIdLocked(client, region, platoonId),
+            storageId = storageId,
             client = client,
             serverRegion = region,
             platoonId = platoonId,
@@ -343,9 +336,7 @@ internal class PlatoonProfileRegistry(context: Context) {
     fun upsertRestored(profile: PlatoonProfile): PlatoonProfile = synchronized(lock) {
         require(!profile.legacy) { "Legacy unscoped Platoon data cannot be restored" }
         requireCompatibleRestoreTargetLocked(profile)
-        require(readLocked(profile.storageId) != null || readAllLocked().size < MAX_PROFILES) {
-            "Too many Platoon profiles are already registered"
-        }
+        requireCapacityLocked(profile.storageId)
         writeLocked(profile, setActive = false)
         profile
     }
@@ -354,9 +345,7 @@ internal class PlatoonProfileRegistry(context: Context) {
     fun requireRestoreCapacity(profile: PlatoonProfile) = synchronized(lock) {
         require(!profile.legacy) { "Legacy unscoped Platoon data cannot be restored" }
         requireCompatibleRestoreTargetLocked(profile)
-        require(readLocked(profile.storageId) != null || readAllLocked().size < MAX_PROFILES) {
-            "Too many Platoon profiles are already registered"
-        }
+        requireCapacityLocked(profile.storageId)
     }
 
     /** Removes registry metadata introduced by a failed restore; scoped data is left untouched. */
@@ -366,19 +355,9 @@ internal class PlatoonProfileRegistry(context: Context) {
         if (preferences.getString(KEY_ACTIVE, null) == storageId) return@synchronized false
         val ids = preferences.getStringSet(KEY_IDS, emptySet()).orEmpty().toMutableSet()
         if (!ids.remove(storageId)) return@synchronized false
-        val prefix = "$KEY_PROFILE.$storageId."
         preferences.edit()
             .putStringSet(KEY_IDS, ids)
-            .remove(prefix + CLIENT)
-            .remove(prefix + REGION)
-            .remove(prefix + PLATOON_ID)
-            .remove(prefix + NAME)
-            .remove(prefix + BANNER_FRAME_ID)
-            .remove(prefix + BANNER_MARK_ID)
-            .remove(prefix + EMBLEM_PRIMARY)
-            .remove(prefix + EMBLEM_SECONDARY)
-            .remove(prefix + LAST_SEEN)
-            .remove(prefix + LEGACY)
+            .removeProfileKeys(storageId)
             .commit()
     }
 
@@ -395,32 +374,13 @@ internal class PlatoonProfileRegistry(context: Context) {
                 PlatoonProfileIdentity.isValidStorageId(previousActiveStorageId),
         )
         val ids = preferences.getStringSet(KEY_IDS, emptySet()).orEmpty().toMutableSet()
-        val prefix = "$KEY_PROFILE.$targetStorageId."
         val editor = preferences.edit()
         if (previousProfile == null) {
             ids.remove(targetStorageId)
-            editor.remove(prefix + CLIENT)
-                .remove(prefix + REGION)
-                .remove(prefix + PLATOON_ID)
-                .remove(prefix + NAME)
-                .remove(prefix + BANNER_FRAME_ID)
-                .remove(prefix + BANNER_MARK_ID)
-                .remove(prefix + EMBLEM_PRIMARY)
-                .remove(prefix + EMBLEM_SECONDARY)
-                .remove(prefix + LAST_SEEN)
-                .remove(prefix + LEGACY)
+            editor.removeProfileKeys(targetStorageId)
         } else {
             ids += targetStorageId
-            editor.putString(prefix + CLIENT, previousProfile.client.name)
-                .putString(prefix + REGION, previousProfile.serverRegion.storedValue)
-                .putLong(prefix + PLATOON_ID, previousProfile.platoonId)
-                .putString(prefix + NAME, previousProfile.platoonName)
-                .putLong(prefix + BANNER_FRAME_ID, previousProfile.bannerFrameId)
-                .putLong(prefix + BANNER_MARK_ID, previousProfile.bannerMarkId)
-                .remove(prefix + EMBLEM_PRIMARY)
-                .remove(prefix + EMBLEM_SECONDARY)
-                .putLong(prefix + LAST_SEEN, previousProfile.lastSeenAt.toEpochMilli())
-                .putBoolean(prefix + LEGACY, previousProfile.legacy)
+            editor.putProfile(previousProfile)
         }
         editor.putStringSet(KEY_IDS, ids)
         if (previousActiveStorageId != null && previousActiveStorageId in ids) {
@@ -439,19 +399,9 @@ internal class PlatoonProfileRegistry(context: Context) {
         val ids = preferences.getStringSet(KEY_IDS, emptySet()).orEmpty().toMutableSet()
         if (!ids.remove(storageId)) return@synchronized false
         val remaining = ids.mapNotNull(::readLocked)
-        val prefix = "$KEY_PROFILE.$storageId."
         val editor = preferences.edit()
             .putStringSet(KEY_IDS, ids)
-            .remove(prefix + CLIENT)
-            .remove(prefix + REGION)
-            .remove(prefix + PLATOON_ID)
-            .remove(prefix + NAME)
-            .remove(prefix + BANNER_FRAME_ID)
-            .remove(prefix + BANNER_MARK_ID)
-            .remove(prefix + EMBLEM_PRIMARY)
-            .remove(prefix + EMBLEM_SECONDARY)
-            .remove(prefix + LAST_SEEN)
-            .remove(prefix + LEGACY)
+            .removeProfileKeys(storageId)
         if (preferences.getString(KEY_ACTIVE, null) == storageId) {
             val fallback = remaining.maxByOrNull(PlatoonProfile::lastSeenAt)
             if (fallback == null) {
@@ -474,19 +424,9 @@ internal class PlatoonProfileRegistry(context: Context) {
         if (!ids.remove(PlatoonProfileIdentity.LEGACY_STORAGE_ID) &&
             preferences.getString(KEY_ACTIVE, null) != PlatoonProfileIdentity.LEGACY_STORAGE_ID
         ) return
-        val prefix = "$KEY_PROFILE.${PlatoonProfileIdentity.LEGACY_STORAGE_ID}."
         val editor = preferences.edit()
             .putStringSet(KEY_IDS, ids)
-            .remove(prefix + CLIENT)
-            .remove(prefix + REGION)
-            .remove(prefix + PLATOON_ID)
-            .remove(prefix + NAME)
-            .remove(prefix + BANNER_FRAME_ID)
-            .remove(prefix + BANNER_MARK_ID)
-            .remove(prefix + EMBLEM_PRIMARY)
-            .remove(prefix + EMBLEM_SECONDARY)
-            .remove(prefix + LAST_SEEN)
-            .remove(prefix + LEGACY)
+            .removeProfileKeys(PlatoonProfileIdentity.LEGACY_STORAGE_ID)
         if (preferences.getString(KEY_ACTIVE, null) == PlatoonProfileIdentity.LEGACY_STORAGE_ID) {
             editor.remove(KEY_ACTIVE)
         }
@@ -495,7 +435,7 @@ internal class PlatoonProfileRegistry(context: Context) {
 
     private fun readLocked(storageId: String): PlatoonProfile? = runCatching {
         if (!PlatoonProfileIdentity.isValidStorageId(storageId)) return@runCatching null
-        val prefix = "$KEY_PROFILE.$storageId."
+        val prefix = profilePrefix(storageId)
         PlatoonProfile(
             storageId = storageId,
             client = PlatoonClient.valueOf(requireNotNull(preferences.getString(prefix + CLIENT, null))),
@@ -512,21 +452,39 @@ internal class PlatoonProfileRegistry(context: Context) {
     private fun writeLocked(profile: PlatoonProfile, setActive: Boolean) {
         val ids = preferences.getStringSet(KEY_IDS, emptySet()).orEmpty().toMutableSet()
         ids += profile.storageId
-        val prefix = "$KEY_PROFILE.${profile.storageId}."
         val editor = preferences.edit()
             .putStringSet(KEY_IDS, ids)
-            .putString(prefix + CLIENT, profile.client.name)
-            .putString(prefix + REGION, profile.serverRegion.storedValue)
-            .putLong(prefix + PLATOON_ID, profile.platoonId)
-            .putString(prefix + NAME, profile.platoonName)
-            .putLong(prefix + BANNER_FRAME_ID, profile.bannerFrameId)
-            .putLong(prefix + BANNER_MARK_ID, profile.bannerMarkId)
-            .remove(prefix + EMBLEM_PRIMARY)
-            .remove(prefix + EMBLEM_SECONDARY)
-            .putLong(prefix + LAST_SEEN, profile.lastSeenAt.toEpochMilli())
-            .putBoolean(prefix + LEGACY, profile.legacy)
+            .putProfile(profile)
         if (setActive) editor.putString(KEY_ACTIVE, profile.storageId)
         check(editor.commit()) { "Unable to persist the Platoon profile registry" }
+    }
+
+    private fun SharedPreferences.Editor.putProfile(profile: PlatoonProfile) = apply {
+        val prefix = profilePrefix(profile.storageId)
+        putString(prefix + CLIENT, profile.client.name)
+        putString(prefix + REGION, profile.serverRegion.storedValue)
+        putLong(prefix + PLATOON_ID, profile.platoonId)
+        putString(prefix + NAME, profile.platoonName)
+        putLong(prefix + BANNER_FRAME_ID, profile.bannerFrameId)
+        putLong(prefix + BANNER_MARK_ID, profile.bannerMarkId)
+        remove(prefix + EMBLEM_PRIMARY)
+        remove(prefix + EMBLEM_SECONDARY)
+        putLong(prefix + LAST_SEEN, profile.lastSeenAt.toEpochMilli())
+        putBoolean(prefix + LEGACY, profile.legacy)
+    }
+
+    private fun SharedPreferences.Editor.removeProfileKeys(storageId: String) = apply {
+        val prefix = profilePrefix(storageId)
+        PROFILE_KEYS.forEach { key -> remove(prefix + key) }
+    }
+
+    private fun profilePrefix(storageId: String) = "$KEY_PROFILE.$storageId."
+
+    /** A new scope must fit under [MAX_PROFILES]; an existing scope is always replaceable. */
+    private fun requireCapacityLocked(storageId: String) {
+        require(readLocked(storageId) != null || readAllLocked().size < MAX_PROFILES) {
+            "Too many Platoon profiles are already registered"
+        }
     }
 
     private fun requireCompatibleRestoreTargetLocked(profile: PlatoonProfile) {
@@ -567,7 +525,7 @@ internal class PlatoonProfileRegistry(context: Context) {
     }
 
     private fun normalizeName(value: String): String = value
-        .replace(Regex("\\s+"), " ")
+        .replace(WHITESPACE, " ")
         .filterNot(Char::isISOControl)
         .trim()
         .take(PlatoonProfile.MAX_NAME_LENGTH)
@@ -609,6 +567,19 @@ internal class PlatoonProfileRegistry(context: Context) {
         private const val EMBLEM_SECONDARY = "emblem_secondary"
         private const val LAST_SEEN = "last_seen"
         private const val LEGACY = "legacy"
+        private val PROFILE_KEYS = listOf(
+            CLIENT,
+            REGION,
+            PLATOON_ID,
+            NAME,
+            BANNER_FRAME_ID,
+            BANNER_MARK_ID,
+            EMBLEM_PRIMARY,
+            EMBLEM_SECONDARY,
+            LAST_SEEN,
+            LEGACY,
+        )
+        private val WHITESPACE = Regex("\\s+")
         private val lock = Any()
     }
 }

@@ -4,6 +4,7 @@ import dev.gf2log.app.StrictProperties
 import dev.gf2log.protocol.PayloadCatalog
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.time.ZoneId
 import java.util.Properties
 
 data class AppBackupSettings(
@@ -87,7 +88,7 @@ object AppBackupSettingsCodec {
             gameTimeZoneId = if (schemaVersion >= TIME_ZONE_SCHEMA_VERSION) {
                 properties.required(KEY_GAME_TIME_ZONE)
             } else {
-                java.time.ZoneId.systemDefault().id
+                ZoneId.systemDefault().id
             },
             onboardingCompleted = if (schemaVersion >= THEME_SCHEMA_VERSION) {
                 properties.strictBoolean(KEY_ONBOARDING_COMPLETED)
@@ -128,7 +129,7 @@ object AppBackupSettingsCodec {
             GameServerRegion.fromStored(settings.gameServerRegion).storedValue ==
                 settings.gameServerRegion,
         ) { "Unsupported game server region" }
-        require(runCatching { java.time.ZoneId.of(settings.gameTimeZoneId) }.isSuccess) {
+        require(runCatching { ZoneId.of(settings.gameTimeZoneId) }.isSuccess) {
             "Unsupported game timezone"
         }
         require(

@@ -9,6 +9,7 @@ import java.io.File
 import java.io.FilterOutputStream
 import java.io.InputStream
 import java.io.OutputStream
+import java.time.Instant
 import java.util.Properties
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
@@ -211,7 +212,7 @@ internal object BackupArchive {
             platoonName = platoonName,
             bannerFrameId = bannerFrameId,
             bannerMarkId = bannerMarkId,
-            lastSeenAt = java.time.Instant.now(),
+            lastSeenAt = Instant.now(),
             legacy = legacy,
         )
     }

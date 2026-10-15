@@ -83,8 +83,8 @@ class OnboardingActivity : BaseActivity() {
                 Controls.segmentedControl(
                     context = context,
                     options = listOf(
-                        LanguagePreferences.DEFAULT_LANGUAGE to "English",
-                        LanguagePreferences.KOREAN to "한국어",
+                        LanguagePreferences.DEFAULT_LANGUAGE to getString(R.string.language_english),
+                        LanguagePreferences.KOREAN to getString(R.string.language_korean_native),
                     ),
                     selectedValue = LanguagePreferences.get(context),
                 ) { language ->

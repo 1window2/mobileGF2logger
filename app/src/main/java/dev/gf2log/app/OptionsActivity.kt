@@ -120,8 +120,8 @@ class OptionsActivity : BaseActivity() {
             addView(Controls.segmentedControl(
                 context = this@OptionsActivity,
                 options = listOf(
-                    LanguagePreferences.KOREAN to getString(R.string.language_korean_native),
                     LanguagePreferences.DEFAULT_LANGUAGE to getString(R.string.language_english),
+                    LanguagePreferences.KOREAN to getString(R.string.language_korean_native),
                 ),
                 selectedValue = LanguagePreferences.get(this@OptionsActivity),
             ) { language ->

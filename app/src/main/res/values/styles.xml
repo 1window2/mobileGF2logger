@@ -18,6 +18,13 @@
         <item name="android:timePickerDialogTheme">@style/GF2PickerTheme</item>
     </style>
 
+    <!-- Pure black from the first frame, so entering standby never flashes the app background. -->
+    <style name="GF2StandbyTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
     <style name="GF2DialogTheme" parent="android:style/Theme.Material.Light.Dialog.Alert">
         <item name="android:fontFamily">sans-serif</item>
         <item name="android:windowBackground">@drawable/bg_dialog</item>

@@ -32,4 +32,6 @@
     <color name="destructive_action_background">#D98A8A</color>
     <color name="destructive_action_pressed">#C77777</color>
     <color name="destructive_action_foreground">#321A1B</color>
+    <!-- Standby draws on pure black in either theme; this is its only lit content. -->
+    <color name="standby_hint">#6B6B6B</color>
 </resources>

@@ -598,4 +598,11 @@
     <string name="capture_running_title">캡처 중입니다</string>
     <string name="stop_capture_and_continue">캡처 중지 후 계속</string>
     <string name="invalid_activity_choice">출석이 아니요이면 과업을 예로 둘 수 없습니다.</string>
+    <string name="open_standby_mode">대기 모드 켜기</string>
+    <string name="standby_running">대기 모드 실행 중</string>
+    <string name="standby_touch_to_leave">화면을 누르면 대기 모드가 해제됩니다.</string>
+    <string name="standby_battery_title">밤새 대기 모드 유지 허용</string>
+    <string name="standby_battery_message">Android는 배터리를 아끼기 위해 백그라운드의 GF2logger를 중지할 수 있습니다. 배터리 최적화 예외로 설정하면 대기 모드가 밤새 유지됩니다. 이 설정은 나중에 앱의 배터리 설정에서 바꿀 수 있습니다.</string>
+    <string name="standby_battery_allow">허용</string>
+    <string name="standby_battery_later">나중에</string>
 </resources>

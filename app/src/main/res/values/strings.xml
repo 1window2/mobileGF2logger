@@ -606,4 +606,11 @@
     <string name="capture_running_title">Capture is running</string>
     <string name="stop_capture_and_continue">Stop capture</string>
     <string name="invalid_activity_choice">Patrol can\'t be yes while login is no.</string>
+    <string name="open_standby_mode">Turn on standby mode</string>
+    <string name="standby_running">Standby mode is on</string>
+    <string name="standby_touch_to_leave">Tap the screen to leave standby mode.</string>
+    <string name="standby_battery_title">Allow standby mode to run overnight</string>
+    <string name="standby_battery_message">Android may stop GF2logger in the background to save battery. Exclude it from battery optimization to keep standby mode running overnight. You can change this later in the app\'s battery settings.</string>
+    <string name="standby_battery_allow">Allow</string>
+    <string name="standby_battery_later">Not now</string>
 </resources>

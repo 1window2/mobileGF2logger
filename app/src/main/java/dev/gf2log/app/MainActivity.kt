@@ -21,9 +21,11 @@ import dev.gf2log.app.management.CsvImportCheckpointManager
 import dev.gf2log.app.management.PlatoonCsvImportStore
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.SnapshotComparison
+import dev.gf2log.app.standby.StandbyBatteryPrompt
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.CaptureGuard
 import dev.gf2log.app.ui.BarAction
+import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.DocumentAccess
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
@@ -67,6 +69,11 @@ class MainActivity : BaseActivity() {
     private var startPending = false
 
     private val statusListener: (CaptureSnapshot) -> Unit = { capturePanel.render(it) }
+
+    /** Standby opens once the system battery-optimization dialog closes, whatever was chosen. */
+    private val batteryExemption = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        startActivity(Intent(this, StandbyActivity::class.java))
+    }
 
     private val vpnConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         startPending = false
@@ -116,9 +123,12 @@ class MainActivity : BaseActivity() {
                 layoutParams = FrameLayout.LayoutParams(dp(36), dp(36))
             })
             .setTitle(getString(R.string.app_name))
-            .setActions(listOf(BarAction(R.drawable.ic_settings, getString(R.string.open_options)) {
-                startActivity(Intent(this, OptionsActivity::class.java))
-            }))
+            .setActions(listOf(
+                BarAction(R.drawable.ic_bedtime, getString(R.string.open_standby_mode)) { openStandby() },
+                BarAction(R.drawable.ic_settings, getString(R.string.open_options)) {
+                    startActivity(Intent(this, OptionsActivity::class.java))
+                },
+            ))
         screen.setBody(Screen.scrollingBody(this, buildContent()))
     }
 
@@ -223,6 +233,31 @@ class MainActivity : BaseActivity() {
         )
         captureOnceRequested = false
         startPending = false
+    }
+
+    // endregion
+
+    // region Standby
+
+    /** The first entry explains and offers the battery-optimization exemption; later ones go straight in. */
+    private fun openStandby() {
+        if (!StandbyBatteryPrompt.shouldAsk(this)) {
+            startActivity(Intent(this, StandbyActivity::class.java))
+            return
+        }
+        Dialogs.show(
+            Dialogs.builder(this)
+                .setTitle(R.string.standby_battery_title)
+                .setMessage(R.string.standby_battery_message)
+                .setNegativeButton(R.string.standby_battery_later) { _, _ ->
+                    StandbyBatteryPrompt.markAsked(this)
+                    startActivity(Intent(this, StandbyActivity::class.java))
+                }
+                .setPositiveButton(R.string.standby_battery_allow) { _, _ ->
+                    StandbyBatteryPrompt.markAsked(this)
+                    batteryExemption.launch(StandbyBatteryPrompt.requestIntent(this))
+                },
+        )
     }
 
     // endregion

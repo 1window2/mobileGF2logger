@@ -2,6 +2,18 @@
 
 All notable changes to mobileGF2logger are documented here.
 
+## Unreleased (2.6.0)
+
+### Added
+
+- Add standby mode from Home's moon button: an all-black, minimum-brightness
+  screen that keeps the phone awake and unlocked overnight. It shows what it is
+  for three seconds on every entry, then turns every pixel off; tapping the
+  screen, Back, the power button, or switching apps leaves it and the previous
+  brightness returns.
+- Offer the battery-optimization exemption once, the first time standby mode is
+  entered.
+
 ## 2.5.0 - 2026-10-16
 
 ### Added

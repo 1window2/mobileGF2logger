@@ -249,6 +249,12 @@ plaintext TCP streams. Do not add pinning or anti-cheat bypasses.
 - `management` owns evidence policy, reporting rules, the repository facade,
   private SQLite persistence, and the retained completed-roster directory.
   It does not depend on the capture package.
+- `standby` owns unattended recording: a pure planner (servers, resets, lead,
+  grace, one server per client), a main-thread state machine whose every path
+  ends in a lock or a cancel that releases the screen, and the accessibility
+  service that taps only while the game is in front, closes it from Recents,
+  and locks the phone. It drives capture only through the `CaptureVpnService`
+  intents and learns of saved rosters from `capture.RosterEvents`.
 - Activities own Android presentation and delegate evidence precedence,
   inference, ordering, and CSV construction to pure policy objects.
 

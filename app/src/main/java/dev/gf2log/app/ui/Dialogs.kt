@@ -11,9 +11,17 @@ import dev.gf2log.app.R
 
 /** App-owned dialogs: one surface, one accent, and an explicit red treatment for destruction. */
 internal object Dialogs {
+    private const val DISABLED_ALPHA = 97 // 38%, the platform's disabled-content opacity
+
     fun builder(context: Context): AlertDialog.Builder = AlertDialog.Builder(context)
 
     /** Shows the dialog and applies the shared button palette once its buttons exist. */
+    /** [color], dimmed while the button is disabled so an unavailable action looks unavailable. */
+    private fun buttonColors(color: Int) = android.content.res.ColorStateList(
+        arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
+        intArrayOf(androidx.core.graphics.ColorUtils.setAlphaComponent(color, DISABLED_ALPHA), color),
+    )
+
     fun show(
         builder: AlertDialog.Builder,
         destructive: Boolean = false,
@@ -23,12 +31,12 @@ internal object Dialogs {
         dialog.setOnShowListener {
             val context = dialog.context
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.apply {
-                setTextColor(context.getColor(if (destructive) R.color.destructive_action else R.color.accent_text))
+                setTextColor(buttonColors(context.getColor(if (destructive) R.color.destructive_action else R.color.accent_text)))
                 isAllCaps = false
             }
             listOf(AlertDialog.BUTTON_NEGATIVE, AlertDialog.BUTTON_NEUTRAL).forEach { which ->
                 dialog.getButton(which)?.apply {
-                    setTextColor(context.getColor(R.color.text_secondary))
+                    setTextColor(buttonColors(context.getColor(R.color.text_secondary)))
                     isAllCaps = false
                 }
             }

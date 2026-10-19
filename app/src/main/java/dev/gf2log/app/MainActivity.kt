@@ -54,6 +54,7 @@ class MainActivity : BaseActivity() {
     private val work = BackgroundWork(this, "GF2Home")
     private lateinit var csvImport: CsvImportFlow
     private lateinit var packetHistory: HomePacketHistory
+    private lateinit var standbyFlow: StandbyFlow
 
     private lateinit var capturePanel: HomeCapturePanel
     private lateinit var undoRow: View
@@ -107,6 +108,7 @@ class MainActivity : BaseActivity() {
         packetHistory.restoreState(savedInstanceState)
         csvImport = CsvImportFlow(this, work, { profileBinding.scope }, ::showProgress)
         csvImport.restoreState(savedInstanceState)
+        standbyFlow = StandbyFlow(this, work)
         captureOnceRequested = savedInstanceState?.getBoolean(STATE_CAPTURE_ONCE) == true
         screen = Screen(this, PrimaryNavigation.Destination.HOME)
         screen.topBar
@@ -116,9 +118,12 @@ class MainActivity : BaseActivity() {
                 layoutParams = FrameLayout.LayoutParams(dp(36), dp(36))
             })
             .setTitle(getString(R.string.app_name))
-            .setActions(listOf(BarAction(R.drawable.ic_settings, getString(R.string.open_options)) {
-                startActivity(Intent(this, OptionsActivity::class.java))
-            }))
+            .setActions(listOf(
+                BarAction(R.drawable.ic_bedtime, getString(R.string.open_standby_mode)) { standbyFlow.start() },
+                BarAction(R.drawable.ic_settings, getString(R.string.open_options)) {
+                    startActivity(Intent(this, OptionsActivity::class.java))
+                },
+            ))
         screen.setBody(Screen.scrollingBody(this, buildContent()))
     }
 
@@ -142,6 +147,7 @@ class MainActivity : BaseActivity() {
         loadRosterSummary()
         loadUndoAvailability()
         csvImport.onScreenReady()
+        standbyFlow.showUnseenResults()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -226,6 +232,7 @@ class MainActivity : BaseActivity() {
     }
 
     // endregion
+
 
     // region Data tools
 

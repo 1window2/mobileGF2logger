@@ -2,6 +2,27 @@
 
 All notable changes to mobileGF2logger are documented here.
 
+## 2.6.0 - 2026-10-19
+
+### Added
+
+- Add standby mode from Home's moon button: an all-black, minimum-brightness
+  screen that keeps the phone awake and unlocked overnight. It shows what it is
+  for three seconds on every entry, then turns every pixel off; tapping the
+  screen, Back, the power button, or switching apps leaves it and the previous
+  brightness returns.
+- Offer the battery-optimization exemption once, the first time standby mode is
+  entered.
+- Record members automatically from standby mode: five minutes before a saved
+  server's game day ends, standby starts capture, opens the game, taps Start,
+  waits for the roster to be saved, closes the game, and locks the phone once
+  every chosen server is done. With Platoons on several servers, standby asks
+  which to record each time, one server per client, and runs them one after
+  another. Switching to another app or Home while the game is open stands
+  down without closing anything or locking. Needs the new GF2logger
+  accessibility service; a summary of each night's results appears on Home
+  until it is closed.
+
 ## 2.5.0 - 2026-10-16
 
 ### Added

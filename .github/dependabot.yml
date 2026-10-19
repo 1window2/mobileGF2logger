@@ -3,9 +3,9 @@ version: 2
 multi-ecosystem-groups:
   all-dependencies:
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
+      # Every two months, on the 1st. Security updates are not bound to this schedule.
+      interval: "cron"
+      cronjob: "0 9 1 */2 *"
       timezone: "Asia/Seoul"
     open-pull-requests-limit: 5
     labels:

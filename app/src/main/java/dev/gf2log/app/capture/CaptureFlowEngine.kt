@@ -102,7 +102,10 @@ internal class CaptureFlowEngine(
         PlatoonCaptureSession(
             context = context,
             profile = profile,
-            onRosterCaptured = { storageId -> tracker?.rosterCaptured(storageId) },
+            onRosterCaptured = { storageId ->
+                tracker?.rosterCaptured(storageId)
+                RosterEvents.persisted(storageId)
+            },
         ).also { sessions[flowId] = it }
 
     override fun unbind(flowId: Long, session: PlatoonCaptureSession) {

@@ -13,6 +13,13 @@ All notable changes to mobileGF2logger are documented here.
   brightness returns.
 - Offer the battery-optimization exemption once, the first time standby mode is
   entered.
+- Record members automatically from standby mode: five minutes before a saved
+  server's game day ends, standby starts capture, opens the game, taps Start,
+  waits for the roster to be saved, closes the game, and locks the phone once
+  every chosen server is done. With Platoons on several servers, standby asks
+  which to record each time, one server per client, and runs them one after
+  another. Needs the new GF2logger accessibility service; a summary of each
+  night's results appears on Home the next time it opens.
 
 ## 2.5.0 - 2026-10-16
 

@@ -613,4 +613,27 @@
     <string name="standby_battery_message">Android may stop GF2logger in the background to save battery. Exclude it from battery optimization to keep standby mode running overnight. You can change this later in the app\'s battery settings.</string>
     <string name="standby_battery_allow">Allow</string>
     <string name="standby_battery_later">Not now</string>
+    <string name="standby_service_description">Used only by standby mode\'s automatic recording: taps the game\'s start screen, closes the game from Recents, returns Home, and locks the phone afterwards. It reads only which app is in front and the app names on Recents cards, nothing else on screen.</string>
+    <string name="standby_accessibility_title">Turn on automatic recording</string>
+    <string name="standby_accessibility_message">To record your Platoon members while you sleep, GF2logger needs its accessibility service to tap the game\'s start screen, close the game, and lock the phone afterwards. Open Accessibility settings, choose GF2logger, and turn it on. If Android does not allow it, first allow restricted settings from the ⋮ menu in GF2logger\'s App info.</string>
+    <string name="standby_accessibility_open">Open settings</string>
+    <string name="standby_only">Standby only</string>
+    <string name="standby_no_platoons">No Platoon is saved yet, so standby mode will not record. Capture your Platoon once first.</string>
+    <string name="standby_vpn_needed">Automatic recording needs VPN consent. Standby mode will not record this time.</string>
+    <string name="standby_servers_title">Choose servers to record</string>
+    <string name="standby_servers_message">Each chosen server is recorded 5 minutes before its game day ends, then the phone locks. A client logs in to one server at a time, so choose one server per client.</string>
+    <string name="standby_server_option">%1$s · %2$s · starts %3$s</string>
+    <string name="standby_start">Start standby mode</string>
+    <string name="standby_next_recording">Next recording: %1$s · %2$s</string>
+    <string name="standby_results_title">Standby recording results</string>
+    <string name="standby_result_line">%1$s: %2$s (%3$s)</string>
+    <string name="standby_outcome_recorded">Members recorded</string>
+    <string name="standby_outcome_other_platoon">Logged in to a different Platoon</string>
+    <string name="standby_outcome_timed_out">No members data before the time limit</string>
+    <string name="standby_outcome_missed">Not started in time</string>
+    <string name="standby_outcome_no_accessibility">Accessibility service was off</string>
+    <string name="standby_outcome_no_vpn">VPN consent was missing</string>
+    <string name="standby_outcome_not_installed">Game client not installed</string>
+    <string name="standby_outcome_capture_failed">Capture could not start</string>
+    <string name="standby_outcome_cancelled">Cancelled because standby mode ended</string>
 </resources>

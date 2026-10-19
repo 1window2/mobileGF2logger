@@ -12,6 +12,9 @@ import androidx.activity.addCallback
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import java.time.ZoneId
+import dev.gf2log.app.standby.StandbyAutomation
+import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.TextRole
 import dev.gf2log.app.ui.dp
 import dev.gf2log.app.ui.text
@@ -19,7 +22,8 @@ import dev.gf2log.app.ui.text
 /**
  * Standby: an all-black, minimum-brightness screen that keeps the phone awake and unlocked.
  * Touching the screen or pressing Back leaves it; so does the screen turning off or the user
- * switching away, so a locked phone is never left in standby.
+ * switching away, so a locked phone is never left in standby. Leaving also cancels any planned
+ * recording; [StandbyAutomation] replaces this screen with the game itself when a recording runs.
  *
  * Brightness is a window-level override, so the system brightness and auto-brightness are never
  * touched and come back on their own when this window goes away.
@@ -54,6 +58,13 @@ class StandbyActivity : BaseActivity() {
                 setTextColor(getColor(R.color.standby_hint))
                 setPadding(0, dp(6), 0, 0)
             })
+            nextRecording()?.let { next ->
+                addView(text(next, TextRole.SECONDARY) {
+                    gravity = Gravity.CENTER
+                    setTextColor(getColor(R.color.standby_hint))
+                    setPadding(0, dp(12), 0, 0)
+                })
+            }
         }
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -74,23 +85,53 @@ class StandbyActivity : BaseActivity() {
         hint.postDelayed({ hint.visibility = View.INVISIBLE }, HINT_VISIBLE_MS)
 
         onBackPressedDispatcher.addCallback(this) { leave() }
+
+        // A last guard independent of the automation: never outlive the planned deadline.
+        StandbyAutomation.deadline?.let { deadline ->
+            val delay = deadline.toEpochMilli() + DEADLINE_MARGIN_MS - System.currentTimeMillis()
+            root.postDelayed({ finishForAutomation() }, delay.coerceAtLeast(0))
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        StandbyAutomation.onStandbyShown(this)
     }
 
     override fun onStop() {
         super.onStop()
         // Screen off, lock, or switching apps ends standby; a configuration change does not.
-        if (!isChangingConfigurations) leave()
+        if (isChangingConfigurations) return
+        StandbyAutomation.onStandbyStopped(this)
+        leaving = true
+        finish()
+    }
+
+    /** Closes standby without cancelling the plan, for the automation that owns it. */
+    internal fun finishForAutomation() {
+        if (leaving) return
+        leaving = true
+        finish()
     }
 
     private fun leave() {
         if (leaving) return
         leaving = true
+        StandbyAutomation.cancel()
         finish()
+    }
+
+    /** "Next recording: HaoPlay South Korea · 04:55", or null when nothing is planned. */
+    private fun nextRecording(): String? {
+        val next = StandbyAutomation.pendingRuns().firstOrNull() ?: return null
+        val time = Labels.format(Labels.TIME, next.startAt, ZoneId.systemDefault())
+        return getString(R.string.standby_next_recording, Labels.region(this, next.server.region), time)
     }
 
     private companion object {
         /** The lowest backlight level; it is not "off", which would let the screen time out. */
         const val MIN_BRIGHTNESS = 0f
         const val HINT_VISIBLE_MS = 3_000L
+        const val DEADLINE_MARGIN_MS = 60_000L
     }
 }

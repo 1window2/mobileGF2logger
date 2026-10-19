@@ -39,6 +39,14 @@ never stored.
 - Keeps a newly detected Platoon's packets in bounded memory until the user confirms one of the verified client's compatible servers; unconfirmed data is discarded on force-stop or process death.
 - Provides profile management for correcting server metadata without moving data and for deleting one isolated Platoon behind two confirmations and an exact-name check.
 - Guides first-time users through Main, Settings, Platoon management, weekly controls, and parsed-packet pages, with a persistent English/Korean selector and Skip action; the guide can be replayed from Settings.
+- Offers an overnight standby mode from Home's moon button: an all-black,
+  minimum-brightness screen that keeps the phone awake. With the optional
+  GF2logger accessibility service turned on, standby records members by itself
+  five minutes before each chosen server's daily reset: it starts capture, opens
+  the game, taps Start on the title screen, waits for the roster, closes the game
+  from Recents, and locks the phone after the last server. The service only taps
+  while the game is in front and reads nothing on screen except the foreground
+  app and the app names on Recents cards.
 - Draws edge to edge and keeps drafts, selections, and pending exports across rotation, theme or language changes, and process recreation.
 - Supports English and Korean, System/Light/Dark themes, and the six known
   Darkwinter/HaoPlay server-region reset presets converted to the phone timezone.

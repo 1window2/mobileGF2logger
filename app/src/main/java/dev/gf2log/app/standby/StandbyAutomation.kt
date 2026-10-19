@@ -59,6 +59,7 @@ internal object StandbyAutomation {
     private var nextTapAt = 0L
     private var tapsUntil = 0L
     private var loggedIn = false
+    private var foreignSince = 0L
     private var startedCapture = false
     private var previousActive: String? = null
     private var handingOff = false
@@ -146,6 +147,9 @@ internal object StandbyAutomation {
                 now - phaseStartedAt >= CAPTURE_START_TIMEOUT_MS -> endRun(StandbyOutcome.CAPTURE_FAILED)
             }
             Phase.IN_GAME -> when {
+                // Someone switched to another app or Home: they are awake, so stand down
+                // without closing anything or locking the phone in their hand.
+                userLeftGame(now) -> cancel()
                 CaptureStatus.snapshot().phase == CapturePhase.STOPPED -> endRun(StandbyOutcome.CAPTURE_FAILED)
                 now >= runTimeoutAt -> endRun(StandbyOutcome.TIMED_OUT)
                 // Taps only reach the title screen: they stop at login, and in any case after the
@@ -159,6 +163,18 @@ internal object StandbyAutomation {
             // The standby screen did not come back between runs: stop rather than leave the game lit.
             Phase.RETURNING -> if (now - phaseStartedAt >= RETURN_TIMEOUT_MS) finish()
         }
+    }
+
+    /** True once something other than the game, or this app, has been in front for a while. */
+    private fun userLeftGame(now: Long): Boolean {
+        val front = StandbyAutomationService.instance?.frontPackage()
+        if (front == null || front == runs[index].server.packageName || front == appContext.packageName) {
+            foreignSince = 0L
+            return false
+        }
+        if (foreignSince == 0L) foreignSince = now
+        // Brief system windows during launch or login do not count.
+        return now - foreignSince >= USER_SWITCH_MS
     }
 
     private fun beginRun(now: Long) {
@@ -186,7 +202,13 @@ internal object StandbyAutomation {
             val previous = runCatching { registry.active()?.storageId }.getOrNull()
             val selected = runCatching { registry.setActive(target) }.getOrDefault(false)
             handler.post {
-                if (phase != Phase.STARTING_CAPTURE || runs.getOrNull(index) !== run) return@post
+                if (phase != Phase.STARTING_CAPTURE || runs.getOrNull(index) !== run) {
+                    // The run ended meanwhile, so nothing else will put the user's Platoon back.
+                    if (selected && previous != null && previous != target) {
+                        worker.execute { runCatching { PlatoonProfileRegistry(appContext).setActive(previous) } }
+                    }
+                    return@post
+                }
                 previousActive = previous.takeIf { selected && it != target }
                 startCapture()
             }
@@ -230,6 +252,7 @@ internal object StandbyAutomation {
         nextTapAt = now + FIRST_TAP_DELAY_MS
         tapsUntil = now + TAP_WINDOW_MS
         loggedIn = false
+        foreignSince = 0L
         enter(Phase.IN_GAME)
     }
 
@@ -256,6 +279,12 @@ internal object StandbyAutomation {
         releaseRun()
         index++
         if (index >= runs.size) return finish()
+        // A run that failed before the game opened is still on the standby screen: just wait.
+        if (standby.get()?.takeUnless { it.isFinishing } != null) {
+            StandbyAutomationService.instance?.releaseScreen()
+            enter(Phase.WAITING)
+            return
+        }
         // Close the game, then back to the standby screen until the next run.
         enter(Phase.RETURNING)
         val service = StandbyAutomationService.instance ?: return finish()
@@ -388,6 +417,7 @@ internal object StandbyAutomation {
     private const val FIRST_TAP_DELAY_MS = 15_000L
     private const val TAP_INTERVAL_MS = 4_000L
     private const val TAP_WINDOW_MS = 2 * 60_000L
+    private const val USER_SWITCH_MS = 5_000L
     private const val RUN_TIMEOUT_MS = 4 * 60_000L
     private const val MIN_RUN_MS = 60_000L
     private const val RETURN_TIMEOUT_MS = 8_000L

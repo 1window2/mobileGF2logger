@@ -153,9 +153,23 @@ internal class StandbyFlow(
         val now = Instant.now()
         val zone = ZoneId.systemDefault()
 
+        fun label(server: StandbyServer, start: Instant): String = activity.getString(
+            R.string.standby_server_option,
+            Labels.regionShort(activity, server.region),
+            server.platoonNames.joinToString(", "),
+            Labels.format(Labels.TIME, start, zone),
+        )
+
+        // Servers sharing a reset start one after another, so each label shows the start the
+        // current selection would really get.
         fun refreshStart() {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled =
-                StandbyPlanner.isValidSelection(boxes.filterValues(CheckBox::isChecked).keys)
+            val checked = boxes.filterValues(CheckBox::isChecked).keys
+            val valid = StandbyPlanner.isValidSelection(checked)
+            val planned = if (valid) StandbyPlanner.plan(checked, now).associate { it.server to it.startAt } else emptyMap()
+            boxes.forEach { (server, box) ->
+                box.text = label(server, planned[server] ?: StandbyPlanner.nextReset(server.zone, now).minus(StandbyPlanner.LEAD))
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = valid
         }
 
         val body = activity.column {
@@ -170,14 +184,8 @@ internal class StandbyFlow(
                 // Default to the remembered server of this client, if it still exists.
                 val preferred = clientServers.firstOrNull { it.key in remembered }
                 clientServers.forEach { server ->
-                    val time = Labels.format(Labels.TIME, StandbyPlanner.nextReset(server.zone, now).minus(StandbyPlanner.LEAD), zone)
-                    val label = activity.getString(
-                        R.string.standby_server_option,
-                        Labels.regionShort(activity, server.region),
-                        server.platoonNames.joinToString(", "),
-                        time,
-                    )
-                    val box = activity.checkBox(label, server == preferred) { checked ->
+                    val start = StandbyPlanner.nextReset(server.zone, now).minus(StandbyPlanner.LEAD)
+                    val box = activity.checkBox(label(server, start), server == preferred) { checked ->
                         // A client logs in to one server at a time: checking one clears its siblings.
                         if (checked) {
                             clientServers.filter { it != server }.forEach { boxes[it]?.isChecked = false }

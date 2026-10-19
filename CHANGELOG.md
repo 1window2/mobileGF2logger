@@ -18,8 +18,10 @@ All notable changes to mobileGF2logger are documented here.
   waits for the roster to be saved, closes the game, and locks the phone once
   every chosen server is done. With Platoons on several servers, standby asks
   which to record each time, one server per client, and runs them one after
-  another. Needs the new GF2logger accessibility service; a summary of each
-  night's results appears on Home the next time it opens.
+  another. Switching to another app or Home while the game is open stands
+  down without closing anything or locking. Needs the new GF2logger
+  accessibility service; a summary of each night's results appears on Home
+  until it is closed.
 
 ## 2.5.0 - 2026-10-16
 

@@ -120,6 +120,11 @@ internal object ScheduledRecording {
         }
         val start = group.first().startAt
         setAlarm(context, start, group.first().reset, group.map { it.server.key })
+        // Turned off while this was being planned: take the alarm back.
+        if (!isEnabled(context)) {
+            cancelAlarm(context)
+            return null
+        }
         prefs(context).edit(commit = true) {
             putLong(KEY_NEXT_START, start.toEpochMilli())
             putString(KEY_NEXT_REGIONS, group.joinToString(",") { it.server.region.storedValue })
@@ -132,13 +137,18 @@ internal object ScheduledRecording {
      * The alarm went off. The next wake-up is planned first; then, unless the phone is locked
      * with a PIN or in use, the standby screen wakes it and takes over.
      */
-    fun onAlarm(context: Context, reset: Instant, keys: Set<String>) {
+    fun onAlarm(context: Context, reset: Instant, keys: Set<String>, scheduled: () -> Unit) {
+        // A second delivery for the same reset (two reschedules racing) must not run it twice.
+        val handled = handledReset(context)
+        if (handled != null && !reset.isAfter(handled)) return scheduled()
         prefs(context).edit(commit = true) { putLong(KEY_HANDLED_RESET, reset.toEpochMilli()) }
-        reschedule(context)
+        reschedule(context) { scheduled() }
         if (!isEnabled(context) || keys.isEmpty()) return
-        // Standby mode is already recording on its own plan.
-        if (StandbyAutomation.isArmed) return
         val outcome = when {
+            // Too late to finish before the day ends (an inexact alarm can come hours late).
+            !Instant.now().isBefore(reset.plus(StandbyPlanner.GRACE).minus(LATEST_START_MARGIN)) -> StandbyOutcome.MISSED
+            // Standby mode is already recording on its own plan.
+            StandbyAutomation.isArmed -> StandbyOutcome.SKIPPED_IN_USE
             isBlockedByScreenLock(context) -> StandbyOutcome.SCREEN_LOCK_SET
             isInUse(context) -> StandbyOutcome.SKIPPED_IN_USE
             StandbyAutomationService.instance == null -> StandbyOutcome.NO_ACCESSIBILITY
@@ -181,9 +191,18 @@ internal object ScheduledRecording {
             keyguard.isKeyguardLocked -> keyguard.requestDismissKeyguard(
                 activity,
                 object : KeyguardManager.KeyguardDismissCallback() {
-                    override fun onDismissSucceeded() = arm(activity, reset, keys)
-                    override fun onDismissError() = lockScreenStayed(activity, keys)
-                    override fun onDismissCancelled() = lockScreenStayed(activity, keys)
+                    override fun onDismissSucceeded() {
+                        if (!activity.isGone()) arm(activity, reset, keys)
+                    }
+
+                    // Once the screen is gone (the user tapped it), there is nothing to give up.
+                    override fun onDismissError() {
+                        if (!activity.isGone()) lockScreenStayed(activity, keys)
+                    }
+
+                    override fun onDismissCancelled() {
+                        if (!activity.isGone()) lockScreenStayed(activity, keys)
+                    }
                 },
             )
             else -> arm(activity, reset, keys)
@@ -200,8 +219,8 @@ internal object ScheduledRecording {
         worker.execute {
             val profiles = runCatching { StandbyProfiles.load(app) }.getOrDefault(emptyList())
             MainThread.post {
-                // The user tapped the screen meanwhile: nothing was armed, nothing to undo.
-                if (activity.isFinishing || activity.isDestroyed) return@post
+                // The user tapped the screen meanwhile, or a recreated screen armed already.
+                if (activity.isGone() || StandbyAutomation.isArmed) return@post
                 val servers = selectedServers(app, profiles, keys)
                 if (servers.isEmpty()) return@post activity.standDown()
                 val plan = StandbyPlanner.plan(servers, Instant.now()) { reset }
@@ -210,6 +229,8 @@ internal object ScheduledRecording {
             }
         }
     }
+
+    private fun StandbyActivity.isGone(): Boolean = isFinishing || isDestroyed
 
     /** The chosen servers that still exist, one per client. */
     private fun selectedServers(context: Context, profiles: List<StandbyProfile>, keys: Set<String>): List<StandbyServer> =
@@ -293,4 +314,7 @@ internal object ScheduledRecording {
     private const val REQUEST_FIRE = 4_505
     private const val REQUEST_SHOW = 4_506
     private const val REHEARSAL_FILE = "scheduled_rehearsal"
+
+    /** A run needs at least this long before its grace period ends to be worth waking for. */
+    private val LATEST_START_MARGIN: Duration = Duration.ofMinutes(1)
 }

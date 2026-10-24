@@ -11,7 +11,9 @@ class ScheduledRecordingAlarmReceiver : BroadcastReceiver() {
         if (intent.action != ScheduledRecording.ACTION_FIRE) return
         val reset = intent.getLongExtra(ScheduledRecording.EXTRA_RESET, -1).takeIf { it >= 0 } ?: return
         val keys = intent.getStringArrayExtra(ScheduledRecording.EXTRA_SERVERS)?.toSet().orEmpty()
-        ScheduledRecording.onAlarm(context, Instant.ofEpochMilli(reset), keys)
+        // Kept alive until the next wake-up is set, even when nothing else holds the process.
+        val pending = goAsync()
+        ScheduledRecording.onAlarm(context, Instant.ofEpochMilli(reset), keys) { pending.finish() }
     }
 }
 

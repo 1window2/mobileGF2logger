@@ -17,13 +17,15 @@ import java.time.ZoneId
 import dev.gf2log.app.standby.ScheduledRecording
 import dev.gf2log.app.standby.StandbyAutomation
 import dev.gf2log.app.standby.StandbyAutomationService
+import dev.gf2log.app.standby.StandbyPlanner
 import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.TextRole
 import dev.gf2log.app.ui.dp
 import dev.gf2log.app.ui.text
 
 /**
- * Standby: an all-black, minimum-brightness screen that keeps the phone awake and unlocked.
+ * Standby: an all-black, minimum-brightness screen that keeps the phone awake and unlocked. An
+ * alarm also opens it for a scheduled recording, waking the screen and passing a swipe lock first.
  * Touching the screen or pressing Back leaves it; so does the screen turning off or the user
  * switching away, so a locked phone is never left in standby. Leaving also cancels any planned
  * recording; [StandbyAutomation] replaces this screen with the game itself when a recording runs.
@@ -88,7 +90,7 @@ class StandbyActivity : BaseActivity() {
         }
         root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
-            contentDescription = getString(R.string.standby_touch_to_leave)
+            contentDescription = getString(if (scheduled) R.string.scheduled_touch_to_cancel else R.string.standby_touch_to_leave)
             setOnClickListener { leave() }
             addView(hint, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -108,9 +110,16 @@ class StandbyActivity : BaseActivity() {
 
         guardDeadline()
         val reset = scheduledReset
-        if (reset != null && savedInstanceState == null) {
-            val keys = intent.getStringArrayExtra(ScheduledRecording.EXTRA_SERVERS)?.toSet().orEmpty()
-            ScheduledRecording.begin(this, reset, keys)
+        if (reset != null) {
+            // Until a recording is armed nothing else bounds this screen, so it bounds itself:
+            // never past the end of the server's grace period.
+            val limit = reset.plus(StandbyPlanner.GRACE).toEpochMilli() + DEADLINE_MARGIN_MS - System.currentTimeMillis()
+            root.postDelayed({ if (!StandbyAutomation.isArmed) standDown() }, limit.coerceAtLeast(0))
+            // A screen recreated after arming leaves the running recording alone.
+            if (!StandbyAutomation.isArmed) {
+                val keys = intent.getStringArrayExtra(ScheduledRecording.EXTRA_SERVERS)?.toSet().orEmpty()
+                ScheduledRecording.begin(this, reset, keys)
+            }
         }
     }
 

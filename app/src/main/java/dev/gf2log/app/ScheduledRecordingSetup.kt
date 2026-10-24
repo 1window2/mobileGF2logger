@@ -144,10 +144,18 @@ internal class ScheduledRecordingSetup(
     private fun checkBattery() {
         if (StandbyBatteryPrompt.isExempt(activity)) return chooseServers()
         StandbyBatteryPrompt.markAsked(activity)
-        batteryExemption.launch(StandbyBatteryPrompt.requestIntent(activity))
+        // Some phones have no such dialog; the exemption is a help, not a requirement.
+        runCatching { batteryExemption.launch(StandbyBatteryPrompt.requestIntent(activity)) }.onFailure { chooseServers() }
     }
 
     private fun chooseServers() {
+        // A Settings screen recreated behind a system dialog lost the list: read it again.
+        if (servers.isEmpty()) {
+            return work.run(task = { StandbyPlanner.servers(StandbyProfiles.load(activity)) }) { result ->
+                servers = result.getOrDefault(emptyList())
+                if (servers.isEmpty()) stop(R.string.standby_no_platoons) else chooseServers()
+            }
+        }
         if (servers.size == 1) return save(servers)
         StandbyServerDialog.show(
             activity,

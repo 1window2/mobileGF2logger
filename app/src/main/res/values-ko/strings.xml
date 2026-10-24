@@ -632,7 +632,7 @@
     <string name="standby_outcome_screen_lock">화면 잠금이 설정돼 실행하지 않음</string>
     <string name="standby_outcome_lock_screen">잠금 화면을 넘기지 못함</string>
     <string name="scheduled_title">예약 자동 기록</string>
-    <string name="scheduled_detail">PIN·패턴·비밀번호가 없는 휴대전화에서는 선택한 서버마다 게임 하루가 끝나기 5분 전에 GF2logger가 스스로 화면을 켜고, 멤버를 기록하고, 게임을 닫은 뒤 화면을 다시 끕니다. 밤새 화면을 켜 둘 필요가 없습니다.</string>
+    <string name="scheduled_detail">PIN·패턴·비밀번호가 없는 휴대전화에서는 선택한 서버마다 게임 하루가 끝나기 5분 전(초기화 시각이 같은 서버가 여럿이면 조금 더 일찍)에 GF2logger가 스스로 화면을 켜고, 멤버를 기록하고, 게임을 닫은 뒤 화면을 다시 끕니다. 밤새 화면을 켜 둘 필요가 없습니다.</string>
     <string name="scheduled_switch">매일 자동 기록</string>
     <string name="scheduled_blocked">이 휴대전화에는 PIN·패턴·비밀번호가 설정돼 있어 사용할 수 없습니다. 홈의 대기 모드를 사용하세요.</string>
     <string name="scheduled_off">꺼짐</string>
@@ -640,7 +640,7 @@
     <string name="scheduled_nothing">기록할 저장 서버가 없음</string>
     <string name="scheduled_inexact">GF2logger의 ‘알람 및 리마인더’ 권한이 꺼져 있어 기록이 늦게 시작될 수 있습니다.</string>
     <string name="scheduled_servers">기록할 서버</string>
-    <string name="scheduled_servers_message">선택한 서버마다 매일 게임 하루가 끝나기 5분 전에 멤버를 기록합니다. 클라이언트는 한 번에 한 서버에만 접속하므로 클라이언트마다 서버를 하나씩 선택하세요.</string>
+    <string name="scheduled_servers_message">선택한 서버마다 매일 게임 하루가 끝나기 5분 전(초기화 시각이 같은 서버가 여럿이면 조금 더 일찍)에 멤버를 기록합니다. 클라이언트는 한 번에 한 서버에만 접속하므로 클라이언트마다 서버를 하나씩 선택하세요.</string>
     <string name="scheduled_confirm">예약</string>
     <string name="scheduled_exact_title">알람 허용</string>
     <string name="scheduled_exact_message">정해진 시각에 휴대전화를 깨우려면 ‘알람 및 리마인더’ 권한이 필요합니다. GF2logger에 허용한 뒤 예약 자동 기록을 다시 켜세요.</string>

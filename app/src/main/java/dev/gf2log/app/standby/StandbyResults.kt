@@ -34,6 +34,15 @@ internal enum class StandbyOutcome {
 
     /** The user left standby or turned the screen off first. */
     CANCELLED,
+
+    /** A scheduled recording found the phone in use (screen on or a call) and left it alone. */
+    SKIPPED_IN_USE,
+
+    /** A scheduled recording found a PIN, pattern, or password set, so scheduling stopped. */
+    SCREEN_LOCK_SET,
+
+    /** A scheduled recording could not get past the lock screen. */
+    LOCK_SCREEN_STAYED,
 }
 
 internal data class StandbyResult(
@@ -43,11 +52,17 @@ internal data class StandbyResult(
     val atMillis: Long,
 )
 
-/** The last standby session's results, kept until the user closes them on Home. */
+/** Recording results not yet acknowledged on Home, newest last, kept until the user closes them. */
 internal object StandbyResults {
 
+    /** Adds [results] after any still unseen, keeping the newest [MAX_KEPT]. */
     fun save(context: Context, results: List<StandbyResult>) {
         if (results.isEmpty()) return
+        write(context, (unseen(context) + results).takeLast(MAX_KEPT))
+    }
+
+    private fun write(context: Context, results: List<StandbyResult>) {
+        if (results.isEmpty()) return prefs(context).edit(commit = true) { remove(KEY_UNSEEN) }
         val json = JSONArray().apply {
             results.forEach { result ->
                 put(
@@ -79,14 +94,15 @@ internal object StandbyResults {
         }.getOrDefault(emptyList())
     }
 
-    /** Clears [shown] once the user has closed them, unless a newer night replaced them. */
+    /** Drops [shown] once the user has closed them; results added meanwhile stay. */
     fun markSeen(context: Context, shown: List<StandbyResult>) {
-        if (unseen(context) == shown) prefs(context).edit { remove(KEY_UNSEEN) }
+        write(context, unseen(context) - shown.toSet())
     }
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    private const val MAX_KEPT = 30
     private const val PREFS = "standby_mode"
     private const val KEY_UNSEEN = "unseen_results"
     private const val PACKAGE = "package"

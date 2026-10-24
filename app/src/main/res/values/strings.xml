@@ -635,5 +635,23 @@
     <string name="standby_outcome_no_vpn">VPN consent was missing</string>
     <string name="standby_outcome_not_installed">Game client not installed</string>
     <string name="standby_outcome_capture_failed">Capture could not start</string>
-    <string name="standby_outcome_cancelled">Cancelled because standby mode ended</string>
+    <string name="standby_outcome_cancelled">Cancelled because the phone was used</string>
+    <string name="standby_outcome_in_use">Skipped because the phone was in use</string>
+    <string name="standby_outcome_screen_lock">Not run because a screen lock is set</string>
+    <string name="standby_outcome_lock_screen">Could not get past the lock screen</string>
+    <string name="scheduled_title">Scheduled recording</string>
+    <string name="scheduled_detail">On a phone without a PIN, pattern, or password, GF2logger wakes the phone by itself five minutes before each chosen server\'s game day ends, records members, closes the game, and turns the screen off again. Nothing has to stay on overnight.</string>
+    <string name="scheduled_switch">Record every day</string>
+    <string name="scheduled_blocked">Unavailable because this phone has a PIN, pattern, or password. Use standby mode from Home instead.</string>
+    <string name="scheduled_off">Off</string>
+    <string name="scheduled_next">Next: %1$s · %2$s</string>
+    <string name="scheduled_nothing">No saved server to record</string>
+    <string name="scheduled_inexact">Alarms &amp; reminders is off for GF2logger, so a recording may start late.</string>
+    <string name="scheduled_servers">Servers to record</string>
+    <string name="scheduled_servers_message">Each chosen server is recorded every day, five minutes before its game day ends. A client logs in to one server at a time, so choose one server per client.</string>
+    <string name="scheduled_confirm">Schedule</string>
+    <string name="scheduled_exact_title">Allow alarms</string>
+    <string name="scheduled_exact_message">To wake the phone on time, GF2logger needs Alarms &amp; reminders. Allow it for GF2logger, then turn scheduled recording on again.</string>
+    <string name="scheduled_running">Scheduled recording</string>
+    <string name="scheduled_touch_to_cancel">Tap the screen to cancel this recording.</string>
 </resources>

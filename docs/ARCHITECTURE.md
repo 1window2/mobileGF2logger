@@ -389,8 +389,9 @@ profile on an installation that does not yet have any registered profiles.
 
 Complete restore validates the filename, archive entries and identity,
 checksums, settings completeness and ranges, current database schema, SQLite
-integrity, and foreign keys before mutation. Database replacement runs under
-the repository maintenance lock. The previous database and a settings snapshot
+integrity, and foreign keys before mutation. Database replacement, and the
+rollback of a failed replacement, run under one hold of the repository
+maintenance lock. The previous database and a settings snapshot
 are retained until both resources commit, so any failure restores the prior
 state instead of leaving a partial import. A fresh install records that no
 database existed so rollback removes the staged replacement rather than

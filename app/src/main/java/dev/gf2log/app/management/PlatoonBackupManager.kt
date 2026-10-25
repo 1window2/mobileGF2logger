@@ -241,7 +241,9 @@ class PlatoonBackupManager internal constructor(
     /**
      * Replaces the validated database and retires target-device roster CSV evidence atomically.
      * Replaces settings only for a complete backup while preserving them for a v1 backup. Uses the
-     * durable restore journal so a process death or failure rolls every resource back.
+     * durable restore journal so a process death or failure rolls every resource back. The
+     * rollback runs inside the same exclusive section, so no ingest can land between a failed
+     * install and its rollback.
      */
     private fun replaceRestoredState(
         stagedDatabase: File,
@@ -251,8 +253,8 @@ class PlatoonBackupManager internal constructor(
     ) {
         val retainedCsvDirectory = storageScope.retainedCsvDirectory(appContext)
         val previousRetainedCsvDirectory = storageScope.previousRetainedCsvDirectory(appContext)
-        try {
-            PlatoonRepository.withExclusiveDatabase(storageScope) {
+        PlatoonRepository.withExclusiveDatabase(storageScope) {
+            try {
                 beginRestoreTransaction(
                     previousSettings = if (restoredSettings == null) {
                         null
@@ -285,14 +287,14 @@ class PlatoonBackupManager internal constructor(
                     previousRetainedCsvDirectory,
                     previousDatabaseFile(appContext, storageScope),
                 )
+            } catch (error: Exception) {
+                runCatching {
+                    recoverInterruptedFullRestore(appContext, settingsStore, storageScope)
+                }
+                    .exceptionOrNull()
+                    ?.let(error::addSuppressed)
+                throw error
             }
-        } catch (error: Exception) {
-            runCatching {
-                recoverInterruptedFullRestore(appContext, settingsStore, storageScope)
-            }
-                .exceptionOrNull()
-                ?.let(error::addSuppressed)
-            throw error
         }
     }
 

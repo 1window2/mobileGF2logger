@@ -136,9 +136,17 @@ transitions.
   merit, attendance, Daily Patrol, and the week transition; unresolved values
   therefore remain lower bounds.
 - If a later transition exceeds the bounded detailed search, already solved
-  earlier days remain visible. The cumulative score/high-score attempt floor
-  and timestamped Login or Daily Patrol facts are retained even when a broader
-  aggregate fallback admits a smaller value.
+  earlier days remain visible and the rest of the run continues with interval
+  bounds: each capture is tracked only by its attempt count, Login, and Daily
+  Patrol, with merit and score ranges for how an interval can split between
+  the previous day's last minutes and the next day. These bounds admit every
+  split the detailed search would, so later days keep defensible lower bounds
+  and shared Login / Daily Patrol states instead of being dropped. A capture
+  shortly before 05:00 every day therefore keeps each day as a lower bound
+  (its interval may still belong to the previous day) while the final event
+  packet can still make the weekly totals exact. The cumulative
+  score/high-score attempt floor and timestamped Login or Daily Patrol facts
+  are retained even when a broader aggregate fallback admits a smaller value.
 - The separate Join/Withdraw section combines UID-safe 21917 roster changes,
   exact 21960 Updates timestamps, and manually entered membership history.
   Snapshot-only boundaries are labelled with their observation time instead of

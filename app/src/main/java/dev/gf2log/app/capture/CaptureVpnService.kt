@@ -189,7 +189,10 @@ class CaptureVpnService : VpnService() {
                 // An interrupted CSV import or undo must finish first, or its later recovery would
                 // overwrite what this capture ingests. A failing scope stays for the next attempt.
                 CsvImportCheckpointManager.recoverInterruptedImports(this, scopes)
-                scopes.forEach { scope -> PlatoonRepository(this, scope).reconcileRetainedCsvFiles() }
+                scopes.forEach { scope ->
+                    GuildMembersCsvWriter.deleteStalePartials(scope.retainedCsvDirectory(this))
+                    PlatoonRepository(this, scope).reconcileRetainedCsvFiles()
+                }
             }
             mainHandler.post {
                 if (run !== tracker || state != State.STARTING) return@post

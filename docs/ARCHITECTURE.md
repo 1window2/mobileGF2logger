@@ -504,7 +504,10 @@ bounds whose displayed minimum remains below the configured threshold. Unknown
 values and lower bounds that already meet the threshold remain neutral.
 
 Completed roster captures are written under a non-importable temporary suffix
-and atomically published as `.csv` only after protocol completion. Retained CSV
+and atomically published as `.csv` only after protocol completion. A working
+file whose write or publication fails is deleted, and capture start removes any
+left by process death. Member and name bounds apply to the UID-deduplicated
+completed roster, so a discarded partial roster never reports a save failure. Retained CSV
 reconciliation runs off the UI thread, skips represented source identities,
 and imports older evidence without rewriting current membership. Both backup
 exports reconcile completed retained evidence before taking their locked

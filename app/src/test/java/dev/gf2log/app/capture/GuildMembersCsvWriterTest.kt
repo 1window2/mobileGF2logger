@@ -9,7 +9,6 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -142,8 +141,39 @@ class GuildMembersCsvWriterTest {
         )
 
         assertEquals(1, completed.size)
-        assertEquals(1, output.listFiles().orEmpty().count { it.extension == "partial" })
-        assertFalse(output.listFiles().orEmpty().any { it.extension == "csv" })
+        assertTrue(output.listFiles().orEmpty().isEmpty())
+    }
+
+    @Test
+    fun stalePartialsAreDeletedWithoutTouchingPublishedRosters() {
+        val output = temporaryFolder.newFolder("stale-partials")
+        val published = output.resolve("gf2log_platoonmembers_20260721T191109Z.csv").apply { writeText("x") }
+        output.resolve("gf2log_platoonmembers_20260721T191110Z.csv.partial").writeText("")
+        output.resolve("gf2log_platoonmembers_20260721T191111Z_2.csv.partial").writeText("half")
+
+        GuildMembersCsvWriter.deleteStalePartials(output)
+        GuildMembersCsvWriter.deleteStalePartials(output.resolve("missing"))
+
+        assertEquals(listOf(published.name), output.listFiles().orEmpty().map { it.name })
+    }
+
+    @Test
+    fun boundsApplyToTheDeduplicatedCompletedRosterOnly() {
+        val output = temporaryFolder.newFolder("bounded-after-dedupe")
+        val writer = GuildMembersCsvWriter(output)
+        val repeated = (1..GuildMembersCsv.MAX_ROSTER_MEMBERS).flatMap { index ->
+            List(2) { member(index.toUInt(), "Member $index") }
+        }
+        val oversized = (1..(GuildMembersCsv.MAX_ROSTER_MEMBERS + 1)).map { index ->
+            member(index.toUInt(), "Member $index")
+        }
+
+        val saved = writer.accept(payload(42, end = true, *repeated.toTypedArray()))
+        // A roster cut short is discarded before any bound applies, so it reports no failure.
+        val discarded = writer.accept(payload(0, end = true, *oversized.toTypedArray()))
+
+        assertEquals(GuildMembersCsv.MAX_ROSTER_MEMBERS, saved?.rowCount)
+        assertNull(discarded)
     }
 
     @Test

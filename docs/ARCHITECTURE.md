@@ -423,7 +423,9 @@ database under the repository's exclusive maintenance lock. Durable restore
 state resumes interrupted quarantine/database replacement after process death;
 ordinary failures restore both the evidence and the preceding undo checkpoint.
 A post-import database digest refuses undo after any later Platoon mutation so
-a one-level rollback cannot silently overwrite newer work.
+a one-level rollback cannot silently overwrite newer work; the digest is
+compared again inside the exclusive section that installs the checkpoint, so an
+ingest that lands after the first check is never overwritten.
 
 Weekly PNG export builds a privacy projection rather than screenshotting the
 Activity. Names are included by default; UIDs and private notes are opt-in.

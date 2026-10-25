@@ -687,6 +687,28 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     @Test
+    fun checkpointInstallRefusesADatabaseThatChangedSinceTheUndoCheck() {
+        seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
+        val checkpoint = ByteArrayOutputStream().also { output ->
+            PlatoonBackupManager(context, storageScope).export(output)
+        }.toByteArray()
+        val manager = PlatoonBackupManager(context, storageScope)
+        val checkedDigest = manager.currentDatabaseSha256()
+        // A capture ingests after the undo's own digest check but before the install.
+        replaceDatabaseForCheckpoint(CURRENT_UID, "Newer capture", "newer-capture.csv")
+
+        assertThrows(IllegalStateException::class.java) {
+            manager.restoreCheckpoint(ByteArrayInputStream(checkpoint), checkedDigest)
+        }
+
+        PlatoonDatabase(context).use { database ->
+            assertEquals(1L, count(database.readableDatabase, "members", "uid = ?", CURRENT_UID))
+            assertEquals(0L, count(database.readableDatabase, "members", "uid = ?", ARCHIVED_UID))
+        }
+        assertFalse(FilePaths.restoreTransactionDirectory(context).exists())
+    }
+
+    @Test
     fun malformedCompleteBackupDoesNotMutateExistingState() {
         seedDatabase(CURRENT_UID, "Current member", "current-source.csv")
         settingsStore.replace(currentSettings())

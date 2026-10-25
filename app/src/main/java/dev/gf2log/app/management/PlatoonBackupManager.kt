@@ -87,9 +87,11 @@ class PlatoonBackupManager internal constructor(
 
     /**
      * Restores a same-device, current-schema checkpoint without retiring retained CSV evidence.
-     * Used only after the caller removes deterministic files planned by the reverted import.
+     * Used only after the caller removes deterministic files planned by the reverted import. With
+     * [expectedDatabaseSha256], the live database must still match it inside the exclusive section
+     * that installs the checkpoint; otherwise nothing is replaced.
      */
-    internal fun restoreCheckpoint(input: InputStream) =
+    internal fun restoreCheckpoint(input: InputStream, expectedDatabaseSha256: String? = null) =
         withStagedArchive(input) { stagedDatabase, staged ->
             validateSelectedBackup {
                 BackupFormatPolicy.requirePlatoonOnly(
@@ -99,7 +101,12 @@ class PlatoonBackupManager internal constructor(
                 requireArchiveMatchesScope(staged)
                 validateDatabase(stagedDatabase, requireCurrentSchema = true)
             }
-            replaceRestoredState(stagedDatabase, restoredSettings = null, retireRetainedCsv = false)
+            replaceRestoredState(
+                stagedDatabase,
+                restoredSettings = null,
+                retireRetainedCsv = false,
+                expectedDatabaseSha256 = expectedDatabaseSha256,
+            )
         }
 
     fun restoreFull(input: InputStream) = withStagedArchive(input) { stagedDatabase, staged ->
@@ -250,10 +257,17 @@ class PlatoonBackupManager internal constructor(
         restoredSettings: AppBackupSettings?,
         retireRetainedCsv: Boolean = true,
         restoreTarget: RestoreTarget? = null,
+        expectedDatabaseSha256: String? = null,
     ) {
         val retainedCsvDirectory = storageScope.retainedCsvDirectory(appContext)
         val previousRetainedCsvDirectory = storageScope.previousRetainedCsvDirectory(appContext)
         PlatoonRepository.withExclusiveDatabase(storageScope) {
+            if (expectedDatabaseSha256 != null) {
+                ensureDatabaseExists()
+                check(databaseFile.sha256Hex() == expectedDatabaseSha256) {
+                    "Platoon data changed after the CSV import; undo would overwrite newer changes"
+                }
+            }
             try {
                 beginRestoreTransaction(
                     previousSettings = if (restoredSettings == null) {

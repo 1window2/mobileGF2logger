@@ -157,10 +157,12 @@ class CsvImportCheckpointManager internal constructor(
             }
             val expectedDigest = digest(root).readText(Charsets.US_ASCII)
             require(expectedDigest.matches(SHA256)) { "Invalid CSV checkpoint digest" }
+            // Fails fast before quarantining anything; the authoritative comparison runs again
+            // inside the exclusive section that installs the checkpoint.
             check(backupManager().currentDatabaseSha256() == expectedDigest) {
                 "Platoon data changed after the CSV import; undo would overwrite newer changes"
             }
-            restoreUnchecked()
+            restoreUnchecked(expectedDigest)
         } finally {
             releaseOperation()
         }
@@ -179,7 +181,11 @@ class CsvImportCheckpointManager internal constructor(
         restoreUnchecked()
     }
 
-    private fun restoreUnchecked() {
+    /**
+     * With [expectedDatabaseSha256], the checkpoint is installed only while the live database still
+     * has that digest, compared under the same exclusive lock, so a concurrent ingest is never lost.
+     */
+    private fun restoreUnchecked(expectedDatabaseSha256: String? = null) {
         val names = manifest(root).readLines(Charsets.UTF_8)
             .filter(String::isNotBlank)
             .toSet()
@@ -208,7 +214,9 @@ class CsvImportCheckpointManager internal constructor(
                 }
                 restoreObserver(checkpoint)
             }
-            archive(root).inputStream().use(backupManager::restoreCheckpoint)
+            archive(root).inputStream().use { input ->
+                backupManager.restoreCheckpoint(input, expectedDatabaseSha256)
+            }
         } catch (error: Exception) {
             val marker = restoreMarker(root)
             if (marker.exists() && !marker.delete()) {

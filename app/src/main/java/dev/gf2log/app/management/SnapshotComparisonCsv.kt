@@ -5,15 +5,16 @@ import dev.gf2log.protocol.CsvCell
 object SnapshotComparisonCsv {
     const val HEADER =
         "olderCapturedAt,newerCapturedAt,changeType,uid,name,weeklyMeritDelta," +
-            "totalMeritDelta,totalScoreDelta,lastLoginChanged"
+            "totalMeritDelta,totalScoreDelta,lastLoginChanged,weeklyMeritDeltaCertainty," +
+            "totalScoreDeltaCertainty"
 
     fun format(result: SnapshotComparison.Result): String = buildString {
         appendLine(HEADER)
         result.joined.forEach { member ->
-            appendRow(result, "JOINED", member.uid, member.name, null, null, null, null)
+            appendRow(result, "JOINED", member.uid, member.name, null, null, null, null, null, null)
         }
         result.left.forEach { member ->
-            appendRow(result, "WITHDREW", member.uid, member.name, null, null, null, null)
+            appendRow(result, "WITHDREW", member.uid, member.name, null, null, null, null, null, null)
         }
         result.changes.forEach { change ->
             appendRow(
@@ -25,6 +26,8 @@ object SnapshotComparisonCsv {
                 change.totalMeritDelta,
                 change.totalScoreDelta,
                 change.lastLoginChanged,
+                change.weeklyMeritDeltaCertainty,
+                change.totalScoreDeltaCertainty,
             )
         }
     }.trimEnd() + "\n"
@@ -38,6 +41,8 @@ object SnapshotComparisonCsv {
         totalMerit: Long?,
         totalScore: Long?,
         lastLoginChanged: Boolean?,
+        weeklyMeritCertainty: MetricCertainty?,
+        totalScoreCertainty: MetricCertainty?,
     ) {
         appendLine(
             listOf(
@@ -50,6 +55,8 @@ object SnapshotComparisonCsv {
                 totalMerit,
                 totalScore,
                 lastLoginChanged,
+                weeklyMeritCertainty,
+                totalScoreCertainty,
             ).joinToString(",") { CsvCell.escape(it) },
         )
     }

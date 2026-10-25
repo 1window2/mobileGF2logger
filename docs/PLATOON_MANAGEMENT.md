@@ -88,7 +88,10 @@ additional upper bound: when an aggregate saturates that bound, it can also fix
 the attempt count and the otherwise ambiguous per-attempt rounding merit.
 
 Counter resets are handled by treating a negative delta as the current counter
-value. Daily activity is derived from Total Merit because Merit This Week
+value. A roster comparison across a Monday 05:00 weekly reset or a Gunsmoke
+event start reports the newer Merit This Week or Gunsmoke score as a lower
+bound (`≥`) even when it came back higher, because the older counter's gain
+before the reset is unknown. Daily activity is derived from Total Merit because Merit This Week
 resets on Monday while a Gunsmoke week begins on Sunday.
 A capped pre-Gunsmoke counter is a valid opening anchor only inside the
 immediately preceding Monday 05:00-to-Sunday 05:00 calendar interval in the

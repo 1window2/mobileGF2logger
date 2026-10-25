@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.VpnService
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
@@ -209,6 +210,10 @@ class CaptureVpnService : VpnService() {
             .addRoute("0.0.0.0", 0)
             .addAddress(VPN_IPV6_ADDRESS, VPN_IPV6_PREFIX_LENGTH)
             .addRoute("::", 0)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // From API 29 a VPN is metered unless declared otherwise; follow the underlying network.
+            builder.setMetered(false)
+        }
 
         val installedTargets = SupportedGamePackages.all.filter { targetPackage ->
             try {

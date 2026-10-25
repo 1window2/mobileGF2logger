@@ -78,7 +78,9 @@ For a previously unknown `(client package, Platoon ID)`, decoded payloads enter
 a bounded process-memory admission queue. Returning to the app presents the
 observed Platoon name, ID, and verified client, then requires one compatible
 server choice. Confirmation creates the profile and replays its buffered
-payloads through the normal scoped ingestion pipeline. Explicit discard,
+payloads through the normal scoped ingestion pipeline. The prompt stays open
+while a confirmation runs; a failed one releases the candidate with its reason,
+which the prompt shows before the user retries or discards. Explicit discard,
 candidate overflow, force-stop, or process death removes the unconfirmed data;
 it never enters parsed-packet history, SQLite, retained CSV, or preferences.
 HaoPlay candidates expose only its four known regions and Darkwinter candidates

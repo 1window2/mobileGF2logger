@@ -63,7 +63,7 @@ Recognized inner types:
 | 21960 | Platoon updates |
 | 23201 | Formations |
 
-Unknown payload types are skipped without allocation. A recognized but malformed protobuf payload produces a warning event and does not terminate parsing of later messages.
+Unknown payload types are skipped without allocation. Capture diagnostics count the first 32 distinct unknown types individually and the rest together. A recognized but malformed protobuf payload produces a warning event and does not terminate parsing of later messages.
 
 Payload `21905` is the authoritative Platoon identity for the decoded flow. On
 Android 10 and newer, the capture service also resolves the original connection

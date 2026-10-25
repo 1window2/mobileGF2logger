@@ -13,13 +13,21 @@ internal class CaptureTrafficStats {
     private val droppedChunks = AtomicLong()
     private val reportedBucket = AtomicLong()
     private val unknownPayloads = ConcurrentHashMap<Int, AtomicLong>()
+    private val otherUnknownPayloads = AtomicLong()
 
     @Volatile
     private var startedAt: Instant? = null
 
     fun begin(now: Instant = Instant.now()) {
-        listOf(forwardedBytes, inspectedBytes, decodedPayloads, warnings, droppedChunks, reportedBucket)
-            .forEach { it.set(0) }
+        listOf(
+            forwardedBytes,
+            inspectedBytes,
+            decodedPayloads,
+            warnings,
+            droppedChunks,
+            reportedBucket,
+            otherUnknownPayloads,
+        ).forEach { it.set(0) }
         unknownPayloads.clear()
         startedAt = now
     }
@@ -29,8 +37,18 @@ internal class CaptureTrafficStats {
         if (warnings > 0) this.warnings.addAndGet(warnings.toLong())
     }
 
+    /**
+     * Counts the first [MAX_UNKNOWN_TYPES] distinct types individually and every later one together,
+     * so a garbage plaintext flow cannot grow the map, or the persisted diagnostics, to 65,536 types.
+     */
     fun recordUnknown(payloadType: Int) {
-        unknownPayloads.computeIfAbsent(payloadType) { AtomicLong() }.incrementAndGet()
+        val counter = unknownPayloads[payloadType]
+            ?: if (unknownPayloads.size < MAX_UNKNOWN_TYPES) {
+                unknownPayloads.computeIfAbsent(payloadType) { AtomicLong() }
+            } else {
+                otherUnknownPayloads
+            }
+        counter.incrementAndGet()
     }
 
     fun recordDropped(): Long = droppedChunks.incrementAndGet()
@@ -63,14 +81,20 @@ internal class CaptureTrafficStats {
             decodedPayloads = decodedPayloads.get(),
             warnings = warnings.get(),
             droppedChunks = droppedChunks.get(),
-            unknownPayloads = unknownPayloads.entries
-                .sortedBy { it.key }
-                .joinToString { "${it.key}:${it.value.get()}" },
+            unknownPayloads = (
+                unknownPayloads.entries
+                    .sortedBy { it.key }
+                    .map { "${it.key}:${it.value.get()}" } +
+                    listOfNotNull(otherUnknownPayloads.get().takeIf { it > 0 }?.let { "*:$it" })
+                ).joinToString(),
             finalStatus = finalStatus,
         )
     }
 
-    private companion object {
-        const val TRAFFIC_REPORT_BYTES = 64 * 1024
+    companion object {
+        private const val TRAFFIC_REPORT_BYTES = 64 * 1024
+
+        /** Types beyond this many are reported together as `*`. */
+        const val MAX_UNKNOWN_TYPES = 32
     }
 }

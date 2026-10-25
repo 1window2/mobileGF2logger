@@ -29,4 +29,23 @@ class CaptureTrafficStatsTest {
         assertEquals("done", diagnostics.finalStatus)
         assertNull(stats.finish("again"))
     }
+
+    @Test
+    fun unknownTypesBeyondTheCapAreCountedTogether() {
+        val stats = CaptureTrafficStats()
+        stats.begin(Instant.EPOCH)
+        val cap = CaptureTrafficStats.MAX_UNKNOWN_TYPES
+        (0 until cap + 100).forEach { stats.recordUnknown(it) }
+        stats.recordUnknown(0)
+        stats.recordUnknown(cap + 500)
+
+        val entries = requireNotNull(stats.finish("done")).unknownPayloads.split(", ")
+        assertEquals(cap + 1, entries.size)
+        assertEquals("0:2", entries.first())
+        assertEquals("*:101", entries.last())
+
+        stats.begin(Instant.EPOCH)
+        stats.recordUnknown(7)
+        assertEquals("7:1", requireNotNull(stats.finish("again")).unknownPayloads)
+    }
 }

@@ -63,7 +63,7 @@ Recognized inner types:
 | 21960 | Platoon updates |
 | 23201 | Formations |
 
-Unknown payload types are skipped without allocation. A recognized but malformed protobuf payload produces a warning event and does not terminate parsing of later messages.
+Unknown payload types are skipped without allocation. Capture diagnostics count the first 32 distinct unknown types individually and the rest together. A recognized but malformed protobuf payload produces a warning event and does not terminate parsing of later messages.
 
 Payload `21905` is the authoritative Platoon identity for the decoded flow. On
 Android 10 and newer, the capture service also resolves the original connection
@@ -78,7 +78,9 @@ For a previously unknown `(client package, Platoon ID)`, decoded payloads enter
 a bounded process-memory admission queue. Returning to the app presents the
 observed Platoon name, ID, and verified client, then requires one compatible
 server choice. Confirmation creates the profile and replays its buffered
-payloads through the normal scoped ingestion pipeline. Explicit discard,
+payloads through the normal scoped ingestion pipeline. The prompt stays open
+while a confirmation runs; a failed one releases the candidate with its reason,
+which the prompt shows before the user retries or discards. Explicit discard,
 candidate overflow, force-stop, or process death removes the unconfirmed data;
 it never enters parsed-packet history, SQLite, retained CSV, or preferences.
 HaoPlay candidates expose only its four known regions and Darkwinter candidates
@@ -133,13 +135,17 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   per candidate, and 128 payloads total. Overflow rejects every flow belonging
   to that candidate rather than partially persisting it.
 - A bound flow cannot change its Platoon identity. Admission failure clears its
-  session and quarantines the flow until native closure. One user-started
+  session and quarantines the flow until native closure. Replay binds every
+  claimed flow before routing any buffered payload, so a replay that fails has
+  persisted nothing and a retry cannot duplicate history or roster files. One user-started
   capture may admit at most one new profile per supported client. Explicit
   profile deletion removes one immutable scope behind two confirmations.
 - TLS, HTTP, and UDP payloads remain native and are excluded from the parser.
   A TCP flow is classified once, on its first payload in either direction, so
   a later plaintext segment that happens to begin with TLS-like bytes can never
-  disable inspection.
+  disable inspection. TLS means a complete record header (content type 20–23,
+  version 3.0–3.4, length 1 to 2^14 + 2048); HTTP means a request method or
+  status line, so a game frame sharing only the first two bytes stays inspected.
 - Outgoing plaintext chunks are used only for native flow classification.
 - Flow-close callbacks finalize any pending recognized payload before removing parser state and
   unconditionally remove metadata even when no parser existed. A rejected close callback
@@ -500,7 +506,10 @@ bounds whose displayed minimum remains below the configured threshold. Unknown
 values and lower bounds that already meet the threshold remain neutral.
 
 Completed roster captures are written under a non-importable temporary suffix
-and atomically published as `.csv` only after protocol completion. Retained CSV
+and atomically published as `.csv` only after protocol completion. A working
+file whose write or publication fails is deleted, and capture start removes any
+left by process death. Member and name bounds apply to the UID-deduplicated
+completed roster, so a discarded partial roster never reports a save failure. Retained CSV
 reconciliation runs off the UI thread, skips represented source identities,
 and imports older evidence without rewriting current membership. Both backup
 exports reconcile completed retained evidence before taking their locked

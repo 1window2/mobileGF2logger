@@ -17,7 +17,8 @@ import java.time.format.DateTimeFormatter
  * already merges continuation frames, so a roster payload that does not complete its logical
  * payload was cut short by another payload or by flow closure. Like the reference logger, such a
  * boundary ends the dataset; it is discarded instead of being merged with a later, unrelated roster.
- * An empty `.partial` file reserves the final name while the CSV is written.
+ * An empty `.partial` file reserves the final name while the CSV is written; it is deleted when
+ * writing or publication fails, and [deleteStalePartials] removes any a process death left behind.
  */
 class GuildMembersCsvWriter(
     private val outputDirectory: File,
@@ -28,14 +29,16 @@ class GuildMembersCsvWriter(
     @Synchronized
     fun accept(payload: ParsedPayload): SaveResult? {
         val data = payload.data as? GuildMembersData ?: return null
-        check(GuildMembersCsv.hasValidMemberBounds(data.members)) {
-            "Platoon roster exceeds the member or name limit"
-        }
         if (payload.messageId == 0 || !payload.isEndOfMessage) return null
         val members = linkedMapOf<UInt, GuildMember>()
         data.members.forEach { member -> members[member.uid] = member }
         if (members.isEmpty()) return null
-        return publish(members.values.toList())
+        // Bounded after deduplication: merged continuation frames may repeat a member.
+        val roster = members.values.toList()
+        check(GuildMembersCsv.hasValidMemberBounds(roster)) {
+            "Platoon roster exceeds the member or name limit"
+        }
+        return publish(roster)
     }
 
     private fun publish(members: List<GuildMember>): SaveResult {
@@ -49,6 +52,8 @@ class GuildMembersCsvWriter(
             }
             publishWithRetry(batch.workingFile, batch.completed.file)
         } catch (error: Exception) {
+            // Nothing reads a working file, so an unpublished one would only accumulate.
+            batch.workingFile.delete()
             // Structured ingestion still gets the completed batch; the caller sees the failure.
             runCatching { onBatchClosed(batch.completed) }
                 .exceptionOrNull()
@@ -68,7 +73,7 @@ class GuildMembersCsvWriter(
         while (true) {
             val name = if (suffix == 1) "$filenameStem.csv" else "${filenameStem}_$suffix.csv"
             val finalFile = File(outputDirectory, name)
-            val workingFile = File(outputDirectory, "$name.partial")
+            val workingFile = File(outputDirectory, name + WORKING_SUFFIX)
             if (!finalFile.exists() && workingFile.createNewFile()) {
                 return Reservation(workingFile, CompletedBatch(finalFile, LogTime.format(instant), members))
             }
@@ -107,6 +112,16 @@ class GuildMembersCsvWriter(
 
     companion object {
         private const val PUBLISH_ATTEMPTS = 2
+        private const val WORKING_SUFFIX = ".partial"
+
+        /**
+         * Deletes working files a process death left in [directory]. Call it only while no writer
+         * for that directory exists, such as before a capture binds its first flow.
+         */
+        fun deleteStalePartials(directory: File) {
+            directory.listFiles { file -> file.isFile && file.name.endsWith(WORKING_SUFFIX) }
+                ?.forEach(File::delete)
+        }
 
         private val FILE_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter
             .ofPattern("yyyyMMdd'T'HHmmss'Z'")

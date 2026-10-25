@@ -21,6 +21,12 @@ internal object PendingPlatoonAdmissionStore {
         val profile: PlatoonProfileData,
         val firstObservedAt: Instant,
         val payloadCount: Int,
+        /** True while a confirmation holds the claim; the prompt stays open to report its outcome. */
+        val admitting: Boolean = false,
+        /** Why the latest confirmation failed; cleared when the next one claims the candidate. */
+        val failure: CaptureNotice? = null,
+        /** Confirmations that have claimed this candidate so far, including the running one. */
+        val attempts: Int = 0,
     )
 
     data class BufferedPayload(
@@ -56,6 +62,8 @@ internal object PendingPlatoonAdmissionStore {
         val flowIds: MutableSet<Long> = linkedSetOf(),
         val endedFlowIds: MutableSet<Long> = linkedSetOf(),
         var claimed: Boolean = false,
+        var failure: CaptureNotice? = null,
+        var attempts: Int = 0,
     )
 
     private data class IdentityKey(val ownerPackage: String, val platoonId: UInt)
@@ -66,8 +74,10 @@ internal object PendingPlatoonAdmissionStore {
     private val listeners = CopyOnWriteArraySet<(List<Summary>) -> Unit>()
 
     /**
-     * [listener] receives the visible candidates on the main looper: once immediately, then
-     * whenever a candidate appears, changes identity, is claimed or released, or is removed.
+     * [listener] receives every candidate on the main looper: once immediately, then whenever a
+     * candidate appears, changes identity, is claimed or released, or is removed. A claimed
+     * candidate stays listed as [Summary.admitting], so a slow confirmation does not close its
+     * prompt, and a failed one is released with its [Summary.failure] for that prompt to show.
      */
     fun addListener(listener: (List<Summary>) -> Unit) {
         listeners += listener
@@ -143,7 +153,6 @@ internal object PendingPlatoonAdmissionStore {
     @Synchronized
     fun summaries(): List<Summary> = candidates.values
         .asSequence()
-        .filterNot(Candidate::claimed)
         .sortedBy(Candidate::firstObservedAt)
         .map { it.summary() }
         .toList()
@@ -158,6 +167,8 @@ internal object PendingPlatoonAdmissionStore {
         val candidate = candidates[token] ?: return null
         if (candidate.claimed) return null
         candidate.claimed = true
+        candidate.failure = null
+        candidate.attempts += 1
         notifyChanged()
         return Claim(
             summary = candidate.summary(),
@@ -168,10 +179,11 @@ internal object PendingPlatoonAdmissionStore {
     }
 
     @Synchronized
-    fun releaseClaim(token: String) {
+    fun releaseClaim(token: String, failure: CaptureNotice? = null) {
         val candidate = candidates[token] ?: return
         if (!candidate.claimed) return
         candidate.claimed = false
+        candidate.failure = failure
         notifyChanged()
     }
 
@@ -179,27 +191,25 @@ internal object PendingPlatoonAdmissionStore {
     fun complete(token: String): Set<Long> = removeLocked(token)?.flowIds.orEmpty()
 
     /**
-     * Claims [token] and runs [admit] outside the lock. The candidate is completed when [admit]
-     * returns true and released for another decision otherwise, including when it throws, so a
-     * failed confirmation can never leave a candidate claimed and invisible forever.
+     * Claims [token] and runs [admit] outside the lock. [admit] returns null once the candidate is
+     * admitted, which completes it, or the failure to show, which releases it for another
+     * decision. A throwing [admit] releases it with [CaptureNotice.ADMISSION_INVALID], so a failed
+     * confirmation can never leave a candidate claimed forever or its prompt without an outcome.
      * Returns the completed candidate's flow IDs, or null when nothing was completed.
      */
-    fun withClaim(token: String, admit: (Claim) -> Boolean): Set<Long>? {
+    fun withClaim(token: String, admit: (Claim) -> CaptureNotice?): Set<Long>? {
         val claim = claim(token) ?: return null
-        var admitted = false
+        var failure: CaptureNotice? = CaptureNotice.ADMISSION_INVALID
         try {
-            admitted = admit(claim)
+            failure = admit(claim)
         } finally {
-            if (!admitted) releaseClaim(token)
+            failure?.let { releaseClaim(token, it) }
         }
-        return if (admitted) complete(token) else null
+        return if (failure == null) complete(token) else null
     }
 
     @Synchronized
     fun discard(token: String): Set<Long> = removeLocked(token)?.flowIds.orEmpty()
-
-    @Synchronized
-    fun contains(token: String): Boolean = token in candidates
 
     @VisibleForTesting
     @Synchronized
@@ -216,6 +226,9 @@ internal object PendingPlatoonAdmissionStore {
         profile = profile,
         firstObservedAt = firstObservedAt,
         payloadCount = payloads.size,
+        admitting = claimed,
+        failure = failure,
+        attempts = attempts,
     )
 
     private fun removeLocked(token: String): Candidate? {

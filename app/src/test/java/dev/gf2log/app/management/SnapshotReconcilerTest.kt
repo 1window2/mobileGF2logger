@@ -1,10 +1,34 @@
 package dev.gf2log.app.management
 
+import java.time.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SnapshotReconcilerTest {
+    @Test
+    fun historicalOrderingComparesCaptureTimeThenSourceFileName() {
+        val latestAt = Instant.parse("2026-08-01T00:00:00Z")
+        val latestFile = "gf2log_platoonmembers_b.csv"
+
+        assertTrue(
+            SnapshotReconciler.isHistorical(latestAt.minusMillis(1), "z.csv", latestAt, latestFile),
+        )
+        assertFalse(
+            SnapshotReconciler.isHistorical(latestAt.plusMillis(1), "a.csv", latestAt, latestFile),
+        )
+        assertTrue(SnapshotReconciler.isHistorical(latestAt, latestFile, latestAt, latestFile))
+        assertTrue(
+            SnapshotReconciler.isHistorical(latestAt, "gf2log_platoonmembers_a.csv", latestAt, latestFile),
+        )
+        assertFalse(
+            SnapshotReconciler.isHistorical(latestAt, "gf2log_platoonmembers_c.csv", latestAt, latestFile),
+        )
+        // A latest roster without a source file sorts before every named file at its instant.
+        assertFalse(SnapshotReconciler.isHistorical(latestAt, "a.csv", latestAt, null))
+    }
+
     @Test
     fun firstSnapshotIsAnInitialRosterWithoutJoinEvents() {
         val result = SnapshotReconciler.reconcile(

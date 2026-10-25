@@ -142,9 +142,12 @@ internal class PlatoonRepository(
                 .sortedWith(compareBy(RetainedCsv::capturedAt, { it.file.name }))
                 .forEach { file ->
                     val historicalOnly = latestStructuredSnapshot?.let {
-                        file.capturedAt.isBefore(it.capturedAt) ||
-                            (file.capturedAt == it.capturedAt &&
-                                file.file.name <= it.sourceFile.orEmpty())
+                        SnapshotReconciler.isHistorical(
+                            file.capturedAt,
+                            file.file.name,
+                            it.capturedAt,
+                            it.sourceFile,
+                        )
                     } ?: false
                     val result = database.ingestSnapshot(
                         PlatoonSnapshot(

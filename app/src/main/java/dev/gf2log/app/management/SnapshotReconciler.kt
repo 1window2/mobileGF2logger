@@ -1,5 +1,7 @@
 package dev.gf2log.app.management
 
+import java.time.Instant
+
 object SnapshotReconciler {
     data class KnownMember(
         val uid: Long,
@@ -21,6 +23,19 @@ object SnapshotReconciler {
         val oldName: String,
         val newName: String,
     )
+
+    /**
+     * Whether a roster file captured at [capturedAt] as [sourceFile] sorts at or before the
+     * newest stored roster, so it must be replayed as history instead of becoming the current
+     * roster. Equal capture instants are ordered by source file name.
+     */
+    fun isHistorical(
+        capturedAt: Instant,
+        sourceFile: String,
+        latestCapturedAt: Instant,
+        latestSourceFile: String?,
+    ): Boolean = capturedAt.isBefore(latestCapturedAt) ||
+        (capturedAt == latestCapturedAt && sourceFile <= latestSourceFile.orEmpty())
 
     fun reconcile(
         known: Collection<KnownMember>,

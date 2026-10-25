@@ -72,17 +72,6 @@ class PlatoonDatabaseIntegrationTest {
             },
         )
         writable.insertOrThrow(
-            "weekly_notes",
-            null,
-            ContentValues().apply {
-                put("period_start", 20665L)
-                put("game_day", 20665L)
-                put("text", "Target joined")
-                put("event_id", targetEventId)
-                put("is_automatic", 1)
-            },
-        )
-        writable.insertOrThrow(
             "platoon_activity",
             null,
             ContentValues().apply {
@@ -106,7 +95,6 @@ class PlatoonDatabaseIntegrationTest {
         assertEquals(0L, count("snapshot_members", "uid = ?", TARGET_UID))
         assertEquals(0L, count("weekly_overrides", "uid = ?", TARGET_UID))
         assertEquals(0L, count("platoon_activity", "resolved_uid = ?", TARGET_UID))
-        assertEquals(0L, count("weekly_notes", "text = ?", "Target joined"))
         assertEquals(1L, count("members", "uid = ?", OTHER_UID))
         assertEquals(1L, count("snapshots", "source_file = ?", sourceFile))
         assertTrue(sourceFile in database.snapshotSourceFiles())

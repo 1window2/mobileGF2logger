@@ -365,7 +365,6 @@ internal class PlatoonRepository(
             report = report,
             membershipEvents = membershipEvents,
             notes = inputs.notes
-                .filterNot(WeeklyNote::isAutomatic)
                 .take(MAX_REVISION_NOTES)
                 .map { it.copy(text = it.text.boundedUtf8(MAX_REVISION_NOTE_BYTES)) },
             memberNamesByUid = inputs.statuses.asSequence()
@@ -521,9 +520,9 @@ internal class PlatoonRepository(
     /**
      * Runs a mutation confined to one member's rows and refreshes only the weeks whose revision
      * can show that member before or after it: weeks whose period-end roster or Join / Withdraw
-     * section contains the member, or whose notes cite the member's events. Every other row,
-     * name, and note of a revision depends on other members' evidence alone. If the pre-scan
-     * fails, every week is refreshed so the mutation stays authoritative.
+     * section contains the member. Weekly notes are manual and cite no member events, so every
+     * other row, name, and note of a revision depends on other members' evidence alone. If the
+     * pre-scan fails, every week is refreshed so the mutation stays authoritative.
      */
     private fun refreshingWeeksOf(uid: Long?, mutation: () -> Boolean): Boolean {
         val zone = gameZone()
@@ -555,9 +554,8 @@ internal class PlatoonRepository(
         mutation,
     )
 
-    private fun weeksShowingMember(uid: Long, zone: ZoneId, asOf: Instant): Set<LocalDate> {
-        val citingNotes = access { it.weeklyNotePeriodsCitingMember(uid) }
-        return weeklyPeriodStarts(zone).filterTo(citingNotes.toMutableSet()) { periodStart ->
+    private fun weeksShowingMember(uid: Long, zone: ZoneId, asOf: Instant): Set<LocalDate> =
+        weeklyPeriodStarts(zone).filterTo(mutableSetOf()) { periodStart ->
             val inputs = access { database ->
                 database.readConsistently { readRosterInputs(database, periodStart, zone, asOf) }
             }
@@ -570,7 +568,6 @@ internal class PlatoonRepository(
                     asOf,
                 )
         }
-    }
 
     private fun recordHistory(
         revision: WeeklyTableRevision,

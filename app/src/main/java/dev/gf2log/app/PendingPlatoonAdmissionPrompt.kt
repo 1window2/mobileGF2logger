@@ -44,20 +44,22 @@ internal object PendingPlatoonAdmissionPrompt {
     fun onCandidatesChanged(activity: Activity, candidates: List<PendingPlatoonAdmissionStore.Summary>) {
         if (activity.isFinishing || activity.isDestroyed) return
         val showing = visible.get()?.takeIf { it.isShowing }
+        val current = candidates.firstOrNull { it.token == visibleToken }
         if (showing != null) {
-            val current = candidates.firstOrNull { it.token == visibleToken }
-            if (current != null) {
+            if (current != null && owner.get() === activity) {
                 refreshVisible?.invoke(current)
                 return
             }
-            // The visible candidate was resolved; move on to the next queued one.
+            // Either the visible candidate was resolved (move on to the next queued one), or a
+            // newly started screen now owns the prompt: the one behind it closes its dialog on
+            // stop, so the prompt moves here, keeping the chosen server.
             showing.dismiss()
             clearVisible()
         }
         val tokens = candidates.mapTo(mutableSetOf()) { it.token }
         selections.keys.retainAll(tokens)
         requested.keys.retainAll(tokens)
-        candidates.firstOrNull()?.let { show(activity, it) }
+        (current ?: candidates.firstOrNull())?.let { show(activity, it) }
     }
 
     /** Dismisses the prompt only when [activity] owns it, so a newly started screen keeps its own. */

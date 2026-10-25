@@ -37,6 +37,9 @@ All notable changes to mobileGF2logger are documented here.
 - Avoid a crash on phones without the battery-optimization dialog and an empty
   server choice after VPN consent when entering standby mode.
 - Close the game from Recents reliably on launchers whose Recents opens slowly.
+- Start every automatic recording with a fresh game: a client left in the
+  background from earlier is closed from Recents first, since resuming it can
+  stop at a "reconnection failed" notice no automatic tap may press.
 - Refresh the Platoon and Weekly screens when a roster is saved while they are
   open, keep their scroll position across recreation, and clear stale rows after
   a failed load.

@@ -60,6 +60,8 @@ internal object StandbyAutomation {
     private var tapsUntil = 0L
     private var loggedIn = false
     private var foreignSince = 0L
+    private var clearingStaleGame = false
+    private var gameShown = false
     private var startedCapture = false
     /** [CaptureSnapshot.runCount] when this automation last sent a stop the service has not seen yet. */
     private var stopSentAtRun: Long? = null
@@ -103,6 +105,7 @@ internal object StandbyAutomation {
         previousActive = null
         handingOff = false
         openedGame = null
+        clearingStaleGame = false
         this.lockWhenDone = lockWhenDone
         enter(Phase.WAITING)
         appContext.registerReceiver(screenOffReceiver, IntentFilter(Intent.ACTION_SCREEN_OFF))
@@ -145,9 +148,11 @@ internal object StandbyAutomation {
             Phase.IDLE -> Unit
             Phase.WAITING -> if (now >= runs[index].startAt.toEpochMilli()) beginRun(now)
             Phase.STARTING_CAPTURE -> when {
+                // Clearing a leftover game from Recents; launchGame follows when it is done.
+                clearingStaleGame -> Unit
                 // A capture the previous run stopped may still read RUNNING until the stop lands.
                 CaptureStatus.snapshot().let { it.phase == CapturePhase.RUNNING && !ownStopPending(it) } ->
-                    launchGame(now)
+                    clearStaleGame()
                 now - phaseStartedAt >= CAPTURE_START_TIMEOUT_MS -> endRun(StandbyOutcome.CAPTURE_FAILED)
             }
             Phase.IN_GAME -> when {
@@ -173,7 +178,11 @@ internal object StandbyAutomation {
     /** True once something other than the game, or this app, has been in front for a while. */
     private fun userLeftGame(now: Long): Boolean {
         val front = StandbyAutomationService.instance?.frontPackage()
-        if (front == null || front == runs[index].server.packageName || front == appContext.packageName) {
+        val game = runs[index].server.packageName
+        if (front == game) gameShown = true
+        // Until the game is first in front (a cold start from Recents shows the launcher for a
+        // while) nobody can have left it; a launch that never shows ends by the run's timeout.
+        if (!gameShown || front == null || front == game || front == appContext.packageName) {
             foreignSince = 0L
             return false
         }
@@ -181,6 +190,7 @@ internal object StandbyAutomation {
         // Brief system windows during launch or login do not count.
         return now - foreignSince >= USER_SWITCH_MS
     }
+
 
     private fun beginRun(now: Long) {
         val run = runs[index]
@@ -253,6 +263,29 @@ internal object StandbyAutomation {
         return false
     }
 
+    /**
+     * A game left in the background from earlier (an evening session, say) can come back to a
+     * "reconnection failed" notice that no tap here may press, so its Recents card is closed first
+     * and every run starts the game fresh. Recents takes over the screen: the standby screen
+     * stops and closes itself without cancelling, and the screen-on hold of this run stays.
+     */
+    private fun clearStaleGame() {
+        val run = runs[index]
+        val service = StandbyAutomationService.instance ?: return launchGame(System.currentTimeMillis())
+        clearingStaleGame = true
+        if (standby.get()?.takeUnless { it.isFinishing } != null) handingOff = true
+        service.closeFromRecents(run.server.packageName) { closed ->
+            if (closed) Log.i(TAG, "Closed a leftover ${run.server.packageName} before launching it")
+            // Android kills a dismissed task's process a moment later; a launch before that lands
+            // in the dying process and vanishes with it.
+            handler.postDelayed({
+                clearingStaleGame = false
+                if (phase != Phase.STARTING_CAPTURE || runs.getOrNull(index) !== run) return@postDelayed
+                launchGame(System.currentTimeMillis())
+            }, if (closed) STALE_GAME_SETTLE_MS else 0L)
+        }
+    }
+
     private fun launchGame(now: Long) {
         val run = runs[index]
         val launch = appContext.packageManager.getLaunchIntentForPackage(run.server.packageName)
@@ -274,6 +307,7 @@ internal object StandbyAutomation {
         tapsUntil = now + TAP_WINDOW_MS
         loggedIn = false
         foreignSince = 0L
+        gameShown = false
         enter(Phase.IN_GAME)
     }
 
@@ -389,6 +423,7 @@ internal object StandbyAutomation {
         CaptureStatus.removeListener(captureListener)
         runCatching { appContext.unregisterReceiver(screenOffReceiver) }
         handingOff = false
+        clearingStaleGame = false
         StandbyResults.save(appContext, results.toList())
     }
 
@@ -441,6 +476,7 @@ internal object StandbyAutomation {
     private const val TAP_INTERVAL_MS = 4_000L
     private const val TAP_WINDOW_MS = 2 * 60_000L
     private const val USER_SWITCH_MS = 5_000L
+    private const val STALE_GAME_SETTLE_MS = 2_500L
     private const val RUN_TIMEOUT_MS = 4 * 60_000L
     private const val MIN_RUN_MS = 60_000L
     private const val RETURN_TIMEOUT_MS = 8_000L

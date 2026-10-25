@@ -87,7 +87,18 @@ class StandbyAutomationService : AccessibilityService() {
             packageManager.getApplicationLabel(packageManager.getApplicationInfo(packageName, 0)).toString()
         }.getOrNull()
         if (label.isNullOrBlank() || !performGlobalAction(GLOBAL_ACTION_RECENTS)) return done(false)
-        handler.postDelayed({ done(dismissCard(label)) }, RECENTS_SETTLE_MS)
+        tryDismiss(label, RECENTS_ATTEMPTS, done)
+    }
+
+    /** Recents animates in at its own pace, slower on some phones; look again before giving up. */
+    private fun tryDismiss(label: String, attemptsLeft: Int, done: (Boolean) -> Unit) {
+        handler.postDelayed({
+            when {
+                dismissCard(label) -> done(true)
+                attemptsLeft > 1 -> tryDismiss(label, attemptsLeft - 1, done)
+                else -> done(false)
+            }
+        }, RECENTS_SETTLE_MS)
     }
 
     private fun dismissCard(label: String): Boolean {
@@ -146,7 +157,8 @@ class StandbyAutomationService : AccessibilityService() {
 
     companion object {
         private const val TAP_DURATION_MS = 60L
-        private const val RECENTS_SETTLE_MS = 1_200L
+        private const val RECENTS_SETTLE_MS = 800L
+        private const val RECENTS_ATTEMPTS = 4
 
         @Volatile
         private var current = java.lang.ref.WeakReference<StandbyAutomationService>(null)

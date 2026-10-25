@@ -2,6 +2,50 @@
 
 All notable changes to mobileGF2logger are documented here.
 
+## Unreleased (2.7.1)
+
+### Fixed
+
+- Stop a scheduled recording from turning the screen off again about ten
+  minutes after it finished, while the phone is in use.
+- Keep every day of a Gunsmoke Frontline week filled when it is recorded once a
+  day before the reset: when the exact search gives up, the rest of the week now
+  continues with safe lower bounds and exact weekly totals instead of dropping
+  later days.
+- Treat a capture at exactly the Sunday 05:00 reset as the closing evidence of
+  the ending week, keep Standard days at or below the 90-point daily cap, credit
+  a mid-week joiner's merit from the day after they were last absent, and leave
+  an open final Saturday's patrol unknown instead of missed.
+- Show roster comparison deltas across a weekly reset as lower bounds; the
+  comparison CSV gains two certainty columns.
+- Report capture as stopped only after its teardown finishes, so backup,
+  restore, CSV import and undo, and Platoon changes started with "Stop capture
+  and continue" never overlap the last packets; Home shows "Stopping capture"
+  meanwhile.
+- Refuse a CSV undo when newer data arrived after its check, recover
+  interrupted CSV imports at startup and before capture, roll back a failed
+  restore under the same lock, and never crash at launch over a recovery.
+- Show capture notifications and background messages in the app's chosen
+  language.
+- Reject roster CSV files dated in the future.
+- Exclude the management database from Android cloud backup and device
+  transfer, as documented.
+- Ignore Discard while weekly edits are saving, and save exactly the edits that
+  were tapped.
+- Keep member, order, comparison, cutline and history screens open, with their
+  unsaved edits, when only the Platoon's name or banner changes.
+- Avoid a crash on phones without the battery-optimization dialog and an empty
+  server choice after VPN consent when entering standby mode.
+- Close the game from Recents reliably on launchers whose Recents opens slowly.
+
+### Changed
+
+- Shrink the release APK from 3.2 MB to 1.1 MB: the Platoon emblem and launcher
+  artwork ship as lossless WebP at the largest size they are drawn, legacy
+  launcher PNGs and unused metadata are gone, and v1 JAR signing is off.
+- Build the protocol module as a plain Kotlin library and skip the duplicate
+  release lint pass in CI.
+
 ## 2.7.0 - 2026-10-25
 
 ### Added

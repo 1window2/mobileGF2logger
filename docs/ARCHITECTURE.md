@@ -381,9 +381,10 @@ profile on an installation that does not yet have any registered profiles.
 Complete restore validates the filename, archive entries and identity,
 checksums, settings completeness and ranges, current database schema, SQLite
 integrity, and foreign keys before mutation. Database replacement runs under
-the repository maintenance lock. The previous database and a settings snapshot
-are retained until both resources commit, so any failure restores the prior
-state instead of leaving a partial import. A fresh install records that no
+the repository maintenance lock. The previous database, together with any WAL
+or rollback journal a crash left beside it, and a settings snapshot are
+retained until both resources commit, so any failure restores the prior state
+instead of leaving a partial import. A fresh install records that no
 database existed so rollback removes the staged replacement rather than
 mistaking it for prior state. Cleanup deletes the transaction state file
 first, so a process death during cleanup leaves only leftovers to delete

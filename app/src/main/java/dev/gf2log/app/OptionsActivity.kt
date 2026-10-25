@@ -13,6 +13,7 @@ import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.app.settings.GameServerRegion
 import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.PayloadHistoryPreferences
+import dev.gf2log.app.standby.ScheduledRecording
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Dialogs
@@ -38,6 +39,7 @@ class OptionsActivity : BaseActivity() {
     private lateinit var profileBinding: ActivePlatoonScopeBinding
     private val work = BackgroundWork(this, "GF2Settings")
     private val backup = BackupFlow(this, work, MAINTENANCE) { profileBinding.scope }
+    private val scheduled = ScheduledRecordingSetup(this, work)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,6 +52,8 @@ class OptionsActivity : BaseActivity() {
 
     override fun onScreenResumed() {
         if (!profileBinding.isCurrent(this)) recreate()
+        // Platoons may have changed since the next scheduled recording was planned.
+        if (ScheduledRecording.isEnabled(this)) ScheduledRecording.reschedule(this)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -141,6 +145,10 @@ class OptionsActivity : BaseActivity() {
                 ) { payloads.setEnabled(category.payloadType, it) }, lp())
             }
         }, lp(top = 8))
+
+        addView(sectionHeader(getString(R.string.scheduled_title)), lp())
+        addView(caption(getString(R.string.scheduled_detail)), lp())
+        addView(scheduled.view(), lp())
 
         addView(sectionHeader(getString(R.string.backup)), lp())
         addView(caption(getString(R.string.settings_backup_detail)), lp())

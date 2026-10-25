@@ -21,6 +21,7 @@ import dev.gf2log.app.management.CsvImportCheckpointManager
 import dev.gf2log.app.management.PlatoonCsvImportStore
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.SnapshotComparison
+import dev.gf2log.app.standby.ScheduledRecording
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.CaptureGuard
 import dev.gf2log.app.ui.BarAction
@@ -148,6 +149,8 @@ class MainActivity : BaseActivity() {
         loadUndoAvailability()
         csvImport.onScreenReady()
         standbyFlow.showUnseenResults()
+        // Revoking exact alarms cancels the next wake-up without telling the app; plan it again.
+        if (ScheduledRecording.isEnabled(this)) ScheduledRecording.reschedule(this)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

@@ -254,7 +254,10 @@ plaintext TCP streams. Do not add pinning or anti-cheat bypasses.
   ends in a lock or a cancel that releases the screen, and the accessibility
   service that taps only while the game is in front, closes it from Recents,
   and locks the phone. It drives capture only through the `CaptureVpnService`
-  intents and learns of saved rosters from `capture.RosterEvents`.
+  intents and learns of saved rosters from `capture.RosterEvents`. Scheduled
+  recording reuses the same state machine: an exact alarm, re-planned from the
+  current Platoons before every run, opens the standby screen over a swipe lock
+  screen, and only on phones without a PIN, pattern, or password.
 - Activities own Android presentation and delegate evidence precedence,
   inference, ordering, and CSV construction to pure policy objects.
 

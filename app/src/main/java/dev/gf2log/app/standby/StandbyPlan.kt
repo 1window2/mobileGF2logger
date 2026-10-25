@@ -118,4 +118,20 @@ internal object StandbyPlanner {
 
     /** Standby must end, with the phone locked, by this instant whatever happened before. */
     fun finalDeadline(runs: List<StandbyRun>): Instant? = runs.maxOfOrNull(StandbyRun::deadline)
+
+    /**
+     * The earliest group of [runs] sharing one reset: what a single scheduled wake-up records, in
+     * order. Null when nothing is planned.
+     */
+    fun firstGroup(runs: List<StandbyRun>): List<StandbyRun> {
+        val reset = runs.minOfOrNull(StandbyRun::reset) ?: return emptyList()
+        return runs.filter { it.reset == reset }.sortedBy(StandbyRun::startAt)
+    }
+
+    /**
+     * Where scheduling the next wake-up starts from: never before [handledReset], so a reset that
+     * was already handled (even a run that ended before it) is not scheduled again.
+     */
+    fun scheduleFrom(now: Instant, handledReset: Instant?): Instant =
+        if (handledReset != null && !handledReset.isBefore(now)) handledReset.plusSeconds(1) else now
 }

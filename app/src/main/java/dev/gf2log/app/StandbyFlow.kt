@@ -4,32 +4,20 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.net.VpnService
 import android.provider.Settings
-import android.view.View
-import android.widget.CheckBox
-import android.widget.LinearLayout
-import android.widget.ScrollView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.edit
-import dev.gf2log.app.management.PlatoonProfileRegistry
-import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.standby.StandbyAutomation
 import dev.gf2log.app.standby.StandbyAutomationService
 import dev.gf2log.app.standby.StandbyBatteryPrompt
 import dev.gf2log.app.standby.StandbyOutcome
 import dev.gf2log.app.standby.StandbyPlanner
-import dev.gf2log.app.standby.StandbyProfile
+import dev.gf2log.app.standby.StandbyProfiles
 import dev.gf2log.app.standby.StandbyResults
 import dev.gf2log.app.standby.StandbyServer
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
-import dev.gf2log.app.ui.TextRole
-import dev.gf2log.app.ui.checkBox
-import dev.gf2log.app.ui.column
-import dev.gf2log.app.ui.dp
-import dev.gf2log.app.ui.lp
-import dev.gf2log.app.ui.text
 import java.time.Instant
 import java.time.ZoneId
 
@@ -90,7 +78,7 @@ internal class StandbyFlow(
                 R.string.standby_result_line,
                 Labels.region(activity, result.region),
                 activity.getString(outcomeLabel(result.outcome)),
-                Labels.format(Labels.TIME, Instant.ofEpochMilli(result.atMillis), zone),
+                Labels.format(Labels.DATE_TIME, Instant.ofEpochMilli(result.atMillis), zone),
             )
         }
         resultsDialog = Dialogs.message(activity, activity.getString(R.string.standby_results_title), lines).apply {
@@ -102,7 +90,7 @@ internal class StandbyFlow(
     }
 
     private fun prepareRecording() {
-        work.run(task = ::loadProfiles) { result ->
+        work.run(task = { StandbyProfiles.load(activity) }) { result ->
             val profiles = result.getOrDefault(emptyList())
             if (profiles.isEmpty()) {
                 Feedback.show(activity, R.string.standby_no_platoons, long = true)
@@ -121,17 +109,6 @@ internal class StandbyFlow(
         }
     }
 
-    private fun loadProfiles(): List<StandbyProfile> =
-        PlatoonProfileRegistry(activity).list().map { profile ->
-            StandbyProfile(
-                storageId = profile.storageId,
-                packageName = profile.client.packageName,
-                region = profile.serverRegion,
-                zone = GameTimeZonePreferences.get(activity, profile.storageId),
-                platoonName = profile.platoonName,
-            )
-        }
-
     private fun askForAccessibility() {
         Dialogs.show(
             Dialogs.builder(activity)
@@ -147,66 +124,13 @@ internal class StandbyFlow(
     /** One server is armed directly; several are offered every time, one per client at most. */
     private fun chooseServers(servers: List<StandbyServer>, packages: Map<String, String>) {
         if (servers.size == 1) return arm(servers, packages)
-        val remembered = rememberedKeys()
-        val boxes = linkedMapOf<StandbyServer, CheckBox>()
-        lateinit var dialog: AlertDialog
-        val now = Instant.now()
-        val zone = ZoneId.systemDefault()
-
-        fun label(server: StandbyServer, start: Instant): String = activity.getString(
-            R.string.standby_server_option,
-            Labels.regionShort(activity, server.region),
-            server.platoonNames.joinToString(", "),
-            Labels.format(Labels.TIME, start, zone),
-        )
-
-        // Servers sharing a reset start one after another, so each label shows the start the
-        // current selection would really get.
-        fun refreshStart() {
-            val checked = boxes.filterValues(CheckBox::isChecked).keys
-            val valid = StandbyPlanner.isValidSelection(checked)
-            val planned = if (valid) StandbyPlanner.plan(checked, now).associate { it.server to it.startAt } else emptyMap()
-            boxes.forEach { (server, box) ->
-                box.text = label(server, planned[server] ?: StandbyPlanner.nextReset(server.zone, now).minus(StandbyPlanner.LEAD))
-            }
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = valid
-        }
-
-        val body = activity.column {
-            setPadding(activity.dp(24), activity.dp(8), activity.dp(24), activity.dp(8))
-            clipToPadding = false
-            addView(activity.text(activity.getString(R.string.standby_servers_message), TextRole.SECONDARY), activity.lp(bottom = 8))
-            val byClient = servers.groupBy(StandbyServer::packageName)
-            byClient.values.forEachIndexed { clientIndex, clientServers ->
-                if (clientIndex > 0) addView(fullWidthDivider())
-                val client = dev.gf2log.app.management.PlatoonClient.fromPackage(clientServers.first().packageName)
-                addView(activity.text(client?.displayName ?: clientServers.first().packageName, TextRole.LABEL), activity.lp(top = 4))
-                // Default to the remembered server of this client, if it still exists.
-                val preferred = clientServers.firstOrNull { it.key in remembered }
-                clientServers.forEach { server ->
-                    val start = StandbyPlanner.nextReset(server.zone, now).minus(StandbyPlanner.LEAD)
-                    val box = activity.checkBox(label(server, start), server == preferred) { checked ->
-                        // A client logs in to one server at a time: checking one clears its siblings.
-                        if (checked) {
-                            clientServers.filter { it != server }.forEach { boxes[it]?.isChecked = false }
-                        }
-                        refreshStart()
-                    }
-                    boxes[server] = box
-                    addView(box, activity.lp())
-                }
-            }
-        }
-        dialog = Dialogs.show(
-            Dialogs.builder(activity)
-                .setTitle(R.string.standby_servers_title)
-                .setView(ScrollView(activity).apply { addView(body) })
-                .setNegativeButton(R.string.cancel, null)
-                .setPositiveButton(R.string.standby_start) { _, _ ->
-                    val chosen = boxes.filterValues(CheckBox::isChecked).keys.toList()
-                    if (StandbyPlanner.isValidSelection(chosen)) arm(chosen, packages)
-                },
-        ) { refreshStart() }
+        StandbyServerDialog.show(
+            activity,
+            servers,
+            preselected = rememberedKeys(),
+            message = R.string.standby_servers_message,
+            confirm = R.string.standby_start,
+        ) { chosen -> arm(chosen, packages) }
     }
 
     private fun arm(chosen: List<StandbyServer>, packages: Map<String, String>) {
@@ -239,18 +163,6 @@ internal class StandbyFlow(
         activity.startActivity(Intent(activity, StandbyActivity::class.java))
     }
 
-    /** A divider spanning the whole dialog width, through the content's side padding. */
-    private fun fullWidthDivider(): View = View(activity).apply {
-        setBackgroundColor(activity.getColor(R.color.outline_strong))
-        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, maxOf(1, activity.dp(1))).apply {
-            marginStart = -activity.dp(24)
-            marginEnd = -activity.dp(24)
-            topMargin = activity.dp(12)
-            bottomMargin = activity.dp(8)
-        }
-    }
-
     private fun rememberedKeys(): Set<String> =
         prefs().getStringSet(KEY_SELECTED, emptySet()).orEmpty()
 
@@ -270,6 +182,9 @@ internal class StandbyFlow(
         StandbyOutcome.NOT_INSTALLED -> R.string.standby_outcome_not_installed
         StandbyOutcome.CAPTURE_FAILED -> R.string.standby_outcome_capture_failed
         StandbyOutcome.CANCELLED -> R.string.standby_outcome_cancelled
+        StandbyOutcome.SKIPPED_IN_USE -> R.string.standby_outcome_in_use
+        StandbyOutcome.SCREEN_LOCK_SET -> R.string.standby_outcome_screen_lock
+        StandbyOutcome.LOCK_SCREEN_STAYED -> R.string.standby_outcome_lock_screen
     }
 
     private companion object {

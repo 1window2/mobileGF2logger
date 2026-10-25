@@ -12,15 +12,20 @@ import androidx.activity.addCallback
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import java.time.Instant
 import java.time.ZoneId
+import dev.gf2log.app.standby.ScheduledRecording
 import dev.gf2log.app.standby.StandbyAutomation
+import dev.gf2log.app.standby.StandbyAutomationService
+import dev.gf2log.app.standby.StandbyPlanner
 import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.TextRole
 import dev.gf2log.app.ui.dp
 import dev.gf2log.app.ui.text
 
 /**
- * Standby: an all-black, minimum-brightness screen that keeps the phone awake and unlocked.
+ * Standby: an all-black, minimum-brightness screen that keeps the phone awake and unlocked. An
+ * alarm also opens it for a scheduled recording, waking the screen and passing a swipe lock first.
  * Touching the screen or pressing Back leaves it; so does the screen turning off or the user
  * switching away, so a locked phone is never left in standby. Leaving also cancels any planned
  * recording; [StandbyAutomation] replaces this screen with the game itself when a recording runs.
@@ -31,11 +36,28 @@ import dev.gf2log.app.ui.text
 class StandbyActivity : BaseActivity() {
 
     private var leaving = false
+    private lateinit var root: FrameLayout
+
+    /** Set when an alarm opened this screen for a scheduled recording rather than the user. */
+    private val scheduledReset: Instant? by lazy {
+        intent.getLongExtra(ScheduledRecording.EXTRA_RESET, -1).takeIf { it >= 0 }?.let(Instant::ofEpochMilli)
+    }
 
     override fun supportsPendingPlatoonAdmission(): Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val scheduled = scheduledReset != null
+        if (scheduled) {
+            // Wake the screen and appear over the lock screen; a swipe lock is then dismissed.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                setShowWhenLocked(true)
+                setTurnScreenOn(true)
+            } else {
+                @Suppress("DEPRECATION")
+                window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
+            }
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.attributes = window.attributes.apply {
             screenBrightness = MIN_BRIGHTNESS
@@ -49,11 +71,11 @@ class StandbyActivity : BaseActivity() {
         // what this black screen is and how to leave it.
         val hint = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(text(getString(R.string.standby_running), TextRole.TITLE) {
+            addView(text(getString(if (scheduled) R.string.scheduled_running else R.string.standby_running), TextRole.TITLE) {
                 gravity = Gravity.CENTER
                 setTextColor(getColor(R.color.standby_hint))
             })
-            addView(text(getString(R.string.standby_touch_to_leave), TextRole.SECONDARY) {
+            addView(text(getString(if (scheduled) R.string.scheduled_touch_to_cancel else R.string.standby_touch_to_leave), TextRole.SECONDARY) {
                 gravity = Gravity.CENTER
                 setTextColor(getColor(R.color.standby_hint))
                 setPadding(0, dp(6), 0, 0)
@@ -66,9 +88,9 @@ class StandbyActivity : BaseActivity() {
                 })
             }
         }
-        val root = FrameLayout(this).apply {
+        root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
-            contentDescription = getString(R.string.standby_touch_to_leave)
+            contentDescription = getString(if (scheduled) R.string.scheduled_touch_to_cancel else R.string.standby_touch_to_leave)
             setOnClickListener { leave() }
             addView(hint, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -86,11 +108,36 @@ class StandbyActivity : BaseActivity() {
 
         onBackPressedDispatcher.addCallback(this) { leave() }
 
-        // A last guard independent of the automation: never outlive the planned deadline.
+        guardDeadline()
+        val reset = scheduledReset
+        if (reset != null) {
+            // Until a recording is armed nothing else bounds this screen, so it bounds itself:
+            // never past the end of the server's grace period.
+            val limit = reset.plus(StandbyPlanner.GRACE).toEpochMilli() + DEADLINE_MARGIN_MS - System.currentTimeMillis()
+            root.postDelayed({ if (!StandbyAutomation.isArmed) standDown() }, limit.coerceAtLeast(0))
+            // A screen recreated after arming leaves the running recording alone.
+            if (!StandbyAutomation.isArmed) {
+                val keys = intent.getStringArrayExtra(ScheduledRecording.EXTRA_SERVERS)?.toSet().orEmpty()
+                ScheduledRecording.begin(this, reset, keys)
+            }
+        }
+    }
+
+    /** A last guard independent of the automation: never outlive the planned deadline. */
+    private fun guardDeadline() {
         StandbyAutomation.deadline?.let { deadline ->
             val delay = deadline.toEpochMilli() + DEADLINE_MARGIN_MS - System.currentTimeMillis()
             root.postDelayed({ finishForAutomation() }, delay.coerceAtLeast(0))
         }
+    }
+
+    /** A scheduled recording was armed after this screen opened. */
+    internal fun onScheduledArmed() = guardDeadline()
+
+    /** Gives up a scheduled wake-up before anything ran: close and turn the screen back off. */
+    internal fun standDown() {
+        finishForAutomation()
+        StandbyAutomationService.instance?.lockScreen()
     }
 
     override fun onStart() {

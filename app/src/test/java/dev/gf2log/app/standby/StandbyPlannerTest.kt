@@ -66,6 +66,30 @@ class StandbyPlannerTest {
     }
 
     @Test
+    fun `a scheduled wake-up records only the earliest reset group`() {
+        val now = Instant.parse("2026-10-19T14:00:00Z") // 23:00 in Seoul
+
+        val group = StandbyPlanner.firstGroup(StandbyPlanner.plan(listOf(korea, darkwinterGlobal), now))
+
+        // Korea resets at 20:00Z, Darkwinter Global (UTC-4) the next morning at 09:00Z.
+        assertEquals(listOf(korea), group.map(StandbyRun::server))
+        assertEquals(Instant.parse("2026-10-19T19:55:00Z"), group.single().startAt)
+    }
+
+    @Test
+    fun `a handled reset is never scheduled again, even when its run ended early`() {
+        val now = Instant.parse("2026-10-19T19:56:00Z") // 04:56 in Seoul, run already done
+        val handled = Instant.parse("2026-10-19T20:00:00Z")
+
+        val from = StandbyPlanner.scheduleFrom(now, handled)
+        val next = StandbyPlanner.firstGroup(StandbyPlanner.plan(listOf(korea), from)).single()
+
+        assertEquals(Instant.parse("2026-10-20T19:55:00Z"), next.startAt)
+        assertEquals(now, StandbyPlanner.scheduleFrom(now, Instant.parse("2026-10-18T20:00:00Z")))
+        assertEquals(now, StandbyPlanner.scheduleFrom(now, null))
+    }
+
+    @Test
     fun `entering standby inside the lead window starts at once`() {
         val now = Instant.parse("2026-10-19T19:57:00Z") // 04:57 in Seoul
 

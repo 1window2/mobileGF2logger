@@ -32,9 +32,14 @@ object StandardWeekSolver {
         ).toMutableList()
         val observations = snapshots.mapNotNull { snapshot ->
             snapshot.member(uid)?.let { member ->
+                // A capture at a 05:00 reset is the complete previous day, so the Sunday 05:00
+                // capture closes Saturday instead of falling outside the counter week.
+                val gameDay = PlatoonPeriods.checkpointDay(snapshot.capturedAt, zoneId)
                 CounterObservation(
                     capturedAt = snapshot.capturedAt,
-                    gameDay = PlatoonPeriods.gameDay(snapshot.capturedAt, zoneId),
+                    gameDay = gameDay,
+                    closing = snapshot.capturedAt ==
+                        PlatoonPeriods.periodStartInstant(gameDay.plusDays(1), zoneId),
                     counter = member.weeklyMerit,
                     lastLoginDay = member.lastLogin
                         .takeIf { it > 0L }
@@ -323,6 +328,7 @@ object StandardWeekSolver {
         val stage = checkpoint.counter - completedPrefix
         val finalForDay = allocation[position]
         if (stage !in DAILY_STAGE || stage > finalForDay) return null
+        if (checkpoint.closing && stage != finalForDay) return null
         val loginStageCompatible = when {
             checkpoint.lastLoginDay == checkpoint.gameDay ->
                 stage == LOGIN_MERIT || stage == PATROL_MERIT
@@ -336,6 +342,8 @@ object StandardWeekSolver {
     private data class CounterObservation(
         val capturedAt: Instant,
         val gameDay: LocalDate,
+        /** Captured exactly at the reset that ends [gameDay], so its stage is the final one. */
+        val closing: Boolean,
         val counter: Long,
         val lastLoginDay: LocalDate?,
     )

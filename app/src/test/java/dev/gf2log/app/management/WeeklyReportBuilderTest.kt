@@ -997,6 +997,28 @@ class WeeklyReportBuilderTest {
     }
 
     @Test
+    fun sundayResetCaptureClosesTheStandardSaturday() {
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 8, 1),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshot("2026-07-31T20:00:00Z", weekly = 320, score = 0),
+                snapshot("2026-08-01T20:00:00Z", weekly = 410, score = 0),
+            ),
+            asOf = Instant.parse("2026-08-01T21:00:00Z"),
+        )
+
+        val member = report.members.single()
+        val saturday = member.days.last()
+        assertTrue(saturday.hasClosingBoundary)
+        assertEquals(90L, saturday.meritDelta)
+        assertEquals(MetricCertainty.EXACT, saturday.meritCertainty)
+        assertEquals(true, saturday.attended)
+        assertEquals(true, saturday.dailyPatrol)
+        assertEquals(410L, member.totalMerit)
+    }
+
+    @Test
     fun openStandardDayShowsFiftyAsALowerBoundButNinetyAsTheCap() {
         val fifty = WeeklyReportBuilder.build(
             referenceDay = LocalDate.of(2026, 7, 27),

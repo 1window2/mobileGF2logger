@@ -9,6 +9,7 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import dev.gf2log.app.R
 import dev.gf2log.app.SupportedGamePackages
+import dev.gf2log.app.management.CsvImportCheckpointManager
 import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonStorageScope
@@ -176,10 +177,11 @@ class CaptureVpnService : VpnService() {
         }
         worker.execute {
             val migration = runCatching {
-                profileRegistry.ensureInitialized().forEach { profile ->
-                    PlatoonRepository(this, PlatoonStorageScope(profile.storageId))
-                        .reconcileRetainedCsvFiles()
-                }
+                val scopes = profileRegistry.ensureInitialized().map { PlatoonStorageScope(it.storageId) }
+                // An interrupted CSV import or undo must finish first, or its later recovery would
+                // overwrite what this capture ingests. A failing scope stays for the next attempt.
+                CsvImportCheckpointManager.recoverInterruptedImports(this, scopes)
+                scopes.forEach { scope -> PlatoonRepository(this, scope).reconcileRetainedCsvFiles() }
             }
             mainHandler.post {
                 if (run !== tracker || state != State.STARTING) return@post

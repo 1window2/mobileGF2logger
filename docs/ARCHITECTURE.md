@@ -425,7 +425,11 @@ ordinary failures restore both the evidence and the preceding undo checkpoint.
 A post-import database digest refuses undo after any later Platoon mutation so
 a one-level rollback cannot silently overwrite newer work; the digest is
 compared again inside the exclusive section that installs the checkpoint, so an
-ingest that lands after the first check is never overwritten.
+ingest that lands after the first check is never overwritten. Interrupted
+imports and undos are recovered for every registered Platoon at process start,
+off the main thread, and again before capture ingests anything, so a late
+recovery cannot replace newer captured evidence. A recovery that fails is logged
+and its durable state left for the next attempt instead of crashing the launch.
 
 Weekly PNG export builds a privacy projection rather than screenshotting the
 Activity. Names are included by default; UIDs and private notes are opt-in.

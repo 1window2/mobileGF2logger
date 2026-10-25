@@ -87,14 +87,19 @@ internal object GunsmokeWeekSolver {
                 aggregate.dayConsensus.forEachIndexed { dayOffset, consensus ->
                     val cellIndex = dayOffset + 1
                     val cell = resolved[cellIndex]
+                    // A final event packet before the 05:00 reset that ends Saturday can miss a
+                    // later Saturday login or patrol, so only a positive consensus holds there.
+                    val finalized = cellIndex < resolved.lastIndex || cell.hasClosingBoundary
                     if (cell.manualOverride == null) {
                         resolved[cellIndex] = cell.copy(
                             solvedAttempts = consensus.attempts ?: cell.solvedAttempts,
                             solvedAttemptsCertainty = consensus.attempts?.let {
                                 MetricCertainty.EXACT
                             } ?: cell.solvedAttemptsCertainty,
-                            solvedAttended = consensus.attended ?: cell.solvedAttended,
-                            solvedDailyPatrol = consensus.patrol ?: cell.solvedDailyPatrol,
+                            solvedAttended = consensus.attended?.takeIf { it || finalized }
+                                ?: cell.solvedAttended,
+                            solvedDailyPatrol = consensus.patrol?.takeIf { it || finalized }
+                                ?: cell.solvedDailyPatrol,
                         )
                     }
                 }

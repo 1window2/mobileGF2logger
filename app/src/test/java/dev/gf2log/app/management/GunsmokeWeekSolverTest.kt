@@ -335,12 +335,82 @@ class GunsmokeWeekSolverTest {
             uid = UID,
             days = days,
             zoneId = zone,
-            snapshots = checkpoints.filterIndexed { index, _ -> index != 3 },
+            snapshots = checkpoints,
             cells = cells,
             dailyPatrolFacts = emptyList(),
         )
         assertEquals(20, requireNotNull(missingWednesday.totals).attempts)
         assertEquals(MetricCertainty.EXACT, missingWednesday.totals.attemptsCertainty)
+    }
+
+    /**
+     * The final event packet arrives at 02:30 after a Saturday login without patrol. Login and
+     * Daily Patrol stay open until 05:00, so the weekly aggregate must not publish a Saturday
+     * patrol miss while it reports the patrol total as a lower bound.
+     */
+    @Test
+    fun finalEventAggregateKeepsTheOpenSaturdayPatrolUnknown() {
+        val days = (0L..6L).map(start::plusDays)
+        val attempts = listOf(3, 3, 3, 3, 3, 2, 0)
+        val dailyMerits = attempts.map { count ->
+            if (count == 0) LOGIN_MERIT else 90L + count * (ActivityInference.MERIT_PER_ATTEMPT + 1_000L)
+        }
+        val dailyScores = attempts.map { it * 10_000L }
+        val totalMerits = dailyMerits.runningReduce(Long::plus)
+        val totalScores = dailyScores.runningReduce(Long::plus)
+        val checkpoints = days.mapIndexed { index, day ->
+            val capturedAt = if (index == days.lastIndex) {
+                day.plusDays(1).atTime(2, 30).atZone(zone).toInstant()
+            } else {
+                day.plusDays(1).atTime(4, 0).atZone(zone).toInstant()
+            }
+            PlatoonSnapshot(
+                id = index.toLong(),
+                capturedAt = capturedAt,
+                members = listOf(
+                    member(
+                        totalMerit = totalMerits[index],
+                        totalScore = totalScores[index],
+                        weeklyMerit = if (index == 0) {
+                            totalMerits[0]
+                        } else {
+                            totalMerits[index] - totalMerits[0]
+                        },
+                    ),
+                ),
+            )
+        }
+        val cells = days.mapIndexed { index, day ->
+            WeeklyReportBuilder.DayCell(
+                gameDay = day,
+                meritDelta = dailyMerits[index],
+                scoreDelta = dailyScores[index],
+                inference = ActivityInference.infer(dailyMerits[index], dailyScores[index], gunsmokeActive = true),
+                evidence = DailyEvidence.PARTIAL_DAY,
+                hasDailyPatrolFact = index == 3,
+                hasFinalGunsmokeScore = index == days.lastIndex,
+                hasLoginFact = index == days.lastIndex,
+                isGunsmokeWeek = true,
+                metricObservedAt = checkpoints[index].capturedAt,
+            )
+        }
+
+        // Without a Wednesday capture the week is solved by the final-event aggregate; the
+        // Wednesday patrol fact and the score ceiling leave no other day to hold a patrol.
+        val resolution = GunsmokeWeekSolver.resolve(
+            uid = UID,
+            days = days,
+            zoneId = zone,
+            snapshots = checkpoints.filterIndexed { index, _ -> index != 3 },
+            cells = cells,
+            dailyPatrolFacts = listOf(DailyPatrolFact(UID, Instant.parse("2026-07-22T03:00:00Z"))),
+        )
+
+        val totals = requireNotNull(resolution.totals)
+        assertEquals(6, totals.patrolDays)
+        assertEquals(MetricCertainty.LOWER_BOUND, totals.patrolDaysCertainty)
+        assertEquals(true, resolution.cells.last().attended)
+        assertNull(resolution.cells.last().dailyPatrol)
     }
 
     @Test

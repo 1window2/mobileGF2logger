@@ -169,7 +169,7 @@ preserving in-flow ordering.
 1. Start forwarding using the supplied TUN file descriptor.
 2. Stop and release native resources.
 
-The listener reports candidate plaintext payloads after TCP reassembly, flow closure, unexpected native termination, and aggregate byte counters. Flow ids are unique for the life of the process, so a pending Platoon that outlives one capture can never refer to a flow of the next. Every upstream socket is passed through `VpnService.protect()` so forwarded traffic cannot re-enter the VPN.
+The listener reports candidate plaintext payloads after TCP reassembly, flow closure, unexpected native termination, and aggregate byte counters. Start returns only after the native thread has attached to the JVM; a thread that cannot attach could never report its termination, so start fails instead. Flow ids are unique for the life of the process, so a pending Platoon that outlives one capture can never refer to a flow of the next. Every upstream socket is passed through `VpnService.protect()` so forwarded traffic cannot re-enter the VPN.
 
 The implementation uses zdtun rather than introducing a new TCP/IP stack.
 General PCAP export, nDPI classification, TLS decryption, root capture, remote

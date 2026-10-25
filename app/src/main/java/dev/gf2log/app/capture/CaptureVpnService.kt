@@ -1,12 +1,14 @@
 package dev.gf2log.app.capture
 
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
+import dev.gf2log.app.LanguagePreferences
 import dev.gf2log.app.R
 import dev.gf2log.app.SupportedGamePackages
 import dev.gf2log.app.management.PlatoonProfileRegistry
@@ -24,6 +26,11 @@ import dev.gf2log.app.settings.PayloadHistoryPreferences
  * "stop native, then drain parser, then clear state". A start requested during teardown waits for it.
  */
 class CaptureVpnService : VpnService() {
+    // Notifications and stored notices follow the app's language, not the device's.
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(LanguagePreferences.wrap(newBase))
+    }
+
     private enum class State { IDLE, STARTING, RUNNING, STOPPING }
 
     private val mainHandler = Handler(Looper.getMainLooper())

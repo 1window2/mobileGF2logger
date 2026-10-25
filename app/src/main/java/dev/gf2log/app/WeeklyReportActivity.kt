@@ -504,6 +504,8 @@ class WeeklyReportActivity : BaseActivity() {
     }
 
     private fun cancelEditing() {
+        // A save in flight already holds these edits; discarding now could not take them back.
+        if (work.isBusy(SAVE)) return
         if (edits.isEmpty()) {
             finishEditing()
             return
@@ -526,18 +528,23 @@ class WeeklyReportActivity : BaseActivity() {
         val current = model ?: return
         if (work.isBusy(SAVE)) return
         val report = current.report
+        // The edits as tapped; whatever happens to the draft meanwhile, exactly these are saved.
+        val saving = edits.values.toList()
         // Merge against the stored overrides, not the displayed table: a restored revision or a member
         // missing from the roster would otherwise drop overrides the user never touched.
         work.run(key = SAVE, task = { repository.listWeeklyOverrides(report.periodStart.toEpochDay()) }) { stored ->
-            stored.onFailure { Feedback.show(this, R.string.save_failed) }
-            stored.onSuccess { saveMerged(current, it) }
+            stored.onFailure {
+                Feedback.show(this, R.string.save_failed)
+                updateTopBar()
+            }
+            stored.onSuccess { saveMerged(current, it, saving) }
         }
         updateTopBar()
     }
 
-    private fun saveMerged(current: RenderModel, existing: List<WeeklyCellOverride>) {
+    private fun saveMerged(current: RenderModel, existing: List<WeeklyCellOverride>, saving: List<WeeklyOverrideEditing.CellEdit>) {
         val report = current.report
-        when (val merged = WeeklyOverrideEditing.merge(report.periodStart, report.isGunsmokeWeek, existing, edits.values)) {
+        when (val merged = WeeklyOverrideEditing.merge(report.periodStart, report.isGunsmokeWeek, existing, saving)) {
             is WeeklyOverrideEditing.Result.Invalid -> {
                 val name = current.namesByUid[merged.uid] ?: Labels.uid(this, merged.uid)
                 Feedback.show(
@@ -545,6 +552,7 @@ class WeeklyReportActivity : BaseActivity() {
                     getString(R.string.invalid_weekly_edit_cell, name, Labels.dayHeader(this, merged.gameDay)),
                     long = true,
                 )
+                updateTopBar()
             }
             is WeeklyOverrideEditing.Result.Valid -> {
                 work.run(
@@ -552,7 +560,7 @@ class WeeklyReportActivity : BaseActivity() {
                     task = { repository.replaceWeeklyOverrides(report.periodStart.toEpochDay(), merged.overrides) },
                 ) { result ->
                     if (result.isSuccess) {
-                        edits.finish()
+                        if (edits.isEditing(report.periodStart)) edits.finish()
                         Feedback.show(this, R.string.weekly_edits_saved)
                         requestRender()
                     } else {

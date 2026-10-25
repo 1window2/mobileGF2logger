@@ -10,6 +10,13 @@ internal class ActivePlatoonScopeBinding(context: Context) {
     private val boundProfile = PlatoonProfileRegistry(context).active()
     val scope: PlatoonStorageScope? = boundProfile?.let { PlatoonStorageScope(it.storageId) }
 
+    /**
+     * Whether the selected Platoon still uses this screen's storage. Screens that do not show the
+     * profile itself use this, so a renamed Platoon or a new banner never closes them mid-edit.
+     */
+    fun isSameStorage(context: Context): Boolean =
+        PlatoonProfileRegistry(context).active()?.storageId == boundProfile?.storageId
+
     fun isCurrent(context: Context): Boolean =
         PlatoonProfileRegistry(context).active()?.let(::visualIdentity) ==
             boundProfile?.let(::visualIdentity)

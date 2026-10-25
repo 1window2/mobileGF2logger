@@ -11,12 +11,16 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 /** Validates and durably retains user-selected Platoon roster CSV evidence. */
-class PlatoonCsvImportStore(private val directory: File) {
+class PlatoonCsvImportStore(
+    private val directory: File,
+    private val now: () -> Instant = Instant::now,
+) {
     /**
      * Reads a bounded UTF-8 roster CSV, validates its complete schema, and hashes its bytes. Does
      * not create files, allowing callers to preview a whole selection before confirmation. Returns
@@ -32,6 +36,9 @@ class PlatoonCsvImportStore(private val directory: File) {
         val parsed = requireNotNull(GuildMembersCsv.parse(text)) { "Invalid Platoon CSV" }
         require(parsed.members.isNotEmpty()) { "Platoon CSV contains no roster members" }
         val capturedAt = Instant.parse(parsed.logTime)
+        // A roster from the future would stay the "current" roster and hide every real capture
+        // after it; a mistyped year is the usual cause.
+        require(!capturedAt.isAfter(now().plus(MAX_CLOCK_SKEW))) { "Platoon CSV is dated in the future" }
         val hash = bytes.sha256().copyOf(HASH_BYTES).toHex()
         return PreparedImport(
             encoded = bytes,
@@ -114,6 +121,9 @@ class PlatoonCsvImportStore(private val directory: File) {
     }
 
     companion object {
+        /** Allows a phone clock a little behind the PC that wrote the CSV. */
+        private val MAX_CLOCK_SKEW: Duration = Duration.ofHours(1)
+
         internal fun latestRetainedFile(directory: File): File? = directory.listFiles()
             .orEmpty()
             .filter { it.isFile && it.extension.equals("csv", ignoreCase = true) }

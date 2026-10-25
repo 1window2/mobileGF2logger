@@ -100,7 +100,7 @@ class MemberOrderActivity : BaseActivity() {
     }
 
     override fun onScreenResumed() {
-        if (!profileBinding.isCurrent(this)) finish()
+        if (!profileBinding.isSameStorage(this)) finish()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

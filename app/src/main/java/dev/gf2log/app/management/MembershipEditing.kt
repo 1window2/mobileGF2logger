@@ -85,12 +85,6 @@ internal object MembershipEditing {
                     "(SELECT id FROM member_events WHERE uid = ?)",
                 arrayOf(uid.toString(), uid.toString()),
             )
-            db.delete(
-                "weekly_notes",
-                "is_automatic = 1 AND event_id IN " +
-                    "(SELECT id FROM member_events WHERE uid = ?)",
-                uidArgument,
-            )
             db.delete("member_events", "uid = ?", uidArgument)
             db.delete("membership_periods", "uid = ?", uidArgument)
             db.delete("snapshot_members", "uid = ?", uidArgument)

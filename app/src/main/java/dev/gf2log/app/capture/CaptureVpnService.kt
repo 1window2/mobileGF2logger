@@ -1,14 +1,18 @@
 package dev.gf2log.app.capture
 
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.VpnService
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
+import dev.gf2log.app.LanguagePreferences
 import dev.gf2log.app.R
 import dev.gf2log.app.SupportedGamePackages
+import dev.gf2log.app.management.CsvImportCheckpointManager
 import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonStorageScope
@@ -22,8 +26,14 @@ import dev.gf2log.app.settings.PayloadHistoryPreferences
  * Every field is confined to the main thread. Blocking work (history migration, joining the native
  * thread, draining queued chunks) runs on [CaptureWorker], whose FIFO order guarantees teardown as
  * "stop native, then drain parser, then clear state". A start requested during teardown waits for it.
+ * [CapturePhase.STOPPING] covers that teardown; STOPPED is published only once it has finished.
  */
 class CaptureVpnService : VpnService() {
+    // Notifications and stored notices follow the app's language, not the device's.
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(LanguagePreferences.wrap(newBase))
+    }
+
     private enum class State { IDLE, STARTING, RUNNING, STOPPING }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -175,9 +185,13 @@ class CaptureVpnService : VpnService() {
         }
         worker.execute {
             val migration = runCatching {
-                profileRegistry.ensureInitialized().forEach { profile ->
-                    PlatoonRepository(this, PlatoonStorageScope(profile.storageId))
-                        .reconcileRetainedCsvFiles()
+                val scopes = profileRegistry.ensureInitialized().map { PlatoonStorageScope(it.storageId) }
+                // An interrupted CSV import or undo must finish first, or its later recovery would
+                // overwrite what this capture ingests. A failing scope stays for the next attempt.
+                CsvImportCheckpointManager.recoverInterruptedImports(this, scopes)
+                scopes.forEach { scope ->
+                    GuildMembersCsvWriter.deleteStalePartials(scope.retainedCsvDirectory(this))
+                    PlatoonRepository(this, scope).reconcileRetainedCsvFiles()
                 }
             }
             mainHandler.post {
@@ -199,6 +213,10 @@ class CaptureVpnService : VpnService() {
             .addRoute("0.0.0.0", 0)
             .addAddress(VPN_IPV6_ADDRESS, VPN_IPV6_PREFIX_LENGTH)
             .addRoute("::", 0)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // From API 29 a VPN is metered unless declared otherwise; follow the underlying network.
+            builder.setMetered(false)
+        }
 
         val installedTargets = SupportedGamePackages.all.filter { targetPackage ->
             try {
@@ -249,18 +267,28 @@ class CaptureVpnService : VpnService() {
         mainHandler.removeCallbacks(captureOnceGraceStop)
         restartCaptureOnce = null
         val lastNotice = CaptureStatus.snapshot().notice
-        CaptureStatus.markStopped(notice, *args)
         notifications.remove()
         when (state) {
             State.IDLE -> {
+                // A teardown inherited from a destroyed instance still owns the phase until it ends.
+                if (teardownsInFlight == 0) {
+                    CaptureStatus.markStopped(notice, *args)
+                } else {
+                    CaptureStatus.markStopping(notice, *args)
+                }
                 if (!destroyed) stopSelf()
                 return
             }
-            State.STOPPING -> return
+            State.STOPPING -> {
+                CaptureStatus.markStopping(notice, *args)
+                return
+            }
             State.STARTING, State.RUNNING -> Unit
         }
 
+        CaptureStatus.markStopping(notice, *args)
         state = State.STOPPING
+        teardownsInFlight++
         run = null
         val descriptor = tunnel
         tunnel = null
@@ -286,12 +314,18 @@ class CaptureVpnService : VpnService() {
 
     private fun onTeardownComplete() {
         state = State.IDLE
+        teardownsInFlight--
+        val restart = restartCaptureOnce
+        restartCaptureOnce = null
+        when {
+            restart == null -> CaptureStatus.markTornDown()
+            // A destroyed service drops the restart it accepted, so its STARTING must not linger.
+            destroyed -> CaptureStatus.markStopped()
+        }
         if (destroyed) {
             worker.shutdown()
             return
         }
-        val restart = restartCaptureOnce
-        restartCaptureOnce = null
         if (restart != null) start(restart) else stopSelf()
     }
 
@@ -310,5 +344,8 @@ class CaptureVpnService : VpnService() {
         private const val VPN_MTU = 1500
         private const val PARSER_QUEUE_CAPACITY = 256
         private const val CAPTURE_ONCE_GRACE_MILLIS = 60_000L
+
+        /** Process-wide and main-thread only: a teardown can outlive the instance that began it. */
+        private var teardownsInFlight = 0
     }
 }

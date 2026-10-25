@@ -72,7 +72,7 @@ class MainActivity : BaseActivity() {
 
     private val vpnConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         startPending = false
-        if (result.resultCode == RESULT_OK) startCaptureService() else CaptureStatus.markStopped()
+        if (result.resultCode == RESULT_OK) startCaptureService() else CaptureStatus.clearIdleNotice()
     }
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -276,9 +276,14 @@ class MainActivity : BaseActivity() {
         work.run(
             key = SUMMARY,
             task = {
-                val snapshots = PlatoonRepository(this, scope).listSnapshots(2)
+                val repository = PlatoonRepository(this, scope)
+                val snapshots = repository.listSnapshots(2)
                 val latest = snapshots.firstOrNull()
-                latest?.let { it to snapshots.getOrNull(1)?.let { older -> SnapshotComparison.compare(older, it) } }
+                latest?.let {
+                    it to snapshots.getOrNull(1)?.let { older ->
+                        SnapshotComparison.compare(older, it, repository.gameZone())
+                    }
+                }
             },
         ) { result ->
             val summary = result.getOrNull()

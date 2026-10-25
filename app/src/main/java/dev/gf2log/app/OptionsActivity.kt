@@ -51,7 +51,10 @@ class OptionsActivity : BaseActivity() {
     }
 
     override fun onScreenResumed() {
-        if (!profileBinding.isCurrent(this)) recreate()
+        if (!profileBinding.isCurrent(this)) {
+            recreate()
+            return
+        }
         // Platoons may have changed since the next scheduled recording was planned.
         if (ScheduledRecording.isEnabled(this)) ScheduledRecording.reschedule(this)
     }

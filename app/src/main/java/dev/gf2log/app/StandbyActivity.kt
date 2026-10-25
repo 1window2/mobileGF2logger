@@ -38,6 +38,9 @@ class StandbyActivity : BaseActivity() {
     private var leaving = false
     private lateinit var root: FrameLayout
 
+    /** Every delayed guard this screen posts; removed with it, so none can act after it is gone. */
+    private val guards = mutableListOf<Runnable>()
+
     /** Set when an alarm opened this screen for a scheduled recording rather than the user. */
     private val scheduledReset: Instant? by lazy {
         intent.getLongExtra(ScheduledRecording.EXTRA_RESET, -1).takeIf { it >= 0 }?.let(Instant::ofEpochMilli)
@@ -114,7 +117,7 @@ class StandbyActivity : BaseActivity() {
             // Until a recording is armed nothing else bounds this screen, so it bounds itself:
             // never past the end of the server's grace period.
             val limit = reset.plus(StandbyPlanner.GRACE).toEpochMilli() + DEADLINE_MARGIN_MS - System.currentTimeMillis()
-            root.postDelayed({ if (!StandbyAutomation.isArmed) standDown() }, limit.coerceAtLeast(0))
+            post(limit) { if (!StandbyAutomation.isArmed) standDown() }
             // A screen recreated after arming leaves the running recording alone.
             if (!StandbyAutomation.isArmed) {
                 val keys = intent.getStringArrayExtra(ScheduledRecording.EXTRA_SERVERS)?.toSet().orEmpty()
@@ -127,8 +130,20 @@ class StandbyActivity : BaseActivity() {
     private fun guardDeadline() {
         StandbyAutomation.deadline?.let { deadline ->
             val delay = deadline.toEpochMilli() + DEADLINE_MARGIN_MS - System.currentTimeMillis()
-            root.postDelayed({ finishForAutomation() }, delay.coerceAtLeast(0))
+            post(delay) { finishForAutomation() }
         }
+    }
+
+    private fun post(delayMs: Long, action: () -> Unit) {
+        val guard = Runnable(action)
+        guards += guard
+        root.postDelayed(guard, delayMs.coerceAtLeast(0))
+    }
+
+    override fun onDestroy() {
+        if (::root.isInitialized) guards.forEach(root::removeCallbacks)
+        guards.clear()
+        super.onDestroy()
     }
 
     /** A scheduled recording was armed after this screen opened. */
@@ -136,6 +151,9 @@ class StandbyActivity : BaseActivity() {
 
     /** Gives up a scheduled wake-up before anything ran: close and turn the screen back off. */
     internal fun standDown() {
+        // A screen already closed (recording done, or the user tapped it) must never lock the
+        // phone afterwards.
+        if (leaving) return
         finishForAutomation()
         StandbyAutomationService.instance?.lockScreen()
     }

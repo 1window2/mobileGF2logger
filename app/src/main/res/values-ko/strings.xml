@@ -5,6 +5,7 @@
     <string name="capture_status_label">캡처 상태</string>
     <string name="capture_ready">준비됨</string>
     <string name="capture_running">캡처 중</string>
+    <string name="capture_stopping">캡처 중지 중</string>
     <string name="nav_home">홈</string>
     <string name="nav_platoon">서클</string>
     <string name="nav_weekly">주간</string>
@@ -103,6 +104,9 @@
     <string name="delete_member">멤버 삭제</string>
     <string name="delete_member_warning">멤버를 삭제하면 가입 이력, 개인 메모, 주간 과업표 수정 내용이 영구적으로 삭제됩니다. 이후 명단에서 다시 추가될 수 있지만 삭제된 정보는 복구되지 않습니다.</string>
     <string name="member_deleted">멤버를 삭제했습니다</string>
+    <string name="packet_too_large_to_copy">패킷이 너무 커서 클립보드에 복사할 수 없습니다.</string>
+    <string name="packet_raw_truncated">전체 %2$s자 중 처음 %1$s자만 표시합니다.</string>
+    <string name="history_delete_failed">선택한 패킷을 삭제하지 못했습니다</string>
     <string name="member_delete_failed">멤버를 삭제할 수 없습니다</string>
     <string name="add_withdrawn_member">탈퇴한 멤버 추가</string>
     <string name="membership_note_hint">메모</string>
@@ -345,6 +349,7 @@
     <string name="clear_discord_webhook">저장된 웹훅 제거</string>
     <string name="discord_webhook_saved">Discord 웹훅을 안전하게 저장했습니다.</string>
     <string name="discord_webhook_invalid">discord.com의 유효한 HTTPS 수신 웹훅 URL을 입력하세요.</string>
+    <string name="clear_discord_webhook_confirm">저장된 Discord 웹훅을 제거할까요? CSV를 보내려면 다시 붙여 넣어야 합니다.</string>
     <string name="discord_webhook_cleared">저장된 Discord 웹훅을 제거했습니다.</string>
     <string name="discord_webhook_clear_failed">저장된 Discord 웹훅을 제거할 수 없습니다.</string>
     <string name="send_original_csv">원본 CSV 전송</string>
@@ -403,7 +408,7 @@
     <string name="level_short">Lv. %1$d</string>
     <string name="loading_comparison">스냅샷을 비교하는 중…</string>
     <string name="loading_members">멤버를 불러오는 중…</string>
-    <string name="member_change_description">%1$s: 이번 주 공적 +%2$d, 누적 공적 +%3$d, 흙먼지 점수 +%4$d</string>
+    <string name="member_change_description">%1$s: 이번 주 공적 +%2$s, 누적 공적 +%3$d, 흙먼지 점수 +%4$s</string>
     <string name="member_changes_count">수치 변화 · %1$d</string>
     <string name="member_nickname_detail">게임 닉네임 대신 모든 화면에 표시됩니다.</string>
     <string name="member_order_position">%2$d명 중 %1$d번째, %3$s</string>
@@ -517,6 +522,7 @@
     <string name="backup_restoring">백업을 복원하는 중…</string>
     <string name="capture_preparing_detail">Android가 VPN을 시작하기를 기다리는 중입니다.</string>
     <string name="capture_ready_detail">캡처 중에 게임의 서클 › 멤버와 동향 화면을 여세요.</string>
+    <string name="capture_stopping_detail">캡처를 끝내기 전에 마지막 패킷을 저장하는 중입니다.</string>
     <string name="captured">수집됨</string>
     <string name="change">변경</string>
     <string name="checklist_activity">서클 활동</string>
@@ -597,6 +603,8 @@
     <string name="apply_and_next_day">적용 후 다음 날</string>
     <string name="capture_running_title">캡처 중입니다</string>
     <string name="stop_capture_and_continue">캡처 중지 후 계속</string>
+    <string name="capture_stop_timeout_title">캡처를 아직 중지하는 중입니다</string>
+    <string name="capture_stop_timeout_message">캡처가 끝나지 않아 아무것도 바꾸지 않았습니다. 홈에 준비됨이 표시되면 다시 시도하세요.</string>
     <string name="invalid_activity_choice">출석이 아니요이면 과업을 예로 둘 수 없습니다.</string>
     <string name="open_standby_mode">대기 모드 켜기</string>
     <string name="standby_running">대기 모드 실행 중</string>

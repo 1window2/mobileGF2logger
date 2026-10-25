@@ -56,6 +56,20 @@ class PlatoonCsvImportStoreTest {
     }
 
     @Test
+    fun futureDatedCsvIsRejectedBeforeAnythingIsRetained() {
+        val directory = temporary.newFolder("future")
+        val store = PlatoonCsvImportStore(directory) { Instant.parse("2026-07-19T17:00:00Z") }
+
+        val failure = runCatching { store.retain(ByteArrayInputStream(VALID_CSV.toByteArray())) }
+
+        assertTrue(failure.exceptionOrNull() is IllegalArgumentException)
+        assertEquals(emptyList<String>(), directory.listFiles().orEmpty().map { it.name })
+        // Within the allowed clock skew the same file is accepted.
+        PlatoonCsvImportStore(directory) { Instant.parse("2026-07-19T18:40:00Z") }
+            .prepare(ByteArrayInputStream(VALID_CSV.toByteArray()))
+    }
+
+    @Test
     fun duplicateUidCsvIsRejectedBeforeAnythingIsRetained() {
         val directory = temporary.newFolder("duplicate-uids")
         val store = PlatoonCsvImportStore(directory)

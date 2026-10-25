@@ -51,7 +51,7 @@ class WeeklyTableHistoryActivity : BaseActivity() {
     }
 
     override fun onScreenResumed() {
-        if (!profileBinding.isCurrent(this)) {
+        if (!profileBinding.isSameStorage(this)) {
             finish()
             return
         }

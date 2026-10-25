@@ -7,7 +7,11 @@ import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
-enum class CapturePhase { STOPPED, STARTING, RUNNING }
+/**
+ * [STOPPING] lasts from a stop request until the native loop is joined, queued chunks are drained,
+ * and the session is cleared; only then is capture [STOPPED] and data operations may begin.
+ */
+enum class CapturePhase { STOPPED, STARTING, RUNNING, STOPPING }
 
 /** Every user-visible capture status message, localized through [messageRes]. */
 enum class CaptureNotice(@StringRes val messageRes: Int, val severity: Severity) {
@@ -84,6 +88,8 @@ data class CaptureSnapshot(
     val notice: CaptureNoticeEvent?,
     val capturedTargets: List<String>,
     val guided: CaptureStatus.GuidedProgress?,
+    /** Increases each time capture reaches [CapturePhase.RUNNING], so a new run is distinguishable. */
+    val runCount: Long = 0,
 )
 
 /** Process-wide capture state, swapped atomically as one immutable [CaptureSnapshot]. */
@@ -113,9 +119,13 @@ object CaptureStatus {
         it.copy(phase = CapturePhase.STARTING, notice = event(CaptureNotice.PREPARING))
     }
 
-    fun markStopped() = markStopped(notice = null)
+    /** A start abandoned before it reached the service only clears a stale notice. */
+    fun clearIdleNotice() = update {
+        if (it.phase != CapturePhase.STOPPED) it else it.copy(notice = null, capturedTargets = emptyList())
+    }
 
-    internal fun markStopped(notice: CaptureNotice?, vararg args: String) = update {
+    /** Publishes STOPPED directly; only the service calls this, and only with no teardown pending. */
+    internal fun markStopped(notice: CaptureNotice? = null, vararg args: String) = update {
         it.copy(
             phase = CapturePhase.STOPPED,
             notice = notice?.let { value -> event(value, args) },
@@ -123,12 +133,49 @@ object CaptureStatus {
         )
     }
 
+    internal fun markStopping(notice: CaptureNotice?, vararg args: String) = update {
+        it.copy(
+            phase = CapturePhase.STOPPING,
+            notice = notice?.let { value -> event(value, args) },
+            capturedTargets = emptyList(),
+        )
+    }
+
+    /**
+     * Publishes STOPPED once teardown has finished, keeping the stop notice. A phase that a newer
+     * start already owns is left alone.
+     */
+    internal fun markTornDown() = update {
+        if (it.phase != CapturePhase.STOPPING) it else it.copy(phase = CapturePhase.STOPPED)
+    }
+
     internal fun markRunning(targets: List<String>) = update {
         it.copy(
             phase = CapturePhase.RUNNING,
             notice = event(CaptureNotice.CAPTURING, arrayOf(targets.joinToString())),
             capturedTargets = targets.toList(),
+            runCount = it.runCount + 1,
         )
+    }
+
+    /**
+     * Runs [action] once on the main looper as soon as capture is [CapturePhase.STOPPED], which may
+     * be immediately. Returns a function that cancels the wait; cancelling after it ran is harmless.
+     */
+    fun whenStopped(action: () -> Unit): () -> Unit {
+        val done = AtomicBoolean(false)
+        lateinit var listener: (CaptureSnapshot) -> Unit
+        listener = { snapshot ->
+            if (snapshot.phase == CapturePhase.STOPPED && done.compareAndSet(false, true)) {
+                removeListener(listener)
+                action()
+            }
+        }
+        addListener(listener)
+        return {
+            done.set(true)
+            removeListener(listener)
+        }
     }
 
     internal fun report(notice: CaptureNotice, vararg args: String) = update {

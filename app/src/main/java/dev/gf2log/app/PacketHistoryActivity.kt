@@ -120,7 +120,18 @@ class PacketHistoryActivity : BaseActivity() {
     private fun rawView(content: String) = ScrollView(this).apply {
         clipToPadding = false
         setPadding(dp(16), 0, dp(16), dp(24))
-        addView(text(content, TextRole.BODY) {
+        // One selectable TextView lays out its whole text at once; a huge entry would freeze the
+        // screen, so only its beginning is shown.
+        val shown = if (content.length > MAX_RAW_CHARS) {
+            content.take(MAX_RAW_CHARS) + "\n\n" + getString(
+                R.string.packet_raw_truncated,
+                java.text.NumberFormat.getIntegerInstance().format(MAX_RAW_CHARS),
+                java.text.NumberFormat.getIntegerInstance().format(content.length),
+            )
+        } else {
+            content
+        }
+        addView(text(shown, TextRole.BODY) {
             typeface = Typeface.MONOSPACE
             textSize = 12f
             setTextIsSelectable(true)
@@ -156,6 +167,11 @@ class PacketHistoryActivity : BaseActivity() {
     }
 
     private fun copy(content: String) {
+        // The clipboard travels through a binder call that fails above about 1 MB.
+        if (content.length > MAX_COPY_CHARS) {
+            Feedback.show(this, R.string.packet_too_large_to_copy, long = true)
+            return
+        }
         Feedback.copy(this, getString(R.string.clipboard_label), content, R.string.status_packet_copied)
     }
 
@@ -189,6 +205,9 @@ class PacketHistoryActivity : BaseActivity() {
     }
 
     companion object {
+        /** About 0.6 MB as UTF-16, safely under the clipboard's binder limit. */
+        private const val MAX_COPY_CHARS = 300_000
+        private const val MAX_RAW_CHARS = 200_000
         const val EXTRA_ENTRY_ID = "entry_id"
         const val EXTRA_ENTRY_TITLE = "entry_title"
         const val EXTRA_SAVED_ENTRY = "saved_entry"

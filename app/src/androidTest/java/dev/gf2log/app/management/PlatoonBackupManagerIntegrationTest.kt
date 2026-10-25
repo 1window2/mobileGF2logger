@@ -26,6 +26,7 @@ import dev.gf2log.protocol.model.GuildMember
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.EOFException
+import java.io.File
 import java.io.InputStream
 import java.time.Instant
 import java.time.LocalDate
@@ -312,6 +313,62 @@ class PlatoonBackupManagerIntegrationTest {
             assertFalse(db.rawQuery("PRAGMA foreign_key_check", null).use { it.moveToFirst() })
         }
         assertFalse(FilePaths.preRestoreDatabase(context).exists())
+    }
+
+    @Test
+    fun failedRestoreKeepsTheWalACrashLeftBesideTheCurrentDatabase() {
+        seedDatabase(ARCHIVED_UID, "Archived member", "archived-source.csv")
+        val archive = ByteArrayOutputStream().also {
+            PlatoonBackupManager(context).exportFull(it)
+        }.toByteArray()
+        replaceDatabaseWithCurrentState()
+        settingsStore.replace(currentSettings())
+        val databaseFile = context.getDatabasePath(storageScope.databaseName)
+        val crashCopy = File(context.cacheDir, "crash-left-database").apply {
+            deleteRecursively()
+            check(mkdirs())
+        }
+        PlatoonRepository.withExclusiveDatabase(storageScope) {
+            // Copying the files while the WAL connection is open leaves the committed update
+            // only in the WAL, as a process death before the next checkpoint would.
+            SQLiteDatabase.openDatabase(
+                databaseFile.path,
+                null,
+                SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING,
+            ).use { db ->
+                db.rawQuery("PRAGMA wal_autocheckpoint = 0", null).use { it.moveToFirst() }
+                db.execSQL(
+                    "UPDATE members SET note = ? WHERE uid = ?",
+                    arrayOf<Any>(CRASH_LEFT_NOTE, CURRENT_UID),
+                )
+                databaseFile.copyTo(File(crashCopy, "database"))
+                File(databaseFile.path + "-wal").copyTo(File(crashCopy, "wal"))
+            }
+            assertTrue(context.deleteDatabase(storageScope.databaseName))
+            File(crashCopy, "database").copyTo(databaseFile)
+            File(crashCopy, "wal").copyTo(File(databaseFile.path + "-wal"))
+        }
+        crashCopy.deleteRecursively()
+
+        assertThrows(IllegalStateException::class.java) {
+            PlatoonBackupManager(
+                context = context,
+                settingsStore = settingsStore,
+                restoreObserver = { checkpoint ->
+                    if (checkpoint == PlatoonBackupManager.RestoreCheckpoint.DATABASE_INSTALLED) {
+                        error("simulated restore failure")
+                    }
+                },
+            ).restoreFull(ByteArrayInputStream(archive))
+        }
+
+        PlatoonDatabase(context).use { database ->
+            val db = database.readableDatabase
+            assertEquals(1L, count(db, "members", "note = ?", CRASH_LEFT_NOTE))
+            assertEquals(0L, count(db, "members", "uid = ?", ARCHIVED_UID))
+        }
+        assertFalse(FilePaths.preRestoreDatabase(context).exists())
+        assertFalse(File(FilePaths.preRestoreDatabase(context).path + "-wal").exists())
     }
 
     @Test
@@ -684,6 +741,57 @@ class PlatoonBackupManagerIntegrationTest {
         assertFalse(members.any { it.uid == CURRENT_UID })
         assertFalse(java.io.File(retained, plannedFileName).exists())
         assertFalse(FilePaths.csvCheckpointDirectory(context).exists())
+    }
+
+    @Test
+    fun checkpointInstallRefusesADatabaseThatChangedSinceTheUndoCheck() {
+        seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
+        val checkpoint = ByteArrayOutputStream().also { output ->
+            PlatoonBackupManager(context, storageScope).export(output)
+        }.toByteArray()
+        val manager = PlatoonBackupManager(context, storageScope)
+        val checkedDigest = manager.currentDatabaseSha256()
+        // A capture ingests after the undo's own digest check but before the install.
+        replaceDatabaseForCheckpoint(CURRENT_UID, "Newer capture", "newer-capture.csv")
+
+        assertThrows(IllegalStateException::class.java) {
+            manager.restoreCheckpoint(ByteArrayInputStream(checkpoint), checkedDigest)
+        }
+
+        PlatoonDatabase(context).use { database ->
+            assertEquals(1L, count(database.readableDatabase, "members", "uid = ?", CURRENT_UID))
+            assertEquals(0L, count(database.readableDatabase, "members", "uid = ?", ARCHIVED_UID))
+        }
+        assertFalse(FilePaths.restoreTransactionDirectory(context).exists())
+    }
+
+    @Test
+    fun startupRecoveryFinishesInterruptedImportsAndSurvivesABrokenScope() {
+        seedDatabase(ARCHIVED_UID, "Before interrupted import", "before-interrupted-import.csv")
+        val checkpoint = FilePaths.csvCheckpointDirectory(context)
+        assertTrue(checkpoint.mkdirs())
+        java.io.FileOutputStream(java.io.File(checkpoint, "platoon.gf2backup")).use { output ->
+            PlatoonBackupManager(context).export(output)
+        }
+        java.io.File(checkpoint, "planned-files.txt").writeText("\n", Charsets.UTF_8)
+        replaceDatabaseForCheckpoint(CURRENT_UID, "Interrupted import", "interrupted-import.csv")
+        val brokenScope = PlatoonStorageScope(
+            PlatoonProfileRegistry(context).upsertDetected(
+                SupportedGamePackages.DARKWINTER,
+                GameServerRegion.DARKWINTER_GLOBAL,
+                dev.gf2log.protocol.model.PlatoonProfileData(303u, "Broken checkpoint", 0u, 0u),
+            ).storageId,
+        )
+        // A checkpoint without its archive cannot be recovered and must not stop the others.
+        assertTrue(java.io.File(brokenScope.rootDirectory(context), "csv-import-checkpoint").mkdirs())
+
+        assertEquals(1, CsvImportCheckpointManager.recoverInterruptedImports(context))
+
+        PlatoonDatabase(context).use { database ->
+            assertEquals(1L, count(database.readableDatabase, "members", "uid = ?", ARCHIVED_UID))
+            assertEquals(0L, count(database.readableDatabase, "members", "uid = ?", CURRENT_UID))
+        }
+        assertFalse(checkpoint.exists())
     }
 
     @Test
@@ -1182,6 +1290,7 @@ class PlatoonBackupManagerIntegrationTest {
         const val CURRENT_UID = 2002L
         const val THIRD_UID = 3003L
         const val ARCHIVED_NOTE = "Weekly review"
+        const val CRASH_LEFT_NOTE = "Committed only to the WAL"
         const val INVALID_TARGET_PACKAGE = "not a package"
         val PERIOD_START: LocalDate = LocalDate.of(2026, 7, 26)
     }

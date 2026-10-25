@@ -97,7 +97,7 @@ class WeeklyTableHistoryPreviewActivity : BaseActivity() {
     }
 
     override fun onScreenResumed() {
-        if (!profileBinding.isCurrent(this)) finish()
+        if (!profileBinding.isSameStorage(this)) finish()
     }
 
     private fun confirmRestore() {

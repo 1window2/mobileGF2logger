@@ -63,7 +63,7 @@ Recognized inner types:
 | 21960 | Platoon updates |
 | 23201 | Formations |
 
-Unknown payload types are skipped without allocation. A recognized but malformed protobuf payload produces a warning event and does not terminate parsing of later messages.
+Unknown payload types are skipped without allocation. Capture diagnostics count the first 32 distinct unknown types individually and the rest together. A recognized but malformed protobuf payload produces a warning event and does not terminate parsing of later messages.
 
 Payload `21905` is the authoritative Platoon identity for the decoded flow. On
 Android 10 and newer, the capture service also resolves the original connection
@@ -78,7 +78,9 @@ For a previously unknown `(client package, Platoon ID)`, decoded payloads enter
 a bounded process-memory admission queue. Returning to the app presents the
 observed Platoon name, ID, and verified client, then requires one compatible
 server choice. Confirmation creates the profile and replays its buffered
-payloads through the normal scoped ingestion pipeline. Explicit discard,
+payloads through the normal scoped ingestion pipeline. The prompt stays open
+while a confirmation runs; a failed one releases the candidate with its reason,
+which the prompt shows before the user retries or discards. Explicit discard,
 candidate overflow, force-stop, or process death removes the unconfirmed data;
 it never enters parsed-packet history, SQLite, retained CSV, or preferences.
 HaoPlay candidates expose only its four known regions and Darkwinter candidates
@@ -122,7 +124,10 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   lifecycle glue whose fields are main-thread only.
 - Stopping capture never blocks the main thread: the worker stops the native
   loop, drains already queued chunks, and clears per-run state; a start that
-  arrives during teardown waits for it to finish.
+  arrives during teardown waits for it to finish. The phase reads `STOPPING`
+  for that whole teardown and becomes `STOPPED` only once it completes, even
+  when the service is destroyed meanwhile, so nothing that waits for `STOPPED`
+  can overlap the native loop or the drain.
 - Before identity is established, each flow retains at most 32 decoded payload
   objects. Overflow rejects that flow until closure. The profile registry holds
   at most 16 bounded identities.
@@ -130,13 +135,17 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   per candidate, and 128 payloads total. Overflow rejects every flow belonging
   to that candidate rather than partially persisting it.
 - A bound flow cannot change its Platoon identity. Admission failure clears its
-  session and quarantines the flow until native closure. One user-started
+  session and quarantines the flow until native closure. Replay binds every
+  claimed flow before routing any buffered payload, so a replay that fails has
+  persisted nothing and a retry cannot duplicate history or roster files. One user-started
   capture may admit at most one new profile per supported client. Explicit
   profile deletion removes one immutable scope behind two confirmations.
 - TLS, HTTP, and UDP payloads remain native and are excluded from the parser.
   A TCP flow is classified once, on its first payload in either direction, so
   a later plaintext segment that happens to begin with TLS-like bytes can never
-  disable inspection.
+  disable inspection. TLS means a complete record header (content type 20–23,
+  version 3.0–3.4, length 1 to 2^14 + 2048); HTTP means a request method or
+  status line, so a game frame sharing only the first two bytes stays inspected.
 - Outgoing plaintext chunks are used only for native flow classification.
 - Flow-close callbacks finalize any pending recognized payload before removing parser state and
   unconditionally remove metadata even when no parser existed. A rejected close callback
@@ -166,7 +175,7 @@ preserving in-flow ordering.
 1. Start forwarding using the supplied TUN file descriptor.
 2. Stop and release native resources.
 
-The listener reports candidate plaintext payloads after TCP reassembly, flow closure, unexpected native termination, and aggregate byte counters. Flow ids are unique for the life of the process, so a pending Platoon that outlives one capture can never refer to a flow of the next. Every upstream socket is passed through `VpnService.protect()` so forwarded traffic cannot re-enter the VPN.
+The listener reports candidate plaintext payloads after TCP reassembly, flow closure, unexpected native termination, and aggregate byte counters. Start returns only after the native thread has attached to the JVM; a thread that cannot attach could never report its termination, so start fails instead. Flow ids are unique for the life of the process, so a pending Platoon that outlives one capture can never refer to a flow of the next. Every upstream socket is passed through `VpnService.protect()` so forwarded traffic cannot re-enter the VPN.
 
 The implementation uses zdtun rather than introducing a new TCP/IP stack.
 General PCAP export, nDPI classification, TLS decryption, root capture, remote
@@ -254,7 +263,10 @@ plaintext TCP streams. Do not add pinning or anti-cheat bypasses.
   ends in a lock or a cancel that releases the screen, and the accessibility
   service that taps only while the game is in front, closes it from Recents,
   and locks the phone. It drives capture only through the `CaptureVpnService`
-  intents and learns of saved rosters from `capture.RosterEvents`. Scheduled
+  intents and learns of saved rosters from `capture.RosterEvents`. A run that
+  follows a stopped one sends its start even while the previous capture is
+  still stopping; the service restarts after teardown, and the run opens the
+  game only on a newer `RUNNING` run, never on the one it just stopped. Scheduled
   recording reuses the same state machine: an exact alarm, re-planned from the
   current Platoons before every run, opens the standby screen over a swipe lock
   screen, and only on phones without a PIN, pattern, or password.
@@ -277,7 +289,10 @@ screen exists, with keyed requests superseding stale loads.
 Capture state reaches the UI as an immutable `CaptureSnapshot` (phase, latest
 typed and localized notice, captured targets, one-time checklist) published by
 `CaptureStatus` listeners on the main looper. Nothing in the UI parses status
-text or polls.
+text or polls. Backup export and restore, CSV import and undo, and profile
+region edits and deletion run through `CaptureGuard`: after one confirmation it
+requests the stop and continues only when a listener observes `STOPPED`, or
+explains after 20 seconds that capture is still stopping and changes nothing.
 
 `PrimaryNavigation` provides the Home, Platoon, and Weekly bar used by `Screen`.
 It launches existing Activities and owns no data or domain state. Onboarding
@@ -323,7 +338,10 @@ the repository's exclusive database gate. Full profile deletion uses a durable
 pending-deletion set: selector metadata is removed first, then the scoped SQLite
 database, retained evidence, member ordering, weekly cutlines, and reset setting
 are deleted. If the process stops mid-cleanup, registry initialization resumes
-the remaining bounded deletion before showing profiles.
+the remaining bounded deletion before showing profiles. A queued scope is never
+handed to a newly detected or declared profile, which takes the random
+fallback ID instead, and a queued scope that the registry lists again after a
+committed restore leaves the queue rather than being deleted.
 
 The design deliberately favors composition over deep inheritance. Abstraction
 and polymorphism appear at real variation points (`GameData`, `ParseEvent`, and
@@ -380,10 +398,12 @@ profile on an installation that does not yet have any registered profiles.
 
 Complete restore validates the filename, archive entries and identity,
 checksums, settings completeness and ranges, current database schema, SQLite
-integrity, and foreign keys before mutation. Database replacement runs under
-the repository maintenance lock. The previous database and a settings snapshot
-are retained until both resources commit, so any failure restores the prior
-state instead of leaving a partial import. A fresh install records that no
+integrity, and foreign keys before mutation. Database replacement, and the
+rollback of a failed replacement, run under one hold of the repository
+maintenance lock. The previous database, together with any WAL or rollback
+journal a crash left beside it, and a settings snapshot are retained until both
+resources commit, so any failure restores the prior state instead of leaving a
+partial import. A fresh install records that no
 database existed so rollback removes the staged replacement rather than
 mistaking it for prior state. Cleanup deletes the transaction state file
 first, so a process death during cleanup leaves only leftovers to delete
@@ -413,7 +433,13 @@ database under the repository's exclusive maintenance lock. Durable restore
 state resumes interrupted quarantine/database replacement after process death;
 ordinary failures restore both the evidence and the preceding undo checkpoint.
 A post-import database digest refuses undo after any later Platoon mutation so
-a one-level rollback cannot silently overwrite newer work.
+a one-level rollback cannot silently overwrite newer work; the digest is
+compared again inside the exclusive section that installs the checkpoint, so an
+ingest that lands after the first check is never overwritten. Interrupted
+imports and undos are recovered for every registered Platoon at process start,
+off the main thread, and again before capture ingests anything, so a late
+recovery cannot replace newer captured evidence. A recovery that fails is logged
+and its durable state left for the next attempt instead of crashing the launch.
 
 Weekly PNG export builds a privacy projection rather than screenshotting the
 Activity. Names are included by default; UIDs and private notes are opt-in.
@@ -484,7 +510,10 @@ bounds whose displayed minimum remains below the configured threshold. Unknown
 values and lower bounds that already meet the threshold remain neutral.
 
 Completed roster captures are written under a non-importable temporary suffix
-and atomically published as `.csv` only after protocol completion. Retained CSV
+and atomically published as `.csv` only after protocol completion. A working
+file whose write or publication fails is deleted, and capture start removes any
+left by process death. Member and name bounds apply to the UID-deduplicated
+completed roster, so a discarded partial roster never reports a save failure. Retained CSV
 reconciliation runs off the UI thread, skips represented source identities,
 and imports older evidence without rewriting current membership. Both backup
 exports reconcile completed retained evidence before taking their locked

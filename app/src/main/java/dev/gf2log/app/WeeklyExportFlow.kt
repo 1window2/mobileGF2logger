@@ -46,9 +46,8 @@ internal class WeeklyExportFlow(
                 val csv = if (request == EXPORT_ALL) {
                     WeeklyReportCsv.formatAll(repository().listAllWeeklyReports(zone))
                 } else {
-                    WeeklyReportCsv.format(
-                        repository().buildWeeklyTableRevision(LocalDate.ofEpochDay(request.toLong()), zone).report,
-                    )
+                    // Exporting reads the displayed table; it never adds a history revision.
+                    WeeklyReportCsv.format(repository().buildWeeklyReport(LocalDate.ofEpochDay(request.toLong()), zone))
                 }
                 DocumentAccess.openOutput(activity.contentResolver, uri).writer(Charsets.UTF_8).use { it.write(csv) }
             },
@@ -93,7 +92,7 @@ internal class WeeklyExportFlow(
 
     fun exportAll() {
         work.run(
-            task = { repository().listAllWeeklyReports(GameTimeZonePreferences.get(activity, storageId())).isNotEmpty() },
+            task = { repository().hasWeeklyReports(GameTimeZonePreferences.get(activity, storageId())) },
         ) { result ->
             if (result.getOrDefault(false)) {
                 pendingCsv = EXPORT_ALL

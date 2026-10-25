@@ -20,11 +20,11 @@ class PendingPlatoonAdmissionStoreTest {
     }
 
     @Test
-    fun listenersSeeVisibleCandidatesChangeWithoutPolling() {
+    fun listenersSeeCandidatesChangeWithoutPolling() {
         MainThread.testExecutor = { it() }
         val observed = mutableListOf<List<String>>()
         PendingPlatoonAdmissionStore.addListener { summaries ->
-            observed += summaries.map { it.profile.platoonName }
+            observed += summaries.map { if (it.admitting) "${it.profile.platoonName}…" else it.profile.platoonName }
         }
         val token = requireNotNull(
             PendingPlatoonAdmissionStore.begin(
@@ -38,8 +38,9 @@ class PendingPlatoonAdmissionStoreTest {
         PendingPlatoonAdmissionStore.releaseClaim(token)
         PendingPlatoonAdmissionStore.discard(token)
 
+        // A claimed candidate stays listed, so its open prompt is not closed mid-confirmation.
         assertEquals(
-            listOf(emptyList(), listOf("Owls"), emptyList(), listOf("Owls"), emptyList()),
+            listOf(emptyList(), listOf("Owls"), listOf("Owls…"), listOf("Owls"), emptyList()),
             observed,
         )
     }
@@ -105,7 +106,7 @@ class PendingPlatoonAdmissionStoreTest {
         PendingPlatoonAdmissionStore.releaseClaim(token)
         assertNotNull(PendingPlatoonAdmissionStore.claim(token))
         assertEquals(setOf(7L), PendingPlatoonAdmissionStore.complete(token))
-        assertFalse(PendingPlatoonAdmissionStore.contains(token))
+        assertTrue(PendingPlatoonAdmissionStore.summaries().none { it.token == token })
     }
 
     @Test
@@ -118,22 +119,32 @@ class PendingPlatoonAdmissionStoreTest {
             ).token,
         )
 
-        assertNull(PendingPlatoonAdmissionStore.withClaim(token) { false })
-        assertNotNull(PendingPlatoonAdmissionStore.summary(token))
+        assertNull(
+            PendingPlatoonAdmissionStore.withClaim(token) { CaptureNotice.ADMISSION_REPLAY_FAILED },
+        )
+        val failed = PendingPlatoonAdmissionStore.summaries().single()
+        assertEquals(CaptureNotice.ADMISSION_REPLAY_FAILED, failed.failure)
+        assertFalse(failed.admitting)
+        assertEquals(1, failed.attempts)
 
         assertTrue(
             runCatching {
                 PendingPlatoonAdmissionStore.withClaim(token) { error("registry unavailable") }
             }.isFailure,
         )
-        assertNotNull(PendingPlatoonAdmissionStore.summary(token))
+        val thrown = PendingPlatoonAdmissionStore.summaries().single()
+        assertEquals(CaptureNotice.ADMISSION_INVALID, thrown.failure)
+        assertEquals(2, thrown.attempts)
 
         assertEquals(setOf(4L), PendingPlatoonAdmissionStore.withClaim(token) { claim ->
             assertNull(PendingPlatoonAdmissionStore.summary(claim.summary.token))
-            true
+            val running = PendingPlatoonAdmissionStore.summaries().single()
+            assertTrue(running.admitting)
+            assertNull(running.failure)
+            null
         })
-        assertFalse(PendingPlatoonAdmissionStore.contains(token))
-        assertNull(PendingPlatoonAdmissionStore.withClaim(token) { true })
+        assertTrue(PendingPlatoonAdmissionStore.summaries().none { it.token == token })
+        assertNull(PendingPlatoonAdmissionStore.withClaim(token) { null })
     }
 
     @Test
@@ -188,7 +199,7 @@ class PendingPlatoonAdmissionStoreTest {
             PendingPlatoonAdmissionStore.OfferResult.Overflow(setOf(9L)),
             overflow,
         )
-        assertFalse(PendingPlatoonAdmissionStore.contains(token))
+        assertTrue(PendingPlatoonAdmissionStore.summaries().none { it.token == token })
     }
 
     @Test

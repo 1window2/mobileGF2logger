@@ -3,9 +3,11 @@ package dev.gf2log.app
 import android.os.Bundle
 import android.text.TextUtils
 import android.view.View
+import dev.gf2log.app.management.MetricCertainty
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.SnapshotComparison
 import dev.gf2log.app.management.SnapshotComparisonCsv
+import dev.gf2log.app.management.WeeklyMetricPresentation
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.BarAction
 import dev.gf2log.app.ui.Feedback
@@ -46,8 +48,11 @@ class SnapshotComparisonActivity : BaseActivity() {
         content.addView(StateViews.loading(this, getString(R.string.loading_comparison)))
         work.run(
             task = {
-                val snapshots = PlatoonRepository(this, scope).listSnapshots(2)
-                snapshots.takeIf { it.size == 2 }?.let { SnapshotComparison.compare(it[1], it[0]) }
+                val repository = PlatoonRepository(this, scope)
+                val snapshots = repository.listSnapshots(2)
+                snapshots.takeIf { it.size == 2 }?.let {
+                    SnapshotComparison.compare(it[1], it[0], repository.gameZone())
+                }
             },
         ) { result ->
             content.removeAllViews()
@@ -59,7 +64,7 @@ class SnapshotComparisonActivity : BaseActivity() {
     }
 
     override fun onScreenResumed() {
-        if (!profileBinding.isCurrent(this)) finish()
+        if (!profileBinding.isSameStorage(this)) finish()
     }
 
     private fun render(result: SnapshotComparison.Result?) {
@@ -114,12 +119,20 @@ class SnapshotComparisonActivity : BaseActivity() {
                     }, lp())
                     addView(row {
                         listOf(
-                            getString(R.string.merit_this_week_short) to change.weeklyMeritDelta,
-                            getString(R.string.total_merit) to change.totalMeritDelta,
-                            getString(R.string.gunsmoke_score) to change.totalScoreDelta,
-                        ).forEachIndexed { badgeIndex, (label, delta) ->
+                            Triple(
+                                getString(R.string.merit_this_week_short),
+                                change.weeklyMeritDelta,
+                                change.weeklyMeritDeltaCertainty,
+                            ),
+                            Triple(getString(R.string.total_merit), change.totalMeritDelta, MetricCertainty.EXACT),
+                            Triple(
+                                getString(R.string.gunsmoke_score),
+                                change.totalScoreDelta,
+                                change.totalScoreDeltaCertainty,
+                            ),
+                        ).forEachIndexed { badgeIndex, (label, delta, certainty) ->
                             addView(badge(
-                                "$label +$delta",
+                                "$label +${WeeklyMetricPresentation.format(delta, certainty)}",
                                 if (delta > 0) R.color.accent_surface else R.color.surface_variant,
                                 if (delta > 0) R.color.accent_text else R.color.text_secondary,
                             ), lp(WRAP, WRAP, start = if (badgeIndex == 0) 0 else 6))
@@ -128,9 +141,9 @@ class SnapshotComparisonActivity : BaseActivity() {
                     contentDescription = getString(
                         R.string.member_change_description,
                         change.name,
-                        change.weeklyMeritDelta,
+                        WeeklyMetricPresentation.format(change.weeklyMeritDelta, change.weeklyMeritDeltaCertainty),
                         change.totalMeritDelta,
-                        change.totalScoreDelta,
+                        WeeklyMetricPresentation.format(change.totalScoreDelta, change.totalScoreDeltaCertainty),
                     )
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
                 }, lp())

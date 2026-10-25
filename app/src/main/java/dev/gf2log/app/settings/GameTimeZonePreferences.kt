@@ -9,7 +9,7 @@ import java.time.ZoneId
 internal object GameTimeZonePreferences {
     fun get(
         context: Context,
-        storageId: String = PlatoonProfileRegistry(context).activeScope().storageId,
+        storageId: String,
     ): ZoneId {
         if (storageId == PlatoonProfileIdentity.LEGACY_STORAGE_ID) return legacyZone(context)
         val region = region(context, storageId)
@@ -22,7 +22,7 @@ internal object GameTimeZonePreferences {
 
     fun region(
         context: Context,
-        storageId: String = PlatoonProfileRegistry(context).activeScope().storageId,
+        storageId: String,
     ): GameServerRegion {
         if (storageId == PlatoonProfileIdentity.LEGACY_STORAGE_ID) return legacyRegion(context)
         val stored = scoped(context).getString(regionKey(storageId), null)
@@ -72,7 +72,7 @@ internal object GameTimeZonePreferences {
     fun setRegion(
         context: Context,
         region: GameServerRegion,
-        storageId: String = PlatoonProfileRegistry(context).activeScope().storageId,
+        storageId: String,
     ) {
         if (storageId == PlatoonProfileIdentity.LEGACY_STORAGE_ID) {
             UserSettingsPreferences.setGameServerRegion(context, region.storedValue)
@@ -84,7 +84,7 @@ internal object GameTimeZonePreferences {
     fun set(
         context: Context,
         zoneId: ZoneId,
-        storageId: String = PlatoonProfileRegistry(context).activeScope().storageId,
+        storageId: String,
     ) {
         if (storageId == PlatoonProfileIdentity.LEGACY_STORAGE_ID) {
             UserSettingsPreferences.setGameTimeZoneId(context, zoneId.id)

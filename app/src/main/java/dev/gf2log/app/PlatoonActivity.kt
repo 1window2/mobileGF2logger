@@ -17,6 +17,7 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
+import dev.gf2log.app.capture.RosterEvents
 import dev.gf2log.app.management.MemberStatus
 import dev.gf2log.app.management.PlatoonMemberCsv
 import dev.gf2log.app.management.PlatoonRepository
@@ -54,7 +55,10 @@ class PlatoonActivity : BaseActivity() {
     private lateinit var repository: PlatoonRepository
     private lateinit var screen: Screen
     private val work = BackgroundWork(this, "GF2Platoon")
-    private val memberAdapter = MemberAdapter()
+    // Scroll restores once rows exist, not onto the loading view of a recreated screen.
+    private val memberAdapter = MemberAdapter().apply {
+        stateRestorationPolicy = RecyclerView.Adapter.StateRestorationPolicy.PREVENT_WHEN_EMPTY
+    }
     private val stateAdapter = SingleViewAdapter()
     private lateinit var summary: LinearLayout
     private lateinit var searchInput: EditText
@@ -128,6 +132,21 @@ class PlatoonActivity : BaseActivity() {
         load()
     }
 
+    /** A roster captured while this screen is showing appears without leaving it. */
+    private val rosterSaved: (String) -> Unit = { storageId ->
+        if (storageId == profileBinding.scope?.storageId) load()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        RosterEvents.addListener(rosterSaved)
+    }
+
+    override fun onStop() {
+        RosterEvents.removeListener(rosterSaved)
+        super.onStop()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putInt(STATE_FILTER, filter.ordinal)
         outState.putInt(STATE_SORT, sort.ordinal)
@@ -155,13 +174,18 @@ class PlatoonActivity : BaseActivity() {
         ) { result ->
             result.fold(
                 onSuccess = { loaded ->
+                    // Rows show the latest roster and time zone, which their diff does not compare.
+                    val rebind = model?.let { it.latest != loaded.latest || it.zone != loaded.zone } == true
                     model = loaded
                     selected.retainAll(loaded.statuses.mapTo(mutableSetOf(), MemberStatus::uid))
                     if (selecting) setSelecting(true)
                     renderSummary(loaded)
                     renderMembers()
+                    if (rebind) memberAdapter.notifyItemRangeChanged(0, memberAdapter.itemCount)
                 },
                 onFailure = {
+                    // Search or filter changes must not bring back rows from before the failure.
+                    model = null
                     memberAdapter.submitList(emptyList())
                     stateAdapter.view = StateViews.failure(this, getString(R.string.platoon_load_failed)) { load() }
                 },

@@ -1,6 +1,7 @@
 package dev.gf2log.app.management
 
 import android.content.Context
+import android.util.Log
 import dev.gf2log.app.settings.ScopedAppSettingsStore
 import java.io.File
 import java.io.FileOutputStream
@@ -157,10 +158,12 @@ class CsvImportCheckpointManager internal constructor(
             }
             val expectedDigest = digest(root).readText(Charsets.US_ASCII)
             require(expectedDigest.matches(SHA256)) { "Invalid CSV checkpoint digest" }
+            // Fails fast before quarantining anything; the authoritative comparison runs again
+            // inside the exclusive section that installs the checkpoint.
             check(backupManager().currentDatabaseSha256() == expectedDigest) {
                 "Platoon data changed after the CSV import; undo would overwrite newer changes"
             }
-            restoreUnchecked()
+            restoreUnchecked(expectedDigest)
         } finally {
             releaseOperation()
         }
@@ -179,7 +182,11 @@ class CsvImportCheckpointManager internal constructor(
         restoreUnchecked()
     }
 
-    private fun restoreUnchecked() {
+    /**
+     * With [expectedDatabaseSha256], the checkpoint is installed only while the live database still
+     * has that digest, compared under the same exclusive lock, so a concurrent ingest is never lost.
+     */
+    private fun restoreUnchecked(expectedDatabaseSha256: String? = null) {
         val names = manifest(root).readLines(Charsets.UTF_8)
             .filter(String::isNotBlank)
             .toSet()
@@ -208,7 +215,9 @@ class CsvImportCheckpointManager internal constructor(
                 }
                 restoreObserver(checkpoint)
             }
-            archive(root).inputStream().use(backupManager::restoreCheckpoint)
+            archive(root).inputStream().use { input ->
+                backupManager.restoreCheckpoint(input, expectedDatabaseSha256)
+            }
         } catch (error: Exception) {
             val marker = restoreMarker(root)
             if (marker.exists() && !marker.delete()) {
@@ -349,20 +358,48 @@ class CsvImportCheckpointManager internal constructor(
     private fun digest(directory: File) = File(directory, DIGEST_FILE)
     private fun restoreMarker(directory: File) = File(directory, RESTORE_MARKER)
 
-    private companion object {
-        val SCOPE_STATES = mutableMapOf<String, ScopeState>()
+    companion object {
+        private const val TAG = "GF2CsvCheckpoint"
+        private val SCOPE_STATES = mutableMapOf<String, ScopeState>()
 
-        const val CHECKPOINT_DIRECTORY = "csv-import-checkpoint"
-        const val STAGING_DIRECTORY = "csv-import-checkpoint.staging"
-        const val PREVIOUS_DIRECTORY = "csv-import-checkpoint.previous"
-        const val DISCARDED_DIRECTORY = "csv-import-checkpoint.discarded"
-        const val QUARANTINE_DIRECTORY = "retained-quarantine"
-        const val ARCHIVE_FILE = "platoon.gf2backup"
-        const val MANIFEST_FILE = "planned-files.txt"
-        const val DIGEST_FILE = "post-import.sha256"
-        const val RESTORE_MARKER = "restore-database-installed"
-        const val MAX_PLANNED_FILES = 64
-        val SAFE_IMPORT_NAME = Regex("import-\\d{8}T\\d{6}Z-[0-9a-f]{20}\\.csv")
-        val SHA256 = Regex("[0-9a-f]{64}")
+        private const val CHECKPOINT_DIRECTORY = "csv-import-checkpoint"
+        private const val STAGING_DIRECTORY = "csv-import-checkpoint.staging"
+        private const val PREVIOUS_DIRECTORY = "csv-import-checkpoint.previous"
+        private const val DISCARDED_DIRECTORY = "csv-import-checkpoint.discarded"
+        private const val QUARANTINE_DIRECTORY = "retained-quarantine"
+        private const val ARCHIVE_FILE = "platoon.gf2backup"
+        private const val MANIFEST_FILE = "planned-files.txt"
+        private const val DIGEST_FILE = "post-import.sha256"
+        private const val RESTORE_MARKER = "restore-database-installed"
+        private const val MAX_PLANNED_FILES = 64
+        private val SAFE_IMPORT_NAME = Regex("import-\\d{8}T\\d{6}Z-[0-9a-f]{20}\\.csv")
+        private val SHA256 = Regex("[0-9a-f]{64}")
+
+        /**
+         * Finishes every [scopes] interrupted import or undo, as constructing a manager does. Runs at
+         * process start and before capture ingests, so a recovery can never overwrite newer
+         * evidence. A failing scope is logged and left for the next attempt; returns how many failed.
+         */
+        internal fun recoverInterruptedImports(context: Context, scopes: List<PlatoonStorageScope>): Int =
+            scopes.count { scope ->
+                try {
+                    CsvImportCheckpointManager(context, scope)
+                    false
+                } catch (error: Exception) {
+                    Log.e(TAG, "CSV import recovery failed for ${scope.storageId}", error)
+                    true
+                }
+            }
+
+        /** [recoverInterruptedImports] for every registered Platoon. */
+        internal fun recoverInterruptedImports(context: Context): Int {
+            val scopes = try {
+                PlatoonProfileRegistry(context).ensureInitialized().map { PlatoonStorageScope(it.storageId) }
+            } catch (error: Exception) {
+                Log.e(TAG, "Platoon profiles unavailable for CSV import recovery", error)
+                return 1
+            }
+            return recoverInterruptedImports(context, scopes)
+        }
     }
 }

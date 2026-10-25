@@ -49,6 +49,7 @@ typedef struct capture_context {
     jmethodID stopped_method;
     pthread_t thread;
     atomic_bool running;
+    int attach_state; // guarded by attach_mutex
     int tun_fd;
     uint64_t sent_bytes;
     uint64_t received_bytes;
@@ -57,6 +58,13 @@ typedef struct capture_context {
 
 static pthread_mutex_t context_mutex = PTHREAD_MUTEX_INITIALIZER;
 static capture_context_t *active_context = NULL;
+// A thread that cannot attach to the JVM cannot report its own stop, so nativeStart waits for the
+// attach outcome and fails the start instead of leaving the service RUNNING on a dead loop.
+#define ATTACH_PENDING 0
+#define ATTACH_OK 1
+#define ATTACH_FAILED 2
+static pthread_mutex_t attach_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t attach_cond = PTHREAD_COND_INITIALIZER;
 // Process-wide so a flow ID is never reused by a later capture: unconfirmed Platoon candidates
 // outlive the capture that observed them and refer to their flows by ID.
 static _Atomic int64_t last_flow_id = 0;
@@ -80,19 +88,43 @@ static bool starts_with(const char *payload, uint16_t length, const char *prefix
     return length >= prefix_length && memcmp(payload, prefix, prefix_length) == 0;
 }
 
+// Every TLS/SSL 3.0 record header: content type 20-23, major version 3, minor version 0-4, and a
+// length within the largest legal record (2^14 plus the 2048-byte TLS 1.2 expansion allowance).
+// A GF2 frame header whose message ID happens to start with the same two bytes must also match
+// the third byte and a plausible length before inspection of its flow is disabled. A first
+// segment too short to carry the length still counts as TLS, as before.
+#define TLS_RECORD_HEADER_LENGTH 5
+#define TLS_MAX_RECORD_LENGTH (16384U + 2048U)
+
+static bool is_tls_record_header(const char *payload, uint16_t length) {
+    if (length < 3) {
+        return false;
+    }
+    uint8_t record_type = (uint8_t) payload[0];
+    if (record_type < 0x14U || record_type > 0x17U ||
+            (uint8_t) payload[1] != 0x03U || (uint8_t) payload[2] > 0x04U) {
+        return false;
+    }
+    if (length < TLS_RECORD_HEADER_LENGTH) {
+        return true;
+    }
+    uint32_t record_length = ((uint32_t) (uint8_t) payload[3] << 8) | (uint8_t) payload[4];
+    return record_length > 0 && record_length <= TLS_MAX_RECORD_LENGTH;
+}
+
 static bool is_web_transport(const char *payload, uint16_t length) {
-    if (length >= 3) {
-        uint8_t record_type = (uint8_t) payload[0];
-        if (record_type >= 0x14U && record_type <= 0x17U &&
-                (uint8_t) payload[1] == 0x03U) {
-            return true;
-        }
+    if (is_tls_record_header(payload, length)) {
+        return true;
     }
 
     return starts_with(payload, length, "GET ") ||
             starts_with(payload, length, "POST ") ||
             starts_with(payload, length, "HEAD ") ||
             starts_with(payload, length, "PUT ") ||
+            starts_with(payload, length, "OPTIONS ") ||
+            starts_with(payload, length, "DELETE ") ||
+            starts_with(payload, length, "PATCH ") ||
+            starts_with(payload, length, "CONNECT ") ||
             starts_with(payload, length, "HTTP/") ||
             starts_with(payload, length, "PRI * HTTP/2.0");
 }
@@ -397,13 +429,23 @@ static void reap_context(JNIEnv *env, capture_context_t *context) {
     free(context);
 }
 
+static void publish_attach_state(capture_context_t *context, int state) {
+    pthread_mutex_lock(&attach_mutex);
+    context->attach_state = state;
+    pthread_cond_broadcast(&attach_cond);
+    pthread_mutex_unlock(&attach_mutex);
+}
+
 static void *capture_thread_main(void *argument) {
     capture_context_t *context = (capture_context_t *) argument;
     if ((*context->vm)->AttachCurrentThread(context->vm, &context->env, NULL) != JNI_OK) {
         LOGE("Unable to attach capture thread to JVM");
         context->env = NULL;
+        // nativeStart joins this thread before it frees the context.
+        publish_attach_state(context, ATTACH_FAILED);
         goto cleanup;
     }
+    publish_attach_state(context, ATTACH_OK);
 
     zdtun_callbacks_t callbacks = {
             .send_client = send_client_callback,
@@ -597,6 +639,21 @@ Java_dev_gf2log_app_capture_NativeCaptureBridge_nativeStart(
 
     atomic_init(&context->running, true);
     if (pthread_create(&context->thread, NULL, capture_thread_main, context) != 0) {
+        release_context(env, context);
+        free(context);
+        pthread_mutex_unlock(&context_mutex);
+        return JNI_FALSE;
+    }
+
+    pthread_mutex_lock(&attach_mutex);
+    while (context->attach_state == ATTACH_PENDING) {
+        pthread_cond_wait(&attach_cond, &attach_mutex);
+    }
+    bool attached = context->attach_state == ATTACH_OK;
+    pthread_mutex_unlock(&attach_mutex);
+    if (!attached) {
+        // The unattached thread exits without callbacks; reporting the failed start is the stop.
+        pthread_join(context->thread, NULL);
         release_context(env, context);
         free(context);
         pthread_mutex_unlock(&context_mutex);

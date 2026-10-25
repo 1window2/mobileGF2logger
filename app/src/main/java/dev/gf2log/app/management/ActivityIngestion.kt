@@ -285,8 +285,9 @@ internal object ActivityIngestion {
 
     /**
      * Upgrades an inferred roster boundary to an exact one when a single linked activity fact
-     * falls within the correlation window. Candidate boundaries are loaded once per ingest; an
-     * applied boundary becomes exact and therefore leaves the candidate set.
+     * falls within its [MembershipCorrelationWindow]: after the previous roster and no later
+     * than the roster that revealed the change. Candidate boundaries are loaded once per ingest;
+     * an applied boundary becomes exact and therefore leaves the candidate set.
      */
     private fun reconcileInferredMembershipBoundaries(db: SQLiteDatabase) {
         val boundariesByUid = readInferredBoundaries(db)
@@ -327,9 +328,11 @@ internal object ActivityIngestion {
         activities.forEach { activity ->
             val candidates = boundariesByUid[activity.uid] ?: return@forEach
             val boundary = candidates.singleOrNull { candidate ->
-                kotlin.math.abs(
-                    candidate.inferredAt.toEpochMilli() - activity.occurredAt.toEpochMilli(),
-                ) <= MEMBERSHIP_CORRELATION_WINDOW_MILLIS
+                MembershipCorrelationWindow.admits(
+                    occurredAt = activity.occurredAt,
+                    inferredAt = candidate.inferredAt,
+                    previousRosterAt = candidate.previousRosterAt,
+                )
             } ?: return@forEach
             val eventType = when (boundary.boundary) {
                 MembershipBoundary.WITHDRAW -> MemberEventType.LEFT
@@ -354,10 +357,13 @@ internal object ActivityIngestion {
     private fun readInferredBoundaries(db: SQLiteDatabase): Map<Long, MutableList<InferredBoundary>> =
         db.rawQuery(
             """
-            SELECT id, uid, joined_at, left_at, joined_precision, left_precision
-            FROM membership_periods
-            WHERE (joined_at IS NOT NULL AND joined_precision = ?)
-               OR (left_at IS NOT NULL AND left_precision = ?)
+            SELECT period.id, period.uid, period.joined_at, period.left_at,
+                   period.joined_precision, period.left_precision,
+                   (SELECT MAX(captured_at) FROM snapshots WHERE captured_at < period.joined_at),
+                   (SELECT MAX(captured_at) FROM snapshots WHERE captured_at < period.left_at)
+            FROM membership_periods period
+            WHERE (period.joined_at IS NOT NULL AND period.joined_precision = ?)
+               OR (period.left_at IS NOT NULL AND period.left_precision = ?)
             """.trimIndent(),
             arrayOf(EvidencePrecision.INFERRED.name, EvidencePrecision.INFERRED.name),
         ).use { cursor ->
@@ -368,11 +374,23 @@ internal object ActivityIngestion {
                 val forMember = boundaries.getOrPut(uid, ::mutableListOf)
                 val joinedAt = cursor.getNullableInstant(2)
                 if (joinedAt != null && cursor.getString(4) == EvidencePrecision.INFERRED.name) {
-                    forMember += InferredBoundary(membershipPeriodId, uid, MembershipBoundary.JOIN, joinedAt)
+                    forMember += InferredBoundary(
+                        membershipPeriodId,
+                        uid,
+                        MembershipBoundary.JOIN,
+                        joinedAt,
+                        cursor.getNullableInstant(6),
+                    )
                 }
                 val leftAt = cursor.getNullableInstant(3)
                 if (leftAt != null && cursor.getNullableString(5) == EvidencePrecision.INFERRED.name) {
-                    forMember += InferredBoundary(membershipPeriodId, uid, MembershipBoundary.WITHDRAW, leftAt)
+                    forMember += InferredBoundary(
+                        membershipPeriodId,
+                        uid,
+                        MembershipBoundary.WITHDRAW,
+                        leftAt,
+                        cursor.getNullableInstant(7),
+                    )
                 }
             }
             boundaries
@@ -402,12 +420,14 @@ internal object ActivityIngestion {
         val membershipPeriodId: Long,
         val uid: Long,
         val boundary: MembershipBoundary,
+        /** Capture time of the roster that revealed the change. */
         val inferredAt: Instant,
+        /** Capture time of the roster before it, which still showed the earlier state. */
+        val previousRosterAt: Instant?,
     )
 
     private const val MAX_UNRESOLVED_ACTIVITY_RESOLUTIONS = 250
     private const val ACTIVITY_RESOLUTION_CURSOR_KEY = "activity_resolution_cursor"
     private const val DAILY_PATROL_RELATED_ACTION_ID = 801005L
     private const val NAME_RESOLUTION_WINDOW_MILLIS = 30L * 24L * 60L * 60L * 1000L
-    private const val MEMBERSHIP_CORRELATION_WINDOW_MILLIS = 12L * 60L * 60L * 1000L
 }

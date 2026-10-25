@@ -2,7 +2,6 @@ package dev.gf2log.app.settings
 
 import android.content.Context
 import dev.gf2log.app.management.PlatoonProfileIdentity
-import dev.gf2log.app.management.PlatoonProfileRegistry
 
 data class WeeklyCutlines(
     val dailyMerit: Long? = null,
@@ -41,7 +40,7 @@ data class WeeklyCutlines(
 
 class WeeklyCutlinePreferences(
     context: Context,
-    private val storageId: String = PlatoonProfileRegistry(context).activeScope().storageId,
+    private val storageId: String,
 ) {
     private val appContext = context.applicationContext
     private val scoped = appContext.getSharedPreferences(PROFILE_PREFERENCES, Context.MODE_PRIVATE)

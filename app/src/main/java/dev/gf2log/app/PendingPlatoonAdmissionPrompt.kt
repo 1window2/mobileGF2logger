@@ -7,11 +7,7 @@ import android.text.TextUtils
 import android.view.View
 import android.widget.RadioButton
 import android.widget.RadioGroup
-import dev.gf2log.app.capture.CaptureNotice
-import dev.gf2log.app.capture.CaptureSnapshot
-import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.capture.CaptureVpnService
-import dev.gf2log.app.capture.format
 import dev.gf2log.app.capture.PendingPlatoonAdmissionStore
 import dev.gf2log.app.management.PlatoonClient
 import dev.gf2log.app.settings.ClientServerRegionPreferences
@@ -29,25 +25,41 @@ import java.lang.ref.WeakReference
 /**
  * Presents the process-memory admission gate for a newly detected Platoon. Screens observe the
  * pending store, so the prompt appears as soon as a candidate arrives and closes when it is
- * confirmed or discarded elsewhere.
+ * confirmed or discarded elsewhere. A confirmation keeps the prompt open while it runs, and a
+ * failed one comes back to it with the reason the store recorded.
  */
 internal object PendingPlatoonAdmissionPrompt {
     private var visible = WeakReference<AlertDialog>(null)
     private var owner = WeakReference<Activity>(null)
     private var visibleToken: String? = null
+    private var refreshVisible: ((PendingPlatoonAdmissionStore.Summary) -> Unit)? = null
     private val selections = HashMap<String, GameServerRegion>()
+
+    /**
+     * The candidate's attempt count when a confirmation was sent. Until the worker claims it and
+     * the count moves on, the request is still queued and an earlier failure is not shown.
+     */
+    private val requested = HashMap<String, Int>()
 
     fun onCandidatesChanged(activity: Activity, candidates: List<PendingPlatoonAdmissionStore.Summary>) {
         if (activity.isFinishing || activity.isDestroyed) return
         val showing = visible.get()?.takeIf { it.isShowing }
+        val current = candidates.firstOrNull { it.token == visibleToken }
         if (showing != null) {
-            if (candidates.any { it.token == visibleToken }) return
-            // The visible candidate was resolved; move on to the next queued one.
+            if (current != null && owner.get() === activity) {
+                refreshVisible?.invoke(current)
+                return
+            }
+            // Either the visible candidate was resolved (move on to the next queued one), or a
+            // newly started screen now owns the prompt: the one behind it closes its dialog on
+            // stop, so the prompt moves here, keeping the chosen server.
             showing.dismiss()
             clearVisible()
         }
-        selections.keys.retainAll(candidates.mapTo(mutableSetOf()) { it.token })
-        candidates.firstOrNull()?.let { show(activity, it) }
+        val tokens = candidates.mapTo(mutableSetOf()) { it.token }
+        selections.keys.retainAll(tokens)
+        requested.keys.retainAll(tokens)
+        (current ?: candidates.firstOrNull())?.let { show(activity, it) }
     }
 
     /** Dismisses the prompt only when [activity] owns it, so a newly started screen keeps its own. */
@@ -61,6 +73,7 @@ internal object PendingPlatoonAdmissionPrompt {
         visible.clear()
         owner.clear()
         visibleToken = null
+        refreshVisible = null
     }
 
     private fun show(activity: Activity, candidate: PendingPlatoonAdmissionStore.Summary) {
@@ -93,7 +106,8 @@ internal object PendingPlatoonAdmissionPrompt {
             addView(status, activity.lp(top = 8))
             addView(activity.text(activity.getString(R.string.new_platoon_memory_only_notice), TextRole.CAPTION), activity.lp(top = 8))
         }
-        var statusListener: ((CaptureSnapshot) -> Unit)? = null
+        var latest = candidate
+        var render: (() -> Unit)? = null
         val dialog = Dialogs.show(
             Dialogs.builder(activity)
                 .setTitle(R.string.new_platoon_detected)
@@ -103,6 +117,7 @@ internal object PendingPlatoonAdmissionPrompt {
                 .setPositiveButton(R.string.confirm, null),
         ) { shown ->
             val confirm = shown.getButton(AlertDialog.BUTTON_POSITIVE)
+            val discard = shown.getButton(AlertDialog.BUTTON_NEGATIVE)
             val ids = regions.map { region ->
                 RadioButton(activity).apply {
                     id = View.generateViewId()
@@ -114,44 +129,56 @@ internal object PendingPlatoonAdmissionPrompt {
                     isChecked = selections[candidate.token] == region
                 }.also { radios.addView(it) }.id
             }
-            confirm.isEnabled = candidate.token in selections
             radios.setOnCheckedChangeListener { _, checkedId ->
                 regions.getOrNull(ids.indexOf(checkedId))?.let { selections[candidate.token] = it }
-                confirm.isEnabled = candidate.token in selections
+                render?.invoke()
             }
+            render = {
+                if (requested[candidate.token].let { it != null && it < latest.attempts }) {
+                    requested -= candidate.token
+                }
+                val busy = latest.admitting || candidate.token in requested
+                val failure = latest.failure
+                when {
+                    busy -> {
+                        status.text = activity.getString(R.string.confirming_platoon)
+                        status.setTextColor(activity.getColor(R.color.text_secondary))
+                        status.visibility = View.VISIBLE
+                    }
+                    failure != null -> {
+                        status.text = activity.getString(failure.messageRes)
+                        status.setTextColor(activity.getColor(R.color.destructive_action))
+                        status.visibility = View.VISIBLE
+                    }
+                    else -> status.visibility = View.GONE
+                }
+                confirm.isEnabled = !busy && candidate.token in selections
+                discard.isEnabled = !busy
+            }
+            render?.invoke()
             confirm.setOnClickListener {
                 val region = selections[candidate.token] ?: return@setOnClickListener
-                val requestedAt = System.currentTimeMillis()
-                status.text = activity.getString(R.string.confirming_platoon)
-                status.setTextColor(activity.getColor(R.color.text_secondary))
-                status.visibility = View.VISIBLE
-                // Failures arrive only as capture notices; surface them here and allow a retry.
-                statusListener?.let(CaptureStatus::removeListener)
-                statusListener = { snapshot: CaptureSnapshot ->
-                    val event = snapshot.notice
-                    if (event != null && event.atMillis >= requestedAt && event.notice in ADMISSION_FAILURES) {
-                        status.text = event.format(activity)
-                        status.setTextColor(activity.getColor(R.color.destructive_action))
-                        confirm.isEnabled = true
-                    }
-                }.also(CaptureStatus::addListener)
+                requested[candidate.token] = latest.attempts
+                render?.invoke()
                 activity.startService(
                     Intent(activity, CaptureVpnService::class.java)
                         .setAction(CaptureVpnService.ACTION_CONFIRM_PENDING_PLATOON)
                         .putExtra(CaptureVpnService.EXTRA_PENDING_TOKEN, candidate.token)
                         .putExtra(CaptureVpnService.EXTRA_SERVER_REGION, region.storedValue),
                 )
-                confirm.isEnabled = false
             }
-            shown.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { confirmDiscard(activity, candidate) }
+            discard.setOnClickListener { confirmDiscard(activity, candidate) }
         }
         dialog.setOnDismissListener {
-            statusListener?.let(CaptureStatus::removeListener)
             if (visible.get() === dialog) clearVisible()
         }
         visible = WeakReference(dialog)
         owner = WeakReference(activity)
         visibleToken = candidate.token
+        refreshVisible = { summary ->
+            latest = summary
+            render?.invoke()
+        }
     }
 
     private fun confirmDiscard(activity: Activity, candidate: PendingPlatoonAdmissionStore.Summary) {
@@ -170,12 +197,4 @@ internal object PendingPlatoonAdmissionPrompt {
             destructive = true,
         )
     }
-
-    private val ADMISSION_FAILURES = setOf(
-        CaptureNotice.ADMISSION_INVALID,
-        CaptureNotice.ADMISSION_REGION_MISMATCH,
-        CaptureNotice.ADMISSION_LIMIT,
-        CaptureNotice.ADMISSION_PROFILE_FAILED,
-        CaptureNotice.ADMISSION_REPLAY_FAILED,
-    )
 }

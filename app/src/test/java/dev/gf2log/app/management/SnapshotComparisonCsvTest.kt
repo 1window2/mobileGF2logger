@@ -1,6 +1,7 @@
 package dev.gf2log.app.management
 
 import java.time.Instant
+import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -19,12 +20,12 @@ class SnapshotComparisonCsvTest {
             member(3, "New", 50),
         )
 
-        val csv = SnapshotComparisonCsv.format(SnapshotComparison.compare(older, newer))
+        val csv = SnapshotComparisonCsv.format(SnapshotComparison.compare(older, newer, ZoneId.of("Asia/Seoul")))
 
         assertEquals(SnapshotComparisonCsv.HEADER, csv.lineSequence().first())
         assertTrue(csv.contains(",JOINED,3,New,"))
         assertTrue(csv.contains(",WITHDREW,1,Old,"))
-        assertTrue(csv.contains(",CHANGED,2,\"Member, Two\",90,90,0,false"))
+        assertTrue(csv.contains(",CHANGED,2,\"Member, Two\",90,90,0,false,EXACT,EXACT"))
     }
 
     @Test
@@ -32,7 +33,7 @@ class SnapshotComparisonCsvTest {
         val older = snapshot("2026-07-20T00:00:00Z")
         val newer = snapshot("2026-07-21T00:00:00Z", member(3, "@SUM(A1)", 50))
 
-        val csv = SnapshotComparisonCsv.format(SnapshotComparison.compare(older, newer))
+        val csv = SnapshotComparisonCsv.format(SnapshotComparison.compare(older, newer, ZoneId.of("Asia/Seoul")))
 
         assertTrue(csv.contains(",JOINED,3,'@SUM(A1),"))
     }

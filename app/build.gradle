@@ -154,8 +154,8 @@ android {
         applicationId = 'dev.gf2log'
         minSdk = 26
         targetSdk = 36
-        versionCode = 20700
-        versionName = '2.7.0'
+        versionCode = 20701
+        versionName = '2.7.1'
         testInstrumentationRunner = 'androidx.test.runner.AndroidJUnitRunner'
 
         ndk {
@@ -178,7 +178,8 @@ android {
                 storePassword = releaseSigningProperties.getProperty('storePassword')
                 keyAlias = releaseSigningProperties.getProperty('keyAlias')
                 keyPassword = releaseSigningProperties.getProperty('keyPassword')
-                enableV1Signing = true
+                // minSdk 26 verifies v2+ signatures; the JAR (v1) signature only adds bytes.
+                enableV1Signing = false
                 enableV2Signing = true
                 enableV3Signing = true
                 enableV4Signing = true
@@ -206,6 +207,19 @@ android {
         cmake {
             path = file('src/main/cpp/CMakeLists.txt')
             version = '3.22.1'
+        }
+    }
+
+    packaging {
+        resources {
+            // Kotlin reflection metadata and library version/licence stamps; nothing reads them at
+            // run time (no kotlin-reflect, no coroutines debug probes).
+            excludes += [
+                '**/*.kotlin_builtins',
+                'DebugProbesKt.bin',
+                'META-INF/*.version',
+                'META-INF/androidx/**/LICENSE.txt',
+            ]
         }
     }
 

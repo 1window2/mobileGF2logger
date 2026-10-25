@@ -72,17 +72,6 @@ class PlatoonDatabaseIntegrationTest {
             },
         )
         writable.insertOrThrow(
-            "weekly_notes",
-            null,
-            ContentValues().apply {
-                put("period_start", 20665L)
-                put("game_day", 20665L)
-                put("text", "Target joined")
-                put("event_id", targetEventId)
-                put("is_automatic", 1)
-            },
-        )
-        writable.insertOrThrow(
             "platoon_activity",
             null,
             ContentValues().apply {
@@ -106,7 +95,6 @@ class PlatoonDatabaseIntegrationTest {
         assertEquals(0L, count("snapshot_members", "uid = ?", TARGET_UID))
         assertEquals(0L, count("weekly_overrides", "uid = ?", TARGET_UID))
         assertEquals(0L, count("platoon_activity", "resolved_uid = ?", TARGET_UID))
-        assertEquals(0L, count("weekly_notes", "text = ?", "Target joined"))
         assertEquals(1L, count("members", "uid = ?", OTHER_UID))
         assertEquals(1L, count("snapshots", "source_file = ?", sourceFile))
         assertTrue(sourceFile in database.snapshotSourceFiles())
@@ -1267,6 +1255,87 @@ class PlatoonDatabaseIntegrationTest {
         assertFalse(database.activateWeeklyReportHistory(latestId, period + 7))
         assertTrue(database.clearActiveWeeklyReportHistory(period))
         assertFalse(database.listWeeklyReportHistory(period).any { it.active })
+    }
+
+    @Test
+    fun onlyActivityBeforeTheRevealingRosterDatesAnInferredJoin() {
+        val previousRoster = Instant.parse("2026-08-03T00:00:00Z")
+        val revealingRoster = Instant.parse("2026-08-03T06:00:00Z")
+        listOf(
+            previousRoster to listOf(member(OTHER_UID, "Other")),
+            revealingRoster to listOf(member(OTHER_UID, "Other"), member(TARGET_UID, "Target")),
+        ).forEach { (capturedAt, members) ->
+            database.ingestSnapshot(
+                PlatoonSnapshot(id = 0, capturedAt = capturedAt, members = members),
+                EvidenceSource.SNAPSHOT,
+            )
+        }
+        val inferredJoin = "uid = ? AND joined_precision = 'INFERRED' AND joined_at = " +
+            revealingRoster.toEpochMilli()
+
+        // Within the old symmetric 12-hour window, but after the roster already listed Target.
+        database.ingestPlatoonActivity(
+            listOf(activity("Target", revealingRoster.plusSeconds(60L * 60L))),
+            revealingRoster.plusSeconds(2L * 60L * 60L),
+        )
+        assertEquals(1L, count("membership_periods", inferredJoin, TARGET_UID))
+
+        val joinedAt = revealingRoster.minusSeconds(60L * 60L)
+        database.ingestPlatoonActivity(
+            listOf(activity("Target", joinedAt)),
+            revealingRoster.plusSeconds(3L * 60L * 60L),
+        )
+        assertEquals(0L, count("membership_periods", inferredJoin, TARGET_UID))
+        assertEquals(
+            1L,
+            count(
+                "membership_periods",
+                "uid = ? AND joined_precision = 'EXACT' AND joined_at = " + joinedAt.toEpochMilli(),
+                TARGET_UID,
+            ),
+        )
+    }
+
+    private fun activity(name: String, occurredAt: Instant) = PlatoonActivityObservation(
+        occurredAt = occurredAt,
+        actionId = 701001L,
+        kind = 1,
+        memberName = name,
+    )
+
+    @Test
+    fun weeklyHistoryKeepsRecordingOrderAfterTheClockStepsBackwards() {
+        val period = LocalDate.of(2026, 8, 16).toEpochDay()
+        repeat(PlatoonDatabase.MAX_WEEKLY_REPORT_HISTORY) { index ->
+            database.recordWeeklyReportHistory(
+                periodStartEpochDay = period,
+                recordedAt = Instant.ofEpochMilli(1_000_000L + index),
+                fingerprint = index.toString(16).padStart(64, '0'),
+                payload = byteArrayOf(index.toByte()),
+                clearActiveOnChange = true,
+            )
+        }
+        val steppedBack = database.recordWeeklyReportHistory(
+            periodStartEpochDay = period,
+            recordedAt = Instant.ofEpochMilli(1L),
+            fingerprint = "a".repeat(64),
+            payload = byteArrayOf(1),
+            clearActiveOnChange = true,
+        )
+
+        val retained = database.listWeeklyReportHistory(period)
+        assertEquals(PlatoonDatabase.MAX_WEEKLY_REPORT_HISTORY, retained.size)
+        assertEquals(steppedBack, retained.first().id)
+        assertEquals(
+            steppedBack,
+            database.recordWeeklyReportHistory(
+                periodStartEpochDay = period,
+                recordedAt = Instant.ofEpochMilli(2L),
+                fingerprint = "a".repeat(64),
+                payload = byteArrayOf(1),
+                clearActiveOnChange = true,
+            ),
+        )
     }
 
     @Test

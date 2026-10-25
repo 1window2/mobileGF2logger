@@ -24,7 +24,9 @@ rules below take precedence over stale copied dates in archived templates.
 - Gunsmoke scoring closes at 02:00 on the final Sunday. A Saturday snapshot at
   or after 02:00 therefore confirms the final cumulative Gunsmoke score, while
   merit, login, Daily Patrol, and the Saturday game day remain open until
-  05:00. A daily Saturday score delta still requires a trustworthy opening
+  05:00. A capture exactly at a 05:00 reset records the closed previous game
+  day, so the Sunday 05:00 capture is the final, closing Saturday capture of
+  the event week. A daily Saturday score delta still requires a trustworthy opening
   boundary; the app does not invent one from the final total alone.
 - A capture shortly before 05:00 is not an exact opening boundary for the next
   day. Its following counter delta can include the previous day's tail, so the
@@ -86,7 +88,10 @@ additional upper bound: when an aggregate saturates that bound, it can also fix
 the attempt count and the otherwise ambiguous per-attempt rounding merit.
 
 Counter resets are handled by treating a negative delta as the current counter
-value. Daily activity is derived from Total Merit because Merit This Week
+value. A roster comparison across a Monday 05:00 weekly reset or a Gunsmoke
+event start reports the newer Merit This Week or Gunsmoke score as a lower
+bound (`≥`) even when it came back higher, because the older counter's gain
+before the reset is unknown. Daily activity is derived from Total Merit because Merit This Week
 resets on Monday while a Gunsmoke week begins on Sunday.
 A capped pre-Gunsmoke counter is a valid opening anchor only inside the
 immediately preceding Monday 05:00-to-Sunday 05:00 calendar interval in the
@@ -105,7 +110,10 @@ transitions.
 - Non-Gunsmoke weeks constrain every `0/50/90` daily allocation against all
   captured Weekly Merit checkpoints. A 21917 recent-login time proves the
   member logged in on its 05:00-based game day and narrows that day to 50 or
-  90; an exact Daily Patrol event fixes it at 90.
+  90; an exact Daily Patrol event fixes it at 90. A Standard day never shows
+  more than 90: a delta above the cap after a near-reset baseline contains the
+  previous day's login or patrol tail, so the day keeps a value only when a
+  single split of that delta remains.
 - Values shared by every compatible allocation are exact. Ambiguous completed
   days remain unknown instead of displaying an arbitrary allocation, while an
   unfinished day displays only its confirmed positive lower bound until it
@@ -128,9 +136,17 @@ transitions.
   merit, attendance, Daily Patrol, and the week transition; unresolved values
   therefore remain lower bounds.
 - If a later transition exceeds the bounded detailed search, already solved
-  earlier days remain visible. The cumulative score/high-score attempt floor
-  and timestamped Login or Daily Patrol facts are retained even when a broader
-  aggregate fallback admits a smaller value.
+  earlier days remain visible and the rest of the run continues with interval
+  bounds: each capture is tracked only by its attempt count, Login, and Daily
+  Patrol, with merit and score ranges for how an interval can split between
+  the previous day's last minutes and the next day. These bounds admit every
+  split the detailed search would, so later days keep defensible lower bounds
+  and shared Login / Daily Patrol states instead of being dropped. A capture
+  shortly before 05:00 every day therefore keeps each day as a lower bound
+  (its interval may still belong to the previous day) while the final event
+  packet can still make the weekly totals exact. The cumulative
+  score/high-score attempt floor and timestamped Login or Daily Patrol facts
+  are retained even when a broader aggregate fallback admits a smaller value.
 - The separate Join/Withdraw section combines UID-safe 21917 roster changes,
   exact 21960 Updates timestamps, and manually entered membership history.
   Snapshot-only boundaries are labelled with their observation time instead of
@@ -189,7 +205,11 @@ transitions.
   delete the member instead when the complete record should be removed.
 - The current member list displays the latest open membership period. A withdrawn member
   displays the latest join and withdrawal times.
-- Snapshot differences provide an observed time window. Exact in-game Updates
+- Snapshot differences provide an observed time window. A name-resolved 21935
+  activity can date an inferred join or withdrawal only when it lies after the
+  previous roster and no later than the roster that revealed the change, at
+  most 12 hours before it; an activity after that roster, which already showed
+  the change, never becomes the boundary. Exact in-game Updates
   events can replace an inferred boundary only when a unique 21917 UID can be
   correlated safely; 21935 contains names but no UID.
 - Exact packet-linked boundary fields are immutable while editing. Users can
@@ -227,6 +247,9 @@ transitions.
 - Weekly history is a derived audit trail, not the primary store. If refreshing
   one revision fails after a successful data mutation, the affected restored
   selection is cleared so the live database projection remains authoritative.
+  Revisions are ordered, deduplicated, and trimmed by recording order rather
+  than by their wall-clock time, so a revision recorded after the device clock
+  moved backwards is still the latest one instead of being trimmed at once.
 - A manual Daily Patrol requires manual attendance. When an edit sets one of
   the two and the other stored choice contradicts it, the edited choice wins
   (Patrol yes also sets Login yes; Login no also sets Patrol no); Login no with

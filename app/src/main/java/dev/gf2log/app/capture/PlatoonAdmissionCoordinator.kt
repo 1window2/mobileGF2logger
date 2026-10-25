@@ -84,8 +84,13 @@ internal class PlatoonAdmissionCoordinator(
     fun confirm(token: String, region: GameServerRegion) {
         var admitted: PlatoonProfile? = null
         val completedFlows = PendingPlatoonAdmissionStore.withClaim(token) { claim ->
-            admitted = admit(claim, region)
-            admitted != null
+            when (val outcome = admit(claim, region)) {
+                is Outcome.Admitted -> {
+                    admitted = outcome.profile
+                    null
+                }
+                is Outcome.Failed -> outcome.notice
+            }
         } ?: return
         completedFlows.forEach { tokenByFlow.remove(it, token) }
         val profile = admitted ?: return
@@ -97,12 +102,11 @@ internal class PlatoonAdmissionCoordinator(
         )
     }
 
-    /** Persists the claimed identity and replays its payloads; null after reporting a failure. */
-    private fun admit(claim: PendingPlatoonAdmissionStore.Claim, region: GameServerRegion): PlatoonProfile? {
+    /** Persists the claimed identity and replays its payloads, reporting any failure. */
+    private fun admit(claim: PendingPlatoonAdmissionStore.Claim, region: GameServerRegion): Outcome {
         val ownerPackage = claim.summary.ownerPackage
         if (region !in clientServerRegions.allowed(ownerPackage)) {
-            CaptureStatus.report(CaptureNotice.ADMISSION_REGION_MISMATCH)
-            return null
+            return failed(CaptureNotice.ADMISSION_REGION_MISMATCH)
         }
         val client = requireNotNull(PlatoonClient.fromPackage(ownerPackage))
         val existing = profileRegistry.findByIdentity(
@@ -111,8 +115,7 @@ internal class PlatoonAdmissionCoordinator(
             claim.summary.profile.platoonId.toLong(),
         )
         if (!admissionGate.canAdmit(ownerPackage, existing != null)) {
-            CaptureStatus.report(CaptureNotice.ADMISSION_LIMIT)
-            return null
+            return failed(CaptureNotice.ADMISSION_LIMIT)
         }
         val previousRegion = clientServerRegions.stored(ownerPackage)
         val profile = runCatching {
@@ -130,36 +133,42 @@ internal class PlatoonAdmissionCoordinator(
                     clientServerRegions.set(ownerPackage, previousRegion)
                 }
             }.onFailure(error::addSuppressed)
-            CaptureStatus.report(CaptureNotice.ADMISSION_PROFILE_FAILED)
-            return null
+            return failed(CaptureNotice.ADMISSION_PROFILE_FAILED)
         }
         if (existing == null) admissionGate.markAdmitted(ownerPackage)
         flows.profileChanged(profile.storageId)
-        if (!replay(claim, profile)) {
-            CaptureStatus.report(CaptureNotice.ADMISSION_REPLAY_FAILED)
-            return null
-        }
-        return profile
+        if (!replay(claim, profile)) return failed(CaptureNotice.ADMISSION_REPLAY_FAILED)
+        return Outcome.Admitted(profile)
     }
 
-    /** Binds live flows to [profile] and routes the buffered payloads in their captured order. */
+    private fun failed(notice: CaptureNotice): Outcome {
+        CaptureStatus.report(notice)
+        return Outcome.Failed(notice)
+    }
+
+    /**
+     * Binds every claimed flow to [profile] before any buffered payload is routed, then routes
+     * them in their captured order. Binding is the only step that fails the replay, and it fails
+     * before anything was persisted, so a retry cannot duplicate history or roster files. Once
+     * routing starts the replay completes: each payload reports its own save failures.
+     */
     private fun replay(claim: PendingPlatoonAdmissionStore.Claim, profile: PlatoonProfile): Boolean {
-        val sessions = mutableMapOf<Long, PlatoonCaptureSession>()
-        val replayed = runCatching {
-            // Live flows stay bound; an ended flow needs a session only while its payloads replay.
-            claim.flowIds.filterNot(claim.endedFlowIds::contains).forEach { flowId ->
-                sessions[flowId] = flows.bind(flowId, profile)
-            }
-            claim.payloads.forEach { buffered ->
-                flows.route(
-                    sessions.getOrPut(buffered.flowId) { flows.bind(buffered.flowId, profile) },
-                    buffered.payload,
-                )
-            }
+        val sessions = linkedMapOf<Long, PlatoonCaptureSession>()
+        // Live flows stay bound; an ended flow needs a session only while its payloads replay.
+        val flowIds = claim.flowIds.filterNot(claim.endedFlowIds::contains) +
+            claim.payloads.map(PendingPlatoonAdmissionStore.BufferedPayload::flowId)
+        val bound = runCatching {
+            flowIds.forEach { flowId -> sessions.getOrPut(flowId) { flows.bind(flowId, profile) } }
         }
-        if (replayed.isFailure) {
+        if (bound.isFailure) {
             sessions.forEach { (flowId, session) -> flows.unbind(flowId, session) }
             return false
+        }
+        claim.payloads.forEach { buffered ->
+            runCatching { flows.route(sessions.getValue(buffered.flowId), buffered.payload) }
+                .onFailure { error ->
+                    CaptureStatus.report(CaptureNotice.PROCESSING_FAILED, error.javaClass.simpleName)
+                }
         }
         claim.endedFlowIds.forEach { flowId ->
             sessions.remove(flowId)?.let { flows.unbind(flowId, it) }
@@ -197,6 +206,11 @@ internal class PlatoonAdmissionCoordinator(
                 false
             }
         }
+
+    private sealed interface Outcome {
+        data class Admitted(val profile: PlatoonProfile) : Outcome
+        data class Failed(val notice: CaptureNotice) : Outcome
+    }
 
     companion object {
         const val MAX_STATUS_NAME_CHARS = 40

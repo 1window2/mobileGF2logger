@@ -5,6 +5,7 @@
     <string name="capture_status_label">Capture status</string>
     <string name="capture_ready">Ready</string>
     <string name="capture_running">Capturing</string>
+    <string name="capture_stopping">Stopping capture</string>
     <string name="nav_home">Home</string>
     <string name="nav_platoon">Platoon</string>
     <string name="nav_weekly">Weekly</string>
@@ -103,6 +104,9 @@
     <string name="delete_member">Delete member</string>
     <string name="delete_member_warning">Deleting this member permanently removes their history, personal notes, and weekly edits. A later roster may add the member again, but the deleted details cannot be recovered.</string>
     <string name="member_deleted">Member deleted</string>
+    <string name="packet_too_large_to_copy">This packet is too large to copy to the clipboard.</string>
+    <string name="packet_raw_truncated">Showing the first %1$s of %2$s characters.</string>
+    <string name="history_delete_failed">Unable to delete the selected packets</string>
     <string name="member_delete_failed">Unable to delete member</string>
     <string name="add_withdrawn_member">Add withdrawn member</string>
     <string name="membership_note_hint">Notes</string>
@@ -349,6 +353,7 @@
     <string name="clear_discord_webhook">Remove saved webhook</string>
     <string name="discord_webhook_saved">Discord webhook saved securely.</string>
     <string name="discord_webhook_invalid">Enter a valid HTTPS incoming-webhook URL on discord.com.</string>
+    <string name="clear_discord_webhook_confirm">Remove the saved Discord webhook? You will need to paste it again to send CSV files.</string>
     <string name="discord_webhook_cleared">Saved Discord webhook removed.</string>
     <string name="discord_webhook_clear_failed">Unable to remove the saved Discord webhook.</string>
     <string name="send_original_csv">Send original CSV</string>
@@ -407,7 +412,7 @@
     <string name="level_short">Lv. %1$d</string>
     <string name="loading_comparison">Comparing snapshots…</string>
     <string name="loading_members">Loading members…</string>
-    <string name="member_change_description">%1$s: merit this week +%2$d, total merit +%3$d, Gunsmoke score +%4$d</string>
+    <string name="member_change_description">%1$s: merit this week +%2$s, total merit +%3$d, Gunsmoke score +%4$s</string>
     <string name="member_changes_count">Counter changes · %1$d</string>
     <string name="member_nickname_detail">Shown everywhere in place of the in-game name.</string>
     <string name="member_order_position">%1$d of %2$d, %3$s</string>
@@ -524,6 +529,7 @@
     <string name="backup_restoring">Restoring backup…</string>
     <string name="capture_preparing_detail">Waiting for Android to start the VPN.</string>
     <string name="capture_ready_detail">Open the game\'s Platoon › Members and Updates pages while capture runs.</string>
+    <string name="capture_stopping_detail">Saving the last packets before capture ends.</string>
     <string name="captured">captured</string>
     <string name="change">Change</string>
     <string name="checklist_activity">Platoon activity</string>
@@ -605,6 +611,8 @@
     <string name="apply_and_next_day">Apply, next day</string>
     <string name="capture_running_title">Capture is running</string>
     <string name="stop_capture_and_continue">Stop capture</string>
+    <string name="capture_stop_timeout_title">Capture is still stopping</string>
+    <string name="capture_stop_timeout_message">Capture didn\'t finish stopping, so nothing was changed. Wait until Home shows Ready, then try again.</string>
     <string name="invalid_activity_choice">Patrol can\'t be yes while login is no.</string>
     <string name="open_standby_mode">Turn on standby mode</string>
     <string name="standby_running">Standby mode is on</string>

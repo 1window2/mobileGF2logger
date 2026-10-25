@@ -90,7 +90,7 @@ class MemberDetailActivity : BaseActivity() {
     }
 
     override fun onScreenResumed() {
-        if (!profileBinding.isCurrent(this)) {
+        if (!profileBinding.isSameStorage(this)) {
             // The member belongs to the previous Platoon scope.
             finish()
             return

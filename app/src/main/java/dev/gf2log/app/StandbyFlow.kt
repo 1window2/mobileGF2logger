@@ -40,7 +40,8 @@ internal class StandbyFlow(
 
     private val vpnConsent = activity.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
-            chooseServers(pendingServers, pendingPackages)
+            // Home recreated behind the system dialog lost the list: read it again.
+            if (pendingServers.isEmpty()) prepareRecording() else chooseServers(pendingServers, pendingPackages)
         } else {
             Feedback.show(activity, R.string.standby_vpn_needed, long = true)
             openStandby()
@@ -59,7 +60,9 @@ internal class StandbyFlow(
                 }
                 .setPositiveButton(R.string.standby_battery_allow) { _, _ ->
                     StandbyBatteryPrompt.markAsked(activity)
-                    batteryExemption.launch(StandbyBatteryPrompt.requestIntent(activity))
+                    // Some phones have no such dialog; the exemption is a help, not a requirement.
+                    runCatching { batteryExemption.launch(StandbyBatteryPrompt.requestIntent(activity)) }
+                        .onFailure { prepareRecording() }
                 },
         )
     }

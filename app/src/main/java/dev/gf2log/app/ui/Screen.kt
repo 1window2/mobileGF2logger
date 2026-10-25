@@ -39,6 +39,10 @@ internal class Screen(
     }
 
     init {
+        // Minimum heights count padding, so the system-bar insets are added on top of them;
+        // otherwise the bars' own content would shrink by the inset.
+        val topBarHeight = topBar.minimumHeight
+        val bottomBarHeight = bottomBar?.minimumHeight ?: 0
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, windowInsets ->
             val bars = windowInsets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
@@ -46,8 +50,10 @@ internal class Screen(
             val ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime())
             view.setPadding(bars.left, 0, bars.right, 0)
             topBar.setPadding(topBar.paddingLeft, bars.top, topBar.paddingRight, 0)
+            topBar.minimumHeight = topBarHeight + bars.top
             bottomInset = if (bottomBar != null) {
                 bottomBar.setPadding(0, 0, 0, bars.bottom)
+                bottomBar.minimumHeight = bottomBarHeight + bars.bottom
                 maxOf(0, ime.bottom - bars.bottom)
             } else {
                 maxOf(bars.bottom, ime.bottom)

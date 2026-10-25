@@ -159,7 +159,9 @@ internal object Feedback {
     }
 
     fun show(context: Context, @StringRes message: Int, long: Boolean = false) {
-        show(context, context.getString(message), long)
+        // Only Activities carry the app's own language; anything else would show the device's.
+        val localized = context as? android.app.Activity ?: dev.gf2log.app.LanguagePreferences.wrap(context.applicationContext)
+        show(context, localized.getString(message), long)
     }
 
     /** Copies plain [value] under the clipboard [label] and confirms with [confirmation]. */

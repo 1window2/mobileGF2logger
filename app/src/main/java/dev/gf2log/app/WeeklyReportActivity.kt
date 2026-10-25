@@ -11,6 +11,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import dev.gf2log.app.capture.RosterEvents
 import dev.gf2log.app.management.MemberEvent
 import dev.gf2log.app.management.PlatoonPeriods
 import dev.gf2log.app.management.PlatoonRepository
@@ -73,7 +74,10 @@ class WeeklyReportActivity : BaseActivity() {
 
     private val topAdapter = SingleViewAdapter()
     private val headerAdapter = SingleViewAdapter()
-    private val rowsAdapter = RowsAdapter()
+    // Scroll restores once rows exist, not onto the loading view of a recreated screen.
+    private val rowsAdapter = RowsAdapter().apply {
+        stateRestorationPolicy = RecyclerView.Adapter.StateRestorationPolicy.PREVENT_WHEN_EMPTY
+    }
     private val stateAdapter = SingleViewAdapter()
     private val bottomAdapter = SingleViewAdapter()
 
@@ -122,13 +126,22 @@ class WeeklyReportActivity : BaseActivity() {
             recreate()
             return
         }
-        reportState.onResume()
         requestRender(reconcileRetainedCsv = true)
     }
 
-    override fun onPause() {
-        if (::reportState.isInitialized) reportState.onPause()
-        super.onPause()
+    /** A roster captured while this screen is showing updates the table; edits in progress stay. */
+    private val rosterSaved: (String) -> Unit = { storageId ->
+        if (::scope.isInitialized && storageId == scope.storageId) requestRender()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        RosterEvents.addListener(rosterSaved)
+    }
+
+    override fun onStop() {
+        RosterEvents.removeListener(rosterSaved)
+        super.onStop()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -157,13 +170,13 @@ class WeeklyReportActivity : BaseActivity() {
     // region Loading and rendering
 
     private fun requestRender(reconcileRetainedCsv: Boolean = false) {
-        val request = reportState.newRenderRequest()
+        val referenceDay = reportState.referenceDay
         if (model == null) stateAdapter.view = StateViews.loading(this, getString(R.string.weekly_report_loading))
         work.run(
             key = RENDER,
             task = {
                 if (reconcileRetainedCsv) repository.reconcileRetainedCsvFiles()
-                loadRenderModel(request.referenceDay)
+                loadRenderModel(referenceDay)
             },
         ) { result ->
             result.fold(
@@ -504,6 +517,8 @@ class WeeklyReportActivity : BaseActivity() {
     }
 
     private fun cancelEditing() {
+        // A save in flight already holds these edits; discarding now could not take them back.
+        if (work.isBusy(SAVE)) return
         if (edits.isEmpty()) {
             finishEditing()
             return
@@ -526,18 +541,23 @@ class WeeklyReportActivity : BaseActivity() {
         val current = model ?: return
         if (work.isBusy(SAVE)) return
         val report = current.report
+        // The edits as tapped; whatever happens to the draft meanwhile, exactly these are saved.
+        val saving = edits.values.toList()
         // Merge against the stored overrides, not the displayed table: a restored revision or a member
         // missing from the roster would otherwise drop overrides the user never touched.
         work.run(key = SAVE, task = { repository.listWeeklyOverrides(report.periodStart.toEpochDay()) }) { stored ->
-            stored.onFailure { Feedback.show(this, R.string.save_failed) }
-            stored.onSuccess { saveMerged(current, it) }
+            stored.onFailure {
+                Feedback.show(this, R.string.save_failed)
+                updateTopBar()
+            }
+            stored.onSuccess { saveMerged(current, it, saving) }
         }
         updateTopBar()
     }
 
-    private fun saveMerged(current: RenderModel, existing: List<WeeklyCellOverride>) {
+    private fun saveMerged(current: RenderModel, existing: List<WeeklyCellOverride>, saving: List<WeeklyOverrideEditing.CellEdit>) {
         val report = current.report
-        when (val merged = WeeklyOverrideEditing.merge(report.periodStart, report.isGunsmokeWeek, existing, edits.values)) {
+        when (val merged = WeeklyOverrideEditing.merge(report.periodStart, report.isGunsmokeWeek, existing, saving)) {
             is WeeklyOverrideEditing.Result.Invalid -> {
                 val name = current.namesByUid[merged.uid] ?: Labels.uid(this, merged.uid)
                 Feedback.show(
@@ -545,6 +565,7 @@ class WeeklyReportActivity : BaseActivity() {
                     getString(R.string.invalid_weekly_edit_cell, name, Labels.dayHeader(this, merged.gameDay)),
                     long = true,
                 )
+                updateTopBar()
             }
             is WeeklyOverrideEditing.Result.Valid -> {
                 work.run(
@@ -552,7 +573,7 @@ class WeeklyReportActivity : BaseActivity() {
                     task = { repository.replaceWeeklyOverrides(report.periodStart.toEpochDay(), merged.overrides) },
                 ) { result ->
                     if (result.isSuccess) {
-                        edits.finish()
+                        if (edits.isEditing(report.periodStart)) edits.finish()
                         Feedback.show(this, R.string.weekly_edits_saved)
                         requestRender()
                     } else {

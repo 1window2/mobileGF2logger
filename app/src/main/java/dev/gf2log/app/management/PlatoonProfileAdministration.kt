@@ -85,11 +85,20 @@ internal class PlatoonProfileAdministration internal constructor(
         private const val PREFERENCES = "platoon_profile_deletions"
         private const val KEY_PENDING = "pending_storage_ids"
 
+        /** Finishes queued deletions off the main thread; the registry never lists their scopes. */
+        private val cleanup = java.util.concurrent.Executors.newSingleThreadExecutor { Thread(it, "GF2ProfileCleanup") }
+
         fun recoverPending(context: Context) {
             // A thread already reading a repository cannot take the exclusive gate; the
             // ReentrantReadWriteLock cannot upgrade. The next registry access finishes the work.
             if (PlatoonRepository.holdsSharedDatabaseAccess()) return
             val appContext = context.applicationContext
+            // Deleting a database waits for the exclusive gate behind capture and rebuilds, so a
+            // screen reading the registry hands the work to a background thread instead.
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                if (pending(appContext).isNotEmpty()) cleanup.execute { recoverPending(appContext) }
+                return
+            }
             pending(appContext).forEach { storageId ->
                 if (PlatoonProfileIdentity.isValidStorageId(storageId) &&
                     storageId != PlatoonProfileIdentity.LEGACY_STORAGE_ID
@@ -101,10 +110,24 @@ internal class PlatoonProfileAdministration internal constructor(
             }
         }
 
+        /** Whether [storageId] still waits for deletion, so it must not be allocated again. */
+        internal fun isPendingDeletion(context: Context, storageId: String): Boolean =
+            storageId in pending(context)
+
+        /**
+         * Deletes one queued scope. A scope the registry lists again, as a committed restore of
+         * the deleted Platoon does, is live data: it leaves the queue instead of being deleted.
+         * The check and every deletion step run under the exclusive gate a restore also holds,
+         * and a rolled-back restore leaves the scope unlisted, so its deletion simply resumes.
+         */
         private fun finishPending(context: Context, storageId: String): Boolean {
             val scope = PlatoonStorageScope(storageId)
             return runCatching {
                 PlatoonRepository.withExclusiveDatabase(scope) {
+                    if (PlatoonProfileRegistry(context).isRegistered(storageId)) {
+                        dequeue(context, storageId)
+                        return@withExclusiveDatabase false
+                    }
                     val database = context.getDatabasePath(scope.databaseName)
                     if (database.exists()) {
                         check(context.deleteDatabase(scope.databaseName)) {
@@ -119,12 +142,12 @@ internal class PlatoonProfileAdministration internal constructor(
                     if (root.exists()) {
                         check(root.deleteRecursively()) { "Unable to delete Platoon evidence" }
                     }
+                    MemberOrderPreferences(context, storageId).clear()
+                    WeeklyCutlinePreferences(context, storageId).clear()
+                    GameTimeZonePreferences.clearScope(context, storageId)
+                    dequeue(context, storageId)
+                    true
                 }
-                MemberOrderPreferences(context, storageId).clear()
-                WeeklyCutlinePreferences(context, storageId).clear()
-                GameTimeZonePreferences.clearScope(context, storageId)
-                dequeue(context, storageId)
-                true
             }.getOrDefault(false)
         }
 

@@ -211,9 +211,6 @@ internal object PendingPlatoonAdmissionStore {
     @Synchronized
     fun discard(token: String): Set<Long> = removeLocked(token)?.flowIds.orEmpty()
 
-    @Synchronized
-    fun contains(token: String): Boolean = token in candidates
-
     @VisibleForTesting
     @Synchronized
     internal fun clearForTests() {

@@ -106,7 +106,7 @@ class PendingPlatoonAdmissionStoreTest {
         PendingPlatoonAdmissionStore.releaseClaim(token)
         assertNotNull(PendingPlatoonAdmissionStore.claim(token))
         assertEquals(setOf(7L), PendingPlatoonAdmissionStore.complete(token))
-        assertFalse(PendingPlatoonAdmissionStore.contains(token))
+        assertTrue(PendingPlatoonAdmissionStore.summaries().none { it.token == token })
     }
 
     @Test
@@ -143,7 +143,7 @@ class PendingPlatoonAdmissionStoreTest {
             assertNull(running.failure)
             null
         })
-        assertFalse(PendingPlatoonAdmissionStore.contains(token))
+        assertTrue(PendingPlatoonAdmissionStore.summaries().none { it.token == token })
         assertNull(PendingPlatoonAdmissionStore.withClaim(token) { null })
     }
 
@@ -199,7 +199,7 @@ class PendingPlatoonAdmissionStoreTest {
             PendingPlatoonAdmissionStore.OfferResult.Overflow(setOf(9L)),
             overflow,
         )
-        assertFalse(PendingPlatoonAdmissionStore.contains(token))
+        assertTrue(PendingPlatoonAdmissionStore.summaries().none { it.token == token })
     }
 
     @Test

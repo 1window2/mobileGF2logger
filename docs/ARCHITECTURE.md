@@ -122,7 +122,10 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   lifecycle glue whose fields are main-thread only.
 - Stopping capture never blocks the main thread: the worker stops the native
   loop, drains already queued chunks, and clears per-run state; a start that
-  arrives during teardown waits for it to finish.
+  arrives during teardown waits for it to finish. The phase reads `STOPPING`
+  for that whole teardown and becomes `STOPPED` only once it completes, even
+  when the service is destroyed meanwhile, so nothing that waits for `STOPPED`
+  can overlap the native loop or the drain.
 - Before identity is established, each flow retains at most 32 decoded payload
   objects. Overflow rejects that flow until closure. The profile registry holds
   at most 16 bounded identities.
@@ -254,7 +257,10 @@ plaintext TCP streams. Do not add pinning or anti-cheat bypasses.
   ends in a lock or a cancel that releases the screen, and the accessibility
   service that taps only while the game is in front, closes it from Recents,
   and locks the phone. It drives capture only through the `CaptureVpnService`
-  intents and learns of saved rosters from `capture.RosterEvents`. Scheduled
+  intents and learns of saved rosters from `capture.RosterEvents`. A run that
+  follows a stopped one sends its start even while the previous capture is
+  still stopping; the service restarts after teardown, and the run opens the
+  game only on a newer `RUNNING` run, never on the one it just stopped. Scheduled
   recording reuses the same state machine: an exact alarm, re-planned from the
   current Platoons before every run, opens the standby screen over a swipe lock
   screen, and only on phones without a PIN, pattern, or password.
@@ -277,7 +283,10 @@ screen exists, with keyed requests superseding stale loads.
 Capture state reaches the UI as an immutable `CaptureSnapshot` (phase, latest
 typed and localized notice, captured targets, one-time checklist) published by
 `CaptureStatus` listeners on the main looper. Nothing in the UI parses status
-text or polls.
+text or polls. Backup export and restore, CSV import and undo, and profile
+region edits and deletion run through `CaptureGuard`: after one confirmation it
+requests the stop and continues only when a listener observes `STOPPED`, or
+explains after 20 seconds that capture is still stopping and changes nothing.
 
 `PrimaryNavigation` provides the Home, Platoon, and Weekly bar used by `Screen`.
 It launches existing Activities and owns no data or domain state. Onboarding

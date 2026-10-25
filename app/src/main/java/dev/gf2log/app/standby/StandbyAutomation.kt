@@ -61,6 +61,8 @@ internal object StandbyAutomation {
     private var loggedIn = false
     private var foreignSince = 0L
     private var startedCapture = false
+    /** [CaptureSnapshot.runCount] when this automation last sent a stop the service has not seen yet. */
+    private var stopSentAtRun: Long? = null
     private var previousActive: String? = null
     private var handingOff = false
     private var lockWhenDone = true
@@ -143,14 +145,17 @@ internal object StandbyAutomation {
             Phase.IDLE -> Unit
             Phase.WAITING -> if (now >= runs[index].startAt.toEpochMilli()) beginRun(now)
             Phase.STARTING_CAPTURE -> when {
-                CaptureStatus.snapshot().phase == CapturePhase.RUNNING -> launchGame(now)
+                // A capture the previous run stopped may still read RUNNING until the stop lands.
+                CaptureStatus.snapshot().let { it.phase == CapturePhase.RUNNING && !ownStopPending(it) } ->
+                    launchGame(now)
                 now - phaseStartedAt >= CAPTURE_START_TIMEOUT_MS -> endRun(StandbyOutcome.CAPTURE_FAILED)
             }
             Phase.IN_GAME -> when {
                 // Someone switched to another app or Home: they are awake, so stand down
                 // without closing anything or locking the phone in their hand.
                 userLeftGame(now) -> cancel()
-                CaptureStatus.snapshot().phase == CapturePhase.STOPPED -> endRun(StandbyOutcome.CAPTURE_FAILED)
+                CaptureStatus.snapshot().phase.let { it == CapturePhase.STOPPING || it == CapturePhase.STOPPED } ->
+                    endRun(StandbyOutcome.CAPTURE_FAILED)
                 now >= runTimeoutAt -> endRun(StandbyOutcome.TIMED_OUT)
                 // Taps only reach the title screen: they stop at login, and in any case after the
                 // window, so nothing inside the game is ever pressed.
@@ -216,7 +221,11 @@ internal object StandbyAutomation {
     }
 
     private fun startCapture() {
-        if (CaptureStatus.snapshot().phase != CapturePhase.STOPPED) return
+        val capture = CaptureStatus.snapshot()
+        // A capture someone else started is reused as it is. One that is stopping, or that the
+        // previous run just asked to stop, restarts once its teardown ends, then reaches RUNNING.
+        val active = capture.phase == CapturePhase.STARTING || capture.phase == CapturePhase.RUNNING
+        if (active && !ownStopPending(capture)) return
         val started = runCatching {
             appContext.startForegroundService(
                 Intent(appContext, CaptureVpnService::class.java)
@@ -230,6 +239,18 @@ internal object StandbyAutomation {
             Log.w(TAG, "Capture could not start", started.exceptionOrNull())
             endRun(StandbyOutcome.CAPTURE_FAILED)
         }
+    }
+
+    /**
+     * True while the stop [releaseRun] sent has not reached the service: the run it stopped still
+     * reads as active. Clears itself once the service is seen stopping, stopped, or on a newer run.
+     */
+    private fun ownStopPending(capture: CaptureSnapshot): Boolean {
+        val stoppedRun = stopSentAtRun ?: return false
+        val active = capture.phase == CapturePhase.STARTING || capture.phase == CapturePhase.RUNNING
+        if (active && capture.runCount == stoppedRun) return true
+        stopSentAtRun = null
+        return false
     }
 
     private fun launchGame(now: Long) {
@@ -258,6 +279,7 @@ internal object StandbyAutomation {
 
     /** Platoon notices only follow a login, so the title screen is gone once one arrives. */
     private fun onCaptureChanged(snapshot: CaptureSnapshot) {
+        ownStopPending(snapshot)
         val notice = snapshot.notice ?: return
         if (phase == Phase.IN_GAME && notice.notice in LOGIN_NOTICES && notice.atMillis >= phaseStartedAt) {
             loggedIn = true
@@ -374,11 +396,12 @@ internal object StandbyAutomation {
     private fun releaseRun() {
         if (startedCapture) {
             startedCapture = false
+            val runCount = CaptureStatus.snapshot().runCount
             runCatching {
                 appContext.startService(
                     Intent(appContext, CaptureVpnService::class.java).setAction(CaptureVpnService.ACTION_STOP),
                 )
-            }
+            }.onSuccess { stopSentAtRun = runCount }
         }
         previousActive?.let { previous ->
             previousActive = null

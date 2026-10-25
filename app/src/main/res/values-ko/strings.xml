@@ -5,6 +5,7 @@
     <string name="capture_status_label">캡처 상태</string>
     <string name="capture_ready">준비됨</string>
     <string name="capture_running">캡처 중</string>
+    <string name="capture_stopping">캡처 중지 중</string>
     <string name="nav_home">홈</string>
     <string name="nav_platoon">서클</string>
     <string name="nav_weekly">주간</string>
@@ -517,6 +518,7 @@
     <string name="backup_restoring">백업을 복원하는 중…</string>
     <string name="capture_preparing_detail">Android가 VPN을 시작하기를 기다리는 중입니다.</string>
     <string name="capture_ready_detail">캡처 중에 게임의 서클 › 멤버와 동향 화면을 여세요.</string>
+    <string name="capture_stopping_detail">캡처를 끝내기 전에 마지막 패킷을 저장하는 중입니다.</string>
     <string name="captured">수집됨</string>
     <string name="change">변경</string>
     <string name="checklist_activity">서클 활동</string>
@@ -597,6 +599,8 @@
     <string name="apply_and_next_day">적용 후 다음 날</string>
     <string name="capture_running_title">캡처 중입니다</string>
     <string name="stop_capture_and_continue">캡처 중지 후 계속</string>
+    <string name="capture_stop_timeout_title">캡처를 아직 중지하는 중입니다</string>
+    <string name="capture_stop_timeout_message">캡처가 끝나지 않아 아무것도 바꾸지 않았습니다. 홈에 준비됨이 표시되면 다시 시도하세요.</string>
     <string name="invalid_activity_choice">출석이 아니요이면 과업을 예로 둘 수 없습니다.</string>
     <string name="open_standby_mode">대기 모드 켜기</string>
     <string name="standby_running">대기 모드 실행 중</string>

@@ -227,6 +227,9 @@ transitions.
 - Weekly history is a derived audit trail, not the primary store. If refreshing
   one revision fails after a successful data mutation, the affected restored
   selection is cleared so the live database projection remains authoritative.
+  Revisions are ordered, deduplicated, and trimmed by recording order rather
+  than by their wall-clock time, so a revision recorded after the device clock
+  moved backwards is still the latest one instead of being trimmed at once.
 - A manual Daily Patrol requires manual attendance. When an edit sets one of
   the two and the other stored choice contradicts it, the edited choice wins
   (Patrol yes also sets Login yes; Login no also sets Patrol no); Login no with

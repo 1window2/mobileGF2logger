@@ -19,6 +19,8 @@ internal object WeeklyHistoryStore {
      * Appends one changed immutable weekly projection and retains the newest
      * [MAX_WEEKLY_REPORT_HISTORY] revisions. A restored selection is cleared only when
      * [clearActiveOnChange] and the live fingerprint changed. Returns the existing or new ID.
+     * Recency is the AUTOINCREMENT ID, never the wall-clock [recordedAt]: after the device clock
+     * steps backwards a new revision must still be the latest rather than be trimmed at once.
      */
     fun record(
         db: SQLiteDatabase,
@@ -32,7 +34,7 @@ internal object WeeklyHistoryStore {
         return db.inTransaction {
             val latest = db.rawQuery(
                 "SELECT id, fingerprint FROM weekly_report_history " +
-                    "WHERE period_start = ? ORDER BY recorded_at DESC, id DESC LIMIT 1",
+                    "WHERE period_start = ? ORDER BY id DESC LIMIT 1",
                 arrayOf(periodStartEpochDay.toString()),
             ).use { cursor ->
                 if (cursor.moveToFirst()) cursor.getLong(0) to cursor.getString(1) else null
@@ -54,7 +56,7 @@ internal object WeeklyHistoryStore {
                 "weekly_report_history",
                 "period_start = ? AND id NOT IN (" +
                     "SELECT id FROM weekly_report_history WHERE period_start = ? " +
-                    "ORDER BY recorded_at DESC, id DESC LIMIT ?)",
+                    "ORDER BY id DESC LIMIT ?)",
                 arrayOf(
                     periodStartEpochDay.toString(),
                     periodStartEpochDay.toString(),
@@ -73,7 +75,7 @@ internal object WeeklyHistoryStore {
                 "LEFT JOIN weekly_report_history_state state " +
                 "ON state.period_start = history.period_start " +
                 "WHERE history.period_start = ? " +
-                "ORDER BY history.recorded_at DESC, history.id DESC LIMIT ?",
+                "ORDER BY history.id DESC LIMIT ?",
             arrayOf(periodStartEpochDay.toString(), MAX_WEEKLY_REPORT_HISTORY.toString()),
         ).use { cursor ->
             buildList {

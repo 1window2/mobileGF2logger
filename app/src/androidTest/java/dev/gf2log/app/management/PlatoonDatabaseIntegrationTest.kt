@@ -1270,6 +1270,41 @@ class PlatoonDatabaseIntegrationTest {
     }
 
     @Test
+    fun weeklyHistoryKeepsRecordingOrderAfterTheClockStepsBackwards() {
+        val period = LocalDate.of(2026, 8, 16).toEpochDay()
+        repeat(PlatoonDatabase.MAX_WEEKLY_REPORT_HISTORY) { index ->
+            database.recordWeeklyReportHistory(
+                periodStartEpochDay = period,
+                recordedAt = Instant.ofEpochMilli(1_000_000L + index),
+                fingerprint = index.toString(16).padStart(64, '0'),
+                payload = byteArrayOf(index.toByte()),
+                clearActiveOnChange = true,
+            )
+        }
+        val steppedBack = database.recordWeeklyReportHistory(
+            periodStartEpochDay = period,
+            recordedAt = Instant.ofEpochMilli(1L),
+            fingerprint = "a".repeat(64),
+            payload = byteArrayOf(1),
+            clearActiveOnChange = true,
+        )
+
+        val retained = database.listWeeklyReportHistory(period)
+        assertEquals(PlatoonDatabase.MAX_WEEKLY_REPORT_HISTORY, retained.size)
+        assertEquals(steppedBack, retained.first().id)
+        assertEquals(
+            steppedBack,
+            database.recordWeeklyReportHistory(
+                periodStartEpochDay = period,
+                recordedAt = Instant.ofEpochMilli(2L),
+                fingerprint = "a".repeat(64),
+                payload = byteArrayOf(1),
+                clearActiveOnChange = true,
+            ),
+        )
+    }
+
+    @Test
     fun failedAtomicHistoryReplacementPreservesEveryPreviousRevision() {
         val originalPeriod = LocalDate.of(2026, 8, 16).toEpochDay()
         database.recordWeeklyReportHistory(

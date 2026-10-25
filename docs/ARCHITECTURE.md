@@ -135,7 +135,9 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   per candidate, and 128 payloads total. Overflow rejects every flow belonging
   to that candidate rather than partially persisting it.
 - A bound flow cannot change its Platoon identity. Admission failure clears its
-  session and quarantines the flow until native closure. One user-started
+  session and quarantines the flow until native closure. Replay binds every
+  claimed flow before routing any buffered payload, so a replay that fails has
+  persisted nothing and a retry cannot duplicate history or roster files. One user-started
   capture may admit at most one new profile per supported client. Explicit
   profile deletion removes one immutable scope behind two confirmations.
 - TLS, HTTP, and UDP payloads remain native and are excluded from the parser.

@@ -146,24 +146,29 @@ internal class PlatoonAdmissionCoordinator(
         return Outcome.Failed(notice)
     }
 
-    /** Binds live flows to [profile] and routes the buffered payloads in their captured order. */
+    /**
+     * Binds every claimed flow to [profile] before any buffered payload is routed, then routes
+     * them in their captured order. Binding is the only step that fails the replay, and it fails
+     * before anything was persisted, so a retry cannot duplicate history or roster files. Once
+     * routing starts the replay completes: each payload reports its own save failures.
+     */
     private fun replay(claim: PendingPlatoonAdmissionStore.Claim, profile: PlatoonProfile): Boolean {
-        val sessions = mutableMapOf<Long, PlatoonCaptureSession>()
-        val replayed = runCatching {
-            // Live flows stay bound; an ended flow needs a session only while its payloads replay.
-            claim.flowIds.filterNot(claim.endedFlowIds::contains).forEach { flowId ->
-                sessions[flowId] = flows.bind(flowId, profile)
-            }
-            claim.payloads.forEach { buffered ->
-                flows.route(
-                    sessions.getOrPut(buffered.flowId) { flows.bind(buffered.flowId, profile) },
-                    buffered.payload,
-                )
-            }
+        val sessions = linkedMapOf<Long, PlatoonCaptureSession>()
+        // Live flows stay bound; an ended flow needs a session only while its payloads replay.
+        val flowIds = claim.flowIds.filterNot(claim.endedFlowIds::contains) +
+            claim.payloads.map(PendingPlatoonAdmissionStore.BufferedPayload::flowId)
+        val bound = runCatching {
+            flowIds.forEach { flowId -> sessions.getOrPut(flowId) { flows.bind(flowId, profile) } }
         }
-        if (replayed.isFailure) {
+        if (bound.isFailure) {
             sessions.forEach { (flowId, session) -> flows.unbind(flowId, session) }
             return false
+        }
+        claim.payloads.forEach { buffered ->
+            runCatching { flows.route(sessions.getValue(buffered.flowId), buffered.payload) }
+                .onFailure { error ->
+                    CaptureStatus.report(CaptureNotice.PROCESSING_FAILED, error.javaClass.simpleName)
+                }
         }
         claim.endedFlowIds.forEach { flowId ->
             sessions.remove(flowId)?.let { flows.unbind(flowId, it) }

@@ -37,6 +37,25 @@ All notable changes to mobileGF2logger are documented here.
 - Avoid a crash on phones without the battery-optimization dialog and an empty
   server choice after VPN consent when entering standby mode.
 - Close the game from Recents reliably on launchers whose Recents opens slowly.
+- Refresh the Platoon and Weekly screens when a roster is saved while they are
+  open, keep their scroll position across recreation, and clear stale rows after
+  a failed load.
+- Keep the new-Platoon prompt open while a confirmation runs, show why it
+  failed, and move it to the screen that just opened; a retried confirmation no
+  longer duplicates history files.
+- Declare the capture VPN unmetered, clean up unfinished roster files, bound
+  stored diagnostics, and tell TLS from game traffic only by a full record
+  header.
+- Date an inferred join or withdrawal from activity only between the rosters
+  around the change, order weekly history by recording order instead of the
+  clock, keep a crash-left journal with a restore's rollback copy, and never
+  delete a Platoon that was registered again while its deletion was queued.
+- Save weekly cutlines off the main thread, report a failed packet deletion,
+  refuse clipboard copies over the system limit, show only the start of huge raw
+  packets, and ask before removing the Discord webhook (kept through passing
+  Keystore errors).
+- Keep top and bottom bars at full height under the system bars, ellipsize long
+  capture notices, and finish pending Platoon deletions off the main thread.
 
 ### Changed
 
@@ -45,6 +64,8 @@ All notable changes to mobileGF2logger are documented here.
   launcher PNGs and unused metadata are gone, and v1 JAR signing is off.
 - Build the protocol module as a plain Kotlin library and skip the duplicate
   release lint pass in CI.
+- Reuse one scan of the Platoon's weeks for member edits, and remove dead
+  weekly-note and render bookkeeping paths.
 
 ## 2.7.0 - 2026-10-25
 

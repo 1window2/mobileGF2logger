@@ -104,6 +104,9 @@
     <string name="delete_member">멤버 삭제</string>
     <string name="delete_member_warning">멤버를 삭제하면 가입 이력, 개인 메모, 주간 과업표 수정 내용이 영구적으로 삭제됩니다. 이후 명단에서 다시 추가될 수 있지만 삭제된 정보는 복구되지 않습니다.</string>
     <string name="member_deleted">멤버를 삭제했습니다</string>
+    <string name="packet_too_large_to_copy">패킷이 너무 커서 클립보드에 복사할 수 없습니다.</string>
+    <string name="packet_raw_truncated">전체 %2$s자 중 처음 %1$s자만 표시합니다.</string>
+    <string name="history_delete_failed">선택한 패킷을 삭제하지 못했습니다</string>
     <string name="member_delete_failed">멤버를 삭제할 수 없습니다</string>
     <string name="add_withdrawn_member">탈퇴한 멤버 추가</string>
     <string name="membership_note_hint">메모</string>
@@ -346,6 +349,7 @@
     <string name="clear_discord_webhook">저장된 웹훅 제거</string>
     <string name="discord_webhook_saved">Discord 웹훅을 안전하게 저장했습니다.</string>
     <string name="discord_webhook_invalid">discord.com의 유효한 HTTPS 수신 웹훅 URL을 입력하세요.</string>
+    <string name="clear_discord_webhook_confirm">저장된 Discord 웹훅을 제거할까요? CSV를 보내려면 다시 붙여 넣어야 합니다.</string>
     <string name="discord_webhook_cleared">저장된 Discord 웹훅을 제거했습니다.</string>
     <string name="discord_webhook_clear_failed">저장된 Discord 웹훅을 제거할 수 없습니다.</string>
     <string name="send_original_csv">원본 CSV 전송</string>

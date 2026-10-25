@@ -297,15 +297,19 @@ internal class HomePacketHistory(
                 key = WRITE,
                 task = { (if (fromSaved) savedStore?.delete(ids) else historyStore?.delete(ids)) ?: 0 },
             ) { result ->
-                val deleted = result.getOrDefault(0)
-                Feedback.show(
-                    activity,
-                    activity.resources.getQuantityString(
-                        if (fromSaved) R.plurals.status_deleted_saved_history else R.plurals.status_deleted_history,
-                        deleted,
-                        deleted,
-                    ),
-                )
+                val deleted = result.getOrNull()
+                if (deleted == null) {
+                    Feedback.show(activity, R.string.history_delete_failed)
+                } else {
+                    Feedback.show(
+                        activity,
+                        activity.resources.getQuantityString(
+                            if (fromSaved) R.plurals.status_deleted_saved_history else R.plurals.status_deleted_history,
+                            deleted,
+                            deleted,
+                        ),
+                    )
+                }
                 setSelecting(false)
                 load()
             }

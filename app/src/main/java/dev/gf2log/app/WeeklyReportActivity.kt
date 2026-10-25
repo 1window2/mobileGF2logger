@@ -11,6 +11,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import dev.gf2log.app.capture.RosterEvents
 import dev.gf2log.app.management.MemberEvent
 import dev.gf2log.app.management.PlatoonPeriods
 import dev.gf2log.app.management.PlatoonRepository
@@ -73,7 +74,10 @@ class WeeklyReportActivity : BaseActivity() {
 
     private val topAdapter = SingleViewAdapter()
     private val headerAdapter = SingleViewAdapter()
-    private val rowsAdapter = RowsAdapter()
+    // Scroll restores once rows exist, not onto the loading view of a recreated screen.
+    private val rowsAdapter = RowsAdapter().apply {
+        stateRestorationPolicy = RecyclerView.Adapter.StateRestorationPolicy.PREVENT_WHEN_EMPTY
+    }
     private val stateAdapter = SingleViewAdapter()
     private val bottomAdapter = SingleViewAdapter()
 
@@ -123,6 +127,21 @@ class WeeklyReportActivity : BaseActivity() {
             return
         }
         requestRender(reconcileRetainedCsv = true)
+    }
+
+    /** A roster captured while this screen is showing updates the table; edits in progress stay. */
+    private val rosterSaved: (String) -> Unit = { storageId ->
+        if (::scope.isInitialized && storageId == scope.storageId) requestRender()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        RosterEvents.addListener(rosterSaved)
+    }
+
+    override fun onStop() {
+        RosterEvents.removeListener(rosterSaved)
+        super.onStop()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

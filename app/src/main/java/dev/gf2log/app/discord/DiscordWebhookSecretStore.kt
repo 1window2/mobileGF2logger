@@ -43,11 +43,19 @@ class DiscordWebhookSecretStore(context: Context) {
             val decoded = cipher.doFinal(Base64.decode(ciphertext, Base64.NO_WRAP))
                 .toString(Charsets.UTF_8)
             DiscordWebhookPolicy.requireValid(decoded).toASCIIString()
-        }.getOrElse {
-            clear()
+        }.getOrElse { error ->
+            // Only data that can never decrypt again is dropped; a passing Keystore hiccup keeps
+            // the saved webhook for the next attempt.
+            if (isPermanent(error)) runCatching { clear() }
             null
         }
     }
+
+    private fun isPermanent(error: Throwable): Boolean =
+        error is javax.crypto.AEADBadTagException ||
+            error is android.security.keystore.KeyPermanentlyInvalidatedException ||
+            // Missing key, malformed stored values, or an address the policy no longer accepts.
+            error is IllegalArgumentException
 
     fun clear() {
         check(preferences.edit().clear().commit()) {

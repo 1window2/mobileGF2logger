@@ -75,13 +75,23 @@ internal class DiscordWebhookRow(private val activity: Activity, private val wor
                 setTextColor(getColor(R.color.destructive_action))
                 setOnClickListener {
                     if (work.isBusy(WRITE)) return@setOnClickListener
-                    work.run(key = WRITE, task = { DiscordWebhookSecretStore(activity).clear() }) { result ->
-                        dialog.dismiss()
-                        Feedback.show(
-                            activity,
-                            if (result.isSuccess) R.string.discord_webhook_cleared else R.string.discord_webhook_clear_failed,
-                        )
-                        refresh()
+                    // The address cannot be shown again once removed, so removal asks first.
+                    Dialogs.confirm(
+                        activity,
+                        R.string.clear_discord_webhook,
+                        R.string.clear_discord_webhook_confirm,
+                        R.string.clear_discord_webhook,
+                        destructive = true,
+                    ) {
+                        if (work.isBusy(WRITE)) return@confirm
+                        work.run(key = WRITE, task = { DiscordWebhookSecretStore(activity).clear() }) { result ->
+                            dialog.dismiss()
+                            Feedback.show(
+                                activity,
+                                if (result.isSuccess) R.string.discord_webhook_cleared else R.string.discord_webhook_clear_failed,
+                            )
+                            refresh()
+                        }
                     }
                 }
             }

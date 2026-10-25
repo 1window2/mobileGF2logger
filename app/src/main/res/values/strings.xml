@@ -104,6 +104,9 @@
     <string name="delete_member">Delete member</string>
     <string name="delete_member_warning">Deleting this member permanently removes their history, personal notes, and weekly edits. A later roster may add the member again, but the deleted details cannot be recovered.</string>
     <string name="member_deleted">Member deleted</string>
+    <string name="packet_too_large_to_copy">This packet is too large to copy to the clipboard.</string>
+    <string name="packet_raw_truncated">Showing the first %1$s of %2$s characters.</string>
+    <string name="history_delete_failed">Unable to delete the selected packets</string>
     <string name="member_delete_failed">Unable to delete member</string>
     <string name="add_withdrawn_member">Add withdrawn member</string>
     <string name="membership_note_hint">Notes</string>
@@ -350,6 +353,7 @@
     <string name="clear_discord_webhook">Remove saved webhook</string>
     <string name="discord_webhook_saved">Discord webhook saved securely.</string>
     <string name="discord_webhook_invalid">Enter a valid HTTPS incoming-webhook URL on discord.com.</string>
+    <string name="clear_discord_webhook_confirm">Remove the saved Discord webhook? You will need to paste it again to send CSV files.</string>
     <string name="discord_webhook_cleared">Saved Discord webhook removed.</string>
     <string name="discord_webhook_clear_failed">Unable to remove the saved Discord webhook.</string>
     <string name="send_original_csv">Send original CSV</string>

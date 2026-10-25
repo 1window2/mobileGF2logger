@@ -8,6 +8,7 @@ import android.widget.LinearLayout
 import androidx.activity.OnBackPressedCallback
 import dev.gf2log.app.settings.WeeklyCutlinePreferences
 import dev.gf2log.app.settings.WeeklyCutlines
+import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BarAction
 import dev.gf2log.app.ui.Dialogs
@@ -31,6 +32,7 @@ class WeeklySettingsActivity : BaseActivity() {
     private lateinit var preferences: WeeklyCutlinePreferences
     private lateinit var initial: WeeklyCutlines
     private val inputs = mutableListOf<Threshold>()
+    private val work = BackgroundWork(this, "GF2WeeklySettings")
     private var restoredEnabled: BooleanArray? = null
     private val unsavedBack = object : OnBackPressedCallback(true) {
         override fun handleOnBackPressed() = leave()
@@ -130,10 +132,18 @@ class WeeklySettingsActivity : BaseActivity() {
     )
 
     private fun save() {
+        if (work.isBusy(SAVE)) return
         val values = readValues() ?: return
-        preferences.write(current(values))
-        Feedback.show(this, R.string.saved)
-        finish()
+        val cutlines = current(values)
+        // A failed write keeps the screen and its edits instead of crashing.
+        work.run(key = SAVE, task = { preferences.write(cutlines) }) { result ->
+            if (result.isSuccess) {
+                Feedback.show(this, R.string.saved)
+                finish()
+            } else {
+                Feedback.show(this, R.string.save_failed)
+            }
+        }
     }
 
     private fun leave() {
@@ -159,6 +169,7 @@ class WeeklySettingsActivity : BaseActivity() {
     )
 
     private companion object {
+        const val SAVE = "save"
         const val DAILY_ATTEMPTS = 3
         const val WEEKLY_ATTEMPTS = 21
         const val WEEK_DAYS = 7

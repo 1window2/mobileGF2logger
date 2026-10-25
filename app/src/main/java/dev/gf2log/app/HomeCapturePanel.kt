@@ -45,7 +45,11 @@ internal class HomeCapturePanel(
     private val stateTitle = context.text(null, TextRole.HEADLINE) {
         accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
     }
-    private val stateDetail = context.text(null, TextRole.SECONDARY) { maxLines = 4 }
+    private val stateDetail = context.text(null, TextRole.SECONDARY) {
+        maxLines = 4
+        // Large font sizes would otherwise cut a notice off mid-word with no sign of it.
+        ellipsize = android.text.TextUtils.TruncateAt.END
+    }
     private val checklist = context.column { visibility = View.GONE }
     private val captureActions = context.row(Gravity.TOP)
     private val clients = context.column()

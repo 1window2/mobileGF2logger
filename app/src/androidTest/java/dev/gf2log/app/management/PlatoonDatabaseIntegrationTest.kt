@@ -1258,6 +1258,52 @@ class PlatoonDatabaseIntegrationTest {
     }
 
     @Test
+    fun onlyActivityBeforeTheRevealingRosterDatesAnInferredJoin() {
+        val previousRoster = Instant.parse("2026-08-03T00:00:00Z")
+        val revealingRoster = Instant.parse("2026-08-03T06:00:00Z")
+        listOf(
+            previousRoster to listOf(member(OTHER_UID, "Other")),
+            revealingRoster to listOf(member(OTHER_UID, "Other"), member(TARGET_UID, "Target")),
+        ).forEach { (capturedAt, members) ->
+            database.ingestSnapshot(
+                PlatoonSnapshot(id = 0, capturedAt = capturedAt, members = members),
+                EvidenceSource.SNAPSHOT,
+            )
+        }
+        val inferredJoin = "uid = ? AND joined_precision = 'INFERRED' AND joined_at = " +
+            revealingRoster.toEpochMilli()
+
+        // Within the old symmetric 12-hour window, but after the roster already listed Target.
+        database.ingestPlatoonActivity(
+            listOf(activity("Target", revealingRoster.plusSeconds(60L * 60L))),
+            revealingRoster.plusSeconds(2L * 60L * 60L),
+        )
+        assertEquals(1L, count("membership_periods", inferredJoin, TARGET_UID))
+
+        val joinedAt = revealingRoster.minusSeconds(60L * 60L)
+        database.ingestPlatoonActivity(
+            listOf(activity("Target", joinedAt)),
+            revealingRoster.plusSeconds(3L * 60L * 60L),
+        )
+        assertEquals(0L, count("membership_periods", inferredJoin, TARGET_UID))
+        assertEquals(
+            1L,
+            count(
+                "membership_periods",
+                "uid = ? AND joined_precision = 'EXACT' AND joined_at = " + joinedAt.toEpochMilli(),
+                TARGET_UID,
+            ),
+        )
+    }
+
+    private fun activity(name: String, occurredAt: Instant) = PlatoonActivityObservation(
+        occurredAt = occurredAt,
+        actionId = 701001L,
+        kind = 1,
+        memberName = name,
+    )
+
+    @Test
     fun weeklyHistoryKeepsRecordingOrderAfterTheClockStepsBackwards() {
         val period = LocalDate.of(2026, 8, 16).toEpochDay()
         repeat(PlatoonDatabase.MAX_WEEKLY_REPORT_HISTORY) { index ->

@@ -115,6 +115,7 @@ internal object PendingPlatoonAdmissionPrompt {
                 .setPositiveButton(R.string.confirm, null),
         ) { shown ->
             val confirm = shown.getButton(AlertDialog.BUTTON_POSITIVE)
+            val discard = shown.getButton(AlertDialog.BUTTON_NEGATIVE)
             val ids = regions.map { region ->
                 RadioButton(activity).apply {
                     id = View.generateViewId()
@@ -150,6 +151,7 @@ internal object PendingPlatoonAdmissionPrompt {
                     else -> status.visibility = View.GONE
                 }
                 confirm.isEnabled = !busy && candidate.token in selections
+                discard.isEnabled = !busy
             }
             render?.invoke()
             confirm.setOnClickListener {
@@ -163,7 +165,7 @@ internal object PendingPlatoonAdmissionPrompt {
                         .putExtra(CaptureVpnService.EXTRA_SERVER_REGION, region.storedValue),
                 )
             }
-            shown.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { confirmDiscard(activity, candidate) }
+            discard.setOnClickListener { confirmDiscard(activity, candidate) }
         }
         dialog.setOnDismissListener {
             if (visible.get() === dialog) clearVisible()

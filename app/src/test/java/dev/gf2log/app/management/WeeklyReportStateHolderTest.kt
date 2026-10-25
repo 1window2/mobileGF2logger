@@ -2,26 +2,9 @@ package dev.gf2log.app.management
 
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WeeklyReportStateHolderTest {
-    @Test
-    fun onlyLatestResumedRequestCanApply() {
-        val state = WeeklyReportStateHolder(LocalDate.of(2026, 8, 10))
-
-        state.onResume()
-        val first = state.newRenderRequest()
-        val second = state.newRenderRequest()
-
-        assertFalse(state.canApply(first.generation))
-        assertTrue(state.canApply(second.generation))
-
-        state.onPause()
-        assertFalse(state.canApply(second.generation))
-    }
-
     @Test
     fun navigationUsesAdjacentReportBoundaries() {
         val state = WeeklyReportStateHolder(LocalDate.of(2026, 8, 10))

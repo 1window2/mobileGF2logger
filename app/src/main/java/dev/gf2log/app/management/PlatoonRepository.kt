@@ -439,6 +439,10 @@ internal class PlatoonRepository(
         .periodStarts(access { it.listWeeklyEvidenceDays(zoneId) })
         .map { buildWeeklyReport(it, zoneId, asOf) }
 
+    /** Whether any week has evidence, without building a single report. */
+    fun hasWeeklyReports(zoneId: ZoneId): Boolean =
+        WeeklyReportRange.periodStarts(access { it.listWeeklyEvidenceDays(zoneId) }).isNotEmpty()
+
     fun replaceWeeklyOverrides(
         periodStartEpochDay: Long,
         overrides: List<WeeklyCellOverride>,

@@ -122,13 +122,7 @@ class WeeklyReportActivity : BaseActivity() {
             recreate()
             return
         }
-        reportState.onResume()
         requestRender(reconcileRetainedCsv = true)
-    }
-
-    override fun onPause() {
-        if (::reportState.isInitialized) reportState.onPause()
-        super.onPause()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -157,13 +151,13 @@ class WeeklyReportActivity : BaseActivity() {
     // region Loading and rendering
 
     private fun requestRender(reconcileRetainedCsv: Boolean = false) {
-        val request = reportState.newRenderRequest()
+        val referenceDay = reportState.referenceDay
         if (model == null) stateAdapter.view = StateViews.loading(this, getString(R.string.weekly_report_loading))
         work.run(
             key = RENDER,
             task = {
                 if (reconcileRetainedCsv) repository.reconcileRetainedCsvFiles()
-                loadRenderModel(request.referenceDay)
+                loadRenderModel(referenceDay)
             },
         ) { result ->
             result.fold(

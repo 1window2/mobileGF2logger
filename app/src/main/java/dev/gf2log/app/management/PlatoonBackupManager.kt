@@ -380,16 +380,27 @@ class PlatoonBackupManager internal constructor(
     private fun replaceDatabase(staged: File, preservePrevious: Boolean = false) {
         databaseFile.parentFile?.mkdirs()
         val previous = previousDatabaseFile(appContext, storageScope)
-        if (previous.exists() && !previous.delete()) error("Unable to clear previous restore backup")
-        listOf("-wal", "-shm", "-journal").forEach { suffix ->
-            File(databaseFile.path + suffix).delete()
-        }
-        if (databaseFile.exists() && !databaseFile.renameTo(previous)) {
-            error("Unable to preserve the current Platoon database")
+        if (!deletePreviousDatabase(previous)) error("Unable to clear previous restore backup")
+        if (databaseFile.exists()) {
+            // A database not opened since a crash can still hold committed WAL frames or a hot
+            // rollback journal. Those move with the rollback copy, before its main file, so
+            // putting the copy back never loses or half-applies a transaction.
+            preservedSidecars(databaseFile).zip(preservedSidecars(previous)).forEach { (live, kept) ->
+                if (live.exists() && !live.renameTo(kept)) {
+                    error("Unable to preserve the current Platoon database")
+                }
+            }
+            File(databaseFile.path + "-shm").delete()
+            if (!databaseFile.renameTo(previous)) {
+                error("Unable to preserve the current Platoon database")
+            }
+        } else {
+            // Without a database these are orphans that must never pair with the restored file.
+            databaseSidecars(databaseFile).forEach(File::delete)
         }
         val installed = staged.renameTo(databaseFile)
         if (!installed) {
-            previous.renameTo(databaseFile)
+            restorePreviousDatabase(databaseFile, previous)
             error("Unable to install the restored Platoon database")
         }
         try {
@@ -405,16 +416,19 @@ class PlatoonBackupManager internal constructor(
                 }
             }
             validateDatabase(databaseFile, requireCurrentSchema = true)
-            if (!preservePrevious && previous.exists() && !previous.delete()) {
+            if (!preservePrevious && !deletePreviousDatabase(previous)) {
                 error("Unable to discard the previous Platoon database")
             }
         } catch (error: Exception) {
-            listOf("", "-wal", "-shm", "-journal").forEach { suffix ->
-                File(databaseFile.path + suffix).delete()
-            }
-            if (previous.exists() && !previous.renameTo(databaseFile)) {
+            runCatching {
+                if (previous.exists()) {
+                    restorePreviousDatabase(databaseFile, previous)
+                } else {
+                    databaseSidecars(databaseFile).forEach(File::delete)
+                }
+            }.onFailure {
                 error.addSuppressed(
-                    IllegalStateException("Unable to restore the previous Platoon database"),
+                    IllegalStateException("Unable to restore the previous Platoon database", it),
                 )
             }
             throw error
@@ -479,7 +493,7 @@ class PlatoonBackupManager internal constructor(
         if (previousCsv.exists() && !previousCsv.deleteRecursively()) {
             return
         }
-        if (previousDatabase.exists() && !previousDatabase.delete()) return
+        if (!deletePreviousDatabase(previousDatabase)) return
         cleanupRestoreTransaction(appContext, storageScope)
     }
 
@@ -644,7 +658,7 @@ class PlatoonBackupManager internal constructor(
                     )
                     RestoreState.COMMITTED -> {
                         if (previousCsv.exists() && !previousCsv.deleteRecursively()) return@withExclusiveDatabase
-                        if (previousDatabase.exists() && !previousDatabase.delete()) return@withExclusiveDatabase
+                        if (!deletePreviousDatabase(previousDatabase)) return@withExclusiveDatabase
                         cleanupRestoreTransaction(appContext, scope)
                     }
                 }
@@ -660,14 +674,8 @@ class PlatoonBackupManager internal constructor(
             previousCsv: File,
             scope: PlatoonStorageScope,
         ) {
-            if (previousDatabase.exists()) {
-                databaseSidecars(database).forEach(File::delete)
-                if (database.exists() && !database.delete()) {
-                    error("Unable to remove the interrupted restored database")
-                }
-                if (!previousDatabase.renameTo(database)) {
-                    error("Unable to recover the previous Platoon database")
-                }
+            if (previousDatabase.exists() || preservedSidecars(previousDatabase).any(File::exists)) {
+                restorePreviousDatabase(database, previousDatabase)
             } else if (restoreDatabaseWasMissingFile(context, scope).isFile) {
                 databaseSidecars(database).forEach { file ->
                     if (file.exists() && !file.delete()) {
@@ -814,6 +822,40 @@ class PlatoonBackupManager internal constructor(
 
         private fun databaseSidecars(database: File): List<File> =
             listOf("", "-wal", "-shm", "-journal").map { suffix -> File(database.path + suffix) }
+
+        /** The WAL and rollback journal: the only sidecars that can hold state the file lacks. */
+        private fun preservedSidecars(database: File): List<File> =
+            listOf("-wal", "-journal").map { suffix -> File(database.path + suffix) }
+
+        /**
+         * Puts a rollback copy and its preserved sidecars back at [database]. The main copy moves
+         * first and its sidecars last, the reverse of how they were set aside, so while the main
+         * copy exists everything at [database] belongs to the replacement, and a copy without its
+         * main file has only sidecars left to return. Safe to repeat after a process death.
+         */
+        private fun restorePreviousDatabase(database: File, previous: File) {
+            if (previous.exists()) {
+                databaseSidecars(database).forEach { file ->
+                    if (file.exists() && !file.delete()) {
+                        error("Unable to remove the interrupted restored database")
+                    }
+                }
+                if (!previous.renameTo(database)) {
+                    error("Unable to recover the previous Platoon database")
+                }
+            }
+            preservedSidecars(previous).zip(preservedSidecars(database)).forEach { (kept, live) ->
+                if (kept.exists() && !kept.renameTo(live)) {
+                    error("Unable to recover the previous Platoon database journal")
+                }
+            }
+        }
+
+        /** Deletes a rollback copy, sidecars first; returns whether nothing of it remains. */
+        private fun deletePreviousDatabase(previous: File): Boolean =
+            (databaseSidecars(previous).drop(1) + previous).all { file ->
+                !file.exists() || file.delete()
+            }
     }
 
     internal enum class RestoreCheckpoint {

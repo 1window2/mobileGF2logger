@@ -192,16 +192,13 @@ internal object MembershipRows {
         )
     }
 
-    /** Deletes the selected events after detaching every note and activity fact citing them. */
+    /**
+     * Deletes the selected events after detaching every activity fact citing them. Weekly notes
+     * never cite events: notes are manual and keep a NULL event_id, whose foreign key would
+     * also clear on delete.
+     */
     fun deleteEvents(db: SQLiteDatabase, selection: String, arguments: Array<String>) {
         val selectedIds = "SELECT id FROM member_events WHERE $selection"
-        db.delete("weekly_notes", "is_automatic = 1 AND event_id IN ($selectedIds)", arguments)
-        db.update(
-            "weekly_notes",
-            ContentValues().apply { putNull("event_id") },
-            "event_id IN ($selectedIds)",
-            arguments,
-        )
         db.update(
             "platoon_activity",
             ContentValues().apply { putNull("member_event_id") },

@@ -142,9 +142,12 @@ internal class PlatoonRepository(
                 .sortedWith(compareBy(RetainedCsv::capturedAt, { it.file.name }))
                 .forEach { file ->
                     val historicalOnly = latestStructuredSnapshot?.let {
-                        file.capturedAt.isBefore(it.capturedAt) ||
-                            (file.capturedAt == it.capturedAt &&
-                                file.file.name <= it.sourceFile.orEmpty())
+                        SnapshotReconciler.isHistorical(
+                            file.capturedAt,
+                            file.file.name,
+                            it.capturedAt,
+                            it.sourceFile,
+                        )
                     } ?: false
                     val result = database.ingestSnapshot(
                         PlatoonSnapshot(
@@ -208,9 +211,14 @@ internal class PlatoonRepository(
         access { it.listDailyPatrolFacts(from, until) }
 
     fun updateMember(uid: Long, name: String, note: String): Boolean =
-        refreshingWeeksOf(uid) { access { it.updateMember(uid, name, note) } }
+        refreshingWeeksOf(uid, WeeklyHistoryWorkPolicy.MemberEdit.DISPLAY_ONLY) {
+            access { it.updateMember(uid, name, note) }
+        }
 
-    fun deleteMember(uid: Long): Boolean = refreshingWeeksOf(uid) {
+    fun deleteMember(uid: Long): Boolean = refreshingWeeksOf(
+        uid,
+        WeeklyHistoryWorkPolicy.MemberEdit.REMOVAL,
+    ) {
         withExclusiveDatabase(storageScope) {
             val order = MemberOrderPreferences(appContext, storageScope.storageId)
             val previousOrder = order.read()
@@ -365,7 +373,6 @@ internal class PlatoonRepository(
             report = report,
             membershipEvents = membershipEvents,
             notes = inputs.notes
-                .filterNot(WeeklyNote::isAutomatic)
                 .take(MAX_REVISION_NOTES)
                 .map { it.copy(text = it.text.boundedUtf8(MAX_REVISION_NOTE_BYTES)) },
             memberNamesByUid = inputs.statuses.asSequence()
@@ -525,25 +532,30 @@ internal class PlatoonRepository(
     /**
      * Runs a mutation confined to one member's rows and refreshes only the weeks whose revision
      * can show that member before or after it: weeks whose period-end roster or Join / Withdraw
-     * section contains the member, or whose notes cite the member's events. Every other row,
-     * name, and note of a revision depends on other members' evidence alone. If the pre-scan
-     * fails, every week is refreshed so the mutation stays authoritative.
+     * section contains the member. Weekly notes are manual and cite no member events, so every
+     * other row, name, and note of a revision depends on other members' evidence alone. If the
+     * pre-scan fails, every week is refreshed so the mutation stays authoritative.
      */
-    private fun refreshingWeeksOf(uid: Long?, mutation: () -> Boolean): Boolean {
+    private fun refreshingWeeksOf(
+        uid: Long?,
+        edit: WeeklyHistoryWorkPolicy.MemberEdit = WeeklyHistoryWorkPolicy.MemberEdit.MEMBERSHIP,
+        mutation: () -> Boolean,
+    ): Boolean {
         val zone = gameZone()
         val asOf = Instant.now()
-        val before = uid?.let { runCatching { weeksShowingMember(it, zone, asOf) }.getOrNull() }
+        val before = uid?.let {
+            runCatching { weeksShowingMember(it, zone, asOf, weeklyPeriodStarts(zone)) }.getOrNull()
+        }
         if (!mutation()) return false
         try {
-            val weeks = weeklyPeriodStarts(zone)
-            val affected = if (uid == null || before == null) {
-                weeks
-            } else {
-                val current = weeks.toSet()
-                (before.filter { it in current } + weeksShowingMember(uid, zone, asOf)).distinct()
-                    .sorted()
-            }
-            affected.forEach { recordLiveWeeklyRevisionSafely(it, zone) }
+            WeeklyHistoryWorkPolicy.memberEditPeriodStarts(
+                edit = edit,
+                showingBefore = before,
+                listedAfter = { weeklyPeriodStarts(zone) },
+                showingAfter = { listed ->
+                    weeksShowingMember(requireNotNull(uid), zone, asOf, listed)
+                },
+            ).forEach { recordLiveWeeklyRevisionSafely(it, zone) }
         } catch (error: Exception) {
             Log.e(TAG, "Unable to scope weekly history refresh; refreshing every week", error)
             recordAllLiveWeeklyReports()
@@ -556,12 +568,17 @@ internal class PlatoonRepository(
         mutation: () -> Boolean,
     ): Boolean = refreshingWeeksOf(
         runCatching { access { it.membershipPeriodOwner(membershipPeriodId) } }.getOrNull(),
-        mutation,
+        mutation = mutation,
     )
 
-    private fun weeksShowingMember(uid: Long, zone: ZoneId, asOf: Instant): Set<LocalDate> {
-        val citingNotes = access { it.weeklyNotePeriodsCitingMember(uid) }
-        return weeklyPeriodStarts(zone).filterTo(citingNotes.toMutableSet()) { periodStart ->
+    /** The [listed] weeks whose revision shows [uid]; each loads one week's roster inputs. */
+    private fun weeksShowingMember(
+        uid: Long,
+        zone: ZoneId,
+        asOf: Instant,
+        listed: List<LocalDate>,
+    ): Set<LocalDate> =
+        listed.filterTo(mutableSetOf()) { periodStart ->
             val inputs = access { database ->
                 database.readConsistently { readRosterInputs(database, periodStart, zone, asOf) }
             }
@@ -574,7 +591,6 @@ internal class PlatoonRepository(
                     asOf,
                 )
         }
-    }
 
     private fun recordHistory(
         revision: WeeklyTableRevision,

@@ -48,9 +48,12 @@ object CsvImportPreviewAnalyzer {
         val existingNames = existingMembers.associate { it.uid to it.name }
         fun isHistorical(item: PlatoonCsvImportStore.PreparedImport): Boolean {
             val baseline = latestSnapshot ?: return false
-            return item.capturedAt.isBefore(baseline.capturedAt) ||
-                (item.capturedAt == baseline.capturedAt &&
-                    item.fileName <= baseline.sourceFile.orEmpty())
+            return SnapshotReconciler.isHistorical(
+                item.capturedAt,
+                item.fileName,
+                baseline.capturedAt,
+                baseline.sourceFile,
+            )
         }
         val historicalFiles = actionable.count(::isHistorical)
 

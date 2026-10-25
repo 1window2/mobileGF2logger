@@ -144,6 +144,83 @@ class WeeklyHistoryWorkPolicyTest {
         assertEquals(listOf(Instant.parse("2026-07-31T12:00:00Z")), lookups)
     }
 
+    @Test
+    fun `a membership edit refreshes still-listed earlier weeks and every week showing it now`() {
+        val periods = WeeklyHistoryWorkPolicy.memberEditPeriodStarts(
+            edit = WeeklyHistoryWorkPolicy.MemberEdit.MEMBERSHIP,
+            showingBefore = setOf(laterWeek, closingWeek),
+            listedAfter = { listOf(openingWeek, laterWeek) },
+            showingAfter = { listedWeeks ->
+                assertEquals(listOf(openingWeek, laterWeek), listedWeeks)
+                setOf(openingWeek)
+            },
+        )
+
+        assertEquals(listOf(openingWeek, laterWeek), periods)
+    }
+
+    @Test
+    fun `a display-only edit reuses the pre-scan instead of listing and scanning again`() {
+        val showing = setOf(laterWeek, closingWeek)
+
+        val periods = WeeklyHistoryWorkPolicy.memberEditPeriodStarts(
+            edit = WeeklyHistoryWorkPolicy.MemberEdit.DISPLAY_ONLY,
+            showingBefore = showing,
+            listedAfter = { error("a name edit cannot change the listed weeks") },
+            showingAfter = { error("a name edit cannot change the rosters") },
+        )
+
+        assertEquals(listOf(closingWeek, laterWeek), periods)
+        assertEquals(
+            WeeklyHistoryWorkPolicy.memberEditPeriodStarts(
+                edit = WeeklyHistoryWorkPolicy.MemberEdit.MEMBERSHIP,
+                showingBefore = showing,
+                listedAfter = { listed },
+                showingAfter = { showing },
+            ),
+            periods,
+        )
+    }
+
+    @Test
+    fun `a removal refreshes only the earlier weeks still listed and scans no roster`() {
+        val showing = setOf(laterWeek, closingWeek)
+        val remaining = listOf(openingWeek, laterWeek)
+
+        val periods = WeeklyHistoryWorkPolicy.memberEditPeriodStarts(
+            edit = WeeklyHistoryWorkPolicy.MemberEdit.REMOVAL,
+            showingBefore = showing,
+            listedAfter = { remaining },
+            showingAfter = { error("a removed member is shown nowhere") },
+        )
+
+        assertEquals(listOf(laterWeek), periods)
+        assertEquals(
+            WeeklyHistoryWorkPolicy.memberEditPeriodStarts(
+                edit = WeeklyHistoryWorkPolicy.MemberEdit.MEMBERSHIP,
+                showingBefore = showing,
+                listedAfter = { remaining },
+                showingAfter = { emptySet() },
+            ),
+            periods,
+        )
+    }
+
+    @Test
+    fun `a failed pre-scan refreshes every listed week for every edit`() {
+        WeeklyHistoryWorkPolicy.MemberEdit.entries.forEach { edit ->
+            assertEquals(
+                listed,
+                WeeklyHistoryWorkPolicy.memberEditPeriodStarts(
+                    edit = edit,
+                    showingBefore = null,
+                    listedAfter = { listed },
+                    showingAfter = { error("no scoped scan without a pre-scan") },
+                ),
+            )
+        }
+    }
+
     private fun affected(instant: Instant, nextSnapshot: Instant?) =
         WeeklyHistoryWorkPolicy.affectedPeriodStarts(sequenceOf(instant), utc, listed) { nextSnapshot }
 }

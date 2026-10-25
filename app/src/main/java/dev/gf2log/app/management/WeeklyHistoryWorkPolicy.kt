@@ -52,5 +52,39 @@ internal object WeeklyHistoryWorkPolicy {
             .take(MAX_CHANGED_WEEKS_PER_INGEST)
     }
 
+    /** What a member edit can change about the weeks that list or show that member. */
+    enum class MemberEdit {
+        /** Rewrites membership periods or boundaries: listed weeks and rosters can change. */
+        MEMBERSHIP,
+
+        /** Changes only the custom name or private note: weeks and rosters stay as they were. */
+        DISPLAY_ONLY,
+
+        /** Deletes every row of the member: afterwards no week shows the member. */
+        REMOVAL,
+    }
+
+    /**
+     * The weeks one member edit refreshes: the weeks that showed the member before it and are
+     * still listed, then the weeks that show the member after it, in week order. A null
+     * [showingBefore] means the pre-scan failed, so every listed week is refreshed. The
+     * post-edit listing and scan are evaluated only when [edit] can change them: a
+     * [MemberEdit.DISPLAY_ONLY] edit reuses the pre-scan, because its listing and rosters are
+     * those it already read, and after [MemberEdit.REMOVAL] the member is shown nowhere.
+     */
+    fun memberEditPeriodStarts(
+        edit: MemberEdit,
+        showingBefore: Set<LocalDate>?,
+        listedAfter: () -> List<LocalDate>,
+        showingAfter: (listed: List<LocalDate>) -> Set<LocalDate>,
+    ): List<LocalDate> {
+        if (showingBefore == null) return listedAfter()
+        if (edit == MemberEdit.DISPLAY_ONLY) return showingBefore.sorted()
+        val listed = listedAfter()
+        val current = listed.toSet()
+        val after = if (edit == MemberEdit.REMOVAL) emptySet() else showingAfter(listed)
+        return (showingBefore.filter { it in current } + after).distinct().sorted()
+    }
+
     private const val DAYS_PER_WEEK = 7L
 }

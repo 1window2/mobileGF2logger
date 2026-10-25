@@ -26,6 +26,7 @@ import dev.gf2log.protocol.model.GuildMember
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.EOFException
+import java.io.File
 import java.io.InputStream
 import java.time.Instant
 import java.time.LocalDate
@@ -312,6 +313,62 @@ class PlatoonBackupManagerIntegrationTest {
             assertFalse(db.rawQuery("PRAGMA foreign_key_check", null).use { it.moveToFirst() })
         }
         assertFalse(FilePaths.preRestoreDatabase(context).exists())
+    }
+
+    @Test
+    fun failedRestoreKeepsTheWalACrashLeftBesideTheCurrentDatabase() {
+        seedDatabase(ARCHIVED_UID, "Archived member", "archived-source.csv")
+        val archive = ByteArrayOutputStream().also {
+            PlatoonBackupManager(context).exportFull(it)
+        }.toByteArray()
+        replaceDatabaseWithCurrentState()
+        settingsStore.replace(currentSettings())
+        val databaseFile = context.getDatabasePath(storageScope.databaseName)
+        val crashCopy = File(context.cacheDir, "crash-left-database").apply {
+            deleteRecursively()
+            check(mkdirs())
+        }
+        PlatoonRepository.withExclusiveDatabase(storageScope) {
+            // Copying the files while the WAL connection is open leaves the committed update
+            // only in the WAL, as a process death before the next checkpoint would.
+            SQLiteDatabase.openDatabase(
+                databaseFile.path,
+                null,
+                SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING,
+            ).use { db ->
+                db.rawQuery("PRAGMA wal_autocheckpoint = 0", null).use { it.moveToFirst() }
+                db.execSQL(
+                    "UPDATE members SET note = ? WHERE uid = ?",
+                    arrayOf<Any>(CRASH_LEFT_NOTE, CURRENT_UID),
+                )
+                databaseFile.copyTo(File(crashCopy, "database"))
+                File(databaseFile.path + "-wal").copyTo(File(crashCopy, "wal"))
+            }
+            assertTrue(context.deleteDatabase(storageScope.databaseName))
+            File(crashCopy, "database").copyTo(databaseFile)
+            File(crashCopy, "wal").copyTo(File(databaseFile.path + "-wal"))
+        }
+        crashCopy.deleteRecursively()
+
+        assertThrows(IllegalStateException::class.java) {
+            PlatoonBackupManager(
+                context = context,
+                settingsStore = settingsStore,
+                restoreObserver = { checkpoint ->
+                    if (checkpoint == PlatoonBackupManager.RestoreCheckpoint.DATABASE_INSTALLED) {
+                        error("simulated restore failure")
+                    }
+                },
+            ).restoreFull(ByteArrayInputStream(archive))
+        }
+
+        PlatoonDatabase(context).use { database ->
+            val db = database.readableDatabase
+            assertEquals(1L, count(db, "members", "note = ?", CRASH_LEFT_NOTE))
+            assertEquals(0L, count(db, "members", "uid = ?", ARCHIVED_UID))
+        }
+        assertFalse(FilePaths.preRestoreDatabase(context).exists())
+        assertFalse(File(FilePaths.preRestoreDatabase(context).path + "-wal").exists())
     }
 
     @Test
@@ -1233,6 +1290,7 @@ class PlatoonBackupManagerIntegrationTest {
         const val CURRENT_UID = 2002L
         const val THIRD_UID = 3003L
         const val ARCHIVED_NOTE = "Weekly review"
+        const val CRASH_LEFT_NOTE = "Committed only to the WAL"
         const val INVALID_TARGET_PACKAGE = "not a package"
         val PERIOD_START: LocalDate = LocalDate.of(2026, 7, 26)
     }

@@ -205,7 +205,11 @@ transitions.
   delete the member instead when the complete record should be removed.
 - The current member list displays the latest open membership period. A withdrawn member
   displays the latest join and withdrawal times.
-- Snapshot differences provide an observed time window. Exact in-game Updates
+- Snapshot differences provide an observed time window. A name-resolved 21935
+  activity can date an inferred join or withdrawal only when it lies after the
+  previous roster and no later than the roster that revealed the change, at
+  most 12 hours before it; an activity after that roster, which already showed
+  the change, never becomes the boundary. Exact in-game Updates
   events can replace an inferred boundary only when a unique 21917 UID can be
   correlated safely; 21935 contains names but no UID.
 - Exact packet-linked boundary fields are immutable while editing. Users can
@@ -243,6 +247,9 @@ transitions.
 - Weekly history is a derived audit trail, not the primary store. If refreshing
   one revision fails after a successful data mutation, the affected restored
   selection is cleared so the live database projection remains authoritative.
+  Revisions are ordered, deduplicated, and trimmed by recording order rather
+  than by their wall-clock time, so a revision recorded after the device clock
+  moved backwards is still the latest one instead of being trimmed at once.
 - A manual Daily Patrol requires manual attendance. When an edit sets one of
   the two and the other stored choice contradicts it, the edited choice wins
   (Patrol yes also sets Login yes; Login no also sets Patrol no); Login no with

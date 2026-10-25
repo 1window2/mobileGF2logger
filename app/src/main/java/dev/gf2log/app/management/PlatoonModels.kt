@@ -150,6 +150,11 @@ enum class MetricCertainty {
 internal fun rangeCertainty(minimum: Number, maximum: Number): MetricCertainty =
     if (minimum.toLong() == maximum.toLong()) MetricCertainty.EXACT else MetricCertainty.LOWER_BOUND
 
+/**
+ * A manual weekly note. [eventId] and [isAutomatic] describe retired automatic event notes,
+ * which the schema-6 upgrade deleted; they stay null and false but remain in the row and the
+ * weekly-history wire format so stored revisions and their fingerprints stay compatible.
+ */
 data class WeeklyNote(
     val id: Long,
     val periodStart: LocalDate,

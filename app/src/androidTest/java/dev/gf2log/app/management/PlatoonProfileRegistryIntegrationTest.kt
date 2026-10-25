@@ -567,6 +567,68 @@ class PlatoonProfileRegistryIntegrationTest {
     }
 
     @Test
+    fun redetectingAPlatoonWhoseDeletionIsStillQueuedGetsAFreshScope() {
+        val queuedId = PlatoonProfileIdentity.storageId(
+            PlatoonClient.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            7L,
+        )
+        queueDeletion(queuedId)
+        val registry = PlatoonProfileRegistry(context)
+
+        val redetected = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            PlatoonProfileData(7u, "Redetected", 0u, 0u),
+        )
+        val scope = PlatoonStorageScope(redetected.storageId)
+        PlatoonRepository(context, scope).ingest(
+            Instant.parse("2026-08-24T12:00:00Z"),
+            listOf(member(1u, "Member")),
+            "redetected.csv",
+        )
+
+        assertNotEquals(queuedId, redetected.storageId)
+        assertEquals(listOf(redetected.storageId), registry.list().map(PlatoonProfile::storageId))
+        assertTrue(context.getDatabasePath(scope.databaseName).exists())
+        assertFalse(PlatoonProfileAdministration.isPendingDeletion(context, queuedId))
+    }
+
+    @Test
+    fun aRestoredScopeLeavesTheDeletionQueueInsteadOfBeingDeleted() {
+        val registry = PlatoonProfileRegistry(context)
+        val profile = registry.upsertDetected(
+            SupportedGamePackages.HAOPLAY,
+            GameServerRegion.HAOPLAY_KOREA,
+            PlatoonProfileData(8u, "Restored", 0u, 0u),
+        )
+        val scope = PlatoonStorageScope(profile.storageId)
+        PlatoonRepository(context, scope).ingest(
+            Instant.parse("2026-08-24T12:00:00Z"),
+            listOf(member(1u, "Member")),
+            "restored.csv",
+        )
+        assertTrue(registry.forget(profile.storageId))
+        queueDeletion(profile.storageId)
+        PlatoonRepository.withExclusiveDatabase(scope) { registry.upsertRestored(profile) }
+
+        assertEquals(listOf(profile.storageId), registry.list().map(PlatoonProfile::storageId))
+        assertTrue(context.getDatabasePath(scope.databaseName).exists())
+        assertFalse(PlatoonProfileAdministration.isPendingDeletion(context, profile.storageId))
+        assertEquals(
+            "Member",
+            PlatoonRepository(context, scope).listMemberStatuses().single().name,
+        )
+    }
+
+    private fun queueDeletion(storageId: String) {
+        check(
+            context.getSharedPreferences("platoon_profile_deletions", android.content.Context.MODE_PRIVATE)
+                .edit().putStringSet("pending_storage_ids", setOf(storageId)).commit(),
+        )
+    }
+
+    @Test
     fun registryRejectsUnboundedNewProfilesAndCanRemoveInactiveMetadata() {
         val registry = PlatoonProfileRegistry(context)
         val profiles = (1..PlatoonProfileRegistry.MAX_PROFILES).map { id ->

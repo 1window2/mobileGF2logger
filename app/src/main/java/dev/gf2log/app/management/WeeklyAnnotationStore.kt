@@ -74,14 +74,6 @@ internal object WeeklyAnnotationStore {
         if (cursor.moveToFirst()) LocalDate.ofEpochDay(cursor.getLong(0)) else null
     }
 
-    fun notePeriodsCitingMember(db: SQLiteDatabase, uid: Long): Set<LocalDate> = db.rawQuery(
-        "SELECT DISTINCT period_start FROM weekly_notes WHERE is_automatic = 0 AND event_id IN " +
-            "(SELECT id FROM member_events WHERE uid = ?)",
-        arrayOf(uid.toString()),
-    ).use { cursor ->
-        buildSet { while (cursor.moveToNext()) add(LocalDate.ofEpochDay(cursor.getLong(0))) }
-    }
-
     fun deleteWeeklyNote(db: SQLiteDatabase, id: Long): Boolean =
         db.delete(
             "weekly_notes",

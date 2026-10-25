@@ -63,11 +63,6 @@ internal class PlatoonDatabase private constructor(
     fun membershipPeriodOwner(membershipPeriodId: Long): Long? =
         PlatoonReadQueries.membershipPeriodOwner(readableDatabase, membershipPeriodId)
 
-    /** Period starts of manual weekly notes that cite one of [uid]'s membership events. */
-    @Synchronized
-    fun weeklyNotePeriodsCitingMember(uid: Long): Set<LocalDate> =
-        WeeklyAnnotationStore.notePeriodsCitingMember(readableDatabase, uid)
-
     @Synchronized
     fun ingestSnapshot(
         snapshot: PlatoonSnapshot,

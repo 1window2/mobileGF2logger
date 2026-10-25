@@ -997,6 +997,39 @@ class WeeklyReportBuilderTest {
     }
 
     @Test
+    fun nearResetBaselineTailCannotPushAStandardDayAboveTheDailyCap() {
+        fun sunday(totalAfter: Long, facts: List<DailyPatrolFact> = emptyList()) =
+            WeeklyReportBuilder.build(
+                referenceDay = LocalDate.of(2026, 7, 26),
+                zoneId = zone,
+                snapshots = listOf(
+                    // Saturday still earns 40 between this 04:50 capture and the reset.
+                    snapshot("2026-07-25T19:50:00Z", weekly = 500, score = 0),
+                    snapshot("2026-07-26T11:00:00Z", weekly = totalAfter, score = 0),
+                ),
+                dailyPatrolFacts = facts,
+                asOf = Instant.parse("2026-07-26T12:00:00Z"),
+            ).members.single().days.first()
+
+        val tailAndPatrol = sunday(totalAfter = 630)
+        assertEquals(90L, tailAndPatrol.meritDelta)
+        assertEquals(MetricCertainty.EXACT, tailAndPatrol.meritCertainty)
+
+        val patrolFact = sunday(
+            totalAfter = 630,
+            facts = listOf(DailyPatrolFact(1, Instant.parse("2026-07-26T01:00:00Z"))),
+        )
+        assertEquals(90L, patrolFact.meritDelta)
+        assertEquals(MetricCertainty.EXACT, patrolFact.meritCertainty)
+        assertEquals(true, patrolFact.dailyPatrol)
+
+        // 50 + 50 or 90 + 50: the split between the two days is unknown.
+        val ambiguous = sunday(totalAfter = 640)
+        assertNull(ambiguous.meritDelta)
+        assertEquals(MetricCertainty.UNKNOWN, ambiguous.meritCertainty)
+    }
+
+    @Test
     fun midWeekJoinerMeritIsNotCreditedToTheFirstObservedDay() {
         val present = member(uid = 1, name = "Present", weekly = 90, score = 0)
         val joiner = member(uid = 2, name = "Joiner", weekly = 90, score = 0)

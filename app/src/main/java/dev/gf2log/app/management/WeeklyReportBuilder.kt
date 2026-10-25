@@ -633,7 +633,30 @@ object WeeklyReportBuilder {
             scoreDelta = if (isGunsmoke) null else 0L
         } else {
             val lastKnown = after ?: before
-            meritDelta = ActivityInference.counterDelta(before.totalMerit, lastKnown.totalMerit)
+            val intervalMerit = ActivityInference.counterDelta(before.totalMerit, lastKnown.totalMerit)
+            meritDelta = if (
+                !isGunsmoke &&
+                baselineSnapshot.capturedAt != start &&
+                intervalMerit > STANDARD_PATROL_MERIT
+            ) {
+                // A near-reset baseline can leave the previous day's login or patrol in the
+                // delta. Above the daily cap that tail is certain, so the day is kept only when
+                // exactly one split remains; it is never shown above the cap.
+                standardPrefixesAfterTail(intervalMerit).singleOrNull()
+                    ?: return withActivityFacts(
+                        DayCell(
+                            gameDay = day,
+                            meritDelta = null,
+                            scoreDelta = null,
+                            inference = null,
+                            evidence = DailyEvidence.INCOMPLETE_BOUNDARY,
+                            metricObservedAt = lastObservation?.first?.capturedAt,
+                            hasClosingBoundary = hasClosingBoundary,
+                        ),
+                    )
+            } else {
+                intervalMerit
+            }
             scoreDelta = if (isGunsmoke) {
                 ActivityInference.counterDelta(before.totalScore, lastKnown.totalScore)
             } else {
@@ -649,7 +672,12 @@ object WeeklyReportBuilder {
                 // A capture immediately before 05:00 is still not a final
                 // boundary: merit can change before reset. Exactness is
                 // established later by the counter constraint solver.
-                evidence = DailyEvidence.PARTIAL_DAY,
+                evidence = if (!isGunsmoke && before != null && meritDelta == STANDARD_PATROL_MERIT) {
+                    // The 90-point cap completes a Standard day before its reset.
+                    DailyEvidence.ATTRIBUTED
+                } else {
+                    DailyEvidence.PARTIAL_DAY
+                },
                 hasFinalGunsmokeScore = hasFinalGunsmokeScore,
                 isGunsmokeWeek = isGunsmoke,
                 metricObservedAt = lastObservation?.first?.capturedAt,
@@ -688,6 +716,8 @@ object WeeklyReportBuilder {
         if (!hasDailyPatrolFact && !hasLoginFact) return cell
         val minimumMerit = if (hasDailyPatrolFact) STANDARD_PATROL_MERIT else STANDARD_LOGIN_MERIT
         val merit = when {
+            // Daily Patrol completes a Standard day at its cap; a larger delta is contaminated.
+            !isGunsmoke && hasDailyPatrolFact -> STANDARD_PATROL_MERIT
             cell.meritDelta == null -> minimumMerit
             else -> maxOf(cell.meritDelta, minimumMerit)
         }
@@ -707,6 +737,13 @@ object WeeklyReportBuilder {
             hasLoginFact = hasLoginFact,
         )
     }
+
+    /**
+     * The Standard-day prefixes that leave a valid previous-day tail in [delta]. A tail can only
+     * add the login, the Daily Patrol, or both to a day that had not finished them yet.
+     */
+    private fun standardPrefixesAfterTail(delta: Long): List<Long> =
+        STANDARD_STAGES.filter { prefix -> delta - prefix in STANDARD_TAILS }
 
     private fun List<PlatoonSnapshot>.lastBefore(instant: Instant): PlatoonSnapshot? =
         lastOrNull { it.capturedAt.isBefore(instant) }
@@ -761,4 +798,11 @@ object WeeklyReportBuilder {
     private const val MAX_STANDARD_WEEKLY_MERIT = ActivityInference.LOGIN_AND_PATROL_MERIT * 7
     private const val STANDARD_LOGIN_MERIT = ActivityInference.LOGIN_MERIT
     private const val STANDARD_PATROL_MERIT = ActivityInference.LOGIN_AND_PATROL_MERIT
+    private val STANDARD_STAGES = listOf(0L, STANDARD_LOGIN_MERIT, STANDARD_PATROL_MERIT)
+    private val STANDARD_TAILS = setOf(
+        0L,
+        ActivityInference.DAILY_PATROL_MERIT,
+        STANDARD_LOGIN_MERIT,
+        STANDARD_PATROL_MERIT,
+    )
 }

@@ -208,9 +208,14 @@ internal class PlatoonRepository(
         access { it.listDailyPatrolFacts(from, until) }
 
     fun updateMember(uid: Long, name: String, note: String): Boolean =
-        refreshingWeeksOf(uid) { access { it.updateMember(uid, name, note) } }
+        refreshingWeeksOf(uid, WeeklyHistoryWorkPolicy.MemberEdit.DISPLAY_ONLY) {
+            access { it.updateMember(uid, name, note) }
+        }
 
-    fun deleteMember(uid: Long): Boolean = refreshingWeeksOf(uid) {
+    fun deleteMember(uid: Long): Boolean = refreshingWeeksOf(
+        uid,
+        WeeklyHistoryWorkPolicy.MemberEdit.REMOVAL,
+    ) {
         withExclusiveDatabase(storageScope) {
             val order = MemberOrderPreferences(appContext, storageScope.storageId)
             val previousOrder = order.read()
@@ -524,21 +529,26 @@ internal class PlatoonRepository(
      * other row, name, and note of a revision depends on other members' evidence alone. If the
      * pre-scan fails, every week is refreshed so the mutation stays authoritative.
      */
-    private fun refreshingWeeksOf(uid: Long?, mutation: () -> Boolean): Boolean {
+    private fun refreshingWeeksOf(
+        uid: Long?,
+        edit: WeeklyHistoryWorkPolicy.MemberEdit = WeeklyHistoryWorkPolicy.MemberEdit.MEMBERSHIP,
+        mutation: () -> Boolean,
+    ): Boolean {
         val zone = gameZone()
         val asOf = Instant.now()
-        val before = uid?.let { runCatching { weeksShowingMember(it, zone, asOf) }.getOrNull() }
+        val before = uid?.let {
+            runCatching { weeksShowingMember(it, zone, asOf, weeklyPeriodStarts(zone)) }.getOrNull()
+        }
         if (!mutation()) return false
         try {
-            val weeks = weeklyPeriodStarts(zone)
-            val affected = if (uid == null || before == null) {
-                weeks
-            } else {
-                val current = weeks.toSet()
-                (before.filter { it in current } + weeksShowingMember(uid, zone, asOf)).distinct()
-                    .sorted()
-            }
-            affected.forEach { recordLiveWeeklyRevisionSafely(it, zone) }
+            WeeklyHistoryWorkPolicy.memberEditPeriodStarts(
+                edit = edit,
+                showingBefore = before,
+                listedAfter = { weeklyPeriodStarts(zone) },
+                showingAfter = { listed ->
+                    weeksShowingMember(requireNotNull(uid), zone, asOf, listed)
+                },
+            ).forEach { recordLiveWeeklyRevisionSafely(it, zone) }
         } catch (error: Exception) {
             Log.e(TAG, "Unable to scope weekly history refresh; refreshing every week", error)
             recordAllLiveWeeklyReports()
@@ -551,11 +561,17 @@ internal class PlatoonRepository(
         mutation: () -> Boolean,
     ): Boolean = refreshingWeeksOf(
         runCatching { access { it.membershipPeriodOwner(membershipPeriodId) } }.getOrNull(),
-        mutation,
+        mutation = mutation,
     )
 
-    private fun weeksShowingMember(uid: Long, zone: ZoneId, asOf: Instant): Set<LocalDate> =
-        weeklyPeriodStarts(zone).filterTo(mutableSetOf()) { periodStart ->
+    /** The [listed] weeks whose revision shows [uid]; each loads one week's roster inputs. */
+    private fun weeksShowingMember(
+        uid: Long,
+        zone: ZoneId,
+        asOf: Instant,
+        listed: List<LocalDate>,
+    ): Set<LocalDate> =
+        listed.filterTo(mutableSetOf()) { periodStart ->
             val inputs = access { database ->
                 database.readConsistently { readRosterInputs(database, periodStart, zone, asOf) }
             }

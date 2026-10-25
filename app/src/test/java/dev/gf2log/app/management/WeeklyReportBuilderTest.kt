@@ -997,6 +997,29 @@ class WeeklyReportBuilderTest {
     }
 
     @Test
+    fun midWeekJoinerMeritIsNotCreditedToTheFirstObservedDay() {
+        val present = member(uid = 1, name = "Present", weekly = 90, score = 0)
+        val joiner = member(uid = 2, name = "Joiner", weekly = 90, score = 0)
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 28),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-27T03:00:00Z", present),
+                snapshotWithMembers("2026-07-28T03:00:00Z", present.copy(weeklyMerit = 180), joiner),
+            ),
+            asOf = Instant.parse("2026-07-28T04:00:00Z"),
+        )
+
+        // Absent on Monday at noon, the joiner can still have earned the 90 later on Monday.
+        val row = report.members.single { it.uid == 2L }
+        assertNull(row.days[1].meritDelta)
+        assertNull(row.days[2].meritDelta)
+        assertTrue(row.days[2].meritCertainty != MetricCertainty.EXACT)
+        assertEquals(90L, row.totalMerit)
+        assertEquals(MetricCertainty.LOWER_BOUND, row.totalMeritCertainty)
+    }
+
+    @Test
     fun sundayResetCaptureClosesTheStandardSaturday() {
         val report = WeeklyReportBuilder.build(
             referenceDay = LocalDate.of(2026, 8, 1),

@@ -54,14 +54,15 @@ object StandardWeekSolver {
             ?: return Resolution(mutable, null)
         val latestDay = latest.gameDay
         val firstObserved = observationsInCounterWeek.minBy(CounterObservation::capturedAt)
-        val knownAbsentBeforeFirstObservation = snapshots.any { snapshot ->
-            val gameDay = PlatoonPeriods.gameDay(snapshot.capturedAt, zoneId)
-            !gameDay.isBefore(monday) &&
-                gameDay.isBefore(firstObserved.gameDay) &&
-                snapshot.capturedAt.isBefore(firstObserved.capturedAt) &&
-                snapshot.member(uid) == null
+        // A member missing from a roster can join right after it, so the counter can already
+        // hold merit from the rest of that game day; only earlier days are known to be empty.
+        val latestAbsence = snapshots.lastOrNull { snapshot ->
+            snapshot.capturedAt.isBefore(firstObserved.capturedAt) && snapshot.member(uid) == null
         }
-        val activeStart = if (knownAbsentBeforeFirstObservation) firstObserved.gameDay else monday
+        val activeStart = latestAbsence
+            ?.let { PlatoonPeriods.gameDay(it.capturedAt, zoneId) }
+            ?.takeIf { it.isAfter(monday) }
+            ?: monday
         val activeIndexes = days.indices.filter { index -> days[index] in activeStart..latestDay }
         if (activeIndexes.isEmpty()) return Resolution(mutable, null)
 

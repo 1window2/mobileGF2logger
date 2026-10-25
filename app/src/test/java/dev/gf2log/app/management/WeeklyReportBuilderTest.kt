@@ -1196,6 +1196,30 @@ class WeeklyReportBuilderTest {
     }
 
     @Test
+    fun sundayResetCaptureIsTheFinalGunsmokeScoreOfTheEndingWeek() {
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 25),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshot("2026-07-24T20:00:00Z", weekly = 1_000, score = 10_000),
+                snapshot("2026-07-25T20:00:00Z", weekly = 1_150, score = 10_300),
+            ),
+            asOf = Instant.parse("2026-07-25T21:00:00Z"),
+        )
+
+        val member = report.members.single()
+        val saturday = member.days.last()
+        assertTrue(saturday.hasClosingBoundary)
+        assertTrue(saturday.hasFinalGunsmokeScore)
+        assertTrue(member.hasFinalGunsmokeScore)
+        assertEquals(10_300L, member.totalScore)
+        assertEquals(MetricCertainty.EXACT, member.totalScoreCertainty)
+        assertEquals(150L, saturday.meritDelta)
+        assertEquals(300L, saturday.scoreDelta)
+        assertEquals(MetricCertainty.EXACT, saturday.scoreCertainty)
+    }
+
+    @Test
     fun preTwoAmFinalSaturdayCaptureLeavesScoreOpen() {
         val report = WeeklyReportBuilder.build(
             referenceDay = LocalDate.of(2026, 7, 25),

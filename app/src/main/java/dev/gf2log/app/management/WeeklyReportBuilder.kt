@@ -459,7 +459,7 @@ object WeeklyReportBuilder {
         }
         val cells = gunsmokeResolution?.cells ?: standardResolution?.cells ?: derivedCells
         val snapshotsInPeriod = week.snapshots.mapNotNull { snapshot ->
-            val gameDay = PlatoonPeriods.gameDay(snapshot.capturedAt, week.zoneId)
+            val gameDay = PlatoonPeriods.checkpointDay(snapshot.capturedAt, week.zoneId)
             snapshot.member(uid)
                 ?.takeIf { gameDay in week.days }
                 ?.let { gameDay to it }

@@ -1054,17 +1054,10 @@ internal object GunsmokeWeekSolver {
         else -> MetricCertainty.LOWER_BOUND
     }
 
-    private fun reportDay(instant: Instant, days: List<LocalDate>, zoneId: ZoneId): LocalDate {
-        val gameDay = PlatoonPeriods.gameDay(instant, zoneId)
-        return if (
-            gameDay > days.first() &&
-            instant == PlatoonPeriods.periodStartInstant(gameDay, zoneId)
-        ) {
-            gameDay.minusDays(1)
-        } else {
-            gameDay
-        }
-    }
+    /** A reset capture closes the previous day, except the week's own opening capture. */
+    private fun reportDay(instant: Instant, days: List<LocalDate>, zoneId: ZoneId): LocalDate =
+        PlatoonPeriods.checkpointDay(instant, zoneId).takeUnless { it < days.first() }
+            ?: PlatoonPeriods.gameDay(instant, zoneId)
 
     private fun SnapshotMember.hasValidActivityCounters(): Boolean =
         weeklyMerit >= 0L && totalMerit >= 0L && highScore >= 0L && totalScore >= 0L

@@ -24,7 +24,9 @@ rules below take precedence over stale copied dates in archived templates.
 - Gunsmoke scoring closes at 02:00 on the final Sunday. A Saturday snapshot at
   or after 02:00 therefore confirms the final cumulative Gunsmoke score, while
   merit, login, Daily Patrol, and the Saturday game day remain open until
-  05:00. A daily Saturday score delta still requires a trustworthy opening
+  05:00. A capture exactly at a 05:00 reset records the closed previous game
+  day, so the Sunday 05:00 capture is the final, closing Saturday capture of
+  the event week. A daily Saturday score delta still requires a trustworthy opening
   boundary; the app does not invent one from the final total alone.
 - A capture shortly before 05:00 is not an exact opening boundary for the next
   day. Its following counter delta can include the previous day's tail, so the

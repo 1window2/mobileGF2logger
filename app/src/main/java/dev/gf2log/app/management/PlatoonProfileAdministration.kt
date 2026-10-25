@@ -101,10 +101,24 @@ internal class PlatoonProfileAdministration internal constructor(
             }
         }
 
+        /** Whether [storageId] still waits for deletion, so it must not be allocated again. */
+        internal fun isPendingDeletion(context: Context, storageId: String): Boolean =
+            storageId in pending(context)
+
+        /**
+         * Deletes one queued scope. A scope the registry lists again, as a committed restore of
+         * the deleted Platoon does, is live data: it leaves the queue instead of being deleted.
+         * The check and every deletion step run under the exclusive gate a restore also holds,
+         * and a rolled-back restore leaves the scope unlisted, so its deletion simply resumes.
+         */
         private fun finishPending(context: Context, storageId: String): Boolean {
             val scope = PlatoonStorageScope(storageId)
             return runCatching {
                 PlatoonRepository.withExclusiveDatabase(scope) {
+                    if (PlatoonProfileRegistry(context).isRegistered(storageId)) {
+                        dequeue(context, storageId)
+                        return@withExclusiveDatabase false
+                    }
                     val database = context.getDatabasePath(scope.databaseName)
                     if (database.exists()) {
                         check(context.deleteDatabase(scope.databaseName)) {
@@ -119,12 +133,12 @@ internal class PlatoonProfileAdministration internal constructor(
                     if (root.exists()) {
                         check(root.deleteRecursively()) { "Unable to delete Platoon evidence" }
                     }
+                    MemberOrderPreferences(context, storageId).clear()
+                    WeeklyCutlinePreferences(context, storageId).clear()
+                    GameTimeZonePreferences.clearScope(context, storageId)
+                    dequeue(context, storageId)
+                    true
                 }
-                MemberOrderPreferences(context, storageId).clear()
-                WeeklyCutlinePreferences(context, storageId).clear()
-                GameTimeZonePreferences.clearScope(context, storageId)
-                dequeue(context, storageId)
-                true
             }.getOrDefault(false)
         }
 

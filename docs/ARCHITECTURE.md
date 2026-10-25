@@ -323,7 +323,10 @@ the repository's exclusive database gate. Full profile deletion uses a durable
 pending-deletion set: selector metadata is removed first, then the scoped SQLite
 database, retained evidence, member ordering, weekly cutlines, and reset setting
 are deleted. If the process stops mid-cleanup, registry initialization resumes
-the remaining bounded deletion before showing profiles.
+the remaining bounded deletion before showing profiles. A queued scope is never
+handed to a newly detected or declared profile, which takes the random
+fallback ID instead, and a queued scope that the registry lists again after a
+committed restore leaves the queue rather than being deleted.
 
 The design deliberately favors composition over deep inheritance. Abstraction
 and polymorphism appear at real variation points (`GameData`, `ParseEvent`, and

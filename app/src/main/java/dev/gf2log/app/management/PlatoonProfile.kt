@@ -161,6 +161,14 @@ internal class PlatoonProfileRegistry(context: Context) {
         profiles.firstOrNull { it.hasIdentity(client, region, platoonId) }
     }
 
+    /**
+     * Whether selector metadata lists [storageId], without resuming pending deletions; the
+     * deletion queue itself asks this under the exclusive gate.
+     */
+    fun isRegistered(storageId: String): Boolean = synchronized(lock) {
+        readLocked(storageId) != null
+    }
+
     fun findByClientAndPlatoonId(
         client: PlatoonClient,
         platoonId: Long,
@@ -510,13 +518,22 @@ internal class PlatoonProfileRegistry(context: Context) {
         platoonId: Long,
     ): String {
         val preferred = PlatoonProfileIdentity.storageId(client, region, platoonId)
-        if (readLocked(preferred) == null) return preferred
+        if (isAllocatableLocked(preferred)) return preferred
         repeat(32) {
             val random = PlatoonProfileIdentity.randomStorageId()
-            if (readLocked(random) == null) return random
+            if (isAllocatableLocked(random)) return random
         }
         error("Unable to allocate an isolated Platoon storage scope")
     }
+
+    /**
+     * A deleted profile's scope stays queued until its files are gone. Re-detecting the same
+     * Platoon meanwhile must not reuse that scope: the new profile would inherit what the failed
+     * deletion left behind, so it takes the random collision-safe fallback instead.
+     */
+    private fun isAllocatableLocked(storageId: String): Boolean =
+        readLocked(storageId) == null &&
+            !PlatoonProfileAdministration.isPendingDeletion(appContext, storageId)
 
     private fun normalizeName(value: String): String = value
         .replace(WHITESPACE, " ")

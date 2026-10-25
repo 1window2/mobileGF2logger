@@ -1,5 +1,6 @@
 package dev.gf2log.app.management
 
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.random.Random
@@ -77,6 +78,205 @@ class GunsmokeWeekSolverPropertyTest {
         }
         assertTrue("generated cases must exercise merit publication", publishedMeritChecks > 0)
         assertTrue("generated cases must exercise score publication", publishedScoreChecks > 0)
+    }
+
+    /**
+     * Automatic recording captures every member once a day at 04:56, just before the reset, while
+     * fifty members play one or two attempts a day. Each interval can still split between the
+     * previous day's last minutes and the new day, so the days stay lower bounds. The detailed
+     * search must hand over to interval bounds instead of dropping the rest of the week: every
+     * day keeps its Daily Patrol and a score floor, and the weekly totals stay exact.
+     */
+    @Test(timeout = 10_000)
+    fun dailyPreResetRecordingKeepsEveryDayAndExactWeeklyTotals() {
+        val random = Random(7)
+        val truths = List(50) {
+            List(7) {
+                val attempts = random.nextInt(1, 3)
+                RecordedDay(attemptScores = List(attempts) { random.nextLong(6_000, 10_001) }, patrol = true)
+            }
+        }
+        val snapshots = (0..7).map { completedDays ->
+            val capturedAt = periodStart.plusDays(completedDays.toLong()).atTime(4, 56).atZone(zone).toInstant()
+            PlatoonSnapshot(
+                id = completedDays.toLong(),
+                capturedAt = capturedAt,
+                members = truths.mapIndexed { index, days ->
+                    recordedMember(index + 1L, days, completedDays, 10_000L, capturedAt.minusSeconds(3_600))
+                },
+            )
+        }
+
+        val report = WeeklyReportBuilder.build(
+            referenceDay = periodStart,
+            zoneId = zone,
+            snapshots = snapshots,
+            asOf = periodStart.plusDays(8).atTime(6, 0).atZone(zone).toInstant(),
+        )
+
+        assertEquals(50, report.members.size)
+        report.members.forEach { row ->
+            val days = truths[(row.uid - 1).toInt()]
+            val label = "member ${row.uid}"
+            assertConservative(label, row.days, days)
+            row.days.forEach { cell ->
+                assertEquals("$label login on ${cell.gameDay}", true, cell.attended)
+                assertEquals("$label patrol on ${cell.gameDay}", true, cell.dailyPatrol)
+                assertTrue("$label merit floor on ${cell.gameDay}", requireNotNull(cell.meritDelta) >= 90L)
+                assertTrue("$label score floor on ${cell.gameDay}", cell.scoreDelta != null)
+            }
+            // The Monday weekly reset still closes Sunday exactly.
+            assertEquals(MetricCertainty.EXACT, row.days.first().meritCertainty)
+            assertEquals(MetricCertainty.EXACT, row.days.first().attemptsCertainty)
+            assertEquals(label, days.sumOf(RecordedDay::merit), row.totalMerit)
+            assertEquals(label, MetricCertainty.EXACT, row.totalMeritCertainty)
+            assertEquals(label, days.sumOf(RecordedDay::attempts), row.totalAttempts)
+            assertEquals(label, MetricCertainty.EXACT, row.totalAttemptsCertainty)
+            assertEquals(label, 7, row.loginDays)
+            assertEquals(label, MetricCertainty.EXACT, row.loginDaysCertainty)
+            assertEquals(label, 7, row.patrolDays)
+            assertEquals(label, MetricCertainty.EXACT, row.patrolDaysCertainty)
+        }
+    }
+
+    /**
+     * Daily, twice-daily, sparse, and exact-reset recording routines with any attempt count and
+     * high score never publish a value the true week contradicts.
+     */
+    @Test(timeout = 60_000)
+    fun recordingRoutinesAroundTheResetRemainConservative() {
+        repeat(160) { caseIndex ->
+            val random = Random(caseIndex * 7_919 + 13)
+            val highScore = listOf(10_000L, 10_545L, 7_985L)[random.nextInt(3)]
+            val days = List(7) {
+                val attempts = random.nextInt(0, 4)
+                val attended = attempts > 0 || random.nextBoolean()
+                RecordedDay(
+                    attemptScores = List(attempts) { random.nextLong(highScore / 2, highScore + 1) },
+                    attended = attended,
+                    patrol = attended && random.nextInt(4) != 0,
+                )
+            }
+            val routine = caseIndex % 4
+            val captures = buildList {
+                (0..7).forEach { completedDays ->
+                    val time = if (routine == 3) 5 to 0 else 4 to 56
+                    if (routine != 2 || completedDays == 0 || completedDays == 7 || random.nextBoolean()) {
+                        add(periodStart.plusDays(completedDays.toLong()).atTime(time.first, time.second) to completedDays)
+                    }
+                    if (routine == 1 && completedDays < 7) {
+                        add(periodStart.plusDays(completedDays.toLong()).atTime(12, 0) to completedDays)
+                    }
+                }
+            }
+            val snapshots = captures.map { (localTime, completedDays) ->
+                val capturedAt = localTime.atZone(zone).toInstant()
+                // Every attended day logs in at 09:00.
+                val lastLogin = (0..6).asSequence()
+                    .filter { index -> days[index].attended }
+                    .map { index -> periodStart.plusDays(index.toLong()).atTime(9, 0).atZone(zone).toInstant() }
+                    .lastOrNull { it.isBefore(capturedAt) }
+                PlatoonSnapshot(
+                    id = 0,
+                    capturedAt = capturedAt,
+                    members = listOf(
+                        recordedMember(
+                            uid = 1L,
+                            days = days,
+                            completedDays = completedDays,
+                            highScore = highScore,
+                            lastLogin = lastLogin,
+                            // A noon capture sees the morning half of that day's attempts.
+                            partialDay = days.getOrNull(completedDays).takeIf { localTime.hour == 12 },
+                        ),
+                    ),
+                )
+            }
+            val facts = if (caseIndex % 5 == 0) {
+                days.indices.filter { days[it].patrol }.map { index ->
+                    DailyPatrolFact(1L, periodStart.plusDays(index.toLong()).atTime(10, 0).atZone(zone).toInstant())
+                }
+            } else {
+                emptyList()
+            }
+
+            val cells = WeeklyReportBuilder.build(
+                referenceDay = periodStart,
+                zoneId = zone,
+                snapshots = snapshots,
+                dailyPatrolFacts = facts,
+                asOf = periodStart.plusDays(8).atTime(6, 0).atZone(zone).toInstant(),
+            ).members.single().days
+
+            assertConservative("routine $routine case $caseIndex", cells, days)
+        }
+    }
+
+    private fun assertConservative(
+        label: String,
+        cells: List<WeeklyReportBuilder.DayCell>,
+        days: List<RecordedDay>,
+    ) {
+        cells.zip(days).forEach { (cell, actual) ->
+            val at = "$label on ${cell.gameDay}"
+            cell.meritDelta?.let { assertTrue("$at merit floor", it <= actual.merit) }
+            cell.scoreDelta?.let { assertTrue("$at score floor", it <= actual.score) }
+            cell.attempts?.let { assertTrue("$at attempts floor", it <= actual.attempts) }
+            if (cell.meritCertainty == MetricCertainty.EXACT) assertEquals("$at merit", actual.merit, cell.meritDelta)
+            if (cell.scoreCertainty == MetricCertainty.EXACT) assertEquals("$at score", actual.score, cell.scoreDelta)
+            if (cell.attemptsCertainty == MetricCertainty.EXACT) assertEquals("$at attempts", actual.attempts, cell.attempts)
+            cell.attended?.let { assertEquals("$at login", actual.attended, it) }
+            cell.dailyPatrol?.let { assertEquals("$at patrol", actual.patrol, it) }
+        }
+    }
+
+    /**
+     * One member's counters after [completedDays] whole days, plus the morning half of
+     * [partialDay] when the capture falls inside it. Merit This Week restarts on Monday.
+     */
+    private fun recordedMember(
+        uid: Long,
+        days: List<RecordedDay>,
+        completedDays: Int,
+        highScore: Long,
+        lastLogin: Instant?,
+        partialDay: RecordedDay? = null,
+    ): SnapshotMember {
+        val morning = partialDay?.let { day ->
+            RecordedDay(day.attemptScores.take(day.attempts / 2), attended = day.attended, patrol = false)
+        }
+        val done = days.take(completedDays)
+        val partialMerit = morning?.merit ?: 0L
+        return SnapshotMember(
+            uid = uid,
+            name = "Member $uid",
+            level = 60,
+            weeklyMerit = when {
+                completedDays == 0 -> 540L + partialMerit
+                completedDays == 1 && partialDay == null -> 540L + done.first().merit
+                else -> done.drop(1).sumOf(RecordedDay::merit) + partialMerit
+            },
+            totalMerit = 100_000L + done.sumOf(RecordedDay::merit) + partialMerit,
+            highScore = highScore,
+            totalScore = done.sumOf(RecordedDay::score) + (morning?.score ?: 0L),
+            lastLogin = lastLogin?.epochSecond ?: 0L,
+        )
+    }
+
+    private data class RecordedDay(
+        val attemptScores: List<Long>,
+        val attended: Boolean = true,
+        val patrol: Boolean,
+    ) {
+        val attempts: Int
+            get() = attemptScores.size
+        val score: Long
+            get() = attemptScores.sum()
+        val merit: Long
+            get() = attempts * ActivityInference.MERIT_PER_ATTEMPT +
+                attemptScores.sumOf { it / ActivityInference.SCORE_POINTS_PER_MERIT } +
+                (if (attended) ActivityInference.LOGIN_MERIT else 0L) +
+                (if (patrol) ActivityInference.DAILY_PATROL_MERIT else 0L)
     }
 
     private fun snapshots(caseIndex: Int, truth: List<Truth>): List<PlatoonSnapshot> {

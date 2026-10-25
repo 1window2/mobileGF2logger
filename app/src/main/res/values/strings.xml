@@ -408,7 +408,7 @@
     <string name="level_short">Lv. %1$d</string>
     <string name="loading_comparison">Comparing snapshots…</string>
     <string name="loading_members">Loading members…</string>
-    <string name="member_change_description">%1$s: merit this week +%2$d, total merit +%3$d, Gunsmoke score +%4$d</string>
+    <string name="member_change_description">%1$s: merit this week +%2$s, total merit +%3$d, Gunsmoke score +%4$s</string>
     <string name="member_changes_count">Counter changes · %1$d</string>
     <string name="member_nickname_detail">Shown everywhere in place of the in-game name.</string>
     <string name="member_order_position">%1$d of %2$d, %3$s</string>

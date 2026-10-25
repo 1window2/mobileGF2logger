@@ -22,6 +22,16 @@ object PlatoonPeriods {
     fun gameDay(instant: Instant, zoneId: ZoneId): LocalDate =
         instant.atZone(zoneId).toLocalDateTime().minusHours(RESET_HOUR.toLong()).toLocalDate()
 
+    /**
+     * The game day whose counters a capture at [instant] records. A capture exactly at a 05:00
+     * reset is the closing capture of the previous game day, since nothing of the new day can
+     * have been earned yet; every other capture records a prefix of its own [gameDay].
+     */
+    fun checkpointDay(instant: Instant, zoneId: ZoneId): LocalDate {
+        val day = gameDay(instant, zoneId)
+        return if (instant == periodStartInstant(day, zoneId)) day.minusDays(1) else day
+    }
+
     fun weekStart(gameDay: LocalDate): LocalDate =
         gameDay.with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY))
 
@@ -45,8 +55,9 @@ object PlatoonPeriods {
             LocalTime.of(GUNSMOKE_FINAL_SCORE_HOUR, 0),
             zoneId,
         ).toInstant()
+        // The Sunday 05:00 reset capture still closes the Saturday game day; see checkpointDay.
         return !capturedAt.isBefore(scoreClose) &&
-            capturedAt.isBefore(periodStartInstant(gameDay.plusDays(1), zoneId))
+            !capturedAt.isAfter(periodStartInstant(gameDay.plusDays(1), zoneId))
     }
 
     private const val GUNSMOKE_CYCLE_WEEKS = 3L

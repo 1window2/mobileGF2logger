@@ -15,6 +15,9 @@ import java.time.ZoneId
  * prefix, while the Monday-reset weekly counter constrains merit. Contiguous
  * observed runs are solved independently so missing days never discard later
  * usable evidence. Only values shared by every compatible path are published.
+ * When the detailed point search would exceed its budget, the rest of the run
+ * continues on attempt and Login / Daily Patrol classes with merit and score
+ * ranges, which admit every point path and therefore stay conservative.
  */
 internal object GunsmokeWeekSolver {
     /**
@@ -87,14 +90,19 @@ internal object GunsmokeWeekSolver {
                 aggregate.dayConsensus.forEachIndexed { dayOffset, consensus ->
                     val cellIndex = dayOffset + 1
                     val cell = resolved[cellIndex]
+                    // A final event packet before the 05:00 reset that ends Saturday can miss a
+                    // later Saturday login or patrol, so only a positive consensus holds there.
+                    val finalized = cellIndex < resolved.lastIndex || cell.hasClosingBoundary
                     if (cell.manualOverride == null) {
                         resolved[cellIndex] = cell.copy(
                             solvedAttempts = consensus.attempts ?: cell.solvedAttempts,
                             solvedAttemptsCertainty = consensus.attempts?.let {
                                 MetricCertainty.EXACT
                             } ?: cell.solvedAttemptsCertainty,
-                            solvedAttended = consensus.attended ?: cell.solvedAttended,
-                            solvedDailyPatrol = consensus.patrol ?: cell.solvedDailyPatrol,
+                            solvedAttended = consensus.attended?.takeIf { it || finalized }
+                                ?: cell.solvedAttended,
+                            solvedDailyPatrol = consensus.patrol?.takeIf { it || finalized }
+                                ?: cell.solvedDailyPatrol,
                         )
                     }
                 }
@@ -356,40 +364,79 @@ internal object GunsmokeWeekSolver {
             val extensionCache = mutableMapOf<ActivityState, List<ActivityState>>()
             val capturedCache = mutableMapOf<Metrics, List<ActivityState>>()
             val nextPartials = linkedMapOf<PartialKey, PartialSolution>()
-
-            partials.forEach { partial ->
-                val previousCaptured = partial.captured
-                val maximumPreviousMerit = previousCaptured.merit + meritDelta
-                val resetCrossed = runStart == 0 && absoluteIndex == 1
-                val requiredPreviousFinalMerit = if (resetCrossed) {
-                    previousCaptured.merit + meritDelta - currentCheckpoint.member.weeklyMerit
+            val resetCrossed = runStart == 0 && absoluteIndex == 1
+            val previousCell = cells[absoluteIndex - 1]
+            val highScore = currentCheckpoint.member.highScore
+            val tailMeritWindows = mutableMapOf<Pair<ActivityOption, ActivityOption>, Bounds?>()
+            fun hasFixedTail(captured: ActivityState) = previousCell.hasClosingBoundary ||
+                previousCell.hasFinalGunsmokeScore ||
+                captured.attempts == ActivityInference.MAX_DAILY_ATTEMPTS
+            fun extensionMerits(captured: ActivityState): Pair<Long, Long> {
+                val required = if (resetCrossed) {
+                    captured.merit + meritDelta - currentCheckpoint.member.weeklyMerit
                 } else {
                     null
                 }
+                return (required ?: captured.merit) to minOf(
+                    required ?: (captured.merit + meritDelta),
+                    maximumDailyMerit(highScore),
+                )
+            }
+            fun intervalBounds() = resolveIntervalBounds(
+                runStart = runStart,
+                firstIndex = absoluteIndex - 1,
+                runEnd = runEnd,
+                partials = partials,
+                days = days,
+                zoneId = zoneId,
+                checkpoints = checkpoints,
+                cells = cells,
+                factsByDay = factsByDay,
+                bestEffortCells = bestEffortCells,
+            )
+
+            // Every open-tail score-merit value costs at least one search step. A transition
+            // that cannot fit the remaining budget goes straight to the interval bounds instead
+            // of spending the budget first.
+            val extensionWork = partials.asSequence()
+                .map(PartialSolution::captured)
+                .distinct()
+                .filterNot(::hasFixedTail)
+                .sumOf { captured ->
+                    val (minimumMerit, maximumMerit) = extensionMerits(captured)
+                    extensionRanges(
+                        prefix = captured,
+                        minimumMerit = minimumMerit,
+                        maximumMerit = maximumMerit,
+                        meritDelta = meritDelta,
+                        scoreDelta = scoreDelta,
+                        maximumAttemptScore = highScore,
+                        tailMeritWindows = tailMeritWindows,
+                    ).sumOf(ExtensionRange::span)
+                }
+            if (extensionWork > searchBudget.remaining) return intervalBounds()
+
+            partials.forEach { partial ->
+                val previousCaptured = partial.captured
                 val extensionStates = extensionCache.getOrPut(previousCaptured) {
-                    if (
-                        cells[absoluteIndex - 1].hasClosingBoundary ||
-                        cells[absoluteIndex - 1].hasFinalGunsmokeScore ||
-                        previousCaptured.attempts == ActivityInference.MAX_DAILY_ATTEMPTS
-                    ) {
+                    if (hasFixedTail(previousCaptured)) {
                         finalCandidates(
                             captured = previousCaptured,
-                            cell = cells[absoluteIndex - 1],
+                            cell = previousCell,
                             facts = previousFacts,
                         )
                     } else {
+                        val (minimumMerit, maximumMerit) = extensionMerits(previousCaptured)
                         statesExtending(
                             prefix = previousCaptured,
-                            minimumMerit = requiredPreviousFinalMerit ?: previousCaptured.merit,
-                            maximumMerit = minOf(
-                                requiredPreviousFinalMerit ?: maximumPreviousMerit,
-                                maximumDailyMerit(currentCheckpoint.member.highScore),
-                            ),
+                            minimumMerit = minimumMerit,
+                            maximumMerit = maximumMerit,
                             meritDelta = meritDelta,
                             scoreDelta = scoreDelta,
-                            maximumAttemptScore = currentCheckpoint.member.highScore,
+                            maximumAttemptScore = highScore,
                             searchBudget = searchBudget,
-                        ) ?: return RunResolution(bestEffortCells, null, searchExhausted = true)
+                            tailMeritWindows = tailMeritWindows,
+                        ) ?: return intervalBounds()
                     }
                 }
                 extensionStates.asSequence()
@@ -456,11 +503,7 @@ internal object GunsmokeWeekSolver {
                                         ?.mergeHistory(candidate)
                                         ?: candidate
                                     if (nextPartials.size > MAX_PARTIAL_SOLUTIONS) {
-                                        return RunResolution(
-                                            bestEffortCells,
-                                            null,
-                                            searchExhausted = true,
-                                        )
+                                        return intervalBounds()
                                     }
                                 }
                         }
@@ -556,6 +599,330 @@ internal object GunsmokeWeekSolver {
             observedAt = checkpoints[currentIndex]?.capturedAt,
         )
         return projected
+    }
+
+    /**
+     * Continues a run whose detailed search would exceed its budget at the transition after
+     * [firstIndex]. Keeps the enumerated captured states of that checkpoint, then tracks every
+     * later capture only by its attempts, Login, and Daily Patrol, with merit and score ranges.
+     * Within such a class pair an interval splits between the previous day's tail and the next
+     * prefix in closed form, so every split the detailed search accepts is still admitted: the
+     * published lower bounds and shared states stay defensible, only less precise. Earlier days
+     * keep their detailed consensus over captured states that still have a complete path. Returns
+     * the run's cells; whole-week totals are left to the final-event aggregate.
+     */
+    private fun resolveIntervalBounds(
+        runStart: Int,
+        firstIndex: Int,
+        runEnd: Int,
+        partials: List<PartialSolution>,
+        days: List<LocalDate>,
+        zoneId: ZoneId,
+        checkpoints: List<Checkpoint?>,
+        cells: List<WeeklyReportBuilder.DayCell>,
+        factsByDay: Map<LocalDate, List<DailyPatrolFact>>,
+        bestEffortCells: List<WeeklyReportBuilder.DayCell>,
+    ): RunResolution {
+        val layers = mutableListOf(
+            partials.groupBy { it.captured.activityOption }
+                .mapValues { (_, group) -> IntervalRange.of(group.map(PartialSolution::captured)) },
+        )
+        val transitions = mutableListOf<List<IntervalEdge>>()
+        var lastIndex = firstIndex
+        while (lastIndex < runEnd) {
+            val edges = intervalEdges(
+                from = layers.last(),
+                runStart = runStart,
+                absoluteIndex = lastIndex + 1,
+                days = days,
+                zoneId = zoneId,
+                checkpoints = checkpoints,
+                cells = cells,
+                factsByDay = factsByDay,
+            ) ?: break
+            if (edges.isEmpty()) return RunResolution(bestEffortCells, null)
+            transitions += edges
+            layers += edges.groupBy(IntervalEdge::to).mapValues { (_, incoming) ->
+                incoming.map(IntervalEdge::next).reduce(IntervalRange::hull)
+            }
+            lastIndex++
+        }
+        // Decreasing counters stop the run early, as in the detailed search, and leave the last
+        // reachable capture an open prefix.
+        val truncated = lastIndex < runEnd
+        val lastCell = cells[lastIndex]
+        val lastFacts = factsByDay[days[lastIndex]].orEmpty()
+        val gunsmokeClosed = { option: ActivityOption ->
+            lastCell.hasClosingBoundary ||
+                lastCell.hasFinalGunsmokeScore ||
+                option.attempts == ActivityInference.MAX_DAILY_ATTEMPTS
+        }
+        val finals = layers.last().mapValues { (option, range) ->
+            when {
+                truncated -> listOf(option to range)
+                lastCell.hasClosingBoundary || !gunsmokeClosed(option) -> listOf(option to range)
+                else -> baselineCompletions(option).map { final ->
+                    val extra = final.baselineMerit - option.baselineMerit
+                    final to range.copy(merit = range.merit + Bounds.of(extra))
+                }
+            }.filter { (final, finalRange) ->
+                truncated ||
+                    matchesFinalEvidence(final, finalRange.merit, finalRange.score, lastCell, lastFacts)
+            }
+        }
+
+        val alive = MutableList(layers.size) { mutableSetOf<ActivityOption>() }
+        alive[layers.lastIndex] += finals.filterValues { it.isNotEmpty() }.keys
+        val liveTransitions = MutableList(transitions.size) { emptyList<IntervalEdge>() }
+        for (layer in transitions.indices.reversed()) {
+            liveTransitions[layer] = transitions[layer].filter { it.to in alive[layer + 1] }
+            alive[layer] += liveTransitions[layer].map(IntervalEdge::from)
+        }
+        if (alive.first().isEmpty()) return RunResolution(bestEffortCells, null)
+
+        val projected = projectPartialPrefix(
+            runStart = runStart,
+            currentIndex = firstIndex,
+            cells = cells,
+            checkpoints = checkpoints,
+            partials = partials.filter { it.captured.activityOption in alive.first() },
+        )
+        liveTransitions.forEachIndexed { layer, edges ->
+            val absoluteIndex = firstIndex + layer
+            projected[absoluteIndex] = project(
+                cell = cells[absoluteIndex],
+                summary = edges.map { edge ->
+                    val prefix = layers[layer].getValue(edge.from)
+                    StateSummary.of(
+                        option = edge.final,
+                        merit = prefix.merit + edge.tail.merit,
+                        score = prefix.score + edge.tail.score,
+                    )
+                }.reduce(StateSummary::merge),
+                finalized = true,
+                observedAt = checkpoints[absoluteIndex]?.capturedAt,
+            )
+        }
+        projected[lastIndex] = project(
+            cell = lastCell,
+            summary = alive.last().flatMap { option -> finals.getValue(option) }
+                .map { (final, range) -> StateSummary.of(final, range.merit, range.score) }
+                .reduce(StateSummary::merge),
+            finalized = !truncated && alive.last().all(gunsmokeClosed),
+            observedAt = checkpoints[lastIndex]?.capturedAt,
+        )
+        return RunResolution(projected, null)
+    }
+
+    /**
+     * Splits the counter interval ending at checkpoint [absoluteIndex] between each previous
+     * prefix class's tail and each next prefix class. The weekly counter fixes the tail only
+     * across the Monday reset; elsewhere it must move with the total counter. Returns the
+     * admissible edges, or null when the counters decrease.
+     */
+    private fun intervalEdges(
+        from: Map<ActivityOption, IntervalRange>,
+        runStart: Int,
+        absoluteIndex: Int,
+        days: List<LocalDate>,
+        zoneId: ZoneId,
+        checkpoints: List<Checkpoint?>,
+        cells: List<WeeklyReportBuilder.DayCell>,
+        factsByDay: Map<LocalDate, List<DailyPatrolFact>>,
+    ): List<IntervalEdge>? {
+        val current = requireNotNull(checkpoints[absoluteIndex])
+        val previous = requireNotNull(checkpoints[absoluteIndex - 1])
+        val meritDelta = current.member.totalMerit - previous.member.totalMerit
+        val scoreDelta = current.member.totalScore - previous.member.totalScore
+        if (meritDelta < 0L || scoreDelta < 0L) return null
+        val requiredTailMerit = if (runStart == 0 && absoluteIndex == 1) {
+            (meritDelta - current.member.weeklyMerit).takeIf { it >= 0L } ?: return emptyList()
+        } else {
+            if (current.member.weeklyMerit - previous.member.weeklyMerit != meritDelta) return emptyList()
+            null
+        }
+        val previousCell = cells[absoluteIndex - 1]
+        val previousFacts = factsByDay[days[absoluteIndex - 1]].orEmpty()
+        val currentFacts = factsByDay[days[absoluteIndex]].orEmpty()
+        // A cell measured from an exact opening boundary fixes the new prefix, and with it the tail.
+        val currentCell = cells[absoluteIndex]
+        val direct = currentCell.meritDelta?.takeIf { currentCell.manualOverride == null }?.let { merit ->
+            currentCell.scoreDelta?.let { score -> Metrics(merit, score) }
+        }
+        val directOptions = direct?.let {
+            statesForMetrics(it.merit, it.score, current.member.highScore).map { state -> state.activityOption }
+        }
+        val nextOptions = ALL_ACTIVITY_OPTIONS.filter { option ->
+            (directOptions == null || option in directOptions) &&
+                matchesCapturedEvidence(option, current, days[absoluteIndex], zoneId, currentFacts)
+        }
+        return buildList {
+            from.forEach { (prefix, prefixRange) ->
+                tailFinals(prefix, previousCell).forEach { final ->
+                    nextOptions.forEach { next ->
+                        var tail = splitInterval(
+                            prefix = prefix,
+                            final = final,
+                            next = next,
+                            meritDelta = meritDelta,
+                            scoreDelta = scoreDelta,
+                            maximumAttemptScore = current.member.highScore,
+                            requiredTailMerit = requiredTailMerit,
+                        ) ?: return@forEach
+                        if (direct != null) {
+                            val exact = IntervalRange(
+                                merit = Bounds.of(meritDelta - direct.merit),
+                                score = Bounds.of(scoreDelta - direct.score),
+                            )
+                            if (exact.merit.minimum !in tail.merit || exact.score.minimum !in tail.score) {
+                                return@forEach
+                            }
+                            tail = exact
+                        }
+                        if (
+                            matchesFinalEvidence(
+                                option = final,
+                                merit = prefixRange.merit + tail.merit,
+                                score = prefixRange.score + tail.score,
+                                cell = previousCell,
+                                facts = previousFacts,
+                            )
+                        ) {
+                            add(
+                                IntervalEdge(
+                                    from = prefix,
+                                    final = final,
+                                    to = next,
+                                    tail = tail,
+                                    next = IntervalRange(
+                                        merit = tail.merit.subtractedFrom(meritDelta),
+                                        score = tail.score.subtractedFrom(scoreDelta),
+                                    ),
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Final classes a captured prefix class can still reach before its day closes. */
+    private fun tailFinals(
+        prefix: ActivityOption,
+        cell: WeeklyReportBuilder.DayCell,
+    ): List<ActivityOption> {
+        if (cell.hasClosingBoundary) return listOf(prefix)
+        val gunsmokeClosed = cell.hasFinalGunsmokeScore ||
+            prefix.attempts == ActivityInference.MAX_DAILY_ATTEMPTS
+        val maximumAttempts = if (gunsmokeClosed) prefix.attempts else ActivityInference.MAX_DAILY_ATTEMPTS
+        return baselineCompletions(prefix).flatMap { completed ->
+            (prefix.attempts..maximumAttempts).mapNotNull { attempts ->
+                completed.copy(attempts = attempts).takeIf { attempts == 0 || it.attended }
+            }
+        }
+    }
+
+    /** The captured class with every Login and Daily Patrol completion it can still gain. */
+    private fun baselineCompletions(option: ActivityOption): List<ActivityOption> =
+        ACTIVITY_BASELINES.filter { baseline ->
+            (baseline.attended || !option.attended) && (baseline.patrol || !option.patrol)
+        }.map { baseline -> option.copy(attended = baseline.attended, patrol = baseline.patrol) }
+
+    /**
+     * Splits one interval between a previous-day tail ([prefix] to [final]) and the [next] prefix.
+     * Both pieces share the interval's score merit and score; each attempt adds at most nine
+     * rounding points and at most the captured high score, which bounds how much the tail can
+     * take. Returns the tail's merit and score ranges, or null when no split fits.
+     */
+    private fun splitInterval(
+        prefix: ActivityOption,
+        final: ActivityOption,
+        next: ActivityOption,
+        meritDelta: Long,
+        scoreDelta: Long,
+        maximumAttemptScore: Long,
+        requiredTailMerit: Long?,
+    ): IntervalRange? {
+        val tailAttempts = final.attempts - prefix.attempts
+        val tailFixedMerit = final.baselineMerit - prefix.baselineMerit +
+            tailAttempts * ActivityInference.MERIT_PER_ATTEMPT
+        val sharedScoreMerit = meritDelta - tailFixedMerit -
+            next.baselineMerit - next.attempts * ActivityInference.MERIT_PER_ATTEMPT
+        if (sharedScoreMerit < 0L) return null
+        if (sharedScoreMerit > Long.MAX_VALUE / ActivityInference.SCORE_POINTS_PER_MERIT) return null
+        val remainder = scoreDelta - sharedScoreMerit * ActivityInference.SCORE_POINTS_PER_MERIT
+        if (remainder < 0L || remainder > MAX_ROUNDING_REMAINDER * (tailAttempts + next.attempts)) return null
+        if (
+            tailAttempts == 0 &&
+            !ActivityInference.isCompatibleScore(scoreDelta, sharedScoreMerit, next.attempts, maximumAttemptScore)
+        ) {
+            return null
+        }
+        if (
+            next.attempts == 0 &&
+            !ActivityInference.isCompatibleScore(scoreDelta, sharedScoreMerit, tailAttempts, maximumAttemptScore)
+        ) {
+            return null
+        }
+        val attemptScoreMerit = if (maximumAttemptScore > 0L) {
+            maximumAttemptScore / ActivityInference.SCORE_POINTS_PER_MERIT
+        } else {
+            Long.MAX_VALUE
+        }
+        var lowest = maxOf(0L, sharedScoreMerit - saturatedMultiply(attemptScoreMerit, next.attempts))
+        var highest = minOf(sharedScoreMerit, saturatedMultiply(attemptScoreMerit, tailAttempts))
+        if (requiredTailMerit != null) {
+            val required = requiredTailMerit - tailFixedMerit
+            if (required !in lowest..highest) return null
+            lowest = required
+            highest = required
+        }
+        // An attempt at the high score's quotient keeps at most its remainder, so the shared
+        // remainder can fail to fit near either end of the score-merit range.
+        fun remaindersFit(tailScoreMerit: Long) = remainder <=
+            maximumRoundingRemainder(tailScoreMerit, tailAttempts, maximumAttemptScore) +
+            maximumRoundingRemainder(sharedScoreMerit - tailScoreMerit, next.attempts, maximumAttemptScore)
+        var steps = 0
+        while (lowest <= highest && !remaindersFit(highest) && steps++ < MAX_REMAINDER_STEPS) highest--
+        steps = 0
+        while (lowest <= highest && !remaindersFit(lowest) && steps++ < MAX_REMAINDER_STEPS) lowest++
+        if (lowest > highest) return null
+        var lowestScore = lowest * ActivityInference.SCORE_POINTS_PER_MERIT + maxOf(
+            0L,
+            remainder - maximumRoundingRemainder(sharedScoreMerit - lowest, next.attempts, maximumAttemptScore),
+        )
+        var highestScore = highest * ActivityInference.SCORE_POINTS_PER_MERIT + minOf(
+            maximumRoundingRemainder(highest, tailAttempts, maximumAttemptScore),
+            remainder,
+        )
+        if (maximumAttemptScore > 0L) {
+            lowestScore = maxOf(lowestScore, scoreDelta - saturatedMultiply(maximumAttemptScore, next.attempts))
+            highestScore = minOf(highestScore, saturatedMultiply(maximumAttemptScore, tailAttempts))
+        }
+        if (maxOf(0L, lowestScore) > minOf(scoreDelta, highestScore)) return null
+        return IntervalRange(
+            merit = Bounds(tailFixedMerit + lowest, tailFixedMerit + highest),
+            score = Bounds(maxOf(0L, lowestScore), minOf(scoreDelta, highestScore)),
+        )
+    }
+
+    /**
+     * The largest total below-ten score remainder [attempts] can carry while their rounded score
+     * merits sum to [scoreMerit]. Attempts forced up to the high score's quotient keep at most
+     * the high score's own remainder.
+     */
+    private fun maximumRoundingRemainder(
+        scoreMerit: Long,
+        attempts: Int,
+        maximumAttemptScore: Long,
+    ): Long {
+        if (attempts == 0) return 0L
+        if (maximumAttemptScore <= 0L) return MAX_ROUNDING_REMAINDER * attempts
+        val quotient = maximumAttemptScore / ActivityInference.SCORE_POINTS_PER_MERIT
+        val capped = (scoreMerit - attempts * (quotient - 1L)).coerceIn(0L, attempts.toLong())
+        return MAX_ROUNDING_REMAINDER * (attempts - capped) +
+            maximumAttemptScore % ActivityInference.SCORE_POINTS_PER_MERIT * capped
     }
 
     /** Derives a monotonic weekly-attempt floor from the cumulative event score. */
@@ -703,85 +1070,140 @@ internal object GunsmokeWeekSolver {
         scoreDelta: Long,
         maximumAttemptScore: Long,
         searchBudget: SearchBudget,
+        tailMeritWindows: MutableMap<Pair<ActivityOption, ActivityOption>, Bounds?> = mutableMapOf(),
     ): List<ActivityState>? {
         val effectiveMinimumMerit = maxOf(prefix.merit, minimumMerit)
         if (maximumMerit < effectiveMinimumMerit || meritDelta < 0L || scoreDelta < 0L) {
             return emptyList()
         }
         val states = linkedSetOf<ActivityState>()
-        var examinedScoreMerits = 0L
-        for (attempts in prefix.attempts..ActivityInference.MAX_DAILY_ATTEMPTS) {
-            for (baseline in ACTIVITY_BASELINES) {
-                if (attempts > 0 && !baseline.attended) continue
-                if (prefix.attended && !baseline.attended) continue
-                if (prefix.patrol && !baseline.patrol) continue
-                val fixedMerit = baseline.merit +
-                    attempts * ActivityInference.MERIT_PER_ATTEMPT
-                if (attempts == prefix.attempts) {
-                    val merit = fixedMerit + prefix.scoreMerit
-                    if (merit !in effectiveMinimumMerit..maximumMerit) continue
+        for (baseline in ACTIVITY_BASELINES) {
+            if (prefix.attempts > 0 && !baseline.attended) continue
+            if (prefix.attended && !baseline.attended) continue
+            if (prefix.patrol && !baseline.patrol) continue
+            val merit = baseline.merit +
+                prefix.attempts * ActivityInference.MERIT_PER_ATTEMPT +
+                prefix.scoreMerit
+            if (merit !in effectiveMinimumMerit..maximumMerit) continue
+            val state = ActivityState(
+                merit = merit,
+                score = prefix.score,
+                attempts = prefix.attempts,
+                scoreMerit = prefix.scoreMerit,
+                attended = baseline.attended,
+                patrol = baseline.patrol,
+            )
+            val currentMerit = meritDelta - (state.merit - prefix.merit)
+            val currentScore = scoreDelta - (state.score - prefix.score)
+            if (
+                extends(prefix, state, maximumAttemptScore) &&
+                statesForMetrics(currentMerit, currentScore, maximumAttemptScore).isNotEmpty()
+            ) {
+                states += state
+            }
+        }
+        val ranges = extensionRanges(
+            prefix = prefix,
+            minimumMerit = minimumMerit,
+            maximumMerit = maximumMerit,
+            meritDelta = meritDelta,
+            scoreDelta = scoreDelta,
+            maximumAttemptScore = maximumAttemptScore,
+            tailMeritWindows = tailMeritWindows,
+        )
+        if (ranges.sumOf(ExtensionRange::span) > MAX_SCORE_MERIT_VALUES) return null
+        ranges.forEach { range ->
+            for (scoreMerit in range.minimumScoreMerit..range.maximumScoreMerit) {
+                if (!searchBudget.consume()) return null
+                val merit = range.fixedMerit + scoreMerit
+                val currentMerit = meritDelta - (merit - prefix.merit)
+                if (currentMerit < 0L) continue
+                statesForMerit(currentMerit, maximumAttemptScore).forEach { current ->
+                    if (!searchBudget.consume()) return null
+                    val score = prefix.score + scoreDelta - current.score
                     val state = ActivityState(
                         merit = merit,
-                        score = prefix.score,
-                        attempts = attempts,
-                        scoreMerit = prefix.scoreMerit,
-                        attended = baseline.attended,
-                        patrol = baseline.patrol,
+                        score = score,
+                        attempts = range.attempts,
+                        scoreMerit = scoreMerit,
+                        attended = true,
+                        patrol = range.baseline.patrol,
                     )
-                    val currentMerit = meritDelta - (state.merit - prefix.merit)
-                    val currentScore = scoreDelta - (state.score - prefix.score)
-                    if (
-                        extends(prefix, state, maximumAttemptScore) &&
-                        statesForMetrics(currentMerit, currentScore, maximumAttemptScore).isNotEmpty()
-                    ) {
-                        states += state
-                    }
-                    continue
-                }
-                val minimumScoreMerit = maxOf(
-                    0L,
-                    prefix.scoreMerit,
-                    effectiveMinimumMerit - fixedMerit,
-                )
-                val maximumScoreMerit = minOf(
-                    if (maximumAttemptScore > 0L) {
-                        saturatedMultiply(
-                            maximumAttemptScore / ActivityInference.SCORE_POINTS_PER_MERIT,
-                            attempts,
-                        )
-                    } else {
-                        maximumMerit - fixedMerit
-                    },
-                    maximumMerit - fixedMerit,
-                )
-                if (maximumScoreMerit < minimumScoreMerit) continue
-                val span = maximumScoreMerit - minimumScoreMerit + 1L
-                examinedScoreMerits += span
-                if (examinedScoreMerits > MAX_SCORE_MERIT_VALUES) return null
-
-                for (scoreMerit in minimumScoreMerit..maximumScoreMerit) {
-                    if (!searchBudget.consume()) return null
-                    val merit = fixedMerit + scoreMerit
-                    val currentMerit = meritDelta - (merit - prefix.merit)
-                    if (currentMerit < 0L) continue
-                    statesForMerit(currentMerit, maximumAttemptScore).forEach { current ->
-                        if (!searchBudget.consume()) return null
-                        val score = prefix.score + scoreDelta - current.score
-                        val state = ActivityState(
-                            merit = merit,
-                            score = score,
-                            attempts = attempts,
-                            scoreMerit = scoreMerit,
-                            attended = true,
-                            patrol = baseline.patrol,
-                        )
-                        if (extends(prefix, state, maximumAttemptScore)) states += state
-                        if (states.size > MAX_EXTENSION_STATES) return null
-                    }
+                    if (extends(prefix, state, maximumAttemptScore)) states += state
+                    if (states.size > MAX_EXTENSION_STATES) return null
                 }
             }
         }
         return states.toList()
+    }
+
+    /**
+     * Lists the score-merit values a previous-day tail with additional attempts can add, per final
+     * attempt count and baseline. The tail and the next prefix share the interval's score merit
+     * and rounding remainders, so only the tail merits some next prefix class can complement are
+     * listed; every skipped value would fail the detailed checks anyway. Shared by the detailed
+     * search and its budget estimate.
+     */
+    private fun extensionRanges(
+        prefix: ActivityState,
+        minimumMerit: Long,
+        maximumMerit: Long,
+        meritDelta: Long,
+        scoreDelta: Long,
+        maximumAttemptScore: Long,
+        tailMeritWindows: MutableMap<Pair<ActivityOption, ActivityOption>, Bounds?> = mutableMapOf(),
+    ): List<ExtensionRange> {
+        val effectiveMinimumMerit = maxOf(prefix.merit, minimumMerit)
+        if (maximumMerit < effectiveMinimumMerit) return emptyList()
+        return buildList {
+            for (attempts in prefix.attempts + 1..ActivityInference.MAX_DAILY_ATTEMPTS) {
+                for (baseline in ACTIVITY_BASELINES) {
+                    if (!baseline.attended) continue
+                    if (prefix.patrol && !baseline.patrol) continue
+                    val final = ActivityOption(attempts, baseline.attended, baseline.patrol)
+                    // The window depends only on the classes, so one transition shares it.
+                    val windowKey = prefix.activityOption to final
+                    val tailMerits = if (windowKey in tailMeritWindows) {
+                        tailMeritWindows[windowKey]
+                    } else {
+                        ALL_ACTIVITY_OPTIONS.mapNotNull { next ->
+                            splitInterval(
+                                prefix = prefix.activityOption,
+                                final = final,
+                                next = next,
+                                meritDelta = meritDelta,
+                                scoreDelta = scoreDelta,
+                                maximumAttemptScore = maximumAttemptScore,
+                                requiredTailMerit = null,
+                            )?.merit
+                        }.reduceOrNull(Bounds::hull).also { tailMeritWindows[windowKey] = it }
+                    } ?: continue
+                    val fixedMerit = baseline.merit +
+                        attempts * ActivityInference.MERIT_PER_ATTEMPT
+                    val minimumScoreMerit = maxOf(
+                        0L,
+                        prefix.scoreMerit,
+                        effectiveMinimumMerit - fixedMerit,
+                        prefix.merit + tailMerits.minimum - fixedMerit,
+                    )
+                    val maximumScoreMerit = minOf(
+                        if (maximumAttemptScore > 0L) {
+                            saturatedMultiply(
+                                maximumAttemptScore / ActivityInference.SCORE_POINTS_PER_MERIT,
+                                attempts,
+                            )
+                        } else {
+                            maximumMerit - fixedMerit
+                        },
+                        maximumMerit - fixedMerit,
+                        prefix.merit + tailMerits.maximum - fixedMerit,
+                    )
+                    if (maximumScoreMerit >= minimumScoreMerit) {
+                        add(ExtensionRange(attempts, baseline, fixedMerit, minimumScoreMerit, maximumScoreMerit))
+                    }
+                }
+            }
+        }
     }
 
     /** Enumerates the narrow score range compatible with a fixed merit state. */
@@ -894,16 +1316,24 @@ internal object GunsmokeWeekSolver {
         day: LocalDate,
         zoneId: ZoneId,
         facts: List<DailyPatrolFact>,
+    ): Boolean = matchesMaximumAttemptScore(state, checkpoint.member.highScore) &&
+        matchesCapturedEvidence(state.activityOption, checkpoint, day, zoneId, facts)
+
+    private fun matchesCapturedEvidence(
+        option: ActivityOption,
+        checkpoint: Checkpoint,
+        day: LocalDate,
+        zoneId: ZoneId,
+        facts: List<DailyPatrolFact>,
     ): Boolean {
-        if (!matchesMaximumAttemptScore(state, checkpoint.member.highScore)) return false
         val patrolBeforeCapture = facts.any { !it.occurredAt.isAfter(checkpoint.capturedAt) }
-        if (patrolBeforeCapture && !state.patrol) return false
+        if (patrolBeforeCapture && !option.patrol) return false
         val loginAt = checkpoint.member.lastLogin.takeIf { it > 0L }?.let(Instant::ofEpochSecond)
         if (
             loginAt != null &&
             !loginAt.isAfter(checkpoint.capturedAt) &&
             PlatoonPeriods.gameDay(loginAt, zoneId) == day &&
-            !state.attended
+            !option.attended
         ) {
             return false
         }
@@ -952,15 +1382,30 @@ internal object GunsmokeWeekSolver {
         state: ActivityState,
         cell: WeeklyReportBuilder.DayCell,
         facts: List<DailyPatrolFact>,
+    ): Boolean = matchesFinalEvidence(
+        option = state.activityOption,
+        merit = Bounds.of(state.merit),
+        score = Bounds.of(state.score),
+        cell = cell,
+        facts = facts,
+    )
+
+    /** Accepts a final class whose merit and score ranges can still hold a manual value. */
+    private fun matchesFinalEvidence(
+        option: ActivityOption,
+        merit: Bounds,
+        score: Bounds,
+        cell: WeeklyReportBuilder.DayCell,
+        facts: List<DailyPatrolFact>,
     ): Boolean {
-        if (facts.isNotEmpty() && !state.patrol) return false
-        if (cell.hasLoginFact && !state.attended) return false
+        if (facts.isNotEmpty() && !option.patrol) return false
+        if (cell.hasLoginFact && !option.attended) return false
         val override = cell.manualOverride ?: return true
-        return (override.meritDelta == null || override.meritDelta == state.merit) &&
-            (override.scoreDelta == null || override.scoreDelta == state.score) &&
-            (override.attempts == null || override.attempts == state.attempts) &&
-            (override.attended == null || override.attended == state.attended) &&
-            (override.dailyPatrol == null || override.dailyPatrol == state.patrol)
+        return (override.meritDelta == null || override.meritDelta in merit) &&
+            (override.scoreDelta == null || override.scoreDelta in score) &&
+            (override.attempts == null || override.attempts == option.attempts) &&
+            (override.attended == null || override.attended == option.attended) &&
+            (override.dailyPatrol == null || override.dailyPatrol == option.patrol)
     }
 
     private fun extends(
@@ -995,27 +1440,31 @@ internal object GunsmokeWeekSolver {
         states: List<ActivityState>,
         finalized: Boolean,
         observedAt: Instant?,
+    ): WeeklyReportBuilder.DayCell = project(cell, StateSummary.of(states), finalized, observedAt)
+
+    private fun project(
+        cell: WeeklyReportBuilder.DayCell,
+        summary: StateSummary,
+        finalized: Boolean,
+        observedAt: Instant?,
     ): WeeklyReportBuilder.DayCell {
-        val merits = states.map(ActivityState::merit).distinct()
-        val scores = states.map(ActivityState::score).distinct()
-        val attempts = states.map(ActivityState::attempts).distinct()
-        val attendedConsensus = states.map(ActivityState::attended).distinct().singleOrNull()
-        val patrolConsensus = states.map(ActivityState::patrol).distinct().singleOrNull()
+        val attendedConsensus = summary.attended.singleOrNull()
+        val patrolConsensus = summary.patrol.singleOrNull()
         val activityFactMeritFloor = when {
             cell.hasDailyPatrolFact -> LOGIN_MERIT + PATROL_MERIT
             cell.hasLoginFact -> LOGIN_MERIT
             else -> 0L
         }
-        val merit = cell.manualOverride?.meritDelta ?: merits.minOrNull()?.let { inferred ->
+        val merit = cell.manualOverride?.meritDelta ?: summary.merit?.minimum?.let { inferred ->
             maxOf(inferred, activityFactMeritFloor)
         }
-        val score = cell.manualOverride?.scoreDelta ?: scores.minOrNull()
-        val attemptValue = cell.manualOverride?.attempts ?: attempts.minOrNull()
+        val score = cell.manualOverride?.scoreDelta ?: summary.score?.minimum
+        val attemptValue = cell.manualOverride?.attempts ?: summary.attempts.minOrNull()
         val exactScore = (finalized || attemptValue == ActivityInference.MAX_DAILY_ATTEMPTS || cell.hasFinalGunsmokeScore) &&
-            scores.size == 1
+            summary.score?.isPoint == true
         val exactAttempts = (finalized || attemptValue == ActivityInference.MAX_DAILY_ATTEMPTS || cell.hasFinalGunsmokeScore) &&
-            attempts.size == 1
-        val exactMerit = merits.size == 1 &&
+            summary.attempts.size == 1
+        val exactMerit = summary.merit?.isPoint == true &&
             (finalized ||
                 (exactScore &&
                     exactAttempts &&
@@ -1054,17 +1503,10 @@ internal object GunsmokeWeekSolver {
         else -> MetricCertainty.LOWER_BOUND
     }
 
-    private fun reportDay(instant: Instant, days: List<LocalDate>, zoneId: ZoneId): LocalDate {
-        val gameDay = PlatoonPeriods.gameDay(instant, zoneId)
-        return if (
-            gameDay > days.first() &&
-            instant == PlatoonPeriods.periodStartInstant(gameDay, zoneId)
-        ) {
-            gameDay.minusDays(1)
-        } else {
-            gameDay
-        }
-    }
+    /** A reset capture closes the previous day, except the week's own opening capture. */
+    private fun reportDay(instant: Instant, days: List<LocalDate>, zoneId: ZoneId): LocalDate =
+        PlatoonPeriods.checkpointDay(instant, zoneId).takeUnless { it < days.first() }
+            ?: PlatoonPeriods.gameDay(instant, zoneId)
 
     private fun SnapshotMember.hasValidActivityCounters(): Boolean =
         weeklyMerit >= 0L && totalMerit >= 0L && highScore >= 0L && totalScore >= 0L
@@ -1124,7 +1566,6 @@ internal object GunsmokeWeekSolver {
     private data class RunResolution(
         val cells: List<WeeklyReportBuilder.DayCell>,
         val totals: WeeklyReportBuilder.ResolvedGunsmokeTotals?,
-        val searchExhausted: Boolean = false,
     )
 
     private data class ActivityTotalBounds(
@@ -1232,7 +1673,102 @@ internal object GunsmokeWeekSolver {
         val lastDayFinalized: Boolean,
     )
 
-    private class SearchBudget(private var remaining: Int) {
+    private val ActivityState.activityOption: ActivityOption
+        get() = ActivityOption(attempts, attended, patrol)
+
+    /** An inclusive range of one counter value. */
+    private data class Bounds(val minimum: Long, val maximum: Long) {
+        val isPoint: Boolean
+            get() = minimum == maximum
+
+        operator fun contains(value: Long): Boolean = value in minimum..maximum
+
+        operator fun plus(other: Bounds): Bounds = Bounds(
+            saturatedAdd(minimum, other.minimum),
+            saturatedAdd(maximum, other.maximum),
+        )
+
+        fun hull(other: Bounds): Bounds =
+            Bounds(minOf(minimum, other.minimum), maxOf(maximum, other.maximum))
+
+        fun subtractedFrom(total: Long): Bounds = Bounds(total - maximum, total - minimum)
+
+        companion object {
+            fun of(value: Long): Bounds = Bounds(value, value)
+        }
+    }
+
+    private data class IntervalRange(val merit: Bounds, val score: Bounds) {
+        fun hull(other: IntervalRange): IntervalRange =
+            IntervalRange(merit.hull(other.merit), score.hull(other.score))
+
+        companion object {
+            fun of(states: List<ActivityState>): IntervalRange = IntervalRange(
+                merit = Bounds(states.minOf(ActivityState::merit), states.maxOf(ActivityState::merit)),
+                score = Bounds(states.minOf(ActivityState::score), states.maxOf(ActivityState::score)),
+            )
+        }
+    }
+
+    /** One way to split an interval: a prefix class, its final class, and the next prefix. */
+    private data class IntervalEdge(
+        val from: ActivityOption,
+        val final: ActivityOption,
+        val to: ActivityOption,
+        val tail: IntervalRange,
+        val next: IntervalRange,
+    )
+
+    /** What every compatible state of one day shares, for projection into its cell. */
+    private data class StateSummary(
+        val merit: Bounds?,
+        val score: Bounds?,
+        val attempts: Set<Int>,
+        val attended: Set<Boolean>,
+        val patrol: Set<Boolean>,
+    ) {
+        fun merge(other: StateSummary): StateSummary = StateSummary(
+            merit = merit?.let { other.merit?.let(it::hull) ?: it } ?: other.merit,
+            score = score?.let { other.score?.let(it::hull) ?: it } ?: other.score,
+            attempts = attempts + other.attempts,
+            attended = attended + other.attended,
+            patrol = patrol + other.patrol,
+        )
+
+        companion object {
+            fun of(states: List<ActivityState>): StateSummary = StateSummary(
+                merit = states.takeIf { it.isNotEmpty() }?.let { IntervalRange.of(it).merit },
+                score = states.takeIf { it.isNotEmpty() }?.let { IntervalRange.of(it).score },
+                attempts = states.map(ActivityState::attempts).toSet(),
+                attended = states.map(ActivityState::attended).toSet(),
+                patrol = states.map(ActivityState::patrol).toSet(),
+            )
+
+            fun of(option: ActivityOption, merit: Bounds, score: Bounds): StateSummary = StateSummary(
+                merit = merit,
+                score = score,
+                attempts = setOf(option.attempts),
+                attended = setOf(option.attended),
+                patrol = setOf(option.patrol),
+            )
+        }
+    }
+
+    private data class ExtensionRange(
+        val attempts: Int,
+        val baseline: ActivityBaseline,
+        val fixedMerit: Long,
+        val minimumScoreMerit: Long,
+        val maximumScoreMerit: Long,
+    ) {
+        val span: Long
+            get() = maximumScoreMerit - minimumScoreMerit + 1L
+    }
+
+    private class SearchBudget(remaining: Int) {
+        var remaining: Int = remaining
+            private set
+
         fun consume(): Boolean {
             if (remaining <= 0) return false
             remaining -= 1
@@ -1307,10 +1843,18 @@ internal object GunsmokeWeekSolver {
                 (cell.solvedDailyPatrol == null || cell.solvedDailyPatrol == option.patrol)
         }
 
+    private val ALL_ACTIVITY_OPTIONS: List<ActivityOption> =
+        (0..ActivityInference.MAX_DAILY_ATTEMPTS).flatMap { attempts ->
+            ACTIVITY_BASELINES.filter { attempts == 0 || it.attended }
+                .map { ActivityOption(attempts, it.attended, it.patrol) }
+        }
+
     private val MAX_BOUNDARY_DISTANCE: Duration = Duration.ofMinutes(15)
+    private const val MAX_ROUNDING_REMAINDER = ActivityInference.SCORE_POINTS_PER_MERIT - 1L
+    private const val MAX_REMAINDER_STEPS = 64
     private const val MAX_SCORE_MERIT_VALUES = 250_000L
     private const val MAX_EXTENSION_STATES = 100_000
-    private const val MAX_PARTIAL_SOLUTIONS = 2_000
+    private const val MAX_PARTIAL_SOLUTIONS = 256
     private const val MAX_SEARCH_OPERATIONS = 100_000
     private const val MAX_AGGREGATE_SEARCH_OPERATIONS = 100_000
     private const val LOGIN_MERIT = ActivityInference.LOGIN_MERIT

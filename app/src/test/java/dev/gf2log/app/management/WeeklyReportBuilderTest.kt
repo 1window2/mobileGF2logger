@@ -997,6 +997,84 @@ class WeeklyReportBuilderTest {
     }
 
     @Test
+    fun nearResetBaselineTailCannotPushAStandardDayAboveTheDailyCap() {
+        fun sunday(totalAfter: Long, facts: List<DailyPatrolFact> = emptyList()) =
+            WeeklyReportBuilder.build(
+                referenceDay = LocalDate.of(2026, 7, 26),
+                zoneId = zone,
+                snapshots = listOf(
+                    // Saturday still earns 40 between this 04:50 capture and the reset.
+                    snapshot("2026-07-25T19:50:00Z", weekly = 500, score = 0),
+                    snapshot("2026-07-26T11:00:00Z", weekly = totalAfter, score = 0),
+                ),
+                dailyPatrolFacts = facts,
+                asOf = Instant.parse("2026-07-26T12:00:00Z"),
+            ).members.single().days.first()
+
+        val tailAndPatrol = sunday(totalAfter = 630)
+        assertEquals(90L, tailAndPatrol.meritDelta)
+        assertEquals(MetricCertainty.EXACT, tailAndPatrol.meritCertainty)
+
+        val patrolFact = sunday(
+            totalAfter = 630,
+            facts = listOf(DailyPatrolFact(1, Instant.parse("2026-07-26T01:00:00Z"))),
+        )
+        assertEquals(90L, patrolFact.meritDelta)
+        assertEquals(MetricCertainty.EXACT, patrolFact.meritCertainty)
+        assertEquals(true, patrolFact.dailyPatrol)
+
+        // 50 + 50 or 90 + 50: the split between the two days is unknown.
+        val ambiguous = sunday(totalAfter = 640)
+        assertNull(ambiguous.meritDelta)
+        assertEquals(MetricCertainty.UNKNOWN, ambiguous.meritCertainty)
+    }
+
+    @Test
+    fun midWeekJoinerMeritIsNotCreditedToTheFirstObservedDay() {
+        val present = member(uid = 1, name = "Present", weekly = 90, score = 0)
+        val joiner = member(uid = 2, name = "Joiner", weekly = 90, score = 0)
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 28),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-27T03:00:00Z", present),
+                snapshotWithMembers("2026-07-28T03:00:00Z", present.copy(weeklyMerit = 180), joiner),
+            ),
+            asOf = Instant.parse("2026-07-28T04:00:00Z"),
+        )
+
+        // Absent on Monday at noon, the joiner can still have earned the 90 later on Monday.
+        val row = report.members.single { it.uid == 2L }
+        assertNull(row.days[1].meritDelta)
+        assertNull(row.days[2].meritDelta)
+        assertTrue(row.days[2].meritCertainty != MetricCertainty.EXACT)
+        assertEquals(90L, row.totalMerit)
+        assertEquals(MetricCertainty.LOWER_BOUND, row.totalMeritCertainty)
+    }
+
+    @Test
+    fun sundayResetCaptureClosesTheStandardSaturday() {
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 8, 1),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshot("2026-07-31T20:00:00Z", weekly = 320, score = 0),
+                snapshot("2026-08-01T20:00:00Z", weekly = 410, score = 0),
+            ),
+            asOf = Instant.parse("2026-08-01T21:00:00Z"),
+        )
+
+        val member = report.members.single()
+        val saturday = member.days.last()
+        assertTrue(saturday.hasClosingBoundary)
+        assertEquals(90L, saturday.meritDelta)
+        assertEquals(MetricCertainty.EXACT, saturday.meritCertainty)
+        assertEquals(true, saturday.attended)
+        assertEquals(true, saturday.dailyPatrol)
+        assertEquals(410L, member.totalMerit)
+    }
+
+    @Test
     fun openStandardDayShowsFiftyAsALowerBoundButNinetyAsTheCap() {
         val fifty = WeeklyReportBuilder.build(
             referenceDay = LocalDate.of(2026, 7, 27),
@@ -1193,6 +1271,30 @@ class WeeklyReportBuilderTest {
         assertTrue(saturday.hasFinalGunsmokeScore)
         assertNull(saturday.scoreDelta)
         assertEquals(DailyEvidence.INCOMPLETE_BOUNDARY, saturday.evidence)
+    }
+
+    @Test
+    fun sundayResetCaptureIsTheFinalGunsmokeScoreOfTheEndingWeek() {
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 25),
+            zoneId = zone,
+            snapshots = listOf(
+                snapshot("2026-07-24T20:00:00Z", weekly = 1_000, score = 10_000),
+                snapshot("2026-07-25T20:00:00Z", weekly = 1_150, score = 10_300),
+            ),
+            asOf = Instant.parse("2026-07-25T21:00:00Z"),
+        )
+
+        val member = report.members.single()
+        val saturday = member.days.last()
+        assertTrue(saturday.hasClosingBoundary)
+        assertTrue(saturday.hasFinalGunsmokeScore)
+        assertTrue(member.hasFinalGunsmokeScore)
+        assertEquals(10_300L, member.totalScore)
+        assertEquals(MetricCertainty.EXACT, member.totalScoreCertainty)
+        assertEquals(150L, saturday.meritDelta)
+        assertEquals(300L, saturday.scoreDelta)
+        assertEquals(MetricCertainty.EXACT, saturday.scoreCertainty)
     }
 
     @Test

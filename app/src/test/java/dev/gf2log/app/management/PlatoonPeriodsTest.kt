@@ -89,10 +89,18 @@ class PlatoonPeriodsTest {
                 seoul,
             ),
         )
-        assertFalse(
+        // The Sunday 05:00 reset capture is the closing Saturday capture of the event week.
+        assertTrue(
             PlatoonPeriods.isFinalGunsmokeScoreCapture(
                 saturday,
                 Instant.parse("2026-07-25T20:00:00Z"),
+                seoul,
+            ),
+        )
+        assertFalse(
+            PlatoonPeriods.isFinalGunsmokeScoreCapture(
+                saturday,
+                Instant.parse("2026-07-25T20:00:01Z"),
                 seoul,
             ),
         )
@@ -100,5 +108,16 @@ class PlatoonPeriodsTest {
             saturday,
             PlatoonPeriods.gameDay(Instant.parse("2026-07-25T17:00:00Z"), seoul),
         )
+    }
+
+    @Test
+    fun aCaptureExactlyAtTheResetRecordsThePreviousGameDay() {
+        val saturday = LocalDate.of(2026, 7, 25)
+        val reset = PlatoonPeriods.periodStartInstant(saturday.plusDays(1), seoul)
+
+        assertEquals(saturday, PlatoonPeriods.checkpointDay(reset, seoul))
+        assertEquals(saturday, PlatoonPeriods.checkpointDay(reset.minusMillis(1), seoul))
+        assertEquals(saturday.plusDays(1), PlatoonPeriods.checkpointDay(reset.plusMillis(1), seoul))
+        assertEquals(saturday.plusDays(1), PlatoonPeriods.gameDay(reset, seoul))
     }
 }

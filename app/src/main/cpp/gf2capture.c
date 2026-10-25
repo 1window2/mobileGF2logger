@@ -49,6 +49,7 @@ typedef struct capture_context {
     jmethodID stopped_method;
     pthread_t thread;
     atomic_bool running;
+    int attach_state; // guarded by attach_mutex
     int tun_fd;
     uint64_t sent_bytes;
     uint64_t received_bytes;
@@ -57,6 +58,13 @@ typedef struct capture_context {
 
 static pthread_mutex_t context_mutex = PTHREAD_MUTEX_INITIALIZER;
 static capture_context_t *active_context = NULL;
+// A thread that cannot attach to the JVM cannot report its own stop, so nativeStart waits for the
+// attach outcome and fails the start instead of leaving the service RUNNING on a dead loop.
+#define ATTACH_PENDING 0
+#define ATTACH_OK 1
+#define ATTACH_FAILED 2
+static pthread_mutex_t attach_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t attach_cond = PTHREAD_COND_INITIALIZER;
 // Process-wide so a flow ID is never reused by a later capture: unconfirmed Platoon candidates
 // outlive the capture that observed them and refer to their flows by ID.
 static _Atomic int64_t last_flow_id = 0;
@@ -397,13 +405,23 @@ static void reap_context(JNIEnv *env, capture_context_t *context) {
     free(context);
 }
 
+static void publish_attach_state(capture_context_t *context, int state) {
+    pthread_mutex_lock(&attach_mutex);
+    context->attach_state = state;
+    pthread_cond_broadcast(&attach_cond);
+    pthread_mutex_unlock(&attach_mutex);
+}
+
 static void *capture_thread_main(void *argument) {
     capture_context_t *context = (capture_context_t *) argument;
     if ((*context->vm)->AttachCurrentThread(context->vm, &context->env, NULL) != JNI_OK) {
         LOGE("Unable to attach capture thread to JVM");
         context->env = NULL;
+        // nativeStart joins this thread before it frees the context.
+        publish_attach_state(context, ATTACH_FAILED);
         goto cleanup;
     }
+    publish_attach_state(context, ATTACH_OK);
 
     zdtun_callbacks_t callbacks = {
             .send_client = send_client_callback,
@@ -597,6 +615,21 @@ Java_dev_gf2log_app_capture_NativeCaptureBridge_nativeStart(
 
     atomic_init(&context->running, true);
     if (pthread_create(&context->thread, NULL, capture_thread_main, context) != 0) {
+        release_context(env, context);
+        free(context);
+        pthread_mutex_unlock(&context_mutex);
+        return JNI_FALSE;
+    }
+
+    pthread_mutex_lock(&attach_mutex);
+    while (context->attach_state == ATTACH_PENDING) {
+        pthread_cond_wait(&attach_cond, &attach_mutex);
+    }
+    bool attached = context->attach_state == ATTACH_OK;
+    pthread_mutex_unlock(&attach_mutex);
+    if (!attached) {
+        // The unattached thread exits without callbacks; reporting the failed start is the stop.
+        pthread_join(context->thread, NULL);
         release_context(env, context);
         free(context);
         pthread_mutex_unlock(&context_mutex);

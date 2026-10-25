@@ -5,6 +5,7 @@
     <string name="capture_status_label">Capture status</string>
     <string name="capture_ready">Ready</string>
     <string name="capture_running">Capturing</string>
+    <string name="capture_stopping">Stopping capture</string>
     <string name="nav_home">Home</string>
     <string name="nav_platoon">Platoon</string>
     <string name="nav_weekly">Weekly</string>
@@ -524,6 +525,7 @@
     <string name="backup_restoring">Restoring backup…</string>
     <string name="capture_preparing_detail">Waiting for Android to start the VPN.</string>
     <string name="capture_ready_detail">Open the game\'s Platoon › Members and Updates pages while capture runs.</string>
+    <string name="capture_stopping_detail">Saving the last packets before capture ends.</string>
     <string name="captured">captured</string>
     <string name="change">Change</string>
     <string name="checklist_activity">Platoon activity</string>
@@ -605,6 +607,8 @@
     <string name="apply_and_next_day">Apply, next day</string>
     <string name="capture_running_title">Capture is running</string>
     <string name="stop_capture_and_continue">Stop capture</string>
+    <string name="capture_stop_timeout_title">Capture is still stopping</string>
+    <string name="capture_stop_timeout_message">Capture didn\'t finish stopping, so nothing was changed. Wait until Home shows Ready, then try again.</string>
     <string name="invalid_activity_choice">Patrol can\'t be yes while login is no.</string>
     <string name="open_standby_mode">Turn on standby mode</string>
     <string name="standby_running">Standby mode is on</string>

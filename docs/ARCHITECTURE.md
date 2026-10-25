@@ -122,7 +122,10 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   lifecycle glue whose fields are main-thread only.
 - Stopping capture never blocks the main thread: the worker stops the native
   loop, drains already queued chunks, and clears per-run state; a start that
-  arrives during teardown waits for it to finish.
+  arrives during teardown waits for it to finish. The phase reads `STOPPING`
+  for that whole teardown and becomes `STOPPED` only once it completes, even
+  when the service is destroyed meanwhile, so nothing that waits for `STOPPED`
+  can overlap the native loop or the drain.
 - Before identity is established, each flow retains at most 32 decoded payload
   objects. Overflow rejects that flow until closure. The profile registry holds
   at most 16 bounded identities.
@@ -166,7 +169,7 @@ preserving in-flow ordering.
 1. Start forwarding using the supplied TUN file descriptor.
 2. Stop and release native resources.
 
-The listener reports candidate plaintext payloads after TCP reassembly, flow closure, unexpected native termination, and aggregate byte counters. Flow ids are unique for the life of the process, so a pending Platoon that outlives one capture can never refer to a flow of the next. Every upstream socket is passed through `VpnService.protect()` so forwarded traffic cannot re-enter the VPN.
+The listener reports candidate plaintext payloads after TCP reassembly, flow closure, unexpected native termination, and aggregate byte counters. Start returns only after the native thread has attached to the JVM; a thread that cannot attach could never report its termination, so start fails instead. Flow ids are unique for the life of the process, so a pending Platoon that outlives one capture can never refer to a flow of the next. Every upstream socket is passed through `VpnService.protect()` so forwarded traffic cannot re-enter the VPN.
 
 The implementation uses zdtun rather than introducing a new TCP/IP stack.
 General PCAP export, nDPI classification, TLS decryption, root capture, remote
@@ -254,7 +257,10 @@ plaintext TCP streams. Do not add pinning or anti-cheat bypasses.
   ends in a lock or a cancel that releases the screen, and the accessibility
   service that taps only while the game is in front, closes it from Recents,
   and locks the phone. It drives capture only through the `CaptureVpnService`
-  intents and learns of saved rosters from `capture.RosterEvents`. Scheduled
+  intents and learns of saved rosters from `capture.RosterEvents`. A run that
+  follows a stopped one sends its start even while the previous capture is
+  still stopping; the service restarts after teardown, and the run opens the
+  game only on a newer `RUNNING` run, never on the one it just stopped. Scheduled
   recording reuses the same state machine: an exact alarm, re-planned from the
   current Platoons before every run, opens the standby screen over a swipe lock
   screen, and only on phones without a PIN, pattern, or password.
@@ -277,7 +283,10 @@ screen exists, with keyed requests superseding stale loads.
 Capture state reaches the UI as an immutable `CaptureSnapshot` (phase, latest
 typed and localized notice, captured targets, one-time checklist) published by
 `CaptureStatus` listeners on the main looper. Nothing in the UI parses status
-text or polls.
+text or polls. Backup export and restore, CSV import and undo, and profile
+region edits and deletion run through `CaptureGuard`: after one confirmation it
+requests the stop and continues only when a listener observes `STOPPED`, or
+explains after 20 seconds that capture is still stopping and changes nothing.
 
 `PrimaryNavigation` provides the Home, Platoon, and Weekly bar used by `Screen`.
 It launches existing Activities and owns no data or domain state. Onboarding
@@ -380,8 +389,9 @@ profile on an installation that does not yet have any registered profiles.
 
 Complete restore validates the filename, archive entries and identity,
 checksums, settings completeness and ranges, current database schema, SQLite
-integrity, and foreign keys before mutation. Database replacement runs under
-the repository maintenance lock. The previous database and a settings snapshot
+integrity, and foreign keys before mutation. Database replacement, and the
+rollback of a failed replacement, run under one hold of the repository
+maintenance lock. The previous database and a settings snapshot
 are retained until both resources commit, so any failure restores the prior
 state instead of leaving a partial import. A fresh install records that no
 database existed so rollback removes the staged replacement rather than
@@ -413,7 +423,13 @@ database under the repository's exclusive maintenance lock. Durable restore
 state resumes interrupted quarantine/database replacement after process death;
 ordinary failures restore both the evidence and the preceding undo checkpoint.
 A post-import database digest refuses undo after any later Platoon mutation so
-a one-level rollback cannot silently overwrite newer work.
+a one-level rollback cannot silently overwrite newer work; the digest is
+compared again inside the exclusive section that installs the checkpoint, so an
+ingest that lands after the first check is never overwritten. Interrupted
+imports and undos are recovered for every registered Platoon at process start,
+off the main thread, and again before capture ingests anything, so a late
+recovery cannot replace newer captured evidence. A recovery that fails is logged
+and its durable state left for the next attempt instead of crashing the launch.
 
 Weekly PNG export builds a privacy projection rather than screenshotting the
 Activity. Names are included by default; UIDs and private notes are opt-in.

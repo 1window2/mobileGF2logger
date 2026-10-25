@@ -85,6 +85,99 @@ class CaptureStatusTest {
     }
 
     @Test
+    fun stoppedIsPublishedOnlyAfterTeardownAndKeepsTheStopNotice() {
+        CaptureStatus.markRunning(listOf("pkg"))
+
+        CaptureStatus.markStopping(CaptureNotice.STOPPED_UNEXPECTEDLY)
+        val stopping = CaptureStatus.snapshot()
+        assertEquals(CapturePhase.STOPPING, stopping.phase)
+        assertEquals(emptyList<String>(), stopping.capturedTargets)
+        assertEquals(CaptureNotice.STOPPED_UNEXPECTEDLY, stopping.notice?.notice)
+
+        CaptureStatus.markTornDown()
+        val stopped = CaptureStatus.snapshot()
+        assertEquals(CapturePhase.STOPPED, stopped.phase)
+        assertEquals(CaptureNotice.STOPPED_UNEXPECTEDLY, stopped.notice?.notice)
+    }
+
+    @Test
+    fun teardownLeavesAPhaseANewerStartAlreadyOwns() {
+        CaptureStatus.markRunning(listOf("pkg"))
+        CaptureStatus.markStopping(notice = null)
+        // A start that arrives during teardown restarts once it finishes.
+        CaptureStatus.markStarting()
+
+        CaptureStatus.markTornDown()
+
+        assertEquals(CapturePhase.STARTING, CaptureStatus.snapshot().phase)
+    }
+
+    @Test
+    fun everyRunIsCountedSoAStaleRunningPhaseIsDistinguishable() {
+        val before = CaptureStatus.snapshot().runCount
+        CaptureStatus.markRunning(listOf("pkg"))
+        CaptureStatus.markStopping(notice = null)
+        CaptureStatus.markTornDown()
+        CaptureStatus.markRunning(listOf("pkg"))
+
+        assertEquals(before + 2, CaptureStatus.snapshot().runCount)
+    }
+
+    @Test
+    fun clearingAnIdleNoticeNeverEndsAnActiveCapture() {
+        CaptureStatus.markStopped(CaptureNotice.NATIVE_START_FAILED)
+        CaptureStatus.clearIdleNotice()
+        assertNull(CaptureStatus.snapshot().notice)
+
+        CaptureStatus.markStarting()
+        CaptureStatus.clearIdleNotice()
+        assertEquals(CapturePhase.STARTING, CaptureStatus.snapshot().phase)
+    }
+
+    @Test
+    fun whenStoppedRunsImmediatelyWhileStopped() {
+        var runs = 0
+        CaptureStatus.whenStopped { runs++ }
+
+        assertEquals(1, runs)
+        CaptureStatus.markRunning(listOf("pkg"))
+        CaptureStatus.markStopped()
+        assertEquals(1, runs)
+    }
+
+    @Test
+    fun whenStoppedWaitsThroughTheWholeTeardownAndRunsOnce() {
+        CaptureStatus.markRunning(listOf("pkg"))
+        var runs = 0
+        CaptureStatus.whenStopped { runs++ }
+
+        CaptureStatus.markStopping(notice = null)
+        CaptureStatus.report(CaptureNotice.TRAFFIC, "1", "0", "0", "0", "0")
+        assertEquals(0, runs)
+
+        CaptureStatus.markTornDown()
+        assertEquals(1, runs)
+
+        CaptureStatus.markRunning(listOf("pkg"))
+        CaptureStatus.markStopping(notice = null)
+        CaptureStatus.markTornDown()
+        assertEquals(1, runs)
+    }
+
+    @Test
+    fun aCancelledStopWaitNeverRuns() {
+        CaptureStatus.markRunning(listOf("pkg"))
+        var runs = 0
+        val cancel = CaptureStatus.whenStopped { runs++ }
+
+        cancel()
+        CaptureStatus.markStopping(notice = null)
+        CaptureStatus.markTornDown()
+
+        assertEquals(0, runs)
+    }
+
+    @Test
     fun listenersReceiveTheCurrentSnapshotImmediatelyAndAfterChanges() {
         val received = mutableListOf<CaptureSnapshot>()
         val listener: (CaptureSnapshot) -> Unit = { received += it }

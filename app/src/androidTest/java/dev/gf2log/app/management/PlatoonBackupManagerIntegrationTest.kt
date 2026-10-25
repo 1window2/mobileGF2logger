@@ -687,6 +687,57 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     @Test
+    fun checkpointInstallRefusesADatabaseThatChangedSinceTheUndoCheck() {
+        seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
+        val checkpoint = ByteArrayOutputStream().also { output ->
+            PlatoonBackupManager(context, storageScope).export(output)
+        }.toByteArray()
+        val manager = PlatoonBackupManager(context, storageScope)
+        val checkedDigest = manager.currentDatabaseSha256()
+        // A capture ingests after the undo's own digest check but before the install.
+        replaceDatabaseForCheckpoint(CURRENT_UID, "Newer capture", "newer-capture.csv")
+
+        assertThrows(IllegalStateException::class.java) {
+            manager.restoreCheckpoint(ByteArrayInputStream(checkpoint), checkedDigest)
+        }
+
+        PlatoonDatabase(context).use { database ->
+            assertEquals(1L, count(database.readableDatabase, "members", "uid = ?", CURRENT_UID))
+            assertEquals(0L, count(database.readableDatabase, "members", "uid = ?", ARCHIVED_UID))
+        }
+        assertFalse(FilePaths.restoreTransactionDirectory(context).exists())
+    }
+
+    @Test
+    fun startupRecoveryFinishesInterruptedImportsAndSurvivesABrokenScope() {
+        seedDatabase(ARCHIVED_UID, "Before interrupted import", "before-interrupted-import.csv")
+        val checkpoint = FilePaths.csvCheckpointDirectory(context)
+        assertTrue(checkpoint.mkdirs())
+        java.io.FileOutputStream(java.io.File(checkpoint, "platoon.gf2backup")).use { output ->
+            PlatoonBackupManager(context).export(output)
+        }
+        java.io.File(checkpoint, "planned-files.txt").writeText("\n", Charsets.UTF_8)
+        replaceDatabaseForCheckpoint(CURRENT_UID, "Interrupted import", "interrupted-import.csv")
+        val brokenScope = PlatoonStorageScope(
+            PlatoonProfileRegistry(context).upsertDetected(
+                SupportedGamePackages.DARKWINTER,
+                GameServerRegion.DARKWINTER_GLOBAL,
+                dev.gf2log.protocol.model.PlatoonProfileData(303u, "Broken checkpoint", 0u, 0u),
+            ).storageId,
+        )
+        // A checkpoint without its archive cannot be recovered and must not stop the others.
+        assertTrue(java.io.File(brokenScope.rootDirectory(context), "csv-import-checkpoint").mkdirs())
+
+        assertEquals(1, CsvImportCheckpointManager.recoverInterruptedImports(context))
+
+        PlatoonDatabase(context).use { database ->
+            assertEquals(1L, count(database.readableDatabase, "members", "uid = ?", ARCHIVED_UID))
+            assertEquals(0L, count(database.readableDatabase, "members", "uid = ?", CURRENT_UID))
+        }
+        assertFalse(checkpoint.exists())
+    }
+
+    @Test
     fun malformedCompleteBackupDoesNotMutateExistingState() {
         seedDatabase(CURRENT_UID, "Current member", "current-source.csv")
         settingsStore.replace(currentSettings())

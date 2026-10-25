@@ -104,6 +104,7 @@ internal class HomeCapturePanel(
             CapturePhase.STOPPED -> R.string.capture_ready to R.color.text_primary
             CapturePhase.STARTING -> R.string.status_preparing to R.color.accent_text
             CapturePhase.RUNNING -> R.string.capture_running to R.color.success_text
+            CapturePhase.STOPPING -> R.string.capture_stopping to R.color.text_secondary
         }
         stateTitle.text = getString(title)
         stateTitle.setTextColor(getColor(color))
@@ -115,7 +116,7 @@ internal class HomeCapturePanel(
         (stateDot.background as GradientDrawable).setColor(
             getColor(
                 when (phase) {
-                    CapturePhase.STOPPED -> R.color.outline_strong
+                    CapturePhase.STOPPED, CapturePhase.STOPPING -> R.color.outline_strong
                     CapturePhase.STARTING -> R.color.accent
                     CapturePhase.RUNNING -> R.color.success_mark
                 },
@@ -126,6 +127,7 @@ internal class HomeCapturePanel(
             notice?.notice == CaptureNotice.CAPTURING -> getString(R.string.capturing_clients, clientNames(snapshot.capturedTargets))
             notice != null && notice.notice != CaptureNotice.PREPARING -> notice.format(this)
             phase == CapturePhase.STOPPED -> getString(R.string.capture_ready_detail)
+            phase == CapturePhase.STOPPING -> getString(R.string.capture_stopping_detail)
             else -> getString(R.string.capture_preparing_detail)
         }
         stateDetail.setTextColor(
@@ -200,7 +202,10 @@ internal class HomeCapturePanel(
             )
         } else {
             captureActions.addView(
-                button(getString(R.string.stop_capture), Controls.Role.DESTRUCTIVE, R.drawable.ic_stop) { onStop() },
+                button(getString(R.string.stop_capture), Controls.Role.DESTRUCTIVE, R.drawable.ic_stop) { onStop() }.apply {
+                    // Already stopping: nothing more to request until the teardown finishes.
+                    isEnabled = phase != CapturePhase.STOPPING
+                },
                 lp(),
             )
         }

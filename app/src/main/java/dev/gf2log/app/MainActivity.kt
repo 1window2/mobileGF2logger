@@ -72,7 +72,7 @@ class MainActivity : BaseActivity() {
 
     private val vpnConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         startPending = false
-        if (result.resultCode == RESULT_OK) startCaptureService() else CaptureStatus.markStopped()
+        if (result.resultCode == RESULT_OK) startCaptureService() else CaptureStatus.clearIdleNotice()
     }
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {

@@ -2,7 +2,7 @@
 
 All notable changes to mobileGF2logger are documented here.
 
-## Unreleased (2.7.1)
+## 2.7.1 - 2026-10-25
 
 ### Fixed
 

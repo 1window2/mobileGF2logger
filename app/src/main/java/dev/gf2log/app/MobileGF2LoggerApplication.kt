@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import dev.gf2log.app.management.CsvImportCheckpointManager
 import dev.gf2log.app.management.PlatoonBackupManager
+import dev.gf2log.app.management.PlatoonProfileAdministration
 
 class MobileGF2LoggerApplication : Application() {
     override fun onCreate() {
@@ -17,7 +18,11 @@ class MobileGF2LoggerApplication : Application() {
         }
         // Interrupted CSV imports and undos finish off the main thread. Capture repeats the same
         // per-scope recovery before it ingests, and each scope's claim serializes the two.
-        Thread({ CsvImportCheckpointManager.recoverInterruptedImports(this) }, "GF2StartupRecovery").start()
+        Thread({
+            CsvImportCheckpointManager.recoverInterruptedImports(this)
+            runCatching { PlatoonProfileAdministration.recoverPending(this) }
+                .onFailure { Log.e(TAG, "Pending Platoon deletion recovery failed", it) }
+        }, "GF2StartupRecovery").start()
     }
 
     private companion object {

@@ -85,11 +85,20 @@ internal class PlatoonProfileAdministration internal constructor(
         private const val PREFERENCES = "platoon_profile_deletions"
         private const val KEY_PENDING = "pending_storage_ids"
 
+        /** Finishes queued deletions off the main thread; the registry never lists their scopes. */
+        private val cleanup = java.util.concurrent.Executors.newSingleThreadExecutor { Thread(it, "GF2ProfileCleanup") }
+
         fun recoverPending(context: Context) {
             // A thread already reading a repository cannot take the exclusive gate; the
             // ReentrantReadWriteLock cannot upgrade. The next registry access finishes the work.
             if (PlatoonRepository.holdsSharedDatabaseAccess()) return
             val appContext = context.applicationContext
+            // Deleting a database waits for the exclusive gate behind capture and rebuilds, so a
+            // screen reading the registry hands the work to a background thread instead.
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                if (pending(appContext).isNotEmpty()) cleanup.execute { recoverPending(appContext) }
+                return
+            }
             pending(appContext).forEach { storageId ->
                 if (PlatoonProfileIdentity.isValidStorageId(storageId) &&
                     storageId != PlatoonProfileIdentity.LEGACY_STORAGE_ID

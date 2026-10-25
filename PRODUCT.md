@@ -65,7 +65,7 @@ is the binding visual direction for the v2.3.0 frontend:
   feature guidance, visible progress, top-right Skip, and bottom navigation.
 
 The shipped emblem remains the existing launcher artwork at
-`app/src/main/res/drawable-nodpi/ic_launcher_art.png`.
+`app/src/main/res/drawable-nodpi/ic_launcher_art.webp`.
 
 ## Design principles
 

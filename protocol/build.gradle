@@ -1,22 +1,17 @@
+// Pure Kotlin: the protocol decoder has no Android dependencies, so it builds and tests on the JVM
+// without the Android library variants, lint models, and AAR packaging.
 plugins {
-    id 'com.android.library'
+    id 'org.jetbrains.kotlin.jvm'
 }
 
-android {
-    namespace = 'dev.gf2log.protocol'
-    compileSdk = 36
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
 
-    defaultConfig {
-        minSdk = 26
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    testOptions {
-        unitTests.returnDefaultValues = true
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 }
 

@@ -3,6 +3,11 @@ name: Deploy project page to GitHub Pages
 on:
   push:
     branches: ["main"]
+    # The page is built from the READMEs alone.
+    paths:
+      - README.md
+      - README_KR.md
+      - .github/workflows/deploy-pages.yml
   workflow_dispatch:
 
 permissions:

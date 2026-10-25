@@ -107,7 +107,7 @@ jobs:
         run: >
           ./gradlew
           :app:compileDebugKotlin
-          :protocol:compileDebugKotlin
+          :protocol:compileKotlin
           --init-script .github/codeql/codeql-kotlin-compat.init.gradle
           --rerun-tasks
           --no-build-cache

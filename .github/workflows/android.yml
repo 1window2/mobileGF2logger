@@ -42,11 +42,13 @@ jobs:
       - name: Test, lint, and build unsigned verification release
         run: >
           ./gradlew
-          :protocol:testDebugUnitTest
+          :protocol:test
           :app:testDebugUnitTest
           :app:lintDebug
           :app:assembleRelease
           -PallowUnsignedRelease=true
+          -x :app:lintVitalRelease
+          -x :app:lintVitalAnalyzeRelease
           --no-daemon
           --stacktrace
 

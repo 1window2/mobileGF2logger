@@ -2,6 +2,26 @@
 
 All notable changes to mobileGF2logger are documented here.
 
+## 2.7.0 - 2026-10-25
+
+### Added
+
+- Add scheduled recording in Settings for phones without a PIN, pattern, or
+  password: every day, five minutes before each chosen server's game day ends,
+  an alarm wakes the phone, gets past a swipe lock screen, records members,
+  closes the game, and turns the screen off again, with no standby screen kept
+  on overnight. It is unavailable while a screen lock is set, turns itself off
+  if one is added later, skips a day when the phone is in use, and is set again
+  after a reboot, an update, or a clock or time zone change.
+
+### Changed
+
+- Keep automatic-recording results until they are closed on Home, across days,
+  with the date of each result.
+- Close the game from Recents on launchers other than Samsung's as well.
+- Report a recording cancelled by using the phone as such, rather than as
+  standby ending.
+
 ## 2.6.0 - 2026-10-19
 
 ### Added

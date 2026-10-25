@@ -107,10 +107,11 @@ internal object ScheduledRecording {
         val selected = selectedServers(context, StandbyProfiles.load(context), selectedKeys(context))
         val now = Instant.now()
         val from = StandbyPlanner.scheduleFrom(now, handledReset(context))
+        val rehearsal = rehearsalReset(context, now)?.takeIf { it.isAfter(from) }
         val runs = when {
             selected.isEmpty() -> emptyList()
-            else -> takeRehearsal(context)?.let { StandbyPlanner.rehearsal(selected, from, it) }
-                ?: StandbyPlanner.plan(selected, from)
+            rehearsal != null -> StandbyPlanner.plan(selected, from) { rehearsal }
+            else -> StandbyPlanner.plan(selected, from)
         }
         val group = StandbyPlanner.firstGroup(runs)
         if (group.isEmpty()) {
@@ -289,16 +290,20 @@ internal object ScheduledRecording {
         prefs(context).getLong(KEY_HANDLED_RESET, -1).takeIf { it >= 0 }?.let(Instant::ofEpochMilli)
 
     /**
-     * A debug build with `files/scheduled_rehearsal` holding a number of minutes schedules the
-     * next wake-up with every chosen server resetting that far from now, once; the file is then
-     * removed so later days follow the real resets.
+     * A debug build with `files/scheduled_rehearsal` holding a number of minutes rehearses the next
+     * wake-up with every chosen server resetting that far from now. The file is turned into a
+     * stored reset at once, which later plans keep until it has been handled.
      */
-    private fun takeRehearsal(context: Context): Duration? {
+    private fun rehearsalReset(context: Context, now: Instant): Instant? {
         if (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return null
         val file = File(context.filesDir, REHEARSAL_FILE)
-        val minutes = runCatching { file.readText().trim().toLong() }.getOrNull() ?: return null
-        file.delete()
-        return Duration.ofMinutes(minutes)
+        runCatching { file.readText().trim().toLong() }.getOrNull()?.let { minutes ->
+            file.delete()
+            prefs(context).edit(commit = true) {
+                putLong(KEY_REHEARSAL_RESET, now.plus(Duration.ofMinutes(minutes)).toEpochMilli())
+            }
+        }
+        return prefs(context).getLong(KEY_REHEARSAL_RESET, -1).takeIf { it >= 0 }?.let(Instant::ofEpochMilli)
     }
 
     private fun prefs(context: Context) =
@@ -311,6 +316,7 @@ internal object ScheduledRecording {
     private const val KEY_HANDLED_RESET = "handled_reset"
     private const val KEY_NEXT_START = "next_start"
     private const val KEY_NEXT_REGIONS = "next_regions"
+    private const val KEY_REHEARSAL_RESET = "rehearsal_reset"
     private const val REQUEST_FIRE = 4_505
     private const val REQUEST_SHOW = 4_506
     private const val REHEARSAL_FILE = "scheduled_rehearsal"

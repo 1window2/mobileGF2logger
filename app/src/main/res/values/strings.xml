@@ -625,7 +625,7 @@
     <string name="standby_server_option">%1$s · %2$s · starts %3$s</string>
     <string name="standby_start">Start standby mode</string>
     <string name="standby_next_recording">Next recording: %1$s · %2$s</string>
-    <string name="standby_results_title">Standby recording results</string>
+    <string name="standby_results_title">Automatic recording results</string>
     <string name="standby_result_line">%1$s: %2$s (%3$s)</string>
     <string name="standby_outcome_recorded">Members recorded</string>
     <string name="standby_outcome_other_platoon">Logged in to a different Platoon</string>

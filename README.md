@@ -47,6 +47,9 @@ never stored.
   from Recents, and locks the phone after the last server. The service only taps
   while the game is in front and reads nothing on screen except the foreground
   app and the app names on Recents cards.
+- On a phone without a PIN, pattern, or password, can instead record every day
+  on a schedule from Settings: an alarm wakes the phone before each chosen
+  server's reset, records members the same way, and turns the screen off again.
 - Draws edge to edge and keeps drafts, selections, and pending exports across rotation, theme or language changes, and process recreation.
 - Supports English and Korean, System/Light/Dark themes, and the six known
   Darkwinter/HaoPlay server-region reset presets converted to the phone timezone.

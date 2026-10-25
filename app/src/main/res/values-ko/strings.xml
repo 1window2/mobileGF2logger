@@ -617,7 +617,7 @@
     <string name="standby_server_option">%1$s · %2$s · %3$s 시작</string>
     <string name="standby_start">대기 모드 시작</string>
     <string name="standby_next_recording">다음 자동 기록: %1$s · %2$s</string>
-    <string name="standby_results_title">대기 모드 자동 기록 결과</string>
+    <string name="standby_results_title">자동 기록 결과</string>
     <string name="standby_result_line">%1$s: %2$s (%3$s)</string>
     <string name="standby_outcome_recorded">멤버 기록 완료</string>
     <string name="standby_outcome_other_platoon">다른 서클로 접속됨</string>

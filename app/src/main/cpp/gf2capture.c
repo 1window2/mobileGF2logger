@@ -88,19 +88,43 @@ static bool starts_with(const char *payload, uint16_t length, const char *prefix
     return length >= prefix_length && memcmp(payload, prefix, prefix_length) == 0;
 }
 
+// Every TLS/SSL 3.0 record header: content type 20-23, major version 3, minor version 0-4, and a
+// length within the largest legal record (2^14 plus the 2048-byte TLS 1.2 expansion allowance).
+// A GF2 frame header whose message ID happens to start with the same two bytes must also match
+// the third byte and a plausible length before inspection of its flow is disabled. A first
+// segment too short to carry the length still counts as TLS, as before.
+#define TLS_RECORD_HEADER_LENGTH 5
+#define TLS_MAX_RECORD_LENGTH (16384U + 2048U)
+
+static bool is_tls_record_header(const char *payload, uint16_t length) {
+    if (length < 3) {
+        return false;
+    }
+    uint8_t record_type = (uint8_t) payload[0];
+    if (record_type < 0x14U || record_type > 0x17U ||
+            (uint8_t) payload[1] != 0x03U || (uint8_t) payload[2] > 0x04U) {
+        return false;
+    }
+    if (length < TLS_RECORD_HEADER_LENGTH) {
+        return true;
+    }
+    uint32_t record_length = ((uint32_t) (uint8_t) payload[3] << 8) | (uint8_t) payload[4];
+    return record_length > 0 && record_length <= TLS_MAX_RECORD_LENGTH;
+}
+
 static bool is_web_transport(const char *payload, uint16_t length) {
-    if (length >= 3) {
-        uint8_t record_type = (uint8_t) payload[0];
-        if (record_type >= 0x14U && record_type <= 0x17U &&
-                (uint8_t) payload[1] == 0x03U) {
-            return true;
-        }
+    if (is_tls_record_header(payload, length)) {
+        return true;
     }
 
     return starts_with(payload, length, "GET ") ||
             starts_with(payload, length, "POST ") ||
             starts_with(payload, length, "HEAD ") ||
             starts_with(payload, length, "PUT ") ||
+            starts_with(payload, length, "OPTIONS ") ||
+            starts_with(payload, length, "DELETE ") ||
+            starts_with(payload, length, "PATCH ") ||
+            starts_with(payload, length, "CONNECT ") ||
             starts_with(payload, length, "HTTP/") ||
             starts_with(payload, length, "PRI * HTTP/2.0");
 }

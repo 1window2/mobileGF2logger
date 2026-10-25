@@ -143,7 +143,9 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
 - TLS, HTTP, and UDP payloads remain native and are excluded from the parser.
   A TCP flow is classified once, on its first payload in either direction, so
   a later plaintext segment that happens to begin with TLS-like bytes can never
-  disable inspection.
+  disable inspection. TLS means a complete record header (content type 20–23,
+  version 3.0–3.4, length 1 to 2^14 + 2048); HTTP means a request method or
+  status line, so a game frame sharing only the first two bytes stays inspected.
 - Outgoing plaintext chunks are used only for native flow classification.
 - Flow-close callbacks finalize any pending recognized payload before removing parser state and
   unconditionally remove metadata even when no parser existed. A rejected close callback

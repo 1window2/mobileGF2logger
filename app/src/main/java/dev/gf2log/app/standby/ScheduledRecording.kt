@@ -70,8 +70,7 @@ internal object ScheduledRecording {
     private fun storedKeys(context: Context): Set<String> = prefs(context).getStringSet(KEY_SERVERS, emptySet()).orEmpty()
 
     /** A PIN, pattern, or password cannot be passed unattended, so it rules scheduling out. */
-    fun isBlockedByScreenLock(context: Context): Boolean =
-        context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure != false
+    fun isBlockedByScreenLock(context: Context): Boolean = hasScreenLock(context)
 
     /** Android 12+ lets the user withhold exact alarms; without them a wake-up may come late. */
     fun canScheduleExactAlarms(context: Context): Boolean =

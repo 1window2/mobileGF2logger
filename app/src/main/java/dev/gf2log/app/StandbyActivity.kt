@@ -18,7 +18,7 @@ import dev.gf2log.app.standby.ScheduledRecording
 import dev.gf2log.app.standby.StandbyAutomation
 import dev.gf2log.app.standby.StandbyAutomationService
 import dev.gf2log.app.standby.StandbyPlanner
-import dev.gf2log.app.standby.StandbyUnlockedWarning
+import dev.gf2log.app.standby.hasScreenLock
 import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.TextRole
 import dev.gf2log.app.ui.dp
@@ -76,7 +76,7 @@ class StandbyActivity : BaseActivity() {
         // is not locked meanwhile (a scheduled recording never runs on one).
         val leaveHint = when {
             scheduled -> R.string.scheduled_touch_to_cancel
-            StandbyUnlockedWarning.isDeviceSecure(this) -> R.string.standby_touch_to_leave_unlocked
+            hasScreenLock(this) -> R.string.standby_touch_to_leave_unlocked
             else -> R.string.standby_touch_to_leave
         }
         val hint = LinearLayout(this).apply {

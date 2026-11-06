@@ -505,6 +505,7 @@
     <string name="unsaved_changes_title">Unsaved changes</string>
     <string name="week_range">%1$s – %2$s</string>
     <string name="week_reset_zone">Reset 05:00 · %1$s</string>
+    <string name="server_time_zone">Server time · %1$s</string>
     <string name="weekly_cell_description">%1$s, %2$s</string>
     <string name="labeled_value">%1$s: %2$s</string>
     <string name="member_uid">#%1$d</string>

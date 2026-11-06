@@ -499,6 +499,7 @@
     <string name="unsaved_changes_title">저장하지 않은 변경</string>
     <string name="week_range">%1$s – %2$s</string>
     <string name="week_reset_zone">초기화 05:00 · %1$s</string>
+    <string name="server_time_zone">서버 시간 · %1$s</string>
     <string name="weekly_cell_description">%1$s, %2$s</string>
     <string name="labeled_value">%1$s: %2$s</string>
     <string name="member_uid">#%1$d</string>

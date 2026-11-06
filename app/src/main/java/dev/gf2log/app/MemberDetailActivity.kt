@@ -198,6 +198,7 @@ class MemberDetailActivity : BaseActivity() {
                 }
             }, lp(top = 12))
         }
+        Labels.zoneCaption(this, loaded.zone)?.let { statusPanel.addView(text(it, TextRole.CAPTION), lp(top = 12)) }
         val rows = status.membershipPeriods.mapIndexed { index, period ->
             navigationRow(
                 title = getString(R.string.membership_period_title, index + 1) +

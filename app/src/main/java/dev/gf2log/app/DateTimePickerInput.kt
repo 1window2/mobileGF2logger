@@ -63,6 +63,12 @@ internal class DateTimePickerInput(
         addView(context.text(label, TextRole.LABEL) {
             setPadding(context.dp(4), 0, context.dp(4), context.dp(4))
         }, context.lp())
+        // The fields edit in the game reset zone; say so whenever the phone clock reads differently.
+        Labels.zoneCaption(context, zone)?.let { caption ->
+            addView(context.text(caption, TextRole.CAPTION) {
+                setPadding(context.dp(4), 0, context.dp(4), context.dp(4))
+            }, context.lp())
+        }
         addView(context.row {
             if (stacksPickerFields(context.resources.configuration.fontScale)) {
                 // Side by side, large digits would not fit a narrow dialog; each field gets the row.

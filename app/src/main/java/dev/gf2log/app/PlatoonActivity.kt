@@ -64,6 +64,7 @@ class PlatoonActivity : BaseActivity() {
     private lateinit var searchInput: EditText
     private lateinit var sortButton: TextView
     private lateinit var resultCount: TextView
+    private lateinit var zoneCaption: TextView
 
     private var model: Model? = null
     private var filter = Filter.ACTIVE
@@ -210,6 +211,7 @@ class PlatoonActivity : BaseActivity() {
         resultCount = text(null, TextRole.LABEL) {
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
+        zoneCaption = text(null, TextRole.CAPTION) { visibility = View.GONE }
         summary = row(Gravity.TOP)
         updateSortLabel()
         return column {
@@ -228,11 +230,15 @@ class PlatoonActivity : BaseActivity() {
                 addView(resultCount, lp(width = 0, weight = 1f, start = 4))
                 addView(sortButton, lp(WRAP, WRAP))
             }, lp(top = 4, bottom = 4))
+            addView(zoneCaption, lp(start = 4, end = 4, bottom = 4))
         }
     }
 
     private fun renderSummary(loaded: Model) {
         summary.removeAllViews()
+        val caption = Labels.zoneCaption(this, loaded.zone)
+        zoneCaption.text = caption
+        zoneCaption.visibility = if (caption == null) View.GONE else View.VISIBLE
         val active = loaded.statuses.count(MemberStatus::isActive)
         val tiles = listOf(
             getString(R.string.stat_active) to active.toString(),

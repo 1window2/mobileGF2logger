@@ -14,6 +14,7 @@ import dev.gf2log.app.standby.StandbyPlanner
 import dev.gf2log.app.standby.StandbyProfiles
 import dev.gf2log.app.standby.StandbyResults
 import dev.gf2log.app.standby.StandbyServer
+import dev.gf2log.app.standby.StandbyUnlockedWarning
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Feedback
@@ -49,6 +50,7 @@ internal class StandbyFlow(
     }
 
     fun start() {
+        if (StandbyUnlockedWarning.shouldWarn(activity)) return warnUnlocked()
         if (!StandbyBatteryPrompt.shouldAsk(activity)) return prepareRecording()
         Dialogs.show(
             Dialogs.builder(activity)
@@ -68,8 +70,26 @@ internal class StandbyFlow(
     }
 
     /**
+     * The black screen looks like a phone that is off, so on a phone with a screen lock the user
+     * agrees once, before standby first opens, that it stays unlocked until standby ends.
+     */
+    private fun warnUnlocked() {
+        Dialogs.show(
+            Dialogs.builder(activity)
+                .setTitle(R.string.standby_unlocked_title)
+                .setMessage(R.string.standby_unlocked_message)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.continue_action) { _, _ ->
+                    StandbyUnlockedWarning.acknowledge(activity)
+                    start()
+                },
+        )
+    }
+
+    /**
      * Shows the last standby session's results when Home opens; they count as seen only once the
-     * user closes them, so a Home briefly resumed during automation cannot use them up.
+     * user closes them (OK, Back, or a touch outside), so neither a Home briefly resumed during
+     * automation nor one closed or recreated with the dialog open can use them up.
      */
     fun showUnseenResults() {
         if (StandbyAutomation.isArmed || resultsDialog?.isShowing == true) return
@@ -84,11 +104,15 @@ internal class StandbyFlow(
                 Labels.format(Labels.DATE_TIME, Instant.ofEpochMilli(result.atMillis), zone),
             )
         }
-        resultsDialog = Dialogs.message(activity, activity.getString(R.string.standby_results_title), lines).apply {
-            setOnDismissListener {
-                StandbyResults.markSeen(activity, results)
-                resultsDialog = null
-            }
+        resultsDialog = Dialogs.show(
+            Dialogs.builder(activity)
+                .setTitle(R.string.standby_results_title)
+                .setMessage(lines)
+                .setOnCancelListener { StandbyResults.markSeen(activity, results) }
+                .setPositiveButton(android.R.string.ok) { _, _ -> StandbyResults.markSeen(activity, results) },
+        ).apply {
+            // Also dismissed, without the user, when Home is destroyed; that must not mark them seen.
+            setOnDismissListener { resultsDialog = null }
         }
     }
 
@@ -167,7 +191,7 @@ internal class StandbyFlow(
     }
 
     private fun rememberedKeys(): Set<String> =
-        prefs().getStringSet(KEY_SELECTED, emptySet()).orEmpty()
+        prefs().getStringSet(KEY_SELECTED, emptySet()).orEmpty().mapTo(HashSet(), StandbyPlanner::selectionKey)
 
     private fun remember(chosen: List<StandbyServer>) {
         prefs().edit { putStringSet(KEY_SELECTED, chosen.mapTo(HashSet(), StandbyServer::key)) }
@@ -179,6 +203,7 @@ internal class StandbyFlow(
         StandbyOutcome.RECORDED -> R.string.standby_outcome_recorded
         StandbyOutcome.OTHER_PLATOON -> R.string.standby_outcome_other_platoon
         StandbyOutcome.TIMED_OUT -> R.string.standby_outcome_timed_out
+        StandbyOutcome.CLIENT_UNVERIFIED -> R.string.standby_outcome_client_unverified
         StandbyOutcome.MISSED -> R.string.standby_outcome_missed
         StandbyOutcome.NO_ACCESSIBILITY -> R.string.standby_outcome_no_accessibility
         StandbyOutcome.NO_VPN_CONSENT -> R.string.standby_outcome_no_vpn

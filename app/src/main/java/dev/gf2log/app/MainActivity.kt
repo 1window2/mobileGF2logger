@@ -239,7 +239,13 @@ class MainActivity : BaseActivity() {
     }
 
     private fun startCaptureService() {
-        CaptureStatus.markStarting()
+        if (!CaptureGuard.beginCaptureStart()) {
+            // A Platoon delete, server change, or restore is still running on its scope.
+            Feedback.show(this, R.string.capture_start_after_maintenance, long = true)
+            captureOnceRequested = false
+            startPending = false
+            return
+        }
         startForegroundService(
             Intent(this, CaptureVpnService::class.java)
                 .setAction(CaptureVpnService.ACTION_START)

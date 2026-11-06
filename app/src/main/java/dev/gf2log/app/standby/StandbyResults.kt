@@ -17,6 +17,9 @@ internal enum class StandbyOutcome {
     /** No roster arrived before the run's time ran out. */
     TIMED_OUT,
 
+    /** The game logged in, but capture could not verify which client sent its data. */
+    CLIENT_UNVERIFIED,
+
     /** The run never started because an earlier one or the deadline left no time. */
     MISSED,
 

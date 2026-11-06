@@ -5,6 +5,7 @@ import dev.gf2log.app.settings.GameServerRegion
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
+import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -144,6 +145,114 @@ class StandbyPlannerTest {
         assertNull(StandbyPlanner.finalDeadline(emptyList()))
     }
 
+    @Test
+    fun `platoons of one login with different reset zones are one server`() {
+        val servers = StandbyPlanner.servers(
+            listOf(
+                profile("a", SupportedGamePackages.HAOPLAY, GameServerRegion.HAOPLAY_KOREA, "Alpha"),
+                profile("b", SupportedGamePackages.HAOPLAY, GameServerRegion.HAOPLAY_KOREA, "Bravo", ZoneOffset.UTC),
+            ),
+        )
+
+        val server = servers.single()
+        assertEquals(setOf("a", "b"), server.storageIds)
+        assertEquals(setOf<ZoneId>(ZoneOffset.ofHours(9), ZoneOffset.UTC), server.zones)
+        assertEquals("${SupportedGamePackages.HAOPLAY}|haoplay_korea", server.key)
+        assertTrue(StandbyPlanner.isValidSelection(servers))
+    }
+
+    @Test
+    fun `a server with several reset zones is recorded before the first of them`() {
+        val server = StandbyPlanner.servers(
+            listOf(
+                profile("a", SupportedGamePackages.HAOPLAY, GameServerRegion.HAOPLAY_KOREA, "Alpha"),
+                profile("b", SupportedGamePackages.HAOPLAY, GameServerRegion.HAOPLAY_KOREA, "Bravo", ZoneOffset.UTC),
+            ),
+        ).single()
+        val evening = Instant.parse("2026-10-19T21:00:00Z") // 05:00 UTC comes before 05:00 in Seoul
+        val morning = Instant.parse("2026-10-20T06:00:00Z") // and 05:00 in Seoul before the next 05:00 UTC
+
+        assertEquals(Instant.parse("2026-10-20T05:00:00Z"), StandbyPlanner.plan(listOf(server), evening).single().reset)
+        assertEquals(Instant.parse("2026-10-20T20:00:00Z"), StandbyPlanner.plan(listOf(server), morning).single().reset)
+    }
+
+    @Test
+    fun `a choice stored before a reset-zone override still matches after it`() {
+        // 2.7.1 stored the zone in the key; an override to UTC then matched nothing.
+        val legacy = "${SupportedGamePackages.HAOPLAY}|haoplay_korea|+09:00"
+        val overridden = StandbyPlanner.servers(
+            listOf(profile("a", SupportedGamePackages.HAOPLAY, GameServerRegion.HAOPLAY_KOREA, "Alpha", ZoneOffset.UTC)),
+        )
+
+        assertEquals("${SupportedGamePackages.HAOPLAY}|haoplay_korea", StandbyPlanner.selectionKey(legacy))
+        assertEquals(overridden, StandbyPlanner.selected(overridden, setOf(legacy)))
+        assertEquals(overridden, StandbyPlanner.selected(overridden, setOf(overridden.single().key)))
+    }
+
+    @Test
+    fun `a chosen server without a saved platoon is dropped, and none left means nothing runs`() {
+        val servers = StandbyPlanner.servers(
+            listOf(profile("g", SupportedGamePackages.DARKWINTER, GameServerRegion.DARKWINTER_GLOBAL, "Golf")),
+        )
+        val deletedKorea = korea.key
+
+        assertEquals(servers, StandbyPlanner.selected(servers, setOf(deletedKorea, servers.single().key)))
+        assertTrue(StandbyPlanner.selected(servers, setOf(deletedKorea)).isEmpty())
+        assertTrue(StandbyPlanner.selected(emptyList(), setOf(deletedKorea)).isEmpty())
+    }
+
+    @Test
+    fun `a choice follows its platoon to the server region it moved to`() {
+        val moved = StandbyPlanner.servers(
+            listOf(profile("a", SupportedGamePackages.HAOPLAY, GameServerRegion.HAOPLAY_JAPAN, "Alpha")),
+        )
+
+        assertEquals(setOf(moved.single().key), StandbyPlanner.followPlatoons(moved, setOf(korea.key), setOf("a")))
+        // The Platoon is gone: the choice stays, matching nothing.
+        assertEquals(setOf(korea.key), StandbyPlanner.followPlatoons(moved, setOf(korea.key), setOf("deleted")))
+        // A legacy key is normalised whether or not it moves.
+        assertEquals(
+            setOf(moved.single().key),
+            StandbyPlanner.followPlatoons(moved, setOf("${moved.single().key}|+09:00"), emptySet()),
+        )
+    }
+
+    @Test
+    fun `a choice does not follow when its client already has an existing chosen server`() {
+        val servers = StandbyPlanner.servers(
+            listOf(
+                profile("a", SupportedGamePackages.HAOPLAY, GameServerRegion.HAOPLAY_JAPAN, "Alpha"),
+                profile("b", SupportedGamePackages.HAOPLAY, GameServerRegion.HAOPLAY_ASIA, "Bravo"),
+            ),
+        )
+        val asiaKey = servers.single { it.region == GameServerRegion.HAOPLAY_ASIA }.key
+
+        assertEquals(
+            setOf(korea.key, asiaKey),
+            StandbyPlanner.followPlatoons(servers, setOf(korea.key, asiaKey), setOf("a", "b")),
+        )
+    }
+
+    @Test
+    fun `a handled reset far in the future from a forward clock jump is ignored`() {
+        val now = Instant.parse("2026-10-19T13:05:00Z") // 22:05 in Seoul, clock corrected back
+        val future = Instant.parse("2026-10-19T20:00:00Z") // handled while the clock was ahead
+
+        assertNull(StandbyPlanner.trustedHandledReset(now, future))
+        assertEquals(now, StandbyPlanner.scheduleFrom(now, future))
+        val next = StandbyPlanner.firstGroup(StandbyPlanner.plan(listOf(korea), StandbyPlanner.scheduleFrom(now, future)))
+        assertEquals(future, next.single().reset)
+    }
+
+    @Test
+    fun `a handled reset just ahead still guards against a second delivery`() {
+        val now = Instant.parse("2026-10-19T19:58:00Z") // 04:58 in Seoul
+        val handled = Instant.parse("2026-10-19T20:00:00Z")
+
+        assertEquals(handled, StandbyPlanner.trustedHandledReset(now, handled))
+        assertEquals(handled.plusSeconds(1), StandbyPlanner.scheduleFrom(now, handled))
+    }
+
     private fun server(packageName: String, region: GameServerRegion) = StandbyServer(
         packageName = packageName,
         region = region,
@@ -152,11 +261,17 @@ class StandbyPlannerTest {
         platoonNames = listOf(region.storedValue),
     )
 
-    private fun profile(id: String, packageName: String, region: GameServerRegion, name: String) = StandbyProfile(
+    private fun profile(
+        id: String,
+        packageName: String,
+        region: GameServerRegion,
+        name: String,
+        zone: ZoneId = requireNotNull(region.serverZone),
+    ) = StandbyProfile(
         storageId = id,
         packageName = packageName,
         region = region,
-        zone = requireNotNull(region.serverZone) as ZoneId,
+        zone = zone,
         platoonName = name,
     )
 }

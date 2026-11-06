@@ -13,6 +13,7 @@ import dev.gf2log.app.management.PlatoonProfile
 import dev.gf2log.app.management.PlatoonProfileAdministration
 import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.settings.ClientServerRegionPreferences
+import dev.gf2log.app.standby.ScheduledRecording
 import dev.gf2log.app.ui.onTextChanged
 import dev.gf2log.app.ui.AccessibleRow
 import dev.gf2log.app.ui.Dialogs
@@ -294,17 +295,26 @@ internal object PlatoonProfileSelector {
         val screen = WeakReference(activity)
         val appContext = activity.applicationContext
         maintenanceExecutor.execute {
-            val result = runCatching(operation)
+            // Checked again where it runs: standby or an alarm may have started capture meanwhile.
+            val result = CaptureGuard.whileStopped { runCatching(operation) }
+                ?: Result.failure(CaptureGuard.CaptureActiveException())
+            // The next scheduled wake-up must not be for a Platoon that is gone or has moved.
+            if (result.isSuccess && ScheduledRecording.isEnabled(appContext)) ScheduledRecording.reschedule(appContext)
+            val message = if (result.exceptionOrNull() is CaptureGuard.CaptureActiveException) {
+                R.string.stop_capture_before_profile_change
+            } else {
+                failureMessage
+            }
             // A rotation may have replaced the caller; refresh whichever screen is showing now.
             val current = screen.get()?.takeUnless { it.isFinishing || it.isDestroyed }
                 ?: BaseActivity.foregroundScreen()
             if (current == null) {
-                if (result.isFailure) Feedback.show(appContext, failureMessage, long = true)
+                if (result.isFailure) Feedback.show(appContext, message, long = true)
                 return@execute
             }
             current.runOnUiThread {
                 if (current.isFinishing || current.isDestroyed) return@runOnUiThread
-                if (result.isSuccess) current.recreate() else Feedback.show(current, failureMessage, long = true)
+                if (result.isSuccess) current.recreate() else Feedback.show(current, message, long = true)
             }
         }
     }

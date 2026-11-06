@@ -17,7 +17,8 @@ import java.security.MessageDigest
 internal object PlatoonEvidenceDigest {
     /**
      * Derived tables that the undo checkpoint restores as well but that never hold evidence. The
-     * maintenance state keeps bookkeeping only: the activity-resolution cursor and history zone.
+     * maintenance state keeps bookkeeping only: the activity-resolution cursor, the history zone
+     * and the version of the active-state rule.
      */
     private val DERIVED_TABLES = setOf(
         "weekly_report_history",

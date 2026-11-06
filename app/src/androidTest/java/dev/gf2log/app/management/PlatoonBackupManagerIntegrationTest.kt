@@ -558,6 +558,120 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     @Test
+    fun platoonOnlyRestoreRebucketsWeeklyHistoryInTheTargetsResetZone() {
+        val week = LocalDate.of(2026, 7, 26)
+        val repository = seedWeeklyHistory(week)
+        val archive = ByteArrayOutputStream().also {
+            PlatoonBackupManager(context, storageScope).export(it)
+        }.toByteArray()
+        // The archive's history is bucketed at Korea's 05:00; the target resets at 05:00 UTC.
+        GameTimeZonePreferences.setRegion(context, GameServerRegion.HAOPLAY_GLOBAL, storageScope.storageId)
+        val archived = storedReports(repository, week)
+
+        PlatoonBackupManager(context, storageScope).restore(ByteArrayInputStream(archive))
+
+        val utc = java.time.ZoneOffset.UTC
+        val restored = PlatoonRepository(context, storageScope)
+        assertEquals(utc, restored.gameZone())
+        val entries = restored.listWeeklyReportHistory(week)
+        assertTrue(entries.isNotEmpty())
+        assertTrue(entries.none { it.active })
+        val live = liveReport(restored, week, utc)
+        // The rosters fall on different game days at the two resets, so the revisions differ.
+        assertTrue(archived.none { it == live })
+        assertEquals(List(entries.size) { live }, storedReports(restored, week))
+    }
+
+    @Test
+    fun platoonOnlyRestoreInTheSameResetZoneKeepsWeeklyHistory() {
+        val week = LocalDate.of(2026, 7, 26)
+        val repository = seedWeeklyHistory(week)
+        val archive = ByteArrayOutputStream().also {
+            PlatoonBackupManager(context, storageScope).export(it)
+        }.toByteArray()
+        val before = repository.listWeeklyReportHistory(week)
+
+        PlatoonBackupManager(context, storageScope).restore(ByteArrayInputStream(archive))
+
+        assertEquals(before, PlatoonRepository(context, storageScope).listWeeklyReportHistory(week))
+    }
+
+    /** Two near-reset rosters whose game days differ between Korea and UTC, plus a selection. */
+    private fun seedWeeklyHistory(week: LocalDate): PlatoonRepository {
+        val repository = PlatoonRepository(context, storageScope)
+        listOf("2026-07-28T20:30:00Z" to 0u, "2026-07-29T20:30:00Z" to 90u).forEach { (time, merit) ->
+            repository.ingest(
+                Instant.parse(time),
+                listOf(
+                    GuildMember(
+                        uid = CURRENT_UID.toUInt(),
+                        name = "History member",
+                        level = 1u,
+                        weeklyMerit = merit,
+                        totalMerit = 1_000u + merit,
+                        highScore = 0u,
+                        totalScore = 0u,
+                        lastLogin = 0u,
+                    ),
+                ),
+                "history-$merit.csv",
+            )
+        }
+        val entries = repository.listWeeklyReportHistory(week)
+        assertTrue(repository.restoreWeeklyReportHistory(entries.last().id, week))
+        return repository
+    }
+
+    private fun storedReports(repository: PlatoonRepository, week: LocalDate) =
+        repository.listWeeklyReportHistory(week).map { repository.weeklyReportHistory(it.id, week) }
+
+    /** The live revision as history stores it, so codec normalization does not differ. */
+    private fun liveReport(repository: PlatoonRepository, week: LocalDate, zone: java.time.ZoneId) =
+        WeeklyReportHistoryCodec.decode(
+            WeeklyReportHistoryCodec.encode(repository.readWeeklyTableRevision(week, zone)).payload,
+        )
+
+    @Test
+    fun derivedWeeklyHistoryWrittenAfterACsvImportKeepsItsUndo() {
+        seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
+        val import = CsvImportCheckpointManager(context, storageScope)
+        import.create(emptySet())
+        replaceDatabaseForCheckpoint(CURRENT_UID, "After import", "after-import.csv")
+        import.seal()
+
+        // Opening the Weekly screen on a week without evidence records a derived revision.
+        val repository = PlatoonRepository(context, storageScope)
+        val week = LocalDate.of(2026, 10, 4)
+        repository.buildWeeklyTableRevision(week, java.time.ZoneOffset.UTC, Instant.parse("2026-10-05T00:00:00Z"))
+        assertTrue(repository.listWeeklyReportHistory(week).isNotEmpty())
+
+        val undo = CsvImportCheckpointManager(context, storageScope)
+        assertTrue(undo.canUndo())
+        undo.restore()
+        PlatoonDatabase(context).use { database ->
+            assertEquals(1L, count(database.readableDatabase, "members", "uid = ?", ARCHIVED_UID))
+        }
+    }
+
+    @Test
+    fun aMemberEditAfterACsvImportStillRefusesItsUndo() {
+        seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
+        val import = CsvImportCheckpointManager(context, storageScope)
+        import.create(emptySet())
+        replaceDatabaseForCheckpoint(CURRENT_UID, "After import", "after-import.csv")
+        import.seal()
+
+        assertTrue(PlatoonRepository(context, storageScope).updateMember(CURRENT_UID, "Renamed", "Edited"))
+
+        assertThrows(IllegalStateException::class.java) {
+            CsvImportCheckpointManager(context, storageScope).restore()
+        }
+        PlatoonDatabase(context).use { database ->
+            assertEquals(1L, count(database.readableDatabase, "members", "uid = ?", CURRENT_UID))
+        }
+    }
+
+    @Test
     fun constructingRepositoriesAndManagersDoesNotWaitForTheExclusiveGate() {
         val held = java.util.concurrent.CountDownLatch(1)
         val release = java.util.concurrent.CountDownLatch(1)

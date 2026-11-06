@@ -66,6 +66,49 @@ class PlatoonRepositoryIntegrationTest {
     }
 
     @Test
+    fun anActiveRevisionBeyondThePayloadLimitFallsBackToTheLiveTable() {
+        val repository = utcRepository()
+        val capturedAt = Instant.parse("2026-07-29T12:00:00Z")
+        repository.ingest(capturedAt, listOf(member(UID, "A", 100u)), "a.csv")
+        // Only a restored archive can hold such a row: the app never stores one this large.
+        val oversizedId = PlatoonRepository.withExclusiveDatabase(SCOPE) {
+            PlatoonDatabase(context, SCOPE.databaseName).use { database ->
+                val db = database.writableDatabase
+                val id = db.insertOrThrow(
+                    "weekly_report_history",
+                    null,
+                    ContentValues().apply {
+                        put("period_start", CLOSING_WEEK.toEpochDay())
+                        put("recorded_at", capturedAt.toEpochMilli())
+                        put("fingerprint", "0".repeat(64))
+                        put("report_blob", ByteArray(3 * 1024 * 1024) { 1 })
+                    },
+                )
+                db.insertWithOnConflict(
+                    "weekly_report_history_state",
+                    null,
+                    ContentValues().apply {
+                        put("period_start", CLOSING_WEEK.toEpochDay())
+                        put("active_history_id", id)
+                    },
+                    android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE,
+                )
+                id
+            }
+        }
+
+        val revision = repository.buildWeeklyTableRevision(
+            referenceDay = CLOSING_WEEK,
+            zoneId = ZoneOffset.UTC,
+            asOf = capturedAt.plusSeconds(3_600),
+        )
+
+        assertEquals(listOf(UID), revision.report.members.map { it.uid })
+        assertTrue(repository.listWeeklyReportHistory(CLOSING_WEEK).none { it.active })
+        assertEquals(null, repository.weeklyReportHistory(oversizedId, CLOSING_WEEK))
+    }
+
+    @Test
     fun rosterCapturedExactlyAtTheSundayResetAlsoRefreshesTheWeekItCloses() {
         val repository = utcRepository()
         repository.ingest(Instant.parse("2026-07-29T12:00:00Z"), listOf(member(UID, "A", 100u)), "a.csv")

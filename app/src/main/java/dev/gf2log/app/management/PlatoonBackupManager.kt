@@ -59,11 +59,14 @@ class PlatoonBackupManager internal constructor(
         }
     }
 
-    /** Returns a stable digest after closing SQLite so WAL state is checkpointed. */
+    /**
+     * Returns a stable digest of the primary evidence after closing SQLite so WAL state is
+     * checkpointed; derived weekly history does not change it (see [PlatoonEvidenceDigest]).
+     */
     internal fun currentDatabaseSha256(): String =
         PlatoonRepository.withExclusiveDatabase(storageScope) {
             ensureDatabaseExists()
-            databaseFile.sha256Hex()
+            PlatoonEvidenceDigest.sha256(databaseFile)
         }
 
     fun exportFull(output: OutputStream) {
@@ -264,7 +267,7 @@ class PlatoonBackupManager internal constructor(
         PlatoonRepository.withExclusiveDatabase(storageScope) {
             if (expectedDatabaseSha256 != null) {
                 ensureDatabaseExists()
-                check(databaseFile.sha256Hex() == expectedDatabaseSha256) {
+                check(PlatoonEvidenceDigest.sha256(databaseFile) == expectedDatabaseSha256) {
                     "Platoon data changed after the CSV import; undo would overwrite newer changes"
                 }
             }
@@ -301,6 +304,9 @@ class PlatoonBackupManager internal constructor(
                     previousRetainedCsvDirectory,
                     previousDatabaseFile(appContext, storageScope),
                 )
+                // Once committed, so constructing the repository cannot roll the restore back:
+                // derived weekly history follows the restored scope's effective reset zone.
+                PlatoonRepository(appContext, storageScope).reconcileWeeklyHistoryZone()
             } catch (error: Exception) {
                 runCatching {
                     recoverInterruptedFullRestore(appContext, settingsStore, storageScope)

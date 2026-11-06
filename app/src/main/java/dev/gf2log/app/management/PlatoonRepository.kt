@@ -318,7 +318,7 @@ internal class PlatoonRepository(
     ): WeeklyTableRevision {
         val live = buildLiveWeeklyRevision(referenceDay, zoneId, asOf)
         try {
-            recordHistory(live, Instant.now(), clearActiveOnChange = false)
+            recordHistory(live, zoneId, Instant.now(), clearActiveOnChange = false)
         } catch (error: Exception) {
             Log.e(TAG, "Unable to record weekly history for ${live.report.periodStart}", error)
         }
@@ -339,13 +339,16 @@ internal class PlatoonRepository(
         return activeRevision(live) ?: live
     }
 
-    /** The selected historical revision, [live] when none is selected, or null if undecodable. */
-    private fun activeRevision(live: WeeklyTableRevision): WeeklyTableRevision? {
+    /**
+     * The selected historical revision, [live] when none is selected, or null when the selection
+     * cannot be read or decoded, so the caller falls back to [live].
+     */
+    private fun activeRevision(live: WeeklyTableRevision): WeeklyTableRevision? = runCatching {
         val payload = access {
             it.activeWeeklyReportHistoryPayload(live.report.periodStart.toEpochDay())
         } ?: return live
-        return runCatching { WeeklyReportHistoryCodec.decodeRevision(payload) }.getOrNull()
-    }
+        WeeklyReportHistoryCodec.decodeRevision(payload)
+    }.getOrNull()
 
     private fun buildLiveWeeklyRevision(
         referenceDay: LocalDate,
@@ -398,8 +401,9 @@ internal class PlatoonRepository(
                 reportEvents = roster.reportEvents,
                 revisionEvents = roster.revisionEvents,
                 overrides = database.listWeeklyOverrides(periodStart.toEpochDay()),
+                // From the day before the week: its Daily Patrol bounds a near-reset tail.
                 dailyPatrolFacts = database.listDailyPatrolFacts(
-                    PlatoonPeriods.periodStartInstant(periodStart, zoneId),
+                    PlatoonPeriods.periodStartInstant(periodStart.minusDays(1), zoneId),
                     PlatoonPeriods.periodStartInstant(periodStart.plusDays(7), zoneId),
                 ),
                 notes = database.listWeeklyNotes(periodStart.toEpochDay()),
@@ -464,8 +468,10 @@ internal class PlatoonRepository(
         access { it.listWeeklyReportHistory(periodStart.toEpochDay()) }
 
     fun weeklyReportHistory(id: Long, periodStart: LocalDate): WeeklyReportBuilder.Report? =
-        access { it.weeklyReportHistoryPayload(id, periodStart.toEpochDay()) }
-            ?.let { payload -> runCatching { WeeklyReportHistoryCodec.decode(payload) }.getOrNull() }
+        runCatching {
+            access { it.weeklyReportHistoryPayload(id, periodStart.toEpochDay()) }
+                ?.let(WeeklyReportHistoryCodec::decode)
+        }.getOrNull()
 
     fun restoreWeeklyReportHistory(id: Long, periodStart: LocalDate): Boolean =
         access { it.activateWeeklyReportHistory(id, periodStart.toEpochDay()) }
@@ -489,7 +495,30 @@ internal class PlatoonRepository(
                         payload = encoded.payload,
                     )
                 }
-            access { it.replaceWeeklyReportHistory(replacements) }
+            access { it.replaceWeeklyReportHistory(replacements, zoneId) }
+        }
+    }
+
+    /**
+     * Rebuilds the derived weekly history unless it is known to be bucketed in this Platoon's
+     * reset zone, as after restoring an archive made under another zone or before the zone was
+     * kept. History is a derived audit trail, so a rebuild that fails clears it instead; live
+     * revisions are always recomputed from evidence. Never throws. Returns whether it rebuilt.
+     */
+    fun reconcileWeeklyHistoryZone(): Boolean = withExclusiveDatabase(storageScope) {
+        try {
+            val zone = gameZone()
+            if (access { it.isWeeklyHistoryBucketedIn(zone) }) return@withExclusiveDatabase false
+            try {
+                rebuildWeeklyHistoryForTimeZoneChange(zone)
+            } catch (error: Exception) {
+                Log.e(TAG, "Unable to rebuild weekly history for $zone; clearing it", error)
+                access { it.replaceWeeklyReportHistory(emptyList(), zone) }
+            }
+            true
+        } catch (error: Exception) {
+            Log.e(TAG, "Unable to reconcile weekly history with its reset zone", error)
+            false
         }
     }
 
@@ -594,6 +623,7 @@ internal class PlatoonRepository(
 
     private fun recordHistory(
         revision: WeeklyTableRevision,
+        zoneId: ZoneId,
         recordedAt: Instant,
         clearActiveOnChange: Boolean,
     ) {
@@ -605,6 +635,7 @@ internal class PlatoonRepository(
                 fingerprint = encoded.fingerprint,
                 payload = encoded.payload,
                 clearActiveOnChange = clearActiveOnChange,
+                zoneId = zoneId,
             )
         }
     }
@@ -623,6 +654,7 @@ internal class PlatoonRepository(
             val now = Instant.now()
             recordHistory(
                 buildLiveWeeklyRevision(periodStart, zone, now),
+                zone,
                 now,
                 clearActiveOnChange = true,
             )

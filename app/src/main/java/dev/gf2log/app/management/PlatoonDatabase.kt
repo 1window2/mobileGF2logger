@@ -223,6 +223,7 @@ internal class PlatoonDatabase private constructor(
         fingerprint: String,
         payload: ByteArray,
         clearActiveOnChange: Boolean,
+        zoneId: ZoneId? = null,
     ): Long = WeeklyHistoryStore.record(
         writableDatabase,
         periodStartEpochDay,
@@ -230,6 +231,7 @@ internal class PlatoonDatabase private constructor(
         fingerprint,
         payload,
         clearActiveOnChange,
+        zoneId,
     )
 
     @Synchronized
@@ -253,8 +255,14 @@ internal class PlatoonDatabase private constructor(
         WeeklyHistoryStore.clearActive(writableDatabase, periodStartEpochDay)
 
     @Synchronized
-    internal fun replaceWeeklyReportHistory(replacements: List<WeeklyReportHistoryReplacement>) =
-        WeeklyHistoryStore.replace(writableDatabase, replacements)
+    internal fun replaceWeeklyReportHistory(
+        replacements: List<WeeklyReportHistoryReplacement>,
+        zoneId: ZoneId? = null,
+    ) = WeeklyHistoryStore.replace(writableDatabase, replacements, zoneId)
+
+    @Synchronized
+    internal fun isWeeklyHistoryBucketedIn(zoneId: ZoneId): Boolean =
+        WeeklyHistoryStore.isBucketedIn(writableDatabase, zoneId)
 
     companion object {
         /** A fresh current-schema database that never touches storage, for schema comparison. */

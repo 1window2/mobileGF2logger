@@ -54,9 +54,58 @@ class SnapshotComparisonTest {
         assertEquals(MetricCertainty.LOWER_BOUND, change.totalScoreDeltaCertainty)
     }
 
+    @Test
+    fun aCaptureExactlyAtTheResetIsTheClosingValueOfTheDayBefore() {
+        // Sunday 20:00 to Monday 05:00:00, the instant of the weekly reset.
+        val older = snapshot("2026-07-26T11:00:00Z", member(1, "Member", 500, 10_000, 0))
+
+        fun change(time: String, weekly: Long) = SnapshotComparison.compare(
+            older,
+            snapshot(time, member(1, "Member", weekly, 10_090, 0)),
+            zone,
+        ).changes.single()
+
+        val atReset = change("2026-07-26T20:00:00Z", 590)
+        assertEquals(90, atReset.weeklyMeritDelta)
+        assertEquals(MetricCertainty.EXACT, atReset.weeklyMeritDeltaCertainty)
+
+        val afterReset = change("2026-07-26T20:00:01Z", 590)
+        assertEquals(590, afterReset.weeklyMeritDelta)
+        assertEquals(MetricCertainty.LOWER_BOUND, afterReset.weeklyMeritDeltaCertainty)
+
+        // A capture at the reset that already saw the restart shows it as a drop.
+        val restarted = change("2026-07-26T20:00:00Z", 0)
+        assertEquals(0, restarted.weeklyMeritDelta)
+        assertEquals(MetricCertainty.LOWER_BOUND, restarted.weeklyMeritDeltaCertainty)
+    }
+
+    @Test
+    fun aDroppedTotalMeritCounterIsNeverAnExactGain() {
+        val older = snapshot("2026-07-20T00:00:00Z", member(1, "Dropped", 100, 1_000, 0), member(2, "Grew", 100, 500, 0))
+        val newer = snapshot("2026-07-21T00:00:00Z", member(1, "Dropped", 100, 500, 0), member(2, "Grew", 100, 700, 0))
+
+        val changes = SnapshotComparison.compare(older, newer, zone).changes.associateBy { it.uid }
+
+        assertEquals(MetricCertainty.LOWER_BOUND, changes.getValue(1).totalMeritDeltaCertainty)
+        assertEquals(200, changes.getValue(2).totalMeritDelta)
+        assertEquals(MetricCertainty.EXACT, changes.getValue(2).totalMeritDeltaCertainty)
+    }
+
+    @Test
+    fun loginOnlyChangesAreExportedButNotListedAsCounterChanges() {
+        val older = snapshot("2026-07-20T00:00:00Z", member(1, "Login", 100, 500, 0, lastLogin = 1_000))
+        val newer = snapshot("2026-07-21T00:00:00Z", member(1, "Login", 100, 500, 0, lastLogin = 2_000))
+
+        val result = SnapshotComparison.compare(older, newer, zone)
+
+        assertEquals(true, result.changes.single().lastLoginChanged)
+        assertEquals(emptyList<SnapshotComparison.MeritChange>(), result.counterChanges)
+        assertEquals(true, SnapshotComparisonCsv.format(result).contains(",CHANGED,1,Login,0,0,0,true,"))
+    }
+
     private fun snapshot(time: String, vararg members: SnapshotMember) =
         PlatoonSnapshot(0, Instant.parse(time), members.toList())
 
-    private fun member(uid: Long, name: String, weekly: Long, total: Long, score: Long) =
-        SnapshotMember(uid, name, 60, weekly, total, 0, score, 0)
+    private fun member(uid: Long, name: String, weekly: Long, total: Long, score: Long, lastLogin: Long = 0) =
+        SnapshotMember(uid, name, 60, weekly, total, 0, score, lastLogin)
 }

@@ -138,13 +138,25 @@ internal object WeeklyDialogs {
                     listOf(edit),
                 )
                 if (probe is WeeklyOverrideEditing.Result.Invalid) {
-                    error.showMessage(activity.getString(
+                    error.showMessage(
                         when (probe.field) {
-                            WeeklyOverrideEditing.Field.ATTEMPTS -> R.string.invalid_attempts
-                            WeeklyOverrideEditing.Field.ACTIVITY -> R.string.invalid_activity_choice
-                            else -> R.string.invalid_counter
+                            WeeklyOverrideEditing.Field.ATTEMPTS -> activity.getString(R.string.invalid_attempts)
+                            WeeklyOverrideEditing.Field.ACTIVITY -> activity.getString(R.string.invalid_activity_choice)
+                            WeeklyOverrideEditing.Field.MERIT -> if (isGunsmokeWeek) {
+                                activity.getString(R.string.invalid_counter)
+                            } else {
+                                activity.getString(
+                                    R.string.invalid_standard_merit,
+                                    WeeklyOverrideEditing.maximumDailyMerit(isGunsmokeWeek = false),
+                                )
+                            }
+                            else -> activity.getString(R.string.invalid_counter)
                         },
-                    ))
+                    )
+                    return
+                }
+                if (WeeklyOverrideEditing.contradictsEvidence(cell, edit)) {
+                    error.showMessage(activity.getString(R.string.invalid_activity_evidence))
                     return
                 }
                 dialog.dismiss()

@@ -129,10 +129,12 @@ internal class BackupFlow(
             val damagedScope = scope()?.takeIf {
                 PlatoonAccessFailure.of(result.exceptionOrNull()) == PlatoonAccessFailure.DATABASE_DAMAGED
             }
-            if (damagedScope != null) {
-                offerRebuild(damagedScope)
-            } else {
-                Feedback.show(activity, result.fold(onSuccess = { success }, onFailure = failure), long = true)
+            when (backupOutcomeDelivery(damagedScope != null, activity.isFinishing || activity.isDestroyed)) {
+                BackupOutcomeDelivery.OFFER_REBUILD -> offerRebuild(checkNotNull(damagedScope))
+                BackupOutcomeDelivery.DAMAGED_NOTICE ->
+                    Feedback.show(activity, R.string.platoon_database_damaged_short, long = true)
+                BackupOutcomeDelivery.RESULT_NOTICE ->
+                    Feedback.show(activity, result.fold(onSuccess = { success }, onFailure = failure), long = true)
             }
         })
     }
@@ -152,6 +154,19 @@ internal class BackupFlow(
     private companion object {
         const val STATE_EXPORT_COMPLETE = "settings.export_complete"
     }
+}
+
+internal enum class BackupOutcomeDelivery { OFFER_REBUILD, DAMAGED_NOTICE, RESULT_NOTICE }
+
+/**
+ * How a finished backup export or restore reports itself. The rebuild prompt needs the screen that
+ * started the work; once that screen was recreated or closed, a damaged database is still reported
+ * as a toast, and the Platoon screens' blocked state offers Restore or Rebuild.
+ */
+internal fun backupOutcomeDelivery(damaged: Boolean, ownerGone: Boolean): BackupOutcomeDelivery = when {
+    !damaged -> BackupOutcomeDelivery.RESULT_NOTICE
+    ownerGone -> BackupOutcomeDelivery.DAMAGED_NOTICE
+    else -> BackupOutcomeDelivery.OFFER_REBUILD
 }
 
 /**

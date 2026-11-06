@@ -4,7 +4,9 @@ import android.database.sqlite.SQLiteDatabase
 import java.time.Instant
 
 /**
- * Read-only SQL boundary for roster snapshots consumed by weekly projections.
+ * Read-only SQL boundary for roster snapshots consumed by weekly projections and by every screen
+ * that shows the latest roster. A roster set aside by [SnapshotClockReview] is never listed, and
+ * a stored member without a real UID never appears in a listed roster.
  * Schema/migration and write transactions remain owned by PlatoonDatabase.
  */
 internal object WeeklySnapshotStore {
@@ -14,6 +16,7 @@ internal object WeeklySnapshotStore {
             """
             SELECT id, captured_at, source_file, game_version
             FROM snapshots
+            WHERE clock_suspect = 0
             ORDER BY captured_at DESC, id DESC
             LIMIT ?
             """.trimIndent(),
@@ -30,14 +33,17 @@ internal object WeeklySnapshotStore {
             """
             SELECT id, captured_at, source_file, game_version
             FROM snapshots
-            WHERE (captured_at >= ? AND captured_at <= ?)
-               OR id = (
-                   SELECT id
-                   FROM snapshots
-                   WHERE captured_at < ?
-                   ORDER BY captured_at DESC, id DESC
-                   LIMIT 1
-               )
+            WHERE clock_suspect = 0
+              AND (
+                (captured_at >= ? AND captured_at <= ?)
+                OR id = (
+                    SELECT id
+                    FROM snapshots
+                    WHERE captured_at < ? AND clock_suspect = 0
+                    ORDER BY captured_at DESC, id DESC
+                    LIMIT 1
+                )
+              )
             ORDER BY captured_at DESC, id DESC
             """.trimIndent(),
         selectionArgs = arrayOf(
@@ -57,7 +63,7 @@ internal object WeeklySnapshotStore {
                member.uid, member.name, member.level, member.weekly_merit,
                member.total_merit, member.high_score, member.total_score, member.last_login
         FROM ($selectedSnapshotsSql) AS selected
-        LEFT JOIN snapshot_members AS member ON member.snapshot_id = selected.id
+        LEFT JOIN snapshot_members AS member ON member.snapshot_id = selected.id AND member.uid > 0
         ORDER BY selected.captured_at DESC, selected.id DESC,
                  member.name COLLATE NOCASE, member.uid
         """.trimIndent(),

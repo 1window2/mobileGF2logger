@@ -45,6 +45,8 @@ internal object RestoredDatabaseRebuild {
                     copySequences(db)
                     // Unqualified names resolve to main, the rebuilt copy.
                     WeeklyHistoryIntegrity.dropUnreadableRevisions(db)
+                    // An archive already at the current version skipped the upgrade's repair.
+                    InvalidMemberIdentityRepair.repair(db)
                     db.rawQuery("PRAGMA main.foreign_key_check", null).use { cursor ->
                         require(!cursor.moveToFirst()) { "Backup database has invalid references" }
                     }

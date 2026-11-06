@@ -9,6 +9,8 @@ import java.time.ZoneId
 /** Upgrades older schemas inside SQLiteOpenHelper's upgrade transaction. */
 internal object PlatoonDatabaseMigrations {
     fun upgrade(db: SQLiteDatabase, oldVersion: Int, gameZone: () -> ZoneId) {
+        // First: earlier steps already apply the current roster rules, which read this column.
+        if (oldVersion < 14) addSnapshotClockSuspectColumn(db)
         if (oldVersion < 10) renameTenuresToMembershipPeriods(db, oldVersion)
         if (oldVersion < 9) addCalendarDateColumns(db)
         if (oldVersion < 2) moveWeeklyNotesToSundayPeriods(db)
@@ -34,8 +36,21 @@ internal object PlatoonDatabaseMigrations {
         if (oldVersion < 13) MembershipRows.synchronizeAllActiveStates(db)
         if (oldVersion < 14) {
             markActivityDatedBoundaries(db)
+            InvalidMemberIdentityRepair.repair(db)
             MembershipRows.foldAllDuplicateOpenPeriods(db)
             MembershipRows.synchronizeAllActiveStates(db)
+        }
+    }
+
+    /** Appended in place; a database that already has the column keeps it. */
+    private fun addSnapshotClockSuspectColumn(db: SQLiteDatabase) {
+        val present = db.rawQuery("PRAGMA table_info(snapshots)", null).use { cursor ->
+            var found = false
+            while (!found && cursor.moveToNext()) found = cursor.getString(1) == "clock_suspect"
+            found
+        }
+        if (!present) {
+            db.execSQL("ALTER TABLE snapshots ADD COLUMN ${PlatoonDatabaseSchema.SNAPSHOTS_CLOCK_SUSPECT_COLUMN}")
         }
     }
 

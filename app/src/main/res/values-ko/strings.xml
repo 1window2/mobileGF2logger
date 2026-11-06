@@ -615,6 +615,9 @@
     <string name="latest_roster_title">최근 명단 · %1$s</string>
     <string name="roster_joined_count">가입 %1$d</string>
     <string name="roster_withdrew_count">탈퇴 %1$d</string>
+    <plurals name="roster_set_aside_count">
+        <item quantity="other">시계보다 앞선 날짜의 명단 %1$d개 제외</item>
+    </plurals>
     <string name="confirming_platoon">서클을 저장하는 중…</string>
     <string name="clear_search">검색어 지우기</string>
     <string name="apply_sort_warning">직접 옮긴 순서를 포함해 현재 순서를 모두 바꿉니다.</string>

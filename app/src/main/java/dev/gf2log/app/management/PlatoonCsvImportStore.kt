@@ -11,7 +11,6 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -46,7 +45,7 @@ class PlatoonCsvImportStore(
         val capturedAt = Instant.parse(parsed.logTime)
         // A roster from the future would stay the "current" roster and hide every real capture
         // after it; a mistyped year is the usual cause.
-        require(!capturedAt.isAfter(now().plus(MAX_CLOCK_SKEW))) { "Platoon CSV is dated in the future" }
+        require(!SnapshotClockPolicy.isAhead(capturedAt, now())) { "Platoon CSV is dated in the future" }
         val encoded = if (GuildMembersCsv.parse(text) == parsed) {
             bytes
         } else {
@@ -142,9 +141,6 @@ class PlatoonCsvImportStore(
     }
 
     companion object {
-        /** Allows a phone clock a little behind the PC that wrote the CSV. */
-        private val MAX_CLOCK_SKEW: Duration = Duration.ofHours(1)
-
         /**
          * The roster as data: its capture instant and members in UID order, written in the
          * retained (not spreadsheet-escaped) representation.

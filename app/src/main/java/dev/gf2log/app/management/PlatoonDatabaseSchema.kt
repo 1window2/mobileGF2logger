@@ -11,7 +11,8 @@ internal object PlatoonDatabaseSchema {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 captured_at INTEGER NOT NULL,
                 source_file TEXT UNIQUE,
-                game_version TEXT
+                game_version TEXT,
+                $SNAPSHOTS_CLOCK_SUSPECT_COLUMN
             )
             """.trimIndent(),
         )
@@ -107,6 +108,9 @@ internal object PlatoonDatabaseSchema {
             "is_automatic INTEGER NOT NULL DEFAULT 0",
         ),
     )
+
+    /** Set for a roster [SnapshotClockReview] keeps aside; the v14 step appends it in place. */
+    const val SNAPSHOTS_CLOCK_SUSPECT_COLUMN = "clock_suspect INTEGER NOT NULL DEFAULT 0"
 
     const val MEMBERSHIP_PERIODS_UID_INDEX =
         "CREATE INDEX membership_periods_uid ON membership_periods(uid, id DESC)"

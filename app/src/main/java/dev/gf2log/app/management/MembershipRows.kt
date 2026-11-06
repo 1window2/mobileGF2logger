@@ -190,6 +190,7 @@ internal object MembershipRows {
             """
             SELECT 1 FROM snapshots roster
             WHERE roster.captured_at > ? AND roster.captured_at < ?
+              AND roster.clock_suspect = 0
               AND NOT EXISTS (
                 SELECT 1 FROM snapshot_members member
                 WHERE member.snapshot_id = roster.id AND member.uid = ?
@@ -386,7 +387,9 @@ internal object MembershipRows {
      * remains. An open period started by an exact Updates join is superseded by later exit
      * evidence: another period exiting after that join, or a newer authoritative roster that
      * omits the member. When rosters and Updates agree this is simply "some period is open".
-     * Any change to this rule must raise [ACTIVE_STATE_RULE_VERSION].
+     * Any change to this rule must raise [ACTIVE_STATE_RULE_VERSION]. A roster set aside by
+     * [SnapshotClockReview] is never the authoritative one; setting one aside or bringing it
+     * back re-derives every flag in the same transaction, so that filter needs no new version.
      */
     private fun effectiveOpenPeriod(uid: String): String =
         """
@@ -404,7 +407,9 @@ internal object MembershipRows {
               )
               OR EXISTS (
                 SELECT 1 FROM snapshots latest_roster
-                WHERE latest_roster.captured_at = (SELECT MAX(captured_at) FROM snapshots)
+                WHERE latest_roster.captured_at =
+                    (SELECT MAX(captured_at) FROM snapshots WHERE clock_suspect = 0)
+                  AND latest_roster.clock_suspect = 0
                   AND latest_roster.captured_at > current_period.joined_at
                   AND NOT EXISTS (
                     SELECT 1
@@ -412,6 +417,7 @@ internal object MembershipRows {
                     JOIN snapshots roster ON roster.id = roster_member.snapshot_id
                     WHERE roster_member.uid = current_period.uid
                       AND roster.captured_at = latest_roster.captured_at
+                      AND roster.clock_suspect = 0
                   )
               )
             )

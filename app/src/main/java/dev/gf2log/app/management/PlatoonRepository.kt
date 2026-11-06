@@ -33,10 +33,12 @@ internal class PlatoonRepository(
     /** The 05:00 reset zone of this repository's own Platoon, never the currently active one. */
     fun gameZone(): ZoneId = GameTimeZonePreferences.get(appContext, storageScope.storageId)
 
+    /** [now] is the phone clock reading this roster's stored rosters are checked against. */
     fun ingest(
         capturedAt: Instant,
         members: List<GuildMember>,
         sourceFile: String?,
+        now: Instant = Instant.now(),
     ): SnapshotIngestResult {
         require(GuildMembersCsv.isValidRoster(members)) {
             "A Platoon roster must stay within the member and name limits with unique UIDs"
@@ -50,12 +52,14 @@ internal class PlatoonRepository(
                     sourceFile = sourceFile,
                 ),
                 source = EvidenceSource.SNAPSHOT,
+                now = now,
             )
         }
         when {
             result.duplicate -> Unit
-            // A replayed older roster can rebuild membership periods across every week.
-            result.historical -> recordAllLiveWeeklyReports()
+            // A replayed older roster, or a replay around a roster set aside, can rebuild
+            // membership periods across every week.
+            result.historical || result.clockReviewChanged -> recordAllLiveWeeklyReports()
             else -> recordChangedWeeks(sequenceOf(capturedAt) + rosterBoundaryInstants(result, capturedAt))
         }
         return result
@@ -191,6 +195,9 @@ internal class PlatoonRepository(
 
     fun listSnapshots(limit: Int = 100): List<PlatoonSnapshot> =
         access { it.listSnapshots(limit) }
+
+    /** Rosters kept but left out of every roster read because they were dated ahead of the clock. */
+    fun setAsideSnapshotCount(): Int = access(PlatoonDatabase::setAsideSnapshotCount)
 
     fun representedSnapshotSources(): Set<String> =
         access(PlatoonDatabase::snapshotSourceFiles)
@@ -411,7 +418,11 @@ internal class PlatoonRepository(
         ))
     }
 
-    /** Every input of one weekly revision, read under a single consistent database state. */
+    /**
+     * Every input of one weekly revision, read under a single consistent database state. Only
+     * real UIDs pass: a stored UID 0 or below, which ingestion and the v14 repair both reject,
+     * must never fail a whole week's consistency check.
+     */
     private fun readRevisionInputs(
         periodStart: LocalDate,
         zoneId: ZoneId,
@@ -421,16 +432,16 @@ internal class PlatoonRepository(
             val roster = readRosterInputs(database, periodStart, zoneId, asOf)
             RevisionInputs(
                 snapshots = roster.snapshots,
-                reportEvents = roster.reportEvents,
-                revisionEvents = roster.revisionEvents,
-                overrides = database.listWeeklyOverrides(periodStart.toEpochDay()),
+                reportEvents = roster.reportEvents.filter { it.uid > 0L },
+                revisionEvents = roster.revisionEvents.filter { it.uid > 0L },
+                overrides = database.listWeeklyOverrides(periodStart.toEpochDay()).filter { it.uid > 0L },
                 // From the day before the week: its Daily Patrol bounds a near-reset tail.
                 dailyPatrolFacts = database.listDailyPatrolFacts(
                     PlatoonPeriods.periodStartInstant(periodStart.minusDays(1), zoneId),
                     PlatoonPeriods.periodStartInstant(periodStart.plusDays(7), zoneId),
                 ),
                 notes = database.listWeeklyNotes(periodStart.toEpochDay()),
-                statuses = database.listMemberStatuses(),
+                statuses = database.listMemberStatuses().filter { it.uid > 0L },
             )
         }
     }

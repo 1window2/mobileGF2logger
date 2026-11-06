@@ -623,6 +623,10 @@
     <string name="latest_roster_title">Latest roster · %1$s</string>
     <string name="roster_joined_count">joined %1$d</string>
     <string name="roster_withdrew_count">withdrew %1$d</string>
+    <plurals name="roster_set_aside_count">
+        <item quantity="one">%1$d roster dated ahead of the clock set aside</item>
+        <item quantity="other">%1$d rosters dated ahead of the clock set aside</item>
+    </plurals>
     <string name="confirming_platoon">Saving this Platoon…</string>
     <string name="clear_search">Clear search</string>
     <string name="apply_sort_warning">This replaces the current order, including any members you moved by hand.</string>

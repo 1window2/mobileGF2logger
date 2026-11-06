@@ -9,8 +9,9 @@ import java.time.ZoneId
 
 /** Read-only projections served to the repository. */
 internal object PlatoonReadQueries {
+    /** The current roster's identity; a roster set aside by [SnapshotClockReview] is never current. */
     fun latestSnapshotIdentity(db: SQLiteDatabase): Pair<Instant, String?>? = db.rawQuery(
-        "SELECT captured_at, source_file FROM snapshots " +
+        "SELECT captured_at, source_file FROM snapshots WHERE clock_suspect = 0 " +
             "ORDER BY captured_at DESC, source_file DESC, id DESC LIMIT 1",
         null,
     ).use { cursor ->
@@ -23,7 +24,7 @@ internal object PlatoonReadQueries {
 
     /** The earliest roster captured strictly after [instant], if any. */
     fun firstSnapshotCapturedAfter(db: SQLiteDatabase, instant: Instant): Instant? = db.rawQuery(
-        "SELECT MIN(captured_at) FROM snapshots WHERE captured_at > ?",
+        "SELECT MIN(captured_at) FROM snapshots WHERE captured_at > ? AND clock_suspect = 0",
         arrayOf(instant.toEpochMilli().toString()),
     ).use { cursor ->
         if (cursor.moveToFirst() && !cursor.isNull(0)) Instant.ofEpochMilli(cursor.getLong(0)) else null
@@ -40,6 +41,7 @@ internal object PlatoonReadQueries {
         }
     }
 
+    /** Every stored roster's file, set aside or not, so none is ever ingested twice. */
     fun snapshotSourceFiles(db: SQLiteDatabase): Set<String> = db.rawQuery(
         "SELECT source_file FROM snapshots WHERE source_file IS NOT NULL",
         null,
@@ -198,11 +200,12 @@ internal object PlatoonReadQueries {
 
     fun listWeeklyEvidenceDays(db: SQLiteDatabase, zoneId: ZoneId): List<LocalDate> {
         val days = mutableListOf<LocalDate>()
+        // A roster set aside for its future date must not list a week of its own.
         listOf(
-            "snapshots" to "captured_at",
-            "platoon_activity" to "occurred_at",
-        ).forEach { (table, expression) ->
-            db.rawQuery("SELECT DISTINCT $expression FROM $table", null).use { cursor ->
+            "SELECT DISTINCT captured_at FROM snapshots WHERE clock_suspect = 0",
+            "SELECT DISTINCT occurred_at FROM platoon_activity",
+        ).forEach { query ->
+            db.rawQuery(query, null).use { cursor ->
                 while (cursor.moveToNext()) {
                     if (!cursor.isNull(0)) {
                         days += PlatoonPeriods.gameDay(Instant.ofEpochMilli(cursor.getLong(0)), zoneId)

@@ -40,8 +40,9 @@ internal object WeeklyHistoryIntegrity {
     }
 
     /**
-     * Deletes from a database being rebuilt for restore every revision that does not decode, or
-     * decodes to another week, then any selection left without its revision. History is derived
+     * Deletes from a database being rebuilt for restore, or repaired by
+     * [InvalidMemberIdentityRepair], every revision that does not decode, or decodes to another
+     * week, then any selection left without its revision. History is derived
      * and the weekly screen already ignores such rows, and a decoder that later grows stricter
      * must not turn the user's own backups, or a CSV import's rollback, into failures.
      */

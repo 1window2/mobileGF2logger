@@ -10,12 +10,12 @@ import java.time.Instant
 /**
  * Replays every retained roster chronologically after late historical imports. Only weak
  * snapshot-derived periods are rebuilt; manual and exact evidence is preserved, and people seen
- * only in historical rosters become inactive members.
+ * only in historical rosters become inactive members. A roster set aside by
+ * [SnapshotClockReview] is not part of the history; when none remains, no weak period does.
  */
 internal object RosterHistoryReplay {
     fun reconcile(db: SQLiteDatabase) {
         val snapshots = readRosterFrames(db)
-        if (snapshots.isEmpty()) return
 
         ensureHistoricalMembers(db, snapshots)
         removeWeakSnapshotMembershipPeriods(db)
@@ -40,6 +40,7 @@ internal object RosterHistoryReplay {
             SELECT s.id, s.captured_at, sm.uid, sm.name, sm.level
             FROM snapshots s
             JOIN snapshot_members sm ON sm.snapshot_id = s.id
+            WHERE s.clock_suspect = 0
             ORDER BY s.captured_at, s.id, sm.uid
             """.trimIndent(),
             null,

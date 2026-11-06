@@ -511,6 +511,7 @@ internal object ExactBoundaryCorrelation {
                 SELECT 1 FROM snapshots roster
                 WHERE roster.captured_at >= MIN($at, ?)
                   AND roster.captured_at < MAX($at, ?)
+                  AND roster.clock_suspect = 0
               )
             )
         """.trimIndent()
@@ -542,7 +543,7 @@ internal object ExactBoundaryCorrelation {
             SELECT MAX(snapshot.captured_at)
             FROM snapshots snapshot
             JOIN snapshot_members member ON member.snapshot_id = snapshot.id
-            WHERE member.uid = ?
+            WHERE member.uid = ? AND snapshot.clock_suspect = 0
             """.trimIndent(),
             arrayOf(uid.toString()),
         ).use { cursor ->

@@ -488,7 +488,7 @@
     <string name="note_day">게임 일자</string>
     <string name="note_required">비고를 입력하세요.</string>
     <string name="patrol_initial">과</string>
-    <string name="png_evidence_summary">근거: 관측 %1$d/%2$d일\n확정 %3$d · 최솟값 %4$d · 미확인 %5$d</string>
+    <string name="png_evidence_summary">근거: 관측 %1$d/%2$d일 · 확정 %3$d · 최솟값 %4$d · 미확인 %5$d</string>
     <string name="rank_description">%1$d위</string>
     <string name="select_week">주 선택</string>
     <string name="share_private_notes_detail">민감한 정보입니다. 기본값은 꺼짐입니다.</string>

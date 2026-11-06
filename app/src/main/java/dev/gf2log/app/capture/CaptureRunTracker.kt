@@ -1,7 +1,7 @@
 package dev.gf2log.app.capture
 
+import dev.gf2log.app.R
 import dev.gf2log.protocol.Gfl2PayloadDecoder
-import dev.gf2log.protocol.PayloadCatalog
 
 /**
  * One capture run's required-payload checklist. Marks arrive on the capture worker; a one-time
@@ -27,19 +27,35 @@ internal class CaptureRunTracker(
         if (captureOnce && checklist.targetScopeId() == storageId) onTargetRosterCaptured(this)
     }
 
-    /** Tags the target scope still lacks, or null until that scope's roster was captured. */
-    fun missingAfterRoster(): List<String>? {
+    /** Payload types the target scope still lacks, or null until that scope's roster was captured. */
+    fun missingAfterRoster(): List<Int>? {
         val captured = checklist.targetCaptured()
         if (Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS !in captured) return null
-        return REQUIRED_TYPES.minus(captured).map(PayloadCatalog::tag)
+        return CHECKLIST_LABELS.keys.filterNot(captured::contains)
+    }
+
+    /**
+     * The stop notice and its args once the grace period after the target roster ends, or null
+     * before that roster. A checklist completed right at the deadline still reads as complete.
+     */
+    fun graceOutcome(): Pair<CaptureNotice, List<String>>? {
+        val missing = missingAfterRoster() ?: return null
+        return if (missing.isEmpty()) {
+            CaptureNotice.CAPTURE_ONCE_COMPLETE to emptyList()
+        } else {
+            CaptureNotice.CAPTURE_ONCE_PARTIAL to missing.map(Int::toString)
+        }
     }
 
     companion object {
-        val REQUIRED_TYPES = setOf(
-            Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE,
-            Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
-            Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY,
-            Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES,
+        /** Required payload types in checklist order, each with the label Home shows for it. */
+        val CHECKLIST_LABELS: Map<Int, Int> = linkedMapOf(
+            Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE to R.string.checklist_identity,
+            Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS to R.string.checklist_roster,
+            Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY to R.string.checklist_activity,
+            Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES to R.string.checklist_updates,
         )
+
+        val REQUIRED_TYPES: Set<Int> = CHECKLIST_LABELS.keys
     }
 }

@@ -50,8 +50,8 @@ class CaptureVpnService : VpnService() {
     private var destroyed = false
 
     private val captureOnceGraceStop = Runnable {
-        val missing = run?.takeIf { state == State.RUNNING }?.missingAfterRoster() ?: return@Runnable
-        stop(CaptureNotice.CAPTURE_ONCE_PARTIAL, missing.joinToString())
+        val (notice, args) = run?.takeIf { state == State.RUNNING }?.graceOutcome() ?: return@Runnable
+        stop(notice, *args.toTypedArray())
     }
 
     override fun onCreate() {
@@ -99,7 +99,8 @@ class CaptureVpnService : VpnService() {
     }
 
     override fun onRevoke() {
-        stop()
+        // Another VPN app took over or the user disconnected this one in system settings.
+        stop(CaptureNotice.VPN_PERMISSION_REVOKED)
         super.onRevoke()
     }
 

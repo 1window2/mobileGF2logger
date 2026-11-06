@@ -28,7 +28,7 @@ enum class CaptureNotice(@StringRes val messageRes: Int, val severity: Severity)
     NATIVE_START_FAILED(R.string.capture_notice_native_start_failed, Severity.ERROR),
     STOPPED_UNEXPECTEDLY(R.string.capture_notice_stopped_unexpectedly, Severity.ERROR),
     CAPTURE_ONCE_COMPLETE(R.string.capture_notice_capture_once_complete, Severity.INFO),
-    /** Args: comma-separated missing payload tags. */
+    /** Args: each missing payload type, named by its checklist label when formatted. */
     CAPTURE_ONCE_PARTIAL(R.string.capture_notice_capture_once_partial, Severity.WARNING),
     /** Args: forwarded KiB, inspected KiB, decoded payloads, warnings, dropped chunks. */
     TRAFFIC(R.string.capture_notice_traffic, Severity.INFO),
@@ -81,7 +81,25 @@ data class CaptureNoticeEvent(
 )
 
 fun CaptureNoticeEvent.format(context: Context): String =
-    context.getString(notice.messageRes, *args.toTypedArray())
+    context.getString(
+        notice.messageRes,
+        *displayArgs { type -> CaptureRunTracker.CHECKLIST_LABELS[type]?.let(context::getString) }.toTypedArray(),
+    )
+
+/**
+ * [args] as the message shows them. A partial capture stores payload types, not text, so its
+ * missing items are named in the current language by the checklist's own [label]s.
+ */
+internal fun CaptureNoticeEvent.displayArgs(label: (Int) -> String?): List<String> =
+    if (notice != CaptureNotice.CAPTURE_ONCE_PARTIAL) {
+        args
+    } else {
+        listOf(args.joinToString(", ") { arg -> arg.toIntOrNull()?.let(label) ?: arg })
+    }
+
+/** True for a warning or error other than [lastAnnounced], so each one is announced only once. */
+internal fun CaptureNoticeEvent?.isNewAlert(lastAnnounced: CaptureNoticeEvent?): Boolean =
+    this != null && notice.severity != CaptureNotice.Severity.INFO && this != lastAnnounced
 
 data class CaptureSnapshot(
     val phase: CapturePhase,
@@ -90,7 +108,24 @@ data class CaptureSnapshot(
     val guided: CaptureStatus.GuidedProgress?,
     /** Increases each time capture reaches [CapturePhase.RUNNING], so a new run is distinguishable. */
     val runCount: Long = 0,
-)
+) {
+    /**
+     * The one-time checklist while capture starts or runs, and afterwards only beside the outcome
+     * it explains. A failed or user-stopped run hides it, so nothing reads as still waiting.
+     */
+    val visibleGuided: CaptureStatus.GuidedProgress?
+        get() = guided?.takeIf {
+            phase == CapturePhase.STARTING ||
+                phase == CapturePhase.RUNNING ||
+                notice?.notice == CaptureNotice.CAPTURE_ONCE_COMPLETE ||
+                notice?.notice == CaptureNotice.CAPTURE_ONCE_PARTIAL
+        }
+
+    /** True once capture ended because Android revoked the VPN, for example for another VPN app. */
+    val endedByVpnRevoke: Boolean
+        get() = (phase == CapturePhase.STOPPING || phase == CapturePhase.STOPPED) &&
+            notice?.notice == CaptureNotice.VPN_PERMISSION_REVOKED
+}
 
 /** Process-wide capture state, swapped atomically as one immutable [CaptureSnapshot]. */
 object CaptureStatus {
@@ -128,7 +163,7 @@ object CaptureStatus {
     internal fun markStopped(notice: CaptureNotice? = null, vararg args: String) = update {
         it.copy(
             phase = CapturePhase.STOPPED,
-            notice = notice?.let { value -> event(value, args) },
+            notice = stopNotice(it, notice, args),
             capturedTargets = emptyList(),
         )
     }
@@ -136,7 +171,7 @@ object CaptureStatus {
     internal fun markStopping(notice: CaptureNotice?, vararg args: String) = update {
         it.copy(
             phase = CapturePhase.STOPPING,
-            notice = notice?.let { value -> event(value, args) },
+            notice = stopNotice(it, notice, args),
             capturedTargets = emptyList(),
         )
     }
@@ -179,7 +214,22 @@ object CaptureStatus {
     }
 
     internal fun report(notice: CaptureNotice, vararg args: String) = update {
-        it.copy(notice = event(notice, args))
+        if (shows(it, notice)) it.copy(notice = event(notice, args)) else it
+    }
+
+    /**
+     * Whether a reported [notice] may replace what [current] shows. Traffic counters are routine
+     * progress: they appear only while running and never hide a warning or error. While stopping,
+     * work drained from the queue cannot replace why capture stopped unless it is more severe.
+     */
+    internal fun shows(current: CaptureSnapshot, notice: CaptureNotice): Boolean {
+        val shown = current.notice?.notice?.severity ?: CaptureNotice.Severity.INFO
+        return when {
+            notice == CaptureNotice.TRAFFIC ->
+                current.phase == CapturePhase.RUNNING && shown == CaptureNotice.Severity.INFO
+            current.phase == CapturePhase.STOPPING -> notice.severity > shown
+            else -> true
+        }
     }
 
     internal fun beginSession(guided: Boolean) = update {
@@ -209,6 +259,20 @@ object CaptureStatus {
             val current = snapshot()
             listeners.forEach { it(current) }
         }
+    }
+
+    /**
+     * A stop without a reason, such as a second stop request, keeps the reason an earlier stop
+     * already published; stopping a starting or running capture clears its progress notice.
+     */
+    private fun stopNotice(
+        current: CaptureSnapshot,
+        notice: CaptureNotice?,
+        args: Array<out String>,
+    ): CaptureNoticeEvent? = when {
+        notice != null -> event(notice, args)
+        current.phase == CapturePhase.STOPPING || current.phase == CapturePhase.STOPPED -> current.notice
+        else -> null
     }
 
     private fun event(notice: CaptureNotice, args: Array<out String> = emptyArray()) =

@@ -160,7 +160,13 @@ internal object StandbyAutomation {
                 // without closing anything or locking the phone in their hand.
                 userLeftGame(now) -> cancel()
                 CaptureStatus.snapshot().phase.let { it == CapturePhase.STOPPING || it == CapturePhase.STOPPED } ->
-                    endRun(StandbyOutcome.CAPTURE_FAILED)
+                    endRun(
+                        if (CaptureStatus.snapshot().endedByVpnRevoke) {
+                            StandbyOutcome.NO_VPN_CONSENT
+                        } else {
+                            StandbyOutcome.CAPTURE_FAILED
+                        },
+                    )
                 now >= runTimeoutAt -> endRun(StandbyOutcome.TIMED_OUT)
                 // Taps only reach the title screen: they stop at login, and in any case after the
                 // window, so nothing inside the game is ever pressed.

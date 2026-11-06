@@ -2,6 +2,7 @@ package dev.gf2log.app
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
@@ -9,11 +10,15 @@ import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
+import androidx.annotation.StringRes
 import dev.gf2log.app.capture.CaptureNotice
+import dev.gf2log.app.capture.CaptureNoticeEvent
 import dev.gf2log.app.capture.CapturePhase
+import dev.gf2log.app.capture.CaptureRunTracker
 import dev.gf2log.app.capture.CaptureSnapshot
 import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.capture.format
+import dev.gf2log.app.capture.isNewAlert
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.TextRole
 import dev.gf2log.app.ui.WRAP
@@ -26,7 +31,6 @@ import dev.gf2log.app.ui.lp
 import dev.gf2log.app.ui.panel
 import dev.gf2log.app.ui.row
 import dev.gf2log.app.ui.text
-import dev.gf2log.protocol.Gfl2PayloadDecoder
 
 /**
  * Home's capture panel: the capture phase and its latest notice, the guided checklist, installed
@@ -51,9 +55,14 @@ internal class HomeCapturePanel(
         ellipsize = android.text.TextUtils.TruncateAt.END
     }
     private val checklist = context.column { visibility = View.GONE }
+    // Built once and updated in place, so frequent renders never detach a row TalkBack is on.
+    private val checklistRows = CaptureRunTracker.CHECKLIST_LABELS.map { (type, label) ->
+        ChecklistRow(context, type, label).also { checklist.addView(it.row, context.lp()) }
+    }
     private val captureActions = context.row(Gravity.TOP)
     private val clients = context.column()
     private var lastPhase: CapturePhase? = null
+    private var lastAnnounced: CaptureNoticeEvent? = null
 
     val view: LinearLayout = context.panel(outlined = true) {
         addView(context.row {
@@ -127,12 +136,20 @@ internal class HomeCapturePanel(
             ),
         )
         val notice = snapshot.notice
-        stateDetail.text = when {
+        val detail = when {
             notice?.notice == CaptureNotice.CAPTURING -> getString(R.string.capturing_clients, clientNames(snapshot.capturedTargets))
             notice != null && notice.notice != CaptureNotice.PREPARING -> notice.format(this)
             phase == CapturePhase.STOPPED -> getString(R.string.capture_ready_detail)
             phase == CapturePhase.STOPPING -> getString(R.string.capture_stopping_detail)
             else -> getString(R.string.capture_preparing_detail)
+        }
+        if (detail != stateDetail.text.toString()) {
+            // Only a new warning or error is announced; routine progress such as traffic is not.
+            val announce = notice.isNewAlert(lastAnnounced)
+            if (announce) lastAnnounced = notice
+            stateDetail.accessibilityLiveRegion =
+                if (announce) View.ACCESSIBILITY_LIVE_REGION_POLITE else View.ACCESSIBILITY_LIVE_REGION_NONE
+            stateDetail.text = detail
         }
         stateDetail.setTextColor(
             getColor(
@@ -143,7 +160,7 @@ internal class HomeCapturePanel(
                 },
             ),
         )
-        renderChecklist(snapshot.guided)
+        renderChecklist(snapshot.visibleGuided)
         if (phase != lastPhase) {
             lastPhase = phase
             renderActions(phase)
@@ -165,31 +182,33 @@ internal class HomeCapturePanel(
         else -> packageName
     }
 
-    private fun renderChecklist(guided: CaptureStatus.GuidedProgress?) = with(context) {
-        checklist.removeAllViews()
+    private fun renderChecklist(guided: CaptureStatus.GuidedProgress?) {
         checklist.visibility = if (guided == null) View.GONE else View.VISIBLE
-        guided ?: return@with
-        listOf(
-            Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE to R.string.checklist_identity,
-            Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS to R.string.checklist_roster,
-            Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY to R.string.checklist_activity,
-            Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES to R.string.checklist_updates,
-        ).forEach { (type, label) ->
-            val done = type in guided.capturedPayloadTypes
-            checklist.addView(row {
-                minimumHeight = dp(32)
-                isFocusable = true
-                contentDescription = getString(label) + ". " + getString(if (done) R.string.captured else R.string.waiting)
-                addView(icon(
-                    if (done) R.drawable.ic_check_circle else R.drawable.ic_circle_outline,
-                    if (done) R.color.success_mark else R.color.outline_strong,
-                    sizeDp = 20,
-                ), lp(20, 20, end = 10))
-                addView(text(getString(label), TextRole.BODY) {
-                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                    if (!done) setTextColor(getColor(R.color.text_secondary))
-                }, lp(width = 0, weight = 1f))
-            }, lp())
+        guided ?: return
+        checklistRows.forEach { it.render(it.type in guided.capturedPayloadTypes) }
+    }
+
+    /** One checklist row; [render] touches its views only when its state changes. */
+    private class ChecklistRow(private val context: Context, val type: Int, @StringRes private val label: Int) {
+        private val mark = context.icon(R.drawable.ic_circle_outline, R.color.outline_strong, sizeDp = 20)
+        private val name = context.text(context.getString(label), TextRole.BODY) {
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        private var done: Boolean? = null
+        val row: LinearLayout = context.row {
+            minimumHeight = context.dp(32)
+            isFocusable = true
+            addView(mark, context.lp(20, 20, end = 10))
+            addView(name, context.lp(width = 0, weight = 1f))
+        }
+
+        fun render(done: Boolean) = with(context) {
+            if (this@ChecklistRow.done == done) return@with
+            this@ChecklistRow.done = done
+            row.contentDescription = getString(label) + ". " + getString(if (done) R.string.captured else R.string.waiting)
+            mark.setImageResource(if (done) R.drawable.ic_check_circle else R.drawable.ic_circle_outline)
+            mark.imageTintList = ColorStateList.valueOf(getColor(if (done) R.color.success_mark else R.color.outline_strong))
+            name.setTextColor(getColor(if (done) TextRole.BODY.color else R.color.text_secondary))
         }
     }
 

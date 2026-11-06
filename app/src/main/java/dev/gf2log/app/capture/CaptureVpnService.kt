@@ -50,8 +50,8 @@ class CaptureVpnService : VpnService() {
     private var destroyed = false
 
     private val captureOnceGraceStop = Runnable {
-        val missing = run?.takeIf { state == State.RUNNING }?.missingAfterRoster() ?: return@Runnable
-        stop(CaptureNotice.CAPTURE_ONCE_PARTIAL, missing.joinToString())
+        val (notice, args) = run?.takeIf { state == State.RUNNING }?.graceOutcome() ?: return@Runnable
+        stop(notice, *args.toTypedArray())
     }
 
     override fun onCreate() {
@@ -99,7 +99,8 @@ class CaptureVpnService : VpnService() {
     }
 
     override fun onRevoke() {
-        stop()
+        // Another VPN app took over or the user disconnected this one in system settings.
+        stop(CaptureNotice.VPN_PERMISSION_REVOKED)
         super.onRevoke()
     }
 
@@ -186,10 +187,10 @@ class CaptureVpnService : VpnService() {
         worker.execute {
             val migration = runCatching {
                 val scopes = profileRegistry.ensureInitialized().map { PlatoonStorageScope(it.storageId) }
-                // An interrupted CSV import or undo must finish first, or its later recovery would
-                // overwrite what this capture ingests. A failing scope stays for the next attempt.
-                CsvImportCheckpointManager.recoverInterruptedImports(this, scopes)
-                scopes.forEach { scope ->
+                CaptureHistoryPreparation.run(
+                    scopes,
+                    recover = { CsvImportCheckpointManager.recoverInterruptedImports(this, it) },
+                ) { scope ->
                     GuildMembersCsvWriter.deleteStalePartials(scope.retainedCsvDirectory(this))
                     PlatoonRepository(this, scope).reconcileRetainedCsvFiles()
                 }
@@ -347,5 +348,18 @@ class CaptureVpnService : VpnService() {
 
         /** Process-wide and main-thread only: a teardown can outlive the instance that began it. */
         private var teardownsInFlight = 0
+    }
+}
+
+/**
+ * Readies every scope's retained history before a capture may ingest into it. An interrupted CSV
+ * import or undo must finish first, or its later recovery would overwrite what this capture
+ * ingests, so one scope whose [recover]y failed fails the whole start; it is retried next time.
+ */
+internal object CaptureHistoryPreparation {
+    fun <S> run(scopes: List<S>, recover: (List<S>) -> Int, prepare: (S) -> Unit) {
+        val failed = recover(scopes)
+        check(failed == 0) { "CSV import recovery is incomplete for $failed Platoon scope(s)" }
+        scopes.forEach(prepare)
     }
 }

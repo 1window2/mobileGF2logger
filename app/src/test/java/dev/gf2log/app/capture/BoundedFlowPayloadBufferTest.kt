@@ -7,6 +7,7 @@ import dev.gf2log.protocol.model.WeaponsData
 import dev.gf2log.protocol.model.decodedElementCount
 import java.lang.reflect.Modifier
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -97,8 +98,59 @@ class BoundedFlowPayloadBufferTest {
     }
 
     @Test
+    fun optionalItemsAreDroppedAtTheirLimitWithoutRejectingTheFlow() {
+        val buffer = BoundedFlowPayloadBuffer<String>(2, 3)
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offerOptional(1, "history-a"))
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offerOptional(1, "history-b"))
+        assertEquals(2, buffer.size())
+
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.DROPPED, buffer.offerOptional(1, "history-c"))
+        assertFalse(buffer.isRejected(1))
+        assertEquals(2, buffer.size())
+
+        // Optional items take no room from the items whose loss rejects a flow.
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(1, "roster-a"))
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(1, "roster-b"))
+        assertEquals(listOf("history-a", "history-b", "roster-a", "roster-b"), buffer.take(1))
+        assertEquals(0, buffer.size())
+    }
+
+    @Test
+    fun optionalItemsShareOnlyTheirOwnAggregateBudget() {
+        val buffer = BoundedFlowPayloadBuffer<String>(4, 2)
+        buffer.offerOptional(1, "one")
+        buffer.offerOptional(2, "two")
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.DROPPED, buffer.offerOptional(3, "three"))
+        assertFalse(buffer.isRejected(3))
+
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(3, "roster"))
+        buffer.remove(1)
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offerOptional(3, "three"))
+        assertEquals(listOf("roster", "three"), buffer.take(3))
+
+        buffer.reject(2)
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.REJECTED, buffer.offerOptional(2, "late"))
+        assertEquals(0, buffer.size())
+    }
+
+    @Test
+    fun manyHistoryPayloadsBeforeIdentityNeverCostTheFlowItsPlatoonData() {
+        val buffer = BoundedFlowPayloadBuffer<Int>(32, 128)
+        repeat(40) {
+            val type = Gfl2PayloadDecoder.TYPE_FORMATIONS
+            if (PreIdentityPolicy.retention(type, historyEnabled = true) == PreIdentityPolicy.Retention.HISTORY_ONLY) {
+                buffer.offerOptional(1, type)
+            }
+        }
+
+        assertFalse(buffer.isRejected(1))
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(1, Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS))
+        assertEquals(33, buffer.take(1).size)
+    }
+
+    @Test
     fun everyStatefulOperationIsSerializedAcrossParserAndCloseThreads() {
-        val synchronizedMethods = setOf("offer", "take", "isRejected", "reject", "remove", "clear")
+        val synchronizedMethods = setOf("offer", "offerOptional", "take", "isRejected", "reject", "remove", "clear", "size")
         val methodsByName = BoundedFlowPayloadBuffer::class.java.declaredMethods
             .filter { it.name in synchronizedMethods }
             .associateBy { it.name }

@@ -113,6 +113,20 @@ class PendingPlatoonAdmissionStoreTest {
     }
 
     @Test
+    fun aClaimReplaysEachPayloadWithTheTimeItArrived() {
+        val profile = profile(4u, "Early")
+        val token = requireNotNull(
+            PendingPlatoonAdmissionStore.begin(SupportedGamePackages.HAOPLAY, profile, flowId = 3L).token,
+        )
+        val arrived = Instant.parse("2026-07-22T04:50:00Z")
+        PendingPlatoonAdmissionStore.offer(token, 3L, payload(profile), arrived)
+
+        val buffered = requireNotNull(PendingPlatoonAdmissionStore.claim(token)).payloads.single()
+        assertEquals(arrived, buffered.receivedAt)
+        assertEquals(3L, buffered.flowId)
+    }
+
+    @Test
     fun failedOrThrowingAdmissionReleasesTheClaimForAnotherDecision() {
         val token = requireNotNull(
             PendingPlatoonAdmissionStore.begin(

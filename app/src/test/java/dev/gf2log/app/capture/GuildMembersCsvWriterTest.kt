@@ -42,6 +42,24 @@ class GuildMembersCsvWriterTest {
     }
 
     @Test
+    fun aRosterHeldForConfirmationIsDatedWhenItArrived() {
+        val output = temporaryFolder.newFolder("held")
+        // Confirmed after the 05:00 reset, received before it.
+        val clock = Clock.fixed(Instant.parse("2026-07-22T05:20:00Z"), ZoneOffset.UTC)
+        val completed = mutableListOf<GuildMembersCsvWriter.CompletedBatch>()
+        val writer = GuildMembersCsvWriter(output, clock, onBatchClosed = completed::add)
+
+        val saved = writer.accept(
+            payload(42, end = true, member(123456u, "First Member")),
+            receivedAt = Instant.parse("2026-07-22T04:50:00Z"),
+        )
+
+        assertEquals("gf2log_platoonmembers_20260722T045000Z.csv", saved?.file?.name)
+        assertEquals("2026-07-22T04:50:00Z", completed.single().logTime)
+        assertTrue(requireNotNull(saved).file.readLines(Charsets.UTF_8).last().endsWith(",2026-07-22T04:50:00Z"))
+    }
+
+    @Test
     fun rosterCutShortByAnotherPayloadIsNeverMergedWithALaterRoster() {
         val output = temporaryFolder.newFolder("boundary")
         val clock = Clock.fixed(Instant.parse("2026-07-21T19:11:09Z"), ZoneOffset.UTC)

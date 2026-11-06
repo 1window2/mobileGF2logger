@@ -7,6 +7,7 @@ import dev.gf2log.app.settings.ClientServerRegionPreferences
 import dev.gf2log.app.settings.GameServerRegion
 import dev.gf2log.protocol.model.ParsedPayload
 import dev.gf2log.protocol.model.PlatoonProfileData
+import java.time.Instant
 
 /**
  * Buffers a previously unknown Platoon identity in [PendingPlatoonAdmissionStore] and later
@@ -23,7 +24,7 @@ internal class PlatoonAdmissionCoordinator(
         fun isOpen(flowId: Long): Boolean
         fun bind(flowId: Long, profile: PlatoonProfile): PlatoonCaptureSession
         fun unbind(flowId: Long, session: PlatoonCaptureSession)
-        fun route(session: PlatoonCaptureSession, payload: ParsedPayload)
+        fun route(session: PlatoonCaptureSession, payload: ParsedPayload, receivedAt: Instant)
         fun quarantine(flowId: Long)
         fun profileChanged(storageId: String)
     }
@@ -57,9 +58,9 @@ internal class PlatoonAdmissionCoordinator(
     }
 
     /** Returns true when [payload] was consumed by the candidate [flowId] belongs to. */
-    fun retain(flowId: Long, payload: ParsedPayload): Boolean {
+    fun retain(flowId: Long, received: ReceivedPayload): Boolean {
         val token = tokenByFlow[flowId] ?: return false
-        offer(token, flowId, payload)
+        offer(token, flowId, received)
         return true
     }
 
@@ -67,7 +68,7 @@ internal class PlatoonAdmissionCoordinator(
         flowId: Long,
         ownerPackage: String,
         data: PlatoonProfileData,
-        preIdentityPayloads: List<ParsedPayload>,
+        preIdentityPayloads: List<ReceivedPayload>,
     ) {
         val result = PendingPlatoonAdmissionStore.begin(ownerPackage, data, flowId)
         val token = result.token
@@ -165,7 +166,7 @@ internal class PlatoonAdmissionCoordinator(
             return false
         }
         claim.payloads.forEach { buffered ->
-            runCatching { flows.route(sessions.getValue(buffered.flowId), buffered.payload) }
+            runCatching { flows.route(sessions.getValue(buffered.flowId), buffered.payload, buffered.receivedAt) }
                 .onFailure { error ->
                     CaptureStatus.report(CaptureNotice.PROCESSING_FAILED, error.javaClass.simpleName)
                 }
@@ -185,8 +186,8 @@ internal class PlatoonAdmissionCoordinator(
     }
 
     /** Returns false when the flow can no longer contribute to the candidate. */
-    private fun offer(token: String, flowId: Long, payload: ParsedPayload): Boolean =
-        when (val result = PendingPlatoonAdmissionStore.offer(token, flowId, payload)) {
+    private fun offer(token: String, flowId: Long, received: ReceivedPayload): Boolean =
+        when (val result = PendingPlatoonAdmissionStore.offer(token, flowId, received.payload, received.receivedAt)) {
             PendingPlatoonAdmissionStore.OfferResult.Accepted -> true
             PendingPlatoonAdmissionStore.OfferResult.Claimed -> {
                 CaptureStatus.report(CaptureNotice.ADMISSION_IN_PROGRESS)

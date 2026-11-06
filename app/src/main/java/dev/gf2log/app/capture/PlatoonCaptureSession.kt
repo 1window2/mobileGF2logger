@@ -21,11 +21,13 @@ internal class PlatoonCaptureSession(
     )
     private val dispatcher = PlatoonPayloadDispatcher(
         onMembers = writer::accept,
-        onActivity = { repository.ingestActivity(it).acceptedObservations > 0 },
-        onUpdates = { repository.ingestUpdates(it).acceptedObservations > 0 },
+        onActivity = { data, receivedAt -> repository.ingestActivity(data, receivedAt).acceptedObservations > 0 },
+        onUpdates = { data, receivedAt -> repository.ingestUpdates(data, receivedAt).acceptedObservations > 0 },
     )
 
-    fun dispatch(payload: ParsedPayload): PlatoonPayloadDispatcher.Results = dispatcher.dispatch(payload)
+    /** [receivedAt] dates what [payload] records, even when it was held until identity was known. */
+    fun dispatch(payload: ParsedPayload, receivedAt: Instant): PlatoonPayloadDispatcher.Results =
+        dispatcher.dispatch(payload, receivedAt)
 
     private fun ingestCompletedRoster(batch: GuildMembersCsvWriter.CompletedBatch) {
         val directResult = runCatching {

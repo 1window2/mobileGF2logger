@@ -30,8 +30,12 @@ class GuildMembersCsvWriter(
     private val onBatchClosed: (CompletedBatch) -> Unit = {},
     private val sync: (FileOutputStream) -> Unit = AtomicFiles::sync,
 ) {
+    /**
+     * [receivedAt] names the file and becomes every row's `logTime`: a roster held for admission
+     * is dated when it arrived, not when it was confirmed.
+     */
     @Synchronized
-    fun accept(payload: ParsedPayload): SaveResult? {
+    fun accept(payload: ParsedPayload, receivedAt: Instant = Instant.now(clock)): SaveResult? {
         val data = payload.data as? GuildMembersData ?: return null
         if (payload.messageId == 0 || !payload.isEndOfMessage) return null
         val members = linkedMapOf<UInt, GuildMember>()
@@ -43,11 +47,11 @@ class GuildMembersCsvWriter(
         check(GuildMembersCsv.hasValidMemberBounds(roster)) {
             "Platoon roster exceeds the member or name limit"
         }
-        return publish(roster)
+        return publish(roster, receivedAt)
     }
 
-    private fun publish(members: List<GuildMember>): SaveResult {
-        val batch = reserve(Instant.now(clock), members)
+    private fun publish(members: List<GuildMember>, receivedAt: Instant): SaveResult {
+        val batch = reserve(receivedAt, members)
         try {
             AtomicFiles.writeSynced(batch.workingFile, sync) { output ->
                 // Flushed rather than closed: writeSynced syncs and then closes the stream.

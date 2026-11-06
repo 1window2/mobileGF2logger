@@ -16,6 +16,7 @@ import dev.gf2log.protocol.model.ParsedPayload
 import dev.gf2log.protocol.model.PlatoonProfileData
 import dev.gf2log.protocol.model.decodedElementCount
 import java.io.File
+import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -31,16 +32,21 @@ internal class CaptureFlowEngine(
     private val clientServerRegions: ClientServerRegionPreferences,
     private val payloadHistory: PayloadHistoryPreferences,
 ) : PlatoonAdmissionCoordinator.Flows {
-    /** The native thread taints a flow whose chunk was dropped; it stays ignored until closure. */
+    /** The native thread taints a flow whose open or chunk was dropped; it stays ignored until closure. */
     private val taintedFlows: MutableSet<Long> = ConcurrentHashMap.newKeySet()
+    private val intake = CaptureFlowIntake(worker, taintedFlows) {
+        CaptureStatus.report(CaptureNotice.PARSER_OVERLOADED, stats.recordDropped().toString())
+    }
     private val parsers = HashMap<Long, Gfl2StreamParser>()
     private val metadata = HashMap<Long, CaptureFlowMetadata>()
     private val sessions = HashMap<Long, PlatoonCaptureSession>()
-    private val preIdentity = BoundedFlowPayloadBuffer<ParsedPayload>(
+    private val preIdentity = BoundedFlowPayloadBuffer<ReceivedPayload>(
         MAX_PRE_IDENTITY_PAYLOADS_PER_FLOW,
         MAX_PRE_IDENTITY_PAYLOADS_TOTAL,
         MAX_PRE_IDENTITY_ELEMENTS_TOTAL,
-    ) { it.data.decodedElementCount() }
+    ) { it.payload.data.decodedElementCount() }
+    /** Flows that already reported losing pre-identity history, so each reports it once. */
+    private val historyDroppedFlows = HashSet<Long>()
     private val historyStores = HashMap<String, CaptureHistoryStore>()
     private val observedProfiles = HashMap<String, Pair<ObservedIdentity, PlatoonProfile>>()
     private var ownerResolver = CaptureFlowOwnerResolver(context)
@@ -62,6 +68,7 @@ internal class CaptureFlowEngine(
         metadata.clear()
         taintedFlows.clear()
         preIdentity.clear()
+        historyDroppedFlows.clear()
         observedProfiles.clear()
         tracker = null
     }
@@ -75,18 +82,18 @@ internal class CaptureFlowEngine(
             remoteAddress: String,
             remotePort: Int,
         ) {
-            submit { open(flowId, protocol, localAddress, localPort, remoteAddress, remotePort) }
+            intake.opened(flowId) { open(flowId, protocol, localAddress, localPort, remoteAddress, remotePort) }
         }
 
         override fun onPayload(flowId: Long, payload: ByteArray) {
-            if (payload.isEmpty() || flowId in taintedFlows) return
-            // A missing TCP chunk makes every later byte offset unreliable.
-            if (!submit { accept(flowId, payload) }) taintedFlows += flowId
+            if (payload.isEmpty()) return
+            // Stamped on arrival, so a backlog or a pending admission never shifts when it was captured.
+            val receivedAt = Instant.now()
+            intake.payload(flowId) { accept(flowId, payload, receivedAt) }
         }
 
         override fun onFlowClosed(flowId: Long) {
-            // Earlier chunks may still be queued; the taint keeps them inert until session end.
-            if (!submit { close(flowId) }) taintedFlows += flowId
+            intake.closed(flowId) { close(flowId) }
         }
 
         override fun onTraffic(sentBytes: Long, receivedBytes: Long, inspectedBytes: Long) {
@@ -125,10 +132,10 @@ internal class CaptureFlowEngine(
         observedProfiles.remove(storageId)
     }
 
-    override fun route(session: PlatoonCaptureSession, payload: ParsedPayload) {
+    override fun route(session: PlatoonCaptureSession, payload: ParsedPayload, receivedAt: Instant) {
         val storageId = session.profile.storageId
         saveHistory(storageId, payload)
-        val routed = session.dispatch(payload)
+        val routed = session.dispatch(payload, receivedAt)
         routed.activity
             ?.onSuccess { if (it) tracker?.mark(storageId, Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY) }
             ?.onFailure { CaptureStatus.report(CaptureNotice.ACTIVITY_SAVE_FAILED) }
@@ -148,12 +155,6 @@ internal class CaptureFlowEngine(
             ?.onFailure { CaptureStatus.report(CaptureNotice.ROSTER_SAVE_FAILED) }
         if (payload.payloadType == Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE) {
             tracker?.mark(storageId, Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE)
-        }
-    }
-
-    private fun submit(task: () -> Unit): Boolean = worker.submitChunk(task).also { queued ->
-        if (!queued) {
-            CaptureStatus.report(CaptureNotice.PARSER_OVERLOADED, stats.recordDropped().toString())
         }
     }
 
@@ -182,23 +183,24 @@ internal class CaptureFlowEngine(
         )
     }
 
-    private fun accept(flowId: Long, payload: ByteArray) {
+    private fun accept(flowId: Long, payload: ByteArray, receivedAt: Instant) {
         if (flowId in taintedFlows) return
-        process(flowId, parsers.getOrPut(flowId, ::Gfl2StreamParser).accept(payload))
+        process(flowId, parsers.getOrPut(flowId, ::Gfl2StreamParser).accept(payload), receivedAt)
     }
 
     private fun close(flowId: Long) {
         val parser = parsers.remove(flowId)
         if (!taintedFlows.remove(flowId) && parser != null) {
-            process(flowId, parser.finish())
+            process(flowId, parser.finish(), Instant.now())
         }
         metadata.remove(flowId)
         admission.flowClosed(flowId)
         preIdentity.remove(flowId)
+        historyDroppedFlows.remove(flowId)
         sessions.remove(flowId)
     }
 
-    private fun process(flowId: Long, events: List<ParseEvent>) {
+    private fun process(flowId: Long, events: List<ParseEvent>, receivedAt: Instant) {
         if (events.isEmpty()) return
         val payloads = mutableListOf<ParsedPayload>()
         var warnings = 0
@@ -216,9 +218,9 @@ internal class CaptureFlowEngine(
             if (profile != null && PlatoonProfilePolicy.isValid(profile)) identify(flowId, profile)
             val session = sessions[flowId]
             if (session == null) {
-                holdUntilIdentified(flowId, payload)
+                holdUntilIdentified(flowId, ReceivedPayload(payload, receivedAt))
             } else {
-                route(session, payload)
+                route(session, payload, receivedAt)
             }
         }
     }
@@ -259,13 +261,14 @@ internal class CaptureFlowEngine(
         if (current != null) return
 
         val session = bind(flowId, profile)
-        preIdentity.take(flowId).forEach { pending -> route(session, pending) }
+        preIdentity.take(flowId).forEach { pending -> route(session, pending.payload, pending.receivedAt) }
         CaptureStatus.report(
             CaptureNotice.PLATOON_DETECTED,
             profile.platoonName.take(PlatoonAdmissionCoordinator.MAX_STATUS_NAME_CHARS),
             profile.platoonId.toString(),
             profile.client.displayName,
         )
+        if (historyDroppedFlows.remove(flowId)) CaptureStatus.report(CaptureNotice.HISTORY_SAVE_FAILED)
     }
 
     private fun findKnownProfile(
@@ -294,13 +297,20 @@ internal class CaptureFlowEngine(
         return profile
     }
 
-    private fun holdUntilIdentified(flowId: Long, payload: ParsedPayload) {
-        // Only history consumes the optional types after identification, and the Platoon types'
-        // history is always on, so a payload whose history is off would be retained for nothing.
-        if (!payloadHistory.isEnabled(payload.payloadType)) return
-        if (admission.retain(flowId, payload)) return
-        if (preIdentity.offer(flowId, payload) == BoundedFlowPayloadBuffer.OfferResult.OVERFLOW) {
-            CaptureStatus.report(CaptureNotice.FLOW_BUFFER_OVERFLOW)
+    private fun holdUntilIdentified(flowId: Long, received: ReceivedPayload) {
+        if (admission.retain(flowId, received)) return
+        val type = received.payload.payloadType
+        when (PreIdentityPolicy.retention(type, payloadHistory.isEnabled(type))) {
+            PreIdentityPolicy.Retention.REQUIRED ->
+                if (preIdentity.offer(flowId, received) == BoundedFlowPayloadBuffer.OfferResult.OVERFLOW) {
+                    CaptureStatus.report(CaptureNotice.FLOW_BUFFER_OVERFLOW)
+                }
+            // Reported only if the flow is identified: a flow of no Platoon had no history to lose.
+            PreIdentityPolicy.Retention.HISTORY_ONLY ->
+                if (preIdentity.offerOptional(flowId, received) == BoundedFlowPayloadBuffer.OfferResult.DROPPED) {
+                    historyDroppedFlows += flowId
+                }
+            PreIdentityPolicy.Retention.NONE -> Unit
         }
     }
 
@@ -324,5 +334,62 @@ internal class CaptureFlowEngine(
         const val MAX_PRE_IDENTITY_PAYLOADS_PER_FLOW = 32
         const val MAX_PRE_IDENTITY_PAYLOADS_TOTAL = 128
         const val MAX_PRE_IDENTITY_ELEMENTS_TOTAL = 65_536L
+    }
+}
+
+/**
+ * The native thread's side of [CaptureFlowEngine]: queues each flow callback on the worker.
+ * Opens and chunks share the worker's chunk budget, and a flow that loses either is tainted: a
+ * lost open leaves it without a verified owner, a lost chunk breaks its byte offsets. A close
+ * bypasses the budget, so it always releases the flow's state, after the flow's queued chunks.
+ */
+internal class CaptureFlowIntake(
+    private val worker: CaptureWorker,
+    private val taintedFlows: MutableSet<Long>,
+    private val onChunkDropped: () -> Unit,
+) {
+    fun opened(flowId: Long, open: () -> Unit) {
+        if (!submit(open)) taintedFlows += flowId
+    }
+
+    fun payload(flowId: Long, accept: () -> Unit) {
+        if (flowId in taintedFlows) return
+        if (!submit(accept)) taintedFlows += flowId
+    }
+
+    /** Only a worker that has shut down refuses it; the taint then keeps the flow inert. */
+    fun closed(flowId: Long, close: () -> Unit) {
+        if (!worker.execute(close)) taintedFlows += flowId
+    }
+
+    private fun submit(task: () -> Unit): Boolean =
+        worker.submitChunk(task).also { queued -> if (!queued) onChunkDropped() }
+}
+
+/** Which payloads of a flow that has no identity yet are worth holding until it has one. */
+internal object PreIdentityPolicy {
+    enum class Retention {
+        /** Platoon data that is lost unless held; failing to hold it rejects the flow. */
+        REQUIRED,
+
+        /** Kept for parsed-packet history only while there is room; never rejects the flow. */
+        HISTORY_ONLY,
+
+        /** Nothing would use it after identification. */
+        NONE,
+    }
+
+    private val PLATOON_DATA_TYPES = setOf(
+        Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
+        Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY,
+        Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES,
+    )
+
+    fun retention(payloadType: Int, historyEnabled: Boolean): Retention = when {
+        payloadType in PLATOON_DATA_TYPES -> Retention.REQUIRED
+        // A 21905 that reaches the buffer could not identify the flow, so it names no Platoon.
+        payloadType == Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE -> Retention.NONE
+        historyEnabled -> Retention.HISTORY_ONLY
+        else -> Retention.NONE
     }
 }

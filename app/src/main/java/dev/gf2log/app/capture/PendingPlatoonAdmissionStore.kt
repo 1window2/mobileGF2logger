@@ -33,6 +33,8 @@ internal object PendingPlatoonAdmissionStore {
     data class BufferedPayload(
         val flowId: Long,
         val payload: ParsedPayload,
+        /** When it arrived; a confirmation hours later still dates what it records by this. */
+        val receivedAt: Instant,
     )
 
     data class Claim(
@@ -129,7 +131,12 @@ internal object PendingPlatoonAdmissionStore {
     }
 
     @Synchronized
-    fun offer(token: String, flowId: Long, payload: ParsedPayload): OfferResult {
+    fun offer(
+        token: String,
+        flowId: Long,
+        payload: ParsedPayload,
+        receivedAt: Instant = Instant.now(),
+    ): OfferResult {
         val candidate = candidates[token] ?: return OfferResult.Missing
         if (candidate.claimed) return OfferResult.Claimed
         val elements = payload.data.decodedElementCount()
@@ -141,7 +148,7 @@ internal object PendingPlatoonAdmissionStore {
             return OfferResult.Overflow(removeLocked(token)?.flowIds.orEmpty())
         }
         candidate.flowIds += flowId
-        candidate.payloads += BufferedPayload(flowId, payload)
+        candidate.payloads += BufferedPayload(flowId, payload, receivedAt)
         totalPayloads += 1
         totalElements += elements
         return OfferResult.Accepted

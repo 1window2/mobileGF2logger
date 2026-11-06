@@ -38,8 +38,25 @@ abstract class BaseActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         dev.gf2log.app.ui.Dialogs.saveDrafts(this, outState, dialogDrafts)
+        // A draft is restored only into the storage it was typed for; see [pinnedStorage].
+        if (pinsBoundStorage()) boundStorageId()?.let { outState.putString(STATE_BOUND_STORAGE, it) }
         super.onSaveInstanceState(outState)
     }
+
+    /** The storage this screen's repositories and drafts belong to, for Platoon-scoped screens. */
+    internal open fun boundStorageId(): String? = null
+
+    /** Whether this screen holds typed input that belongs to its bound storage. */
+    protected open fun hasUnsavedDraft(): Boolean = false
+
+    /**
+     * Whether a recreated instance stays on [boundStorageId]. True while a draft is held; a screen
+     * that closes instead of following a newly selected Platoon may keep it always.
+     */
+    protected open fun pinsBoundStorage(): Boolean = hasUnsavedDraft()
+
+    /** The storage a recreated screen binds to instead of the active Platoon, if any. */
+    protected fun pinnedStorage(state: Bundle?): String? = state?.getString(STATE_BOUND_STORAGE)
 
     /**
      * The input dialog named [key] that was open when the previous instance went away, for the
@@ -121,7 +138,13 @@ abstract class BaseActivity : ComponentActivity() {
         draftPrompt = java.lang.ref.WeakReference(dialog)
     }
 
+    /** The save-or-discard prompt [confirmDraftBeforeScopeChange] is showing, if any. */
+    @androidx.annotation.VisibleForTesting
+    internal fun draftPromptDialog(): android.app.Dialog? = draftPrompt?.get()?.takeIf { it.isShowing }
+
     companion object {
+        private const val STATE_BOUND_STORAGE = "screen.bound_storage"
+
         @Volatile
         private var foreground = java.lang.ref.WeakReference<BaseActivity>(null)
 

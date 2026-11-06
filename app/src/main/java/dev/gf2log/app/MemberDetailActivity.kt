@@ -76,9 +76,10 @@ class MemberDetailActivity : BaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         uid = intent.getLongExtra(EXTRA_UID, -1)
-        profileBinding = ActivePlatoonScopeBinding(this)
+        profileBinding = ActivePlatoonScopeBinding(this, pinnedStorage(savedInstanceState))
         val bound = profileBinding.scope
-        if (uid <= 0 || bound == null) {
+        // A draft typed for a Platoon that is gone never shows against another Platoon's member.
+        if (uid <= 0 || bound == null || profileBinding.lostPinnedStorage) {
             finish()
             return
         }
@@ -102,16 +103,43 @@ class MemberDetailActivity : BaseActivity() {
 
     override fun onScreenResumed() {
         if (!profileBinding.isSameStorage(this)) {
-            // The member belongs to the previous Platoon scope; unsaved edits are not dropped silently.
-            if (::saveButton.isInitialized && saveButton.isEnabled) {
-                confirmDraftBeforeScopeChange(R.string.save_member, { saveProfile(thenFinish = true) }, ::finish)
-            } else {
-                finish()
-            }
+            onScopeChanged()
             return
         }
         load()
     }
+
+    /**
+     * The member belongs to the previous Platoon scope; unsaved edits are not dropped silently.
+     * A recreated screen first loads the member again, so its restored draft can be compared.
+     */
+    private fun onScopeChanged() {
+        if (work.isBusy(SAVE)) {
+            // The edits are already being saved; leave once that save lands.
+            finishAfterSave = true
+            return
+        }
+        if (model == null && inputsInitialized) {
+            if (!work.isBusy(LOAD)) load()
+            return
+        }
+        if (isDirty()) {
+            confirmDraftBeforeScopeChange(R.string.save_member, { saveProfile(thenFinish = true) }, ::finish)
+        } else {
+            finish()
+        }
+    }
+
+    override fun boundStorageId(): String? =
+        if (::profileBinding.isInitialized) profileBinding.scope?.storageId else null
+
+    /**
+     * Always kept: on a Platoon change this screen closes rather than follow it, and its fields
+     * restore their text by id, which must never land on another Platoon's member.
+     */
+    override fun pinsBoundStorage(): Boolean = true
+
+    override fun hasUnsavedDraft(): Boolean = ::saveButton.isInitialized && (isDirty() || work.isBusy(SAVE))
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean(STATE_INPUTS_INITIALIZED, inputsInitialized)
@@ -176,6 +204,7 @@ class MemberDetailActivity : BaseActivity() {
             }
             render(loaded)
             reopenMembershipDialog(loaded.status)
+            if (!profileBinding.isSameStorage(this)) onScopeChanged()
         }
     }
 

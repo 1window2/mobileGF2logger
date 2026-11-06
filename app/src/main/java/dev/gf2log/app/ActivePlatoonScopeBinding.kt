@@ -5,10 +5,21 @@ import dev.gf2log.app.management.PlatoonProfile
 import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.management.PlatoonStorageScope
 
-/** Pins one Activity instance to the profile scope used to construct its repositories and views. */
-internal class ActivePlatoonScopeBinding(context: Context) {
-    private val boundProfile = PlatoonProfileRegistry(context).active()
+/**
+ * Pins one Activity instance to the profile scope used to construct its repositories and views.
+ * A screen recreated while it holds a draft passes the storage that draft was typed for as
+ * [pinnedStorageId] ([BaseActivity.pinnedStorage]); it binds to that Platoon while it still
+ * exists, so the draft is never restored into the newly active one. Otherwise it binds to the
+ * active Platoon.
+ */
+internal class ActivePlatoonScopeBinding(context: Context, pinnedStorageId: String? = null) {
+    private val boundProfile = PlatoonProfileRegistry(context).let { registry ->
+        pinnedStorageId?.let(registry::find) ?: registry.active()
+    }
     val scope: PlatoonStorageScope? = boundProfile?.let { PlatoonStorageScope(it.storageId) }
+
+    /** A draft was typed for a Platoon that no longer exists: it must not be restored here. */
+    val lostPinnedStorage: Boolean = pinnedStorageId != null && boundProfile?.storageId != pinnedStorageId
 
     /**
      * Whether the selected Platoon still uses this screen's storage. Screens that do not show the

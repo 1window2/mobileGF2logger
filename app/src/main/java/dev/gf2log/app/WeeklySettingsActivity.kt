@@ -40,8 +40,8 @@ class WeeklySettingsActivity : BaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        profileBinding = ActivePlatoonScopeBinding(this)
-        val scope = profileBinding.scope ?: run {
+        profileBinding = ActivePlatoonScopeBinding(this, pinnedStorage(savedInstanceState))
+        val scope = profileBinding.scope?.takeUnless { profileBinding.lostPinnedStorage } ?: run {
             finish()
             return
         }
@@ -78,12 +78,26 @@ class WeeklySettingsActivity : BaseActivity() {
     override fun onScreenResumed() {
         if (profileBinding.isSameStorage(this)) return
         // These cutlines belong to the previous Platoon; unsaved changes are not dropped silently.
-        val values = readValues()
-        if (values != null && current(values) == initial) {
-            finish()
-        } else {
+        if (hasUnsavedDraft()) {
             confirmDraftBeforeScopeChange(R.string.save_settings, ::save, ::finish)
+        } else {
+            finish()
         }
+    }
+
+    override fun boundStorageId(): String? =
+        if (::profileBinding.isInitialized) profileBinding.scope?.storageId else null
+
+    /**
+     * Always kept: on a Platoon change this screen closes rather than follow it, and the cutline
+     * fields restore their text by id, which must never land on another Platoon's cutlines.
+     */
+    override fun pinsBoundStorage(): Boolean = true
+
+    override fun hasUnsavedDraft(): Boolean {
+        if (!::initial.isInitialized) return false
+        val values = readValues()
+        return values == null || current(values) != initial
     }
 
     private fun LinearLayout.threshold(id: Int, label: Int, value: Long?, maximum: Int?) {

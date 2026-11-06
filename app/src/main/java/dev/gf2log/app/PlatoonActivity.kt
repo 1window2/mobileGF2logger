@@ -115,7 +115,7 @@ class PlatoonActivity : BaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        profileBinding = ActivePlatoonScopeBinding(this)
+        profileBinding = ActivePlatoonScopeBinding(this, pinnedStorage(savedInstanceState))
         scope = profileBinding.scope ?: run {
             Feedback.show(this, R.string.no_platoon_detected_detail, long = true)
             finish()
@@ -140,16 +140,27 @@ class PlatoonActivity : BaseActivity() {
             setPadding(dp(16), 0, dp(16), dp(24))
         })
         setSelecting(selecting)
-        takeDialogDraft(WithdrawnMemberDialog.KEY)?.let(::addWithdrawnMember)
+        // A draft typed for a Platoon that is gone is never reopened against another one.
+        takeDialogDraft(WithdrawnMemberDialog.KEY)
+            ?.takeUnless { profileBinding.lostPinnedStorage }
+            ?.let(::addWithdrawnMember)
     }
 
     override fun onScreenResumed() {
         if (!profileBinding.isCurrent(this)) {
+            // An open withdrawn-member draft stays on the Platoon it was typed for; this screen
+            // follows the newly selected one once that dialog closes.
+            if (!profileBinding.isSameStorage(this) && withdrawnDialog?.isShowing == true) return
             recreate()
             return
         }
         load()
     }
+
+    override fun boundStorageId(): String? =
+        if (::profileBinding.isInitialized) profileBinding.scope?.storageId else null
+
+    override fun hasUnsavedDraft(): Boolean = withdrawnDialog?.isShowing == true
 
     /** A roster captured while this screen is showing appears without leaving it. */
     private val rosterSaved: (String) -> Unit = { storageId ->
@@ -385,10 +396,22 @@ class PlatoonActivity : BaseActivity() {
         }
     }
 
-    private fun addWithdrawnMember(restored: DialogDraft? = null) {
-        WithdrawnMemberDialog.show(this, work, repository, { uid ->
+    @androidx.annotation.VisibleForTesting
+    internal var withdrawnDialog: android.app.Dialog? = null
+        private set
+
+    @androidx.annotation.VisibleForTesting
+    internal fun addWithdrawnMember(restored: DialogDraft? = null) {
+        withdrawnDialog = WithdrawnMemberDialog.show(this, work, repository, { uid ->
             model?.statuses?.any { it.uid == uid } == true
-        }, ::load, restored)
+        }, ::load, restored).apply {
+            setOnDismissListener {
+                withdrawnDialog = null
+                // Closing the dialog of a recreated or leaving screen follows nothing.
+                if (isFinishing || isDestroyed || isChangingConfigurations) return@setOnDismissListener
+                if (!profileBinding.isCurrent(this@PlatoonActivity)) recreate()
+            }
+        }
     }
 
     private fun toggle(uid: Long) {

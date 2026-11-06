@@ -94,7 +94,7 @@ class WeeklyReportActivity : BaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        profileBinding = ActivePlatoonScopeBinding(this)
+        profileBinding = ActivePlatoonScopeBinding(this, pinnedStorage(savedInstanceState))
         scope = profileBinding.scope ?: run {
             Feedback.show(this, R.string.no_platoon_detected_detail, long = true)
             finish()
@@ -125,7 +125,9 @@ class WeeklyReportActivity : BaseActivity() {
         if (!profileBinding.isCurrent(this)) {
             // Edits belong to the bound Platoon; they are saved or discarded before the switch.
             if (!profileBinding.isSameStorage(this) && hasUnsavedEdits()) {
-                confirmDraftBeforeScopeChange(R.string.save_weekly_edits, ::saveEdits, ::finishEditing)
+                // A recreated screen has no table yet; Save needs the bound Platoon's table.
+                if (model == null) requestRender()
+                confirmDraftBeforeScopeChange(R.string.save_weekly_edits, ::saveEditsWhenLoaded, ::finishEditing)
             } else {
                 recreate()
             }
@@ -135,6 +137,17 @@ class WeeklyReportActivity : BaseActivity() {
     }
 
     private fun hasUnsavedEdits(): Boolean = edits.period != null && !edits.isEmpty()
+
+    override fun boundStorageId(): String? = if (::scope.isInitialized) scope.storageId else null
+
+    override fun hasUnsavedDraft(): Boolean = ::scope.isInitialized && hasUnsavedEdits()
+
+    /** Set when Save was chosen before the bound Platoon's table loaded; [render] saves then. */
+    private var saveWhenLoaded = false
+
+    private fun saveEditsWhenLoaded() {
+        if (model == null) saveWhenLoaded = true else saveEdits()
+    }
 
     /** A roster captured while this screen is showing updates the table; edits in progress stay. */
     private val rosterSaved: (String) -> Unit = { storageId ->
@@ -238,6 +251,10 @@ class WeeklyReportActivity : BaseActivity() {
         val report = next.report
         edits.retainFor(report.periodStart)
         model = next
+        if (saveWhenLoaded) {
+            saveWhenLoaded = false
+            saveEdits()
+        }
         val weeklyTable = tables.getOrPut(report.isGunsmokeWeek) {
             WeeklyTable(this, report.isGunsmokeWeek, next.zone, next.cutlines, horizontalSync)
         }.apply {

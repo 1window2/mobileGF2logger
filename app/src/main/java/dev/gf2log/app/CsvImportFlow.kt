@@ -367,3 +367,7 @@ internal fun csvUndoFailureMessage(error: Throwable): Int =
     } else {
         platoonDataFailureMessage(error, R.string.csv_import_undo_failed)
     }
+
+/** Whether [T] caused this failure anywhere along its cause chain. */
+private inline fun <reified T : Throwable> Throwable.hasCause(): Boolean =
+    generateSequence(this) { it.cause }.any { it is T }

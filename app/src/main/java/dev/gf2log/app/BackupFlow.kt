@@ -167,8 +167,3 @@ internal fun fullBackupRestoreFailureMessage(error: Throwable): Int = when {
 /** A Platoon-only export failure must not claim that the complete backup failed. */
 internal fun backupExportFailureMessage(complete: Boolean): Int =
     if (complete) R.string.full_backup_export_failed else R.string.status_backup_export_failed
-
-/** Whether [T] caused this failure anywhere along its cause chain. */
-internal inline fun <reified T : Throwable> Throwable.hasCause(): Boolean =
-    generateSequence(this) { it.cause }.any { it is T }
-

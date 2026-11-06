@@ -88,8 +88,9 @@ when Android animations are disabled.
 - Document pickers use the Activity Result API. Exports regenerate their content
   from the repository when the destination returns rather than holding it in
   memory across process death. `DocumentAccess.writeExport` deletes the created
-  document when the write fails or the provider is refused, and a refused
-  provider names the supported locations.
+  document when a write fails after it opened; a refused provider or a failed
+  open leaves the picked document as it was, since it may be an existing file
+  chosen for overwrite, and a refused provider names the supported locations.
 - Times shown or edited in a Platoon's game reset zone carry a "Server time"
   caption whenever that zone's offset differs from the device's.
 

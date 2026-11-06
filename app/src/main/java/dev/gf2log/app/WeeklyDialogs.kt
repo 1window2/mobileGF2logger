@@ -14,6 +14,7 @@ import dev.gf2log.app.management.WeeklyOverrideEditing.Choice
 import dev.gf2log.app.management.WeeklyReportBuilder
 import dev.gf2log.app.management.WeeklyShareProjection
 import dev.gf2log.app.ui.Controls
+import dev.gf2log.app.ui.DialogDraft
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.LabeledField
 import dev.gf2log.app.ui.TextRole
@@ -82,6 +83,18 @@ internal object WeeklyDialogs {
      * Edits one member-day. Exact values start filled in; only fields the user changes become
      * edits, so untouched derived values keep their certainty.
      */
+    /** Names the cell editor's draft for [BaseActivity.takeDialogDraft]. */
+    const val CELL_EDIT_KEY = "weekly_cell_edit"
+    const val ARG_UID = "uid"
+    const val ARG_GAME_DAY = "game_day"
+    private const val ARG_LOGIN = "login"
+    private const val ARG_PATROL = "patrol"
+
+    /**
+     * Edits one member-day. Exact values start filled in; only fields the user changes become
+     * edits, so untouched derived values keep their certainty. The editor reopens with what was
+     * typed after its screen is recreated: the screen passes back the [restored] draft.
+     */
     fun showEdit(
         activity: Activity,
         title: String,
@@ -90,31 +103,41 @@ internal object WeeklyDialogs {
         cell: WeeklyReportBuilder.DayCell,
         current: WeeklyOverrideEditing.CellEdit?,
         next: (() -> Unit)? = null,
+        restored: DialogDraft? = null,
         onDone: (WeeklyOverrideEditing.CellEdit) -> Unit,
-    ) {
+    ): AlertDialog {
         // A minimum or unknown value starts empty with its notation as the hint, so typing the
         // shown number confirms it instead of reading as "unchanged".
-        fun numberField(label: Int, field: WeeklyCellEditor.Field, hint: Int): Pair<LabeledField, String> {
+        fun numberField(label: Int, field: WeeklyCellEditor.Field, hint: Int, id: Int): Pair<LabeledField, String> {
             val start = WeeklyCellEditor.start(cell, current, field)
             val hintText = start.notation?.let { activity.getString(R.string.captured_value_hint, it) } ?: activity.getString(hint)
-            val input = activity.textField(hintText, inputType = InputType.TYPE_CLASS_NUMBER).apply { setText(start.text) }
+            val input = activity.textField(hintText, id = id, inputType = InputType.TYPE_CLASS_NUMBER).apply { setText(start.text) }
             return LabeledField(activity, activity.getString(label), input) to start.text
         }
-        val (merit, meritInitial) = numberField(R.string.merit_short, WeeklyCellEditor.Field.MERIT, R.string.blank_clears)
+        val (merit, meritInitial) = numberField(R.string.merit_short, WeeklyCellEditor.Field.MERIT, R.string.blank_clears, R.id.weekly_cell_merit)
         val score = if (isGunsmokeWeek) {
-            numberField(R.string.point_short, WeeklyCellEditor.Field.SCORE, R.string.blank_clears)
+            numberField(R.string.point_short, WeeklyCellEditor.Field.SCORE, R.string.blank_clears, R.id.weekly_cell_score)
         } else {
             null
         }
         val attempts = if (isGunsmokeWeek) {
-            numberField(R.string.attempt_short, WeeklyCellEditor.Field.ATTEMPTS, R.string.attempts_range)
+            numberField(R.string.attempt_short, WeeklyCellEditor.Field.ATTEMPTS, R.string.attempts_range, R.id.weekly_cell_attempts)
         } else {
             null
         }
         val loginInitial = current?.attended ?: Choice.of(cell.attended)
         val patrolInitial = current?.dailyPatrol ?: Choice.of(cell.dailyPatrol)
-        var login = loginInitial
-        var patrol = patrolInitial
+        // The choices live in the draft's arguments, which the saved draft reads when it is taken.
+        val arguments = android.os.Bundle().apply {
+            putLong(ARG_UID, uid)
+            putLong(ARG_GAME_DAY, cell.gameDay.toEpochDay())
+        }
+        fun restoredChoice(key: String, initial: Choice): Choice =
+            restored?.arguments?.getString(key)?.let { name -> Choice.entries.firstOrNull { it.name == name } } ?: initial
+        var login = restoredChoice(ARG_LOGIN, loginInitial)
+        var patrol = restoredChoice(ARG_PATROL, patrolInitial)
+        arguments.putString(ARG_LOGIN, login.name)
+        arguments.putString(ARG_PATROL, patrol.name)
         val error = activity.errorLine()
         val clear = activity.button(activity.getString(R.string.clear_manual_values), Controls.Role.DESTRUCTIVE_TEXT) {}
         val content = Dialogs.content(activity) {
@@ -126,8 +149,14 @@ internal object WeeklyDialogs {
                     addView(attempts.first, activity.lp(width = 0, weight = 1f, start = 12))
                 }, activity.lp(top = 12))
             }
-            addView(choiceRow(activity, R.string.login_short, loginInitial) { login = it }, activity.lp(top = 12))
-            addView(choiceRow(activity, R.string.patrol_short, patrolInitial) { patrol = it }, activity.lp(top = 12))
+            addView(choiceRow(activity, R.string.login_short, login) {
+                login = it
+                arguments.putString(ARG_LOGIN, it.name)
+            }, activity.lp(top = 12))
+            addView(choiceRow(activity, R.string.patrol_short, patrol) {
+                patrol = it
+                arguments.putString(ARG_PATROL, it.name)
+            }, activity.lp(top = 12))
             addView(error, activity.lp(top = 8))
             if (cell.manualOverride != null) addView(clear, activity.lp(WRAP, WRAP, top = 4))
         }
@@ -138,7 +167,7 @@ internal object WeeklyDialogs {
             .setNegativeButton(R.string.cancel, null)
             .setPositiveButton(R.string.apply, null)
         if (next != null) builder.setNeutralButton(R.string.apply_and_next_day, null)
-        Dialogs.show(builder) { dialog ->
+        return Dialogs.showRestorable(builder, CELL_EDIT_KEY, content, arguments, restored) { dialog ->
             fun changed(field: Pair<LabeledField, String>?): String? =
                 field?.let { (view, initial) -> WeeklyCellEditor.changed(view.input.text.toString(), initial) }
             fun finish(edit: WeeklyOverrideEditing.CellEdit, then: (() -> Unit)? = null) {

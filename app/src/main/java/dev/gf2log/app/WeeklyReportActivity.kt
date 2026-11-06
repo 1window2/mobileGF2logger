@@ -30,6 +30,7 @@ import dev.gf2log.app.settings.WeeklyCutlines
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.BarAction
+import dev.gf2log.app.ui.DialogDraft
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
@@ -286,6 +287,7 @@ class WeeklyReportActivity : BaseActivity() {
         }
         updateTopBar()
         list.post(::updateStickyHeader)
+        reopenCellEditor(next)
     }
 
     private fun updateStickyHeader() {
@@ -498,7 +500,26 @@ class WeeklyReportActivity : BaseActivity() {
         )
     }
 
-    private fun onCellTapped(member: WeeklyReportBuilder.MemberRow, cell: WeeklyReportBuilder.DayCell?) {
+    @androidx.annotation.VisibleForTesting
+    internal var cellEditor: android.app.Dialog? = null
+        private set
+
+    /** A cell editor that was open before recreation comes back, with what was typed, once its table shows. */
+    private fun reopenCellEditor(next: RenderModel) {
+        if (!edits.isEditing(next.report.periodStart)) return
+        val draft = takeDialogDraft(WeeklyDialogs.CELL_EDIT_KEY) ?: return
+        val member = next.displayedMembers.firstOrNull { it.uid == draft.arguments.getLong(WeeklyDialogs.ARG_UID) } ?: return
+        val day = LocalDate.ofEpochDay(draft.arguments.getLong(WeeklyDialogs.ARG_GAME_DAY))
+        val cell = member.days.firstOrNull { it.gameDay == day } ?: return
+        onCellTapped(member, cell, draft)
+    }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun onCellTapped(
+        member: WeeklyReportBuilder.MemberRow,
+        cell: WeeklyReportBuilder.DayCell?,
+        restored: DialogDraft? = null,
+    ) {
         val current = model ?: return
         val weeklyTable = table ?: return
         val dayLabel = cell?.let { Labels.dayHeader(this, it.gameDay) } ?: getString(R.string.total)
@@ -512,7 +533,16 @@ class WeeklyReportActivity : BaseActivity() {
             if (work.isBusy(SAVE)) return
             val nextCell = member.days.getOrNull(member.days.indexOf(cell) + 1)
             val next = nextCell?.let { { onCellTapped(member, it) } }
-            WeeklyDialogs.showEdit(this, title, current.report.isGunsmokeWeek, member.uid, cell, edits[member.uid, cell.gameDay], next) { edit ->
+            cellEditor = WeeklyDialogs.showEdit(
+                this,
+                title,
+                current.report.isGunsmokeWeek,
+                member.uid,
+                cell,
+                edits[member.uid, cell.gameDay],
+                next,
+                restored,
+            ) { edit ->
                 if (!edits.isEditing(current.report.periodStart) || !edits.put(edit)) return@showEdit
                 // Rows are addressed in the list the adapter currently shows, not the tapped model.
                 rowsAdapter.notifyMemberChanged(member.uid)

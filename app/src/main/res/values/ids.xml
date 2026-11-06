@@ -23,4 +23,7 @@
     <item name="cutline_weekly_attempts" type="id" />
     <item name="cutline_login_days" type="id" />
     <item name="cutline_patrol_days" type="id" />
+    <item name="weekly_cell_merit" type="id" />
+    <item name="weekly_cell_score" type="id" />
+    <item name="weekly_cell_attempts" type="id" />
 </resources>

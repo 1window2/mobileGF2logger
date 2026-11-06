@@ -79,9 +79,12 @@ when Android animations are disabled.
   and a refused action says to try again shortly rather than that it failed.
 - Text fields carry stable view IDs and Activities save transient choices, so
   rotation, theme or language changes, and large-screen resizing keep drafts.
-  Input dialogs shown with `Dialogs.showRestorable` reopen with their typed
-  values; the Discord webhook dialog deliberately does not, because its token
-  must never enter saved instance state.
+  Only input dialogs shown with `Dialogs.showRestorable` reopen with their typed
+  values: the membership-period and withdrawn-member editors and the weekly
+  cell editor. The CSV import destination and new-Platoon prompts do not, since
+  they belong to a picked file the screen does not reopen, and the Discord
+  webhook dialog deliberately does not, because its token must never enter
+  saved instance state.
 - Document pickers use the Activity Result API. Exports regenerate their content
   from the repository when the destination returns rather than holding it in
   memory across process death. `DocumentAccess.writeExport` deletes the created

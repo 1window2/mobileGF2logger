@@ -82,9 +82,13 @@ internal class BackupFlow(
         work.run(
             key = maintenanceKey,
             task = {
-                DocumentAccess.openInput(activity.contentResolver, uri).use { input ->
-                    PlatoonBackupManager.restoreSelected(activity, input)
-                }
+                // Checked again where it runs: standby or an alarm may have started capture while
+                // the file was being chosen.
+                CaptureGuard.whileStopped {
+                    DocumentAccess.openInput(activity.contentResolver, uri).use { input ->
+                        PlatoonBackupManager.restoreSelected(activity, input)
+                    }
+                } ?: throw CaptureGuard.CaptureActiveException()
             },
         ) { result ->
             result.fold(
@@ -96,7 +100,14 @@ internal class BackupFlow(
                     )
                     activity.recreate()
                 },
-                onFailure = { Feedback.show(activity, fullBackupRestoreFailureMessage(it), long = true) },
+                onFailure = {
+                    val message = if (it is CaptureGuard.CaptureActiveException) {
+                        R.string.stop_capture_before_backup
+                    } else {
+                        fullBackupRestoreFailureMessage(it)
+                    }
+                    Feedback.show(activity, message, long = true)
+                },
             )
         }
     }

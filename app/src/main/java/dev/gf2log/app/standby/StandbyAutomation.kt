@@ -17,6 +17,7 @@ import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.capture.CaptureVpnService
 import dev.gf2log.app.capture.RosterEvents
 import dev.gf2log.app.management.PlatoonProfileRegistry
+import dev.gf2log.app.ui.CaptureGuard
 import java.lang.ref.WeakReference
 import java.time.Instant
 import java.util.concurrent.Executors
@@ -235,6 +236,12 @@ internal object StandbyAutomation {
         // previous run just asked to stop, restarts once its teardown ends, then reaches RUNNING.
         val active = capture.phase == CapturePhase.STARTING || capture.phase == CapturePhase.RUNNING
         if (active && !ownStopPending(capture)) return
+        // A Platoon is being deleted, moved to another server, or restored: its storage must not
+        // be written meanwhile.
+        if (!CaptureGuard.beginCaptureStart()) {
+            Log.w(TAG, "Capture not started: Platoon maintenance is running")
+            return endRun(StandbyOutcome.CAPTURE_FAILED)
+        }
         val started = runCatching {
             appContext.startForegroundService(
                 Intent(appContext, CaptureVpnService::class.java)
@@ -246,6 +253,7 @@ internal object StandbyAutomation {
             startedCapture = true
         } else {
             Log.w(TAG, "Capture could not start", started.exceptionOrNull())
+            if (capture.phase == CapturePhase.STOPPED) CaptureGuard.abandonCaptureStart()
             endRun(StandbyOutcome.CAPTURE_FAILED)
         }
     }

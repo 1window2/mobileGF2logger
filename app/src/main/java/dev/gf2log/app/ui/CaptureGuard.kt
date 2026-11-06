@@ -18,12 +18,57 @@ internal val captureActive: Boolean
 /**
  * Data operations that must not interleave with capture ask once and stop it in place, instead of
  * sending the user back to Home to find the Stop button.
+ *
+ * Asking happens before any follow-up dialog or file picker, so a capture that standby or an alarm
+ * starts meanwhile is caught again where the operation runs: [whileStopped] runs it only while
+ * capture is stopped, and [beginCaptureStart] refuses a start until it has finished.
  */
 internal object CaptureGuard {
     /** Teardown joins the native loop and drains queued chunks; anything longer means it is stuck. */
     private const val STOP_TIMEOUT_MS = 20_000L
 
     private val handler by lazy { Handler(Looper.getMainLooper()) }
+
+    /** Orders a maintenance check against a capture start, so one of them always sees the other. */
+    private val lock = Any()
+
+    /** Operations inside [whileStopped] right now; guarded by [lock]. */
+    private var maintenance = 0
+
+    /** Thrown by callers whose operation [whileStopped] refused because capture was active. */
+    class CaptureActiveException : IllegalStateException("Capture became active before the operation ran")
+
+    /**
+     * Runs [operation] on the calling thread if capture is STOPPED at this moment, and keeps every
+     * capture start out until it returns. Null, without running it, when capture is active.
+     */
+    fun <T> whileStopped(operation: () -> T): T? {
+        synchronized(lock) {
+            if (CaptureStatus.snapshot().phase != CapturePhase.STOPPED) return null
+            maintenance++
+        }
+        try {
+            return operation()
+        } finally {
+            synchronized(lock) { maintenance-- }
+        }
+    }
+
+    /**
+     * Call right before asking the capture service to start: publishes STARTING (when capture is
+     * stopped) so no maintenance begins after it, or returns false, and the start must not be
+     * sent, while one is running.
+     */
+    fun beginCaptureStart(): Boolean = synchronized(lock) {
+        if (maintenance > 0) return false
+        if (CaptureStatus.snapshot().phase == CapturePhase.STOPPED) CaptureStatus.markStarting()
+        true
+    }
+
+    /** A start [beginCaptureStart] allowed never reached the service: back to STOPPED. */
+    fun abandonCaptureStart() = synchronized(lock) {
+        if (CaptureStatus.snapshot().phase == CapturePhase.STARTING) CaptureStatus.markStopped()
+    }
 
     /** Requests a stop; the service publishes STOPPED only after its teardown has finished. */
     fun stop(context: Context) {

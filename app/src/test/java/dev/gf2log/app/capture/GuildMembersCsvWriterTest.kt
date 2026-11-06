@@ -98,6 +98,28 @@ class GuildMembersCsvWriterTest {
     }
 
     @Test
+    fun workingFileIsCompleteAndSyncedBeforeItIsPublished() {
+        val output = temporaryFolder.newFolder("synced-publication")
+        val events = mutableListOf<String>()
+        val writer = GuildMembersCsvWriter(
+            outputDirectory = output,
+            publisher = { working, final ->
+                events += "publish:" + working.readText(Charsets.UTF_8).lines().size
+                assertTrue(working.renameTo(final))
+            },
+            sync = { stream ->
+                events += "sync"
+                stream.fd.sync()
+            },
+        )
+
+        writer.accept(payload(42, end = true, member(1u, "One"), member(2u, "Two")))
+
+        // The header, two rows, and the empty remainder after the final line break.
+        assertEquals(listOf("sync", "publish:4"), events)
+    }
+
+    @Test
     fun transientPublicationFailureRetriesImmediately() {
         val output = temporaryFolder.newFolder("publication-failure")
         val clock = Clock.fixed(Instant.parse("2026-07-21T19:11:09Z"), ZoneOffset.UTC)

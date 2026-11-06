@@ -7,6 +7,7 @@ import dev.gf2log.protocol.model.GuildMember
 import dev.gf2log.protocol.model.GuildMembersData
 import dev.gf2log.protocol.model.ParsedPayload
 import java.io.File
+import java.io.FileOutputStream
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -19,12 +20,15 @@ import java.time.format.DateTimeFormatter
  * boundary ends the dataset; it is discarded instead of being merged with a later, unrelated roster.
  * An empty `.partial` file reserves the final name while the CSV is written; it is deleted when
  * writing or publication fails, and [deleteStalePartials] removes any a process death left behind.
+ * The working file's data is synced before it is renamed into place, so a power loss can never
+ * leave an empty or truncated CSV under its final name.
  */
 class GuildMembersCsvWriter(
     private val outputDirectory: File,
     private val clock: Clock = Clock.systemUTC(),
     private val publisher: (File, File) -> Unit = AtomicFiles::move,
     private val onBatchClosed: (CompletedBatch) -> Unit = {},
+    private val sync: (FileOutputStream) -> Unit = AtomicFiles::sync,
 ) {
     @Synchronized
     fun accept(payload: ParsedPayload): SaveResult? {
@@ -44,11 +48,14 @@ class GuildMembersCsvWriter(
     private fun publish(members: List<GuildMember>): SaveResult {
         val batch = reserve(Instant.now(clock), members)
         try {
-            batch.workingFile.bufferedWriter(Charsets.UTF_8).use { writer ->
+            AtomicFiles.writeSynced(batch.workingFile, sync) { output ->
+                // Flushed rather than closed: writeSynced syncs and then closes the stream.
+                val writer = output.bufferedWriter(Charsets.UTF_8)
                 writer.appendLine(GuildMembersCsv.HEADER)
                 members.forEach { member ->
                     writer.appendLine(GuildMembersCsv.row(member, batch.completed.logTime))
                 }
+                writer.flush()
             }
             publishWithRetry(batch.workingFile, batch.completed.file)
         } catch (error: Exception) {

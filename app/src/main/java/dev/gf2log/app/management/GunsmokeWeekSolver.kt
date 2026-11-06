@@ -2,7 +2,6 @@ package dev.gf2log.app.management
 
 import dev.gf2log.app.management.ActivityInference.saturatedAdd
 import dev.gf2log.app.management.ActivityInference.saturatedMultiply
-import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -158,6 +157,7 @@ internal object GunsmokeWeekSolver {
             zoneId = zoneId,
             periodStart = periodStart,
             cell = cells[0],
+            factsByDay = factsByDay,
         ).filter { state ->
             matchesCapturedEvidence(
                 state = state,
@@ -311,6 +311,7 @@ internal object GunsmokeWeekSolver {
             zoneId = zoneId,
             periodStart = periodStart,
             cell = cells[runStart],
+            factsByDay = factsByDay,
         )
 
         var partials = initialStates.asSequence()
@@ -953,6 +954,7 @@ internal object GunsmokeWeekSolver {
         zoneId: ZoneId,
         periodStart: Instant,
         cell: WeeklyReportBuilder.DayCell,
+        factsByDay: Map<LocalDate, List<DailyPatrolFact>>,
     ): List<ActivityState> {
         val direct = cell.meritDelta?.let { merit ->
             cell.scoreDelta?.let { score -> Metrics(merit, score) }
@@ -969,6 +971,8 @@ internal object GunsmokeWeekSolver {
                 weeklyMerit = anchor.member.weeklyMerit,
                 zoneId = zoneId,
                 periodStart = periodStart,
+                previousDayPatrolAt = factsByDay[PlatoonPeriods.gameDay(periodStart, zoneId).minusDays(1)]
+                    ?.minOfOrNull(DailyPatrolFact::occurredAt),
             ) &&
             checkpoint.member.totalMerit >= anchor.member.totalMerit
         ) {
@@ -994,25 +998,35 @@ internal object GunsmokeWeekSolver {
     }
 
     /**
-     * Accepts a near-reset capture or a preceding-week counter that has already reached its cap. A
-     * capped Monday-through-Saturday counter cannot gain more merit before the Gunsmoke Sunday.
-     * Returns true when no unobserved pre-boundary merit can contaminate the opening interval.
+     * Accepts a capture at the reset itself, a preceding-week counter that has already reached its
+     * cap, or a capture on the Saturday before after that Saturday's first Daily Patrol at
+     * [previousDayPatrolAt]. A capped Monday-through-Saturday counter, like a Saturday that has
+     * completed its Daily Patrol, cannot gain more merit before the Gunsmoke Sunday; a capture
+     * merely close to 05:00 still can. Returns true when no unobserved pre-boundary merit can
+     * contaminate the opening interval.
      */
     internal fun isClosedOpeningAnchor(
         capturedAt: Instant,
         weeklyMerit: Long,
         zoneId: ZoneId,
         periodStart: Instant,
+        previousDayPatrolAt: Instant? = null,
     ): Boolean {
         val precedingCounterStart = periodStart.atZone(zoneId).minusDays(6).toInstant()
+        val previousDayStart = periodStart.atZone(zoneId).minusDays(1).toInstant()
         return !capturedAt.isAfter(periodStart) &&
             (
-                Duration.between(capturedAt, periodStart) <= MAX_BOUNDARY_DISTANCE ||
+                capturedAt == periodStart ||
                     (
                         weeklyMerit == MAX_PRE_GUNSMOKE_WEEKLY_MERIT &&
                             !capturedAt.isBefore(precedingCounterStart)
+                        ) ||
+                    (
+                        previousDayPatrolAt != null &&
+                            !previousDayPatrolAt.isBefore(previousDayStart) &&
+                            !previousDayPatrolAt.isAfter(capturedAt)
                         )
-                    )
+                )
     }
 
     private fun statesForMetrics(
@@ -1849,7 +1863,6 @@ internal object GunsmokeWeekSolver {
                 .map { ActivityOption(attempts, it.attended, it.patrol) }
         }
 
-    private val MAX_BOUNDARY_DISTANCE: Duration = Duration.ofMinutes(15)
     private const val MAX_ROUNDING_REMAINDER = ActivityInference.SCORE_POINTS_PER_MERIT - 1L
     private const val MAX_REMAINDER_STEPS = 64
     private const val MAX_SCORE_MERIT_VALUES = 250_000L

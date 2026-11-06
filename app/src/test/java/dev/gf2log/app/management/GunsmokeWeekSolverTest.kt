@@ -33,8 +33,9 @@ class GunsmokeWeekSolverTest {
                 periodStart = periodStart,
             ),
         )
+        // Close to 05:00 is not closed: Saturday can still earn its login or Daily Patrol.
         assertEquals(
-            true,
+            false,
             GunsmokeWeekSolver.isClosedOpeningAnchor(
                 capturedAt = periodStart.minusSeconds(10 * 60),
                 weeklyMerit = 90,
@@ -42,6 +43,62 @@ class GunsmokeWeekSolverTest {
                 periodStart = periodStart,
             ),
         )
+    }
+
+    @Test
+    fun uncappedOpeningAnchorIsClosedOnlyAtTheResetOrAfterSaturdaysDailyPatrol() {
+        val periodStart = start.atTime(5, 0).atZone(zone).toInstant()
+        val anchor = periodStart.minusSeconds(5 * 60)
+
+        fun closed(capturedAt: Instant, patrolAt: Instant?) = GunsmokeWeekSolver.isClosedOpeningAnchor(
+            capturedAt = capturedAt,
+            weeklyMerit = 500,
+            zoneId = zone,
+            periodStart = periodStart,
+            previousDayPatrolAt = patrolAt,
+        )
+
+        assertEquals(true, closed(periodStart, null))
+        assertEquals(false, closed(anchor, null))
+        assertEquals(true, closed(anchor, periodStart.minusSeconds(6 * 60 * 60)))
+        // A Daily Patrol after the anchor is exactly the tail the anchor misses.
+        assertEquals(false, closed(anchor, periodStart.minusSeconds(3 * 60)))
+        // A Friday capture misses all of Saturday.
+        assertEquals(false, closed(periodStart.minusSeconds(26 * 60 * 60), periodStart.minusSeconds(27 * 60 * 60)))
+    }
+
+    @Test
+    fun nearResetUncappedAnchorDoesNotCreditTheSaturdayTailToTheGunsmokeSunday() {
+        // Sunday 04:55 with 500 weekly merit, then Saturday's Daily Patrol at 04:57 (+40). Sunday
+        // itself is a login and one 1,000-point attempt: 50 + 30 + 100 = 180.
+        fun sunday(tail: Long, facts: List<DailyPatrolFact>) = WeeklyReportBuilder.build(
+            referenceDay = start,
+            zoneId = zone,
+            snapshots = listOf(
+                PlatoonSnapshot(1, Instant.parse("2026-07-18T19:55:00Z"), listOf(member(10_000, 0, 500))),
+                PlatoonSnapshot(
+                    2,
+                    Instant.parse("2026-07-19T19:55:00Z"),
+                    listOf(member(10_180 + tail, 1_000, 680 + tail)),
+                ),
+                PlatoonSnapshot(3, Instant.parse("2026-07-20T19:55:00Z"), listOf(member(10_180 + tail, 1_000, 0))),
+            ),
+            dailyPatrolFacts = facts,
+            asOf = Instant.parse("2026-07-20T21:00:00Z"),
+        ).members.single().days.first()
+
+        val contaminated = sunday(tail = 40, facts = listOf(DailyPatrolFact(UID, Instant.parse("2026-07-18T19:57:00Z"))))
+        assertEquals(
+            false,
+            contaminated.meritDelta == 220L && contaminated.meritCertainty == MetricCertainty.EXACT,
+        )
+        assertEquals(false, contaminated.dailyPatrol == true)
+
+        // A Daily Patrol before the anchor completes Saturday, so the anchor closes the interval.
+        val completed = sunday(tail = 0, facts = listOf(DailyPatrolFact(UID, Instant.parse("2026-07-18T03:00:00Z"))))
+        assertEquals(180L, completed.meritDelta)
+        assertEquals(MetricCertainty.EXACT, completed.meritCertainty)
+        assertEquals(1, completed.attempts)
     }
 
     @Test

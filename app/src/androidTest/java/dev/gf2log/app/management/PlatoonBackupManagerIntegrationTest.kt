@@ -639,10 +639,12 @@ class PlatoonBackupManagerIntegrationTest {
         replaceDatabaseForCheckpoint(CURRENT_UID, "After import", "after-import.csv")
         import.seal()
 
-        // Opening the Weekly screen on a week without evidence records a derived revision.
+        // Opening the Weekly screen on a week without evidence records a derived revision. The
+        // screen builds in the Platoon's reset zone; a revision of another zone is never stored.
         val repository = PlatoonRepository(context, storageScope)
         val week = LocalDate.of(2026, 10, 4)
-        repository.buildWeeklyTableRevision(week, java.time.ZoneOffset.UTC, Instant.parse("2026-10-05T00:00:00Z"))
+        val zone = GameTimeZonePreferences.get(context, storageScope.storageId)
+        repository.buildWeeklyTableRevision(week, zone, Instant.parse("2026-10-05T00:00:00Z"))
         assertTrue(repository.listWeeklyReportHistory(week).isNotEmpty())
 
         val undo = CsvImportCheckpointManager(context, storageScope)

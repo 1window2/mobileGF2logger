@@ -37,7 +37,7 @@ mobileGF2logger는 서클장을 위한 가벼운 비루팅 앱입니다. Android
 - PIN·패턴·비밀번호가 없는 휴대전화에서는 설정의 예약 자동 기록으로 매일 기록할 수도 있습니다. 선택한 서버마다 초기화 전에 알람이 휴대전화를 깨워 같은 방식으로 멤버를 기록하고 화면을 다시 끕니다.
 - 화면을 가장자리까지 그리며, 회전·테마·언어 변경이나 프로세스 재생성 후에도 작성 중인 내용과 선택, 대기 중인 내보내기를 유지합니다.
 - 영어와 한국어, 시스템/라이트/다크 테마를 지원합니다. 알려진 Darkwinter/HaoPlay 6개 서버 지역의 초기화 시각을 기기 시간대로 환산하며, 감지된 서클을 선택하면 해당 프로필에 저장된 지역을 자동으로 따릅니다.
-- HaoPlay(`com.haoplay.game.and.exilium`)와 Darkwinter(`com.Sunborn.SnqxExilium.Glo`) Android 클라이언트를 별도의 VPN 대상으로 등록합니다.
+- HaoPlay(`com.haoplay.game.and.exilium`)와 Darkwinter(`com.Sunborn.SnqxExilium.Glo`) Android 클라이언트를 별도의 VPN 대상으로 등록합니다. 클라이언트마다 처음 확인한 서명 인증서를 신뢰하며, 다른 서명으로 다시 설치된 클라이언트는 설정에서 다시 신뢰하기 전까지 캡처하거나 실행하지 않습니다.
 - 다음 열 순서의 UTF-8 서클 멤버 CSV 파일을 만듭니다.
 
 ```text

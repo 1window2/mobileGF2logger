@@ -91,13 +91,19 @@ internal class PlatoonDatabase private constructor(
         source: EvidenceSource,
         historicalOnly: Boolean = false,
         deferHistoricalMembershipReconciliation: Boolean = false,
+        now: Instant = Instant.now(),
     ): SnapshotIngestResult = SnapshotIngestion.ingest(
         writableDatabase,
         snapshot,
         source,
         historicalOnly,
         deferHistoricalMembershipReconciliation,
+        now,
     )
+
+    /** Rosters kept but set aside because their capture time lay ahead of the clock. */
+    @Synchronized
+    fun setAsideSnapshotCount(): Int = SnapshotClockReview.setAsideCount(readableDatabase)
 
     /** Replays every retained roster after late historical imports; see [RosterHistoryReplay]. */
     @Synchronized

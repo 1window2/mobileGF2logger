@@ -250,9 +250,30 @@ Schema v11 owns the rotation cursor and a global `(captured_at, id)` retention
 index. Schema v13 repairs the derived active-member projection from canonical
 membership periods during upgrade, and every writable open re-derives it once
 more whenever the rule's `active_state_rule` version changes. Schema v14 marks
-activity-dated roster boundaries as `ACTIVITY` evidence and folds duplicate
-open periods; supported older backups are upgraded before strict
-current-schema validation.
+activity-dated roster boundaries as `ACTIVITY` evidence, folds duplicate open
+periods, and adds `snapshots.clock_suspect`; supported older backups are
+upgraded before strict current-schema validation.
+
+`SnapshotClockReview` keeps a roster captured with the phone clock set ahead
+from becoming the permanent current roster. Before each roster that may
+become current is placed, every stored roster dated more than one hour after
+the best known present is set aside (`clock_suspect = 1`): that present is the
+phone clock or, when later, the newest server time stored or carried by the
+incoming roster (a member login, a 21935 activity, or a 21960 Updates time).
+Server times trail the real present, so they can vouch for a roster but never
+convict one; only a later phone-clock reading reveals a future date. Setting a
+roster aside withdraws the renames and withdrawals it inferred as the current
+roster, reopening those withdrawals on periods the replay keeps, and replays
+the remaining roster history. A set-aside roster keeps every row and returns,
+with another replay, once the clock has reached its date and no roster dated
+earlier shows a newer login for one of its members (`SnapshotClockPolicy`):
+one set aside because a later capture ran on a clock set behind comes back,
+while one really captured ahead stays aside even after its date passes, so it
+never lands among the rosters captured meanwhile. Every read that picks or
+orders rosters (latest roster, comparison baseline, weekly inputs and evidence
+days, replay frames, membership correlation and the active-state rule)
+selects `clock_suspect = 0`; source-file deduplication and the evidence digest
+still see every row.
 These limits are enforced again at repository and persistence boundaries so a
 future caller cannot bypass the protocol-layer checks. User-entered text has
 the same treatment: `ManualTextPolicy` trims and then rejects a member name

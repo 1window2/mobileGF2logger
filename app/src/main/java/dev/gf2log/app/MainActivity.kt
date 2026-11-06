@@ -298,9 +298,11 @@ class MainActivity : BaseActivity() {
                 val repository = PlatoonRepository(this, scope)
                 val snapshots = repository.listSnapshots(SnapshotComparison.COMPARISON_LOOKBACK)
                 SnapshotComparison.latestComparablePair(snapshots)?.let { (latest, baseline) ->
-                    latest to baseline?.let { older ->
-                        SnapshotComparison.compare(older, latest, repository.gameZone())
-                    }
+                    Triple(
+                        latest,
+                        baseline?.let { older -> SnapshotComparison.compare(older, latest, repository.gameZone()) },
+                        repository.setAsideSnapshotCount(),
+                    )
                 }
             },
         ) { result ->
@@ -309,7 +311,7 @@ class MainActivity : BaseActivity() {
                 rosterSummary.visibility = View.GONE
                 return@run
             }
-            val (latest, comparison) = summary
+            val (latest, comparison, setAside) = summary
             rosterSummary.removeAllViews()
             rosterSummary.visibility = View.VISIBLE
             val detail = buildList {
@@ -318,6 +320,8 @@ class MainActivity : BaseActivity() {
                     add(getString(R.string.roster_joined_count, it.joined.size))
                     add(getString(R.string.roster_withdrew_count, it.left.size))
                 }
+                // Kept but unused rosters stay visible, so a wrong phone clock is never silent.
+                if (setAside > 0) add(resources.getQuantityString(R.plurals.roster_set_aside_count, setAside, setAside))
             }.joinToString(" · ")
             rosterSummary.addView(group(listOf(
                 navigationRow(

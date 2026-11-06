@@ -295,6 +295,16 @@ transitions.
 - A captured roster older than the latest stored one, from a late packet or a
   clock moved backwards, is replayed into history instead of being treated as
   the current roster, so it never withdraws members of a newer roster.
+- A roster captured with the phone clock set ahead is set aside at the next
+  roster whose clock reading, or a newer login or activity time from the game
+  server, shows that its date had not yet come (one hour of skew is allowed).
+  It is kept, not deleted, but is no longer the current roster, the comparison
+  baseline, a weekly input, or a week of its own; the renames and withdrawals
+  it inferred are withdrawn and the remaining roster history is replayed. Home's
+  latest-roster row counts the rosters set aside. A real roster set aside
+  because a later capture ran on a clock set behind returns once the clock
+  reaches its date again; one whose own login times are older than a roster
+  dated before it stays aside for good.
 - A consumed CSV import checkpoint is retired by an atomic rename to
   `csv-import-checkpoint.discarded` before deletion, so a crash mid-cleanup can
   never block later imports or undo.

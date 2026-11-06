@@ -5,7 +5,10 @@ package dev.gf2log.app.management
  */
 internal object PlatoonSchema {
     const val DATABASE_NAME = "platoon.db"
-    /** v14 stores activity-dated boundaries as [EvidenceSource.ACTIVITY]; DDL is unchanged. */
+    /**
+     * v14 stores activity-dated boundaries as [EvidenceSource.ACTIVITY] and marks rosters set
+     * aside for a capture time ahead of the clock (`snapshots.clock_suspect`).
+     */
     const val CURRENT_VERSION = 14
     const val MIN_BACKUP_VERSION = 1
 
@@ -30,7 +33,13 @@ internal object PlatoonSchema {
     }
 
     fun requiredColumns(version: Int): Map<String, Set<String>> = buildMap {
-        put("snapshots", setOf("id", "captured_at"))
+        put(
+            "snapshots",
+            buildSet {
+                addAll(setOf("id", "captured_at"))
+                if (version >= 14) add("clock_suspect")
+            },
+        )
         put("snapshot_members", setOf("snapshot_id", "uid", "name", "total_merit"))
         put(
             "members",

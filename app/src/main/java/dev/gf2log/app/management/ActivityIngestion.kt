@@ -73,6 +73,7 @@ internal object ActivityIngestion {
             WHERE sm.name = ? COLLATE BINARY
               AND s.captured_at >= ?
               AND s.captured_at <= ?
+              AND s.clock_suspect = 0
             LIMIT 2
             """.trimIndent(),
             arrayOf(memberName, windowStart.toString(), windowEnd.toString()),
@@ -382,8 +383,10 @@ internal object ActivityIngestion {
             """
             SELECT period.id, period.uid, period.joined_at, period.left_at,
                    period.joined_precision, period.left_precision,
-                   (SELECT MAX(captured_at) FROM snapshots WHERE captured_at < period.joined_at),
-                   (SELECT MAX(captured_at) FROM snapshots WHERE captured_at < period.left_at)
+                   (SELECT MAX(captured_at) FROM snapshots
+                    WHERE captured_at < period.joined_at AND clock_suspect = 0),
+                   (SELECT MAX(captured_at) FROM snapshots
+                    WHERE captured_at < period.left_at AND clock_suspect = 0)
             FROM membership_periods period
             WHERE (period.joined_at IS NOT NULL AND period.joined_precision = ?)
                OR (period.left_at IS NOT NULL AND period.left_precision = ?)

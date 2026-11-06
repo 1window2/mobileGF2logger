@@ -4,7 +4,8 @@ import android.database.sqlite.SQLiteDatabase
 import java.time.Instant
 
 /**
- * Read-only SQL boundary for roster snapshots consumed by weekly projections.
+ * Read-only SQL boundary for roster snapshots consumed by weekly projections and by every screen
+ * that shows the latest roster. A roster set aside by [SnapshotClockReview] is never listed.
  * Schema/migration and write transactions remain owned by PlatoonDatabase.
  */
 internal object WeeklySnapshotStore {
@@ -14,6 +15,7 @@ internal object WeeklySnapshotStore {
             """
             SELECT id, captured_at, source_file, game_version
             FROM snapshots
+            WHERE clock_suspect = 0
             ORDER BY captured_at DESC, id DESC
             LIMIT ?
             """.trimIndent(),
@@ -30,14 +32,17 @@ internal object WeeklySnapshotStore {
             """
             SELECT id, captured_at, source_file, game_version
             FROM snapshots
-            WHERE (captured_at >= ? AND captured_at <= ?)
-               OR id = (
-                   SELECT id
-                   FROM snapshots
-                   WHERE captured_at < ?
-                   ORDER BY captured_at DESC, id DESC
-                   LIMIT 1
-               )
+            WHERE clock_suspect = 0
+              AND (
+                (captured_at >= ? AND captured_at <= ?)
+                OR id = (
+                    SELECT id
+                    FROM snapshots
+                    WHERE captured_at < ? AND clock_suspect = 0
+                    ORDER BY captured_at DESC, id DESC
+                    LIMIT 1
+                )
+              )
             ORDER BY captured_at DESC, id DESC
             """.trimIndent(),
         selectionArgs = arrayOf(

@@ -3,7 +3,6 @@ package dev.gf2log.app.management
 import android.content.Context
 import android.database.DatabaseErrorHandler
 import android.database.sqlite.SQLiteDatabase
-import android.database.sqlite.SQLiteDatabaseCorruptException
 import android.util.AtomicFile
 import android.util.Log
 import java.io.File
@@ -159,13 +158,6 @@ internal object PlatoonDatabaseDamage {
         if (!intact) {
             throw PlatoonDatabaseDamagedException("The Platoon database failed its integrity check")
         }
-    }
-
-    /** Reports SQLite corruption from [block] as the typed damage the UI explains. */
-    inline fun <T> reporting(block: () -> T): T = try {
-        block()
-    } catch (error: SQLiteDatabaseCorruptException) {
-        throw PlatoonDatabaseDamagedException("The Platoon database is damaged", error)
     }
 
     private fun marker(context: Context, scope: PlatoonStorageScope) =

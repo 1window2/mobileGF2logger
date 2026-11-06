@@ -1,6 +1,7 @@
 package dev.gf2log.app.management
 
 import android.content.Context
+import android.database.sqlite.SQLiteDatabaseCorruptException
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.gf2log.app.SupportedGamePackages
@@ -86,6 +87,15 @@ class PlatoonAccessFailureIntegrationTest {
             PlatoonDatabaseDamage.quarantinedFiles(context, scope).any { file ->
                 file.isFile && !file.name.endsWith("-wal") && !file.name.endsWith("-journal")
             },
+        )
+    }
+
+    @Test
+    fun sqliteCorruptionAnywhereAlongTheCauseChainIsDamage() {
+        assertEquals(PlatoonAccessFailure.DATABASE_DAMAGED, PlatoonAccessFailure.of(SQLiteDatabaseCorruptException()))
+        assertEquals(
+            PlatoonAccessFailure.DATABASE_DAMAGED,
+            PlatoonAccessFailure.of(IllegalStateException("export failed", SQLiteDatabaseCorruptException())),
         )
     }
 

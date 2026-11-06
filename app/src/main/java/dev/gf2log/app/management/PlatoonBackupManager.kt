@@ -49,10 +49,10 @@ class PlatoonBackupManager internal constructor(
 
     /**
      * No backup or CSV checkpoint is written from a database that fails its integrity check.
-     * SQLite corruption met while reconciling first is reported the same way; its handler has
-     * already moved the file aside instead of deleting it.
+     * SQLite corruption met while reconciling first counts as the same damage
+     * ([PlatoonAccessFailure]); its handler has already moved the file aside instead of deleting it.
      */
-    fun export(output: OutputStream) = PlatoonDatabaseDamage.reporting {
+    fun export(output: OutputStream) {
         PlatoonRepository(appContext, storageScope).reconcileRetainedCsvFiles()
         PlatoonRepository.withExclusiveDatabase(storageScope) {
             ensureDatabaseExists()
@@ -76,7 +76,7 @@ class PlatoonBackupManager internal constructor(
             PlatoonEvidenceDigest.sha256(databaseFile)
         }
 
-    fun exportFull(output: OutputStream) = PlatoonDatabaseDamage.reporting {
+    fun exportFull(output: OutputStream) {
         PlatoonRepository(appContext, storageScope).reconcileRetainedCsvFiles()
         PlatoonRepository.withExclusiveDatabase(storageScope) {
             val settings = settingsStore.read()

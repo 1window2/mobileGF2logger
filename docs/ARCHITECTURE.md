@@ -190,8 +190,10 @@ timestamp but no UID, so a fact is linked only when nearby roster snapshots
 map the name to exactly one member. Ambiguous duplicate names remain stored
 but unresolved.
 
-Observed action `802001` is deduplicated to one Daily Patrol fact per UID and
-matching 05:00-based game day. Membership boundaries remain available as
+Only the UID-safe 21960 Updates kind `8` supplies Daily Patrol evidence,
+deduplicated to one fact per UID and 05:00-based game day; 21935 `802001` and
+`801005` rows are name-only supporting history and never count as Daily Patrol.
+Membership boundaries remain available as
 UID-safe 21917 observation facts. Payload 21960 supplies exact UID and event
 timestamps for Join, Withdraw, and Remove boundaries; those individual
 boundaries are immutable. Manual boundaries remain editable and can coexist
@@ -225,13 +227,17 @@ SQLite work. Within that cap, `WeeklyHistoryWorkPolicy` adds the listed
 neighbouring weeks that read an instant across a 05:00 reset (the closed week
 of an exact-reset roster, the calendar-day Join / Withdraw week, and later
 weeks up to the next stored roster), so their stored revisions never lag the
-live projection. SQLite retains the newest 10,000 activity
-facts, and one ingestion resolves at most 250 unresolved facts. A database-local
+live projection. SQLite retains the newest 10,000 21935 activity
+facts; exact 21960 Daily Patrol facts are outside that cap. One ingestion
+resolves at most 250 unresolved facts. A database-local
 cursor rotates those bounded batches through the complete retained backlog.
 Schema v11 owns the rotation cursor and a global `(captured_at, id)` retention
 index. Schema v13 repairs the derived active-member projection from canonical
-membership periods during upgrade; supported older backups are upgraded before
-strict current-schema validation.
+membership periods during upgrade, and every writable open re-derives it once
+more whenever the rule's `active_state_rule` version changes. Schema v14 marks
+activity-dated roster boundaries as `ACTIVITY` evidence and folds duplicate
+open periods; supported older backups are upgraded before strict
+current-schema validation.
 These limits are enforced again at repository and persistence boundaries so a
 future caller cannot bypass the protocol-layer checks. User-entered text has
 the same treatment: `ManualTextPolicy` trims and then rejects a member name

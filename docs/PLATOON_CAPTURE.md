@@ -42,11 +42,13 @@ Entry.member_name = field 5
 ```
 
 `occurred_at` is Unix time in seconds. Observed `802001` entries correlate with
-the in-game Daily Patrol-completion/update line and are collapsed to one fact
-per UID and game day. Duplicate `802001` rows do not mean that Daily Patrol was
-completed twice. `801005` is a correlated companion daily reward/reset record;
-its exact user-facing label remains provisional, so it is retained in parsed
-history but is not counted independently.
+the in-game Daily Patrol-completion/update line, and `801005` is a correlated
+companion daily reward/reset record whose exact user-facing label remains
+provisional. A 21935 activity carries a name but no UID, so both are kept only
+as name-resolved supporting history and never count as Daily Patrol. Daily
+Patrol evidence comes only from the UID-safe 21960 Updates kind `8`, which the
+weekly table deduplicates to one fact per UID and 05:00-based game day;
+duplicate rows never mean that Daily Patrol was completed twice.
 
 `Summary.id` is a unique, monotonic server record/cursor identifier, not a
 member UID. `Entry.kind` is an event variant/state discriminator: values 1, 2,

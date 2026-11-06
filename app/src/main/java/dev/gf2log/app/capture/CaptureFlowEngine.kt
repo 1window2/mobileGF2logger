@@ -14,6 +14,7 @@ import dev.gf2log.protocol.Gfl2StreamParser
 import dev.gf2log.protocol.model.ParseEvent
 import dev.gf2log.protocol.model.ParsedPayload
 import dev.gf2log.protocol.model.PlatoonProfileData
+import dev.gf2log.protocol.model.decodedElementCount
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -38,7 +39,8 @@ internal class CaptureFlowEngine(
     private val preIdentity = BoundedFlowPayloadBuffer<ParsedPayload>(
         MAX_PRE_IDENTITY_PAYLOADS_PER_FLOW,
         MAX_PRE_IDENTITY_PAYLOADS_TOTAL,
-    )
+        MAX_PRE_IDENTITY_ELEMENTS_TOTAL,
+    ) { it.data.decodedElementCount() }
     private val historyStores = HashMap<String, CaptureHistoryStore>()
     private val observedProfiles = HashMap<String, Pair<ObservedIdentity, PlatoonProfile>>()
     private var ownerResolver = CaptureFlowOwnerResolver(context)
@@ -293,6 +295,9 @@ internal class CaptureFlowEngine(
     }
 
     private fun holdUntilIdentified(flowId: Long, payload: ParsedPayload) {
+        // Only history consumes the optional types after identification, and the Platoon types'
+        // history is always on, so a payload whose history is off would be retained for nothing.
+        if (!payloadHistory.isEnabled(payload.payloadType)) return
         if (admission.retain(flowId, payload)) return
         if (preIdentity.offer(flowId, payload) == BoundedFlowPayloadBuffer.OfferResult.OVERFLOW) {
             CaptureStatus.report(CaptureNotice.FLOW_BUFFER_OVERFLOW)
@@ -318,5 +323,6 @@ internal class CaptureFlowEngine(
     private companion object {
         const val MAX_PRE_IDENTITY_PAYLOADS_PER_FLOW = 32
         const val MAX_PRE_IDENTITY_PAYLOADS_TOTAL = 128
+        const val MAX_PRE_IDENTITY_ELEMENTS_TOTAL = 65_536L
     }
 }

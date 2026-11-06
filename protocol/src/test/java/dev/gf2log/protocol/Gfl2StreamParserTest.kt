@@ -9,6 +9,7 @@ import dev.gf2log.protocol.model.PlatoonUpdatesData
 import dev.gf2log.protocol.model.PublicSkillItemsData
 import dev.gf2log.protocol.model.WeaponsData
 import dev.gf2log.protocol.model.WeaponModsData
+import dev.gf2log.protocol.model.decodedElementCount
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -479,6 +480,77 @@ class Gfl2StreamParserTest {
             ),
             events.single(),
         )
+    }
+
+    @Test
+    fun oneFrameOfPackedElementsBeyondTheDefaultBudgetIsDiscarded() {
+        val parser = Gfl2StreamParser()
+        val zeros = ByteArray(Gfl2PayloadDecoder.MAX_DECODED_ELEMENTS + 1)
+        val doll = messageField(3, zeros)
+        val formations = messageField(1, messageField(1, messageField(2, doll)))
+
+        val events = parser.accept(
+            outerMessage(42, payload(Gfl2PayloadDecoder.TYPE_FORMATIONS, formations)),
+        )
+
+        assertEquals(1, events.filterIsInstance<ParseEvent.Warning>().size)
+        assertTrue(events.filterIsInstance<ParseEvent.Payload>().isEmpty())
+        assertRecovers(parser)
+    }
+
+    @Test
+    fun oneFrameOfEmptySubmessagesBeyondTheBudgetIsDiscarded() {
+        val parser = Gfl2StreamParser(maximumPayloadElements = 100)
+        val emptyWeapons = hex("0a00".repeat(101))
+
+        val events = parser.accept(
+            outerMessage(42, payload(Gfl2PayloadDecoder.TYPE_WEAPONS, emptyWeapons)),
+        )
+
+        assertEquals(1, events.filterIsInstance<ParseEvent.Warning>().size)
+        assertTrue(events.filterIsInstance<ParseEvent.Payload>().isEmpty())
+        assertRecovers(parser)
+    }
+
+    @Test
+    fun continuationsBeyondTheMergedElementBudgetAreQuarantined() {
+        val parser = Gfl2StreamParser(maximumPayloadElements = 10)
+        val continuation = outerMessage(
+            0,
+            payload(Gfl2PayloadDecoder.TYPE_WEAPONS, hex("0a00".repeat(4))),
+        )
+
+        assertTrue(parser.accept(continuation).isEmpty())
+        assertTrue(parser.accept(continuation).isEmpty())
+        val overflow = parser.accept(continuation)
+
+        assertEquals(1, overflow.filterIsInstance<ParseEvent.Warning>().size)
+        assertTrue(overflow.filterIsInstance<ParseEvent.Payload>().isEmpty())
+        assertTrue(parser.accept(continuation).isEmpty())
+        assertTrue(
+            parser.accept(
+                outerMessage(42, payload(Gfl2PayloadDecoder.TYPE_WEAPONS, hex("0a00"))),
+            ).isEmpty(),
+        )
+        assertRecovers(parser)
+    }
+
+    @Test
+    fun continuationsWithinTheElementBudgetMergeInOrder() {
+        val parser = Gfl2StreamParser(maximumPayloadElements = 12)
+        val continuation = outerMessage(
+            0,
+            payload(Gfl2PayloadDecoder.TYPE_WEAPONS, hex("0a00".repeat(4))),
+        )
+
+        assertTrue(parser.accept(continuation).isEmpty())
+        assertTrue(parser.accept(continuation).isEmpty())
+        val merged = parser.accept(
+            outerMessage(42, payload(Gfl2PayloadDecoder.TYPE_WEAPONS, hex("0a00".repeat(4)))),
+        ).singlePayload().value.data as WeaponsData
+
+        assertEquals(12, merged.weapons.size)
+        assertEquals(12, merged.decodedElementCount())
     }
 
     private fun weaponsPayload(): ByteArray {

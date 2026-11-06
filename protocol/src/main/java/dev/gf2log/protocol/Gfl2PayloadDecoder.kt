@@ -1,5 +1,6 @@
 package dev.gf2log.protocol
 
+import dev.gf2log.protocol.internal.DecodeBudget
 import dev.gf2log.protocol.internal.ProtoReader
 import dev.gf2log.protocol.internal.collectMessages
 import dev.gf2log.protocol.internal.forEachField
@@ -59,18 +60,38 @@ object Gfl2PayloadDecoder {
         else -> false
     }
 
+    /**
+     * Upper bound on the submessages and repeated scalars one logical payload may decode. A
+     * two-byte empty submessage would otherwise turn a 2 MiB continuation sequence into about a
+     * million objects; real rosters, inventories, and formations stay far below this.
+     */
+    const val MAX_DECODED_ELEMENTS = 32_768
+
     @Throws(ProtocolException::class)
-    fun decode(type: Int, bytes: ByteArray): GameData? = when (type) {
-        TYPE_WEAPONS -> decodeWeapons(ProtoReader(bytes))
-        TYPE_WEAPON_MODS -> decodeWeaponMods(ProtoReader(bytes))
-        TYPE_PUBLIC_SKILL_ITEMS -> decodePublicSkillItems(ProtoReader(bytes))
-        TYPE_PLATOON_PROFILE -> decodePlatoonProfile(ProtoReader(bytes))
-        TYPE_GUILD_MEMBERS -> decodeGuildMembers(ProtoReader(bytes))
-        TYPE_PLATOON_ACTIVITY -> decodePlatoonActivity(ProtoReader(bytes))
-        TYPE_PLATOON_UPDATES -> decodePlatoonUpdates(ProtoReader(bytes))
-        TYPE_FORMATIONS -> decodeFormationsResponse(ProtoReader(bytes))
-        else -> null
+    fun decode(type: Int, bytes: ByteArray): GameData? =
+        decodeCounted(type, bytes, MAX_DECODED_ELEMENTS)?.data
+
+    /** Decodes [bytes] while charging every element to a budget of [maxElements]. */
+    @Throws(ProtocolException::class)
+    internal fun decodeCounted(type: Int, bytes: ByteArray, maxElements: Int): Decoded? {
+        val budget = DecodeBudget(maxElements)
+        val reader = ProtoReader(bytes, budget)
+        val data = when (type) {
+            TYPE_WEAPONS -> decodeWeapons(reader)
+            TYPE_WEAPON_MODS -> decodeWeaponMods(reader)
+            TYPE_PUBLIC_SKILL_ITEMS -> decodePublicSkillItems(reader)
+            TYPE_PLATOON_PROFILE -> decodePlatoonProfile(reader)
+            TYPE_GUILD_MEMBERS -> decodeGuildMembers(reader)
+            TYPE_PLATOON_ACTIVITY -> decodePlatoonActivity(reader)
+            TYPE_PLATOON_UPDATES -> decodePlatoonUpdates(reader)
+            TYPE_FORMATIONS -> decodeFormationsResponse(reader)
+            else -> return null
+        }
+        return Decoded(data, budget.consumed)
     }
+
+    /** One decoded payload and the elements its decoding charged to the budget. */
+    internal class Decoded(val data: GameData, val elements: Int)
 
     private fun decodeWeapons(reader: ProtoReader) =
         WeaponsData(reader.collectMessages(1, ::decodeWeapon))

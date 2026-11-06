@@ -1,5 +1,10 @@
 package dev.gf2log.app.capture
 
+import dev.gf2log.protocol.Gfl2PayloadDecoder
+import dev.gf2log.protocol.model.ParsedPayload
+import dev.gf2log.protocol.model.Weapon
+import dev.gf2log.protocol.model.WeaponsData
+import dev.gf2log.protocol.model.decodedElementCount
 import java.lang.reflect.Modifier
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -50,6 +55,35 @@ class BoundedFlowPayloadBufferTest {
     }
 
     @Test
+    fun aggregateWeightOverflowRejectsTheFlowAndRemovalReleasesItsWeight() {
+        val buffer = BoundedFlowPayloadBuffer<String>(8, 8, maxTotalWeight = 10) { it.length }
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(1, "aaaa"))
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(2, "bbbb"))
+
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.OVERFLOW, buffer.offer(1, "ccc"))
+        assertTrue(buffer.isRejected(1))
+        assertTrue(buffer.take(1).isEmpty())
+
+        // Flow 1's four units were released when it was rejected; flow 2 still holds four.
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(3, "dddddd"))
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.OVERFLOW, buffer.offer(4, "e"))
+        assertEquals(listOf("bbbb"), buffer.take(2))
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(5, "ffff"))
+    }
+
+    @Test
+    fun decodedPayloadsAreWeighedByTheirElements() {
+        val buffer = BoundedFlowPayloadBuffer<ParsedPayload>(8, 8, maxTotalWeight = 100) {
+            it.data.decodedElementCount()
+        }
+        val small = weapons(40)
+
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(1, small))
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.ACCEPTED, buffer.offer(1, small))
+        assertEquals(BoundedFlowPayloadBuffer.OfferResult.OVERFLOW, buffer.offer(1, weapons(21)))
+    }
+
+    @Test
     fun removalAndClearReleaseAggregateCapacity() {
         val buffer = BoundedFlowPayloadBuffer<String>(2, 2)
         buffer.offer(1, "one")
@@ -76,4 +110,11 @@ class BoundedFlowPayloadBufferTest {
             ))
         }
     }
+
+    private fun weapons(count: Int) = ParsedPayload(
+        messageId = 1,
+        payloadType = Gfl2PayloadDecoder.TYPE_WEAPONS,
+        isEndOfMessage = true,
+        data = WeaponsData(List(count) { Weapon(it.toUInt(), 0u, 0u, 0u, 0u, 0u, 0u, emptyList()) }),
+    )
 }

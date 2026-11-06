@@ -7,6 +7,7 @@ import dev.gf2log.protocol.model.GuildMembersData
 import dev.gf2log.protocol.model.ParseEvent
 import dev.gf2log.protocol.model.ParsedPayload
 import dev.gf2log.protocol.model.PlatoonActivityData
+import dev.gf2log.protocol.model.PlatoonProfileData
 import dev.gf2log.protocol.model.PlatoonUpdatesData
 import dev.gf2log.protocol.model.PublicSkillItemsData
 import dev.gf2log.protocol.model.WeaponModsData
@@ -16,10 +17,12 @@ class Gfl2StreamParser(
     maximumBufferedBytes: Int = DEFAULT_MAXIMUM_BUFFERED_BYTES,
     private val maximumPendingPayloadBytes: Int = DEFAULT_MAXIMUM_PENDING_PAYLOAD_BYTES,
     private val maximumPendingContinuations: Int = DEFAULT_MAXIMUM_PENDING_CONTINUATIONS,
+    private val maximumPayloadElements: Int = Gfl2PayloadDecoder.MAX_DECODED_ELEMENTS,
 ) {
     init {
         require(maximumPendingPayloadBytes > 0) { "Pending payload byte limit must be positive" }
         require(maximumPendingContinuations > 0) { "Pending continuation limit must be positive" }
+        require(maximumPayloadElements > 0) { "Payload element limit must be positive" }
     }
 
     private val buffer = ByteAccumulator(maximumBufferedBytes)
@@ -104,7 +107,9 @@ class Gfl2StreamParser(
             } else if (!consumeQuarantinedPayload(type, messageId, isEndOfMessage)) {
                 val payload = bytes.copyOfRange(offset + PAYLOAD_HEADER_SIZE, offset + payloadSize)
                 try {
-                    val decoded = requireNotNull(Gfl2PayloadDecoder.decode(type, payload))
+                    val decoded = requireNotNull(
+                        Gfl2PayloadDecoder.decodeCounted(type, payload, maximumPayloadElements),
+                    )
                     acceptDecodedPayload(messageId, type, isEndOfMessage, payload.size, decoded, events)
                 } catch (error: ProtocolException) {
                     events += ParseEvent.Warning(
@@ -123,19 +128,21 @@ class Gfl2StreamParser(
         type: Int,
         isEndOfMessage: Boolean,
         payloadBytes: Int,
-        data: GameData,
+        decoded: Gfl2PayloadDecoder.Decoded,
         events: MutableList<ParseEvent>,
     ) {
+        val data = decoded.data
         val pending = pendingPayload
         if (pending != null) {
             val continued = pending.type == type && continues(pending.previousMessageId, messageId)
-            val merged = if (continued) merge(pending.data, data) else null
-            if (continued && merged != null) {
+            if (continued && isMergeable(pending.parts.first(), data)) {
                 val accumulatedBytes = pending.accumulatedPayloadBytes + payloadBytes.toLong()
                 val continuationCount = pending.continuationCount + 1
+                val accumulatedElements = pending.accumulatedElements + decoded.elements
                 if (
                     accumulatedBytes > maximumPendingPayloadBytes ||
-                    continuationCount > maximumPendingContinuations
+                    continuationCount > maximumPendingContinuations ||
+                    accumulatedElements > maximumPayloadElements
                 ) {
                     pendingPayload = null
                     quarantinedPayload = if (isTerminal(messageId, isEndOfMessage)) {
@@ -148,11 +155,12 @@ class Gfl2StreamParser(
                     )
                     return
                 }
-                pending.data = merged
+                pending.parts += data
                 pending.previousMessageId = messageId
                 pending.isEndOfMessage = isEndOfMessage
                 pending.accumulatedPayloadBytes = accumulatedBytes
                 pending.continuationCount = continuationCount
+                pending.accumulatedElements = accumulatedElements
                 if (isTerminal(messageId, isEndOfMessage)) emitPending(events)
                 return
             }
@@ -175,9 +183,10 @@ class Gfl2StreamParser(
                 type = type,
                 previousMessageId = messageId,
                 isEndOfMessage = isEndOfMessage,
-                data = data,
+                parts = mutableListOf(data),
                 accumulatedPayloadBytes = payloadBytes.toLong(),
                 continuationCount = 1,
+                accumulatedElements = decoded.elements,
             )
         }
     }
@@ -234,31 +243,38 @@ class Gfl2StreamParser(
                 messageId = pending.previousMessageId,
                 payloadType = pending.type,
                 isEndOfMessage = pending.isEndOfMessage,
-                data = pending.data,
+                data = concatenate(pending.parts),
             ),
         )
         pendingPayload = null
     }
 
-    /** Returns null for payloads that are not lists and therefore cannot be concatenated. */
-    private fun merge(first: GameData, second: GameData): GameData? = when {
-        first is WeaponsData && second is WeaponsData -> WeaponsData(first.weapons + second.weapons)
-        first is WeaponModsData && second is WeaponModsData ->
-            WeaponModsData(first.mods + second.mods)
-        first is PublicSkillItemsData && second is PublicSkillItemsData ->
-            PublicSkillItemsData(first.items + second.items)
-        first is GuildMembersData && second is GuildMembersData ->
-            GuildMembersData(first.members + second.members)
-        first is PlatoonActivityData && second is PlatoonActivityData ->
-            PlatoonActivityData(
-                summaries = first.summaries + second.summaries,
-                entries = first.entries + second.entries,
+    /** False for payloads that are not lists and therefore cannot be concatenated. */
+    private fun isMergeable(first: GameData, second: GameData): Boolean =
+        first !is PlatoonProfileData && first.javaClass == second.javaClass
+
+    /**
+     * Concatenates a dataset's frames once, when it is emitted, so a long continuation sequence
+     * copies each element a single time instead of once per continuation.
+     */
+    private fun concatenate(parts: List<GameData>): GameData {
+        val first = parts.first()
+        if (parts.size == 1) return first
+        return when (first) {
+            is WeaponsData -> WeaponsData(parts.flatMap { (it as WeaponsData).weapons })
+            is WeaponModsData -> WeaponModsData(parts.flatMap { (it as WeaponModsData).mods })
+            is PublicSkillItemsData ->
+                PublicSkillItemsData(parts.flatMap { (it as PublicSkillItemsData).items })
+            is GuildMembersData -> GuildMembersData(parts.flatMap { (it as GuildMembersData).members })
+            is PlatoonActivityData -> PlatoonActivityData(
+                summaries = parts.flatMap { (it as PlatoonActivityData).summaries },
+                entries = parts.flatMap { (it as PlatoonActivityData).entries },
             )
-        first is PlatoonUpdatesData && second is PlatoonUpdatesData ->
-            PlatoonUpdatesData(first.entries + second.entries)
-        first is FormationsData && second is FormationsData ->
-            FormationsData(first.formations + second.formations)
-        else -> null
+            is PlatoonUpdatesData ->
+                PlatoonUpdatesData(parts.flatMap { (it as PlatoonUpdatesData).entries })
+            is FormationsData -> FormationsData(parts.flatMap { (it as FormationsData).formations })
+            is PlatoonProfileData -> error("A Platoon profile is never merged")
+        }
     }
 
     /** The reference continuation rule: after message id 0, or within the same message id. */
@@ -281,13 +297,14 @@ class Gfl2StreamParser(
         const val DEFAULT_MAXIMUM_PENDING_CONTINUATIONS = 64
     }
 
-    private data class PendingPayload(
+    private class PendingPayload(
         val type: Int,
         var previousMessageId: Int,
         var isEndOfMessage: Boolean,
-        var data: GameData,
+        val parts: MutableList<GameData>,
         var accumulatedPayloadBytes: Long,
         var continuationCount: Int,
+        var accumulatedElements: Int,
     )
 
     private data class QuarantinedPayload(

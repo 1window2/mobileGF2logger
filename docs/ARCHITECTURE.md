@@ -115,6 +115,10 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   A malformed or truncated continuation frame discards its dataset the same way.
   Quarantine is advanced from frame metadata before protobuf decoding, so even
   a malformed terminal fragment clears the discarded dataset deterministically.
+  Decoding also charges every submessage and repeated scalar against a budget of
+  32,768 elements per logical payload, across its continuations, and exceeding
+  it is handled like the byte limit, so a frame of minimal elements cannot
+  amplify into an unbounded object graph.
 - One serial `CaptureWorker` owns every parser, flow, session, and admission
   structure, so that state needs no locks. Native callbacks share a budget of
   256 queued chunks; lifecycle, confirm, and discard tasks bypass that budget
@@ -129,11 +133,13 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   when the service is destroyed meanwhile, so nothing that waits for `STOPPED`
   can overlap the native loop or the drain.
 - Before identity is established, each flow retains at most 32 decoded payload
-  objects. Overflow rejects that flow until closure. The profile registry holds
-  at most 16 bounded identities.
+  objects, all flows together at most 65,536 decoded elements, and only payload
+  types whose history is on. Overflow rejects that flow until closure. The
+  profile registry holds at most 16 bounded identities.
 - Unconfirmed profile admission is capped at 4 candidates, 64 decoded payloads
-  per candidate, and 128 payloads total. Overflow rejects every flow belonging
-  to that candidate rather than partially persisting it.
+  per candidate, 128 payloads total, and 65,536 decoded elements total.
+  Overflow rejects every flow belonging to that candidate rather than partially
+  persisting it.
 - A bound flow cannot change its Platoon identity. Admission failure clears its
   session and quarantines the flow until native closure. Replay binds every
   claimed flow before routing any buffered payload, so a replay that fails has

@@ -20,8 +20,11 @@ class CaptureHistoryStore(
     fun save(payload: ParsedPayload): Entry = synchronized(entries.lock) {
         entries.ensureExists("history")
         val instant = Instant.now(clock)
-        val content = ParsedPayloadTextFormatter.format(payload, LogTime.format(instant))
-            .toByteArray(Charsets.UTF_8)
+        // Bounded while formatting, so a crafted payload cannot allocate its whole text first.
+        val text = requireNotNull(
+            ParsedPayloadTextFormatter.format(payload, LogTime.format(instant), MAX_ENTRY_BYTES),
+        ) { "Parsed-packet history entry exceeds the storage limit" }
+        val content = text.toByteArray(Charsets.UTF_8)
         require(content.size <= MAX_ENTRY_BYTES) {
             "Parsed-packet history entry exceeds the storage limit"
         }

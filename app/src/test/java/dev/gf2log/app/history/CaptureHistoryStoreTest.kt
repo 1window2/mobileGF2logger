@@ -1,5 +1,9 @@
 package dev.gf2log.app.history
 
+import dev.gf2log.protocol.Gfl2PayloadDecoder
+import dev.gf2log.protocol.GuildMembersCsv
+import dev.gf2log.protocol.model.GuildMember
+import dev.gf2log.protocol.model.GuildMembersData
 import dev.gf2log.protocol.model.PublicSkillItem
 import dev.gf2log.protocol.model.PublicSkillItemsData
 import dev.gf2log.protocol.model.ParsedPayload
@@ -11,6 +15,7 @@ import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -108,6 +113,33 @@ class CaptureHistoryStoreTest {
             assertFalse(
                 HistoryDirectory(directory).lock === HistoryDirectory(directory.resolve("other")).lock,
             )
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun oversizedPayloadWritesNothingAndKeepsEarlierEntries() {
+        val directory = Files.createTempDirectory("gf2log-history-oversized-test").toFile()
+        try {
+            val store = CaptureHistoryStore(directory)
+            val kept = store.save(payload(1))
+            val name = "x".repeat(GuildMembersCsv.MAX_MEMBER_NAME_CHARS)
+            val oversized = ParsedPayload(
+                messageId = 7,
+                payloadType = Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
+                isEndOfMessage = true,
+                data = GuildMembersData(
+                    List(CaptureHistoryStore.MAX_ENTRY_BYTES / name.length) { index ->
+                        GuildMember((index + 1).toUInt(), name, 60u, 1u, 2u, 3u, 4u, 5u)
+                    },
+                ),
+            )
+
+            assertThrows(IllegalArgumentException::class.java) { store.save(oversized) }
+
+            assertEquals(listOf(kept.id), store.list().map { it.id })
+            assertEquals(listOf(kept.id), directory.list().orEmpty().toList())
         } finally {
             directory.deleteRecursively()
         }

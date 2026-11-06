@@ -677,7 +677,7 @@
     <string name="standby_only">Standby only</string>
     <string name="standby_no_platoons">No Platoon is saved yet, so standby mode will not record. Capture your Platoon once first.</string>
     <string name="standby_vpn_needed">Automatic recording needs VPN consent. Standby mode will not record this time.</string>
-    <string name="capture_vpn_needed">Capture needs VPN permission. Tap Start capture to try again.</string>
+    <string name="capture_vpn_needed">Capture needs VPN permission. Start a capture again to retry.</string>
     <string name="standby_servers_title">Choose servers to record</string>
     <string name="standby_servers_message">Each chosen server is recorded 5 minutes before its game day ends, then the phone locks (on Android 8 it is left to its screen timeout). Until then the phone stays unlocked, and tapping the screen or switching apps leaves standby without locking it. A client logs in to one server at a time, so choose one server per client.</string>
     <string name="standby_server_option">%1$s · %2$s · starts %3$s</string>

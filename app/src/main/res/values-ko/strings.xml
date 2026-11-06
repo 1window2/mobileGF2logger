@@ -438,6 +438,7 @@
     <string name="source_manual">수동</string>
     <string name="source_roster">명단 관측</string>
     <string name="source_updates">정확 (동향)</string>
+    <string name="source_activity">활동 기준</string>
     <string name="stat_active">가입 중</string>
     <string name="stat_last_snapshot">최근 스냅샷</string>
     <string name="stat_withdrawn">탈퇴</string>

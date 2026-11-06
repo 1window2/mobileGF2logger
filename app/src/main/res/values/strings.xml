@@ -442,6 +442,7 @@
     <string name="source_manual">manual</string>
     <string name="source_roster">observed in roster</string>
     <string name="source_updates">exact (Updates)</string>
+    <string name="source_activity">dated by activity</string>
     <string name="stat_active">Active</string>
     <string name="stat_last_snapshot">Last snapshot</string>
     <string name="stat_withdrawn">Withdrawn</string>

@@ -226,15 +226,28 @@ internal object SnapshotIngestion {
             from = priorCapturedAt,
             observedAt = observedAt,
         )
-        val membershipPeriodId = exactMembershipPeriodId ?: closeLatestMembershipPeriod(
+        if (exactMembershipPeriodId != null) {
+            // The exact withdrawal closed its period; the omission still ends any other one.
+            MembershipRows.closeOpenMembershipPeriods(
+                db = db,
+                uid = member.uid,
+                memberName = member.name,
+                leftAt = observedAt,
+                precision = EvidencePrecision.INFERRED,
+                source = source,
+            )
+            recordLastSeen(db, member.uid, observedAt)
+            return
+        }
+        val membershipPeriodId = closeLatestMembershipPeriod(
             db = db,
             uid = member.uid,
+            memberName = member.name,
             leftAt = observedAt,
             precision = EvidencePrecision.INFERRED,
             source = source,
         )
         recordLastSeen(db, member.uid, observedAt)
-        if (exactMembershipPeriodId != null) return
         insertSnapshotBoundaryEvent(
             db,
             membershipPeriodId,

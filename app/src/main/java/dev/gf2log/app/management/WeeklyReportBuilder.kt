@@ -383,7 +383,7 @@ object WeeklyReportBuilder {
         }
         membershipEvents.asSequence()
             .filter { event ->
-                event.source == EvidenceSource.GAME_UPDATES &&
+                event.source in TIMED_BOUNDARY_SOURCES &&
                     event.precision == EvidencePrecision.EXACT &&
                     event.occurredAt?.isBefore(rosterCutoff) == true
             }
@@ -756,7 +756,7 @@ object WeeklyReportBuilder {
     ): Set<Long> = snapshotRoster.toMutableSet().apply {
         events.asSequence()
             .filter { event ->
-                event.source == EvidenceSource.GAME_UPDATES &&
+                event.source in TIMED_BOUNDARY_SOURCES &&
                     event.precision == EvidencePrecision.EXACT &&
                     event.occurredAt?.let { occurredAt ->
                         occurredAt.isBefore(cutoff) &&

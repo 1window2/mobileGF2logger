@@ -27,8 +27,18 @@ fun isValidMembershipRange(
     else -> !withdrew.instant.isBefore(joined.instant)
 }
 
+/**
+ * Only 21960 Updates boundaries are immutable. An [EvidenceSource.ACTIVITY] boundary is an
+ * inference from a name-matched activity, so it stays editable like a roster observation.
+ */
 fun EvidenceSource.isImmutableMembershipBoundary(): Boolean =
     this == EvidenceSource.GAME_UPDATES
+
+/**
+ * Sources whose boundary events carry the instant the change happened, so the weekly roster
+ * applies them at that instant: exact Updates and activity-dated roster boundaries.
+ */
+internal val TIMED_BOUNDARY_SOURCES = setOf(EvidenceSource.GAME_UPDATES, EvidenceSource.ACTIVITY)
 
 /**
  * Only a recorded packet-linked boundary is immutable. A period opened by an exact Updates
@@ -99,6 +109,7 @@ object MembershipEventPresentation {
         EvidenceSource.LEGACY_IMPORT,
         EvidenceSource.GAME_UPDATES,
         EvidenceSource.MANUAL,
+        EvidenceSource.ACTIVITY,
     )
 
     fun deduplicate(events: List<MemberEvent>): List<MemberEvent> {
@@ -133,7 +144,7 @@ object MembershipEventPresentation {
     }
 
     fun timePrefix(event: MemberEvent, zoneId: ZoneId): String? = when {
-        event.source == EvidenceSource.GAME_UPDATES && event.occurredAt != null ->
+        event.source in TIMED_BOUNDARY_SOURCES && event.occurredAt != null ->
             eventTime.format(event.occurredAt.atZone(zoneId))
         event.source == EvidenceSource.MANUAL && !event.timeKnown -> "??:??"
         event.source == EvidenceSource.MANUAL && event.occurredAt != null ->
@@ -148,8 +159,9 @@ object MembershipEventPresentation {
         event.type in displayedTypes && event.source in displayedSources
 
     private fun evidencePriority(source: EvidenceSource): Int = when (source) {
-        EvidenceSource.GAME_UPDATES -> 3
-        EvidenceSource.MANUAL -> 2
+        EvidenceSource.GAME_UPDATES -> 4
+        EvidenceSource.MANUAL -> 3
+        EvidenceSource.ACTIVITY -> 2
         EvidenceSource.SNAPSHOT, EvidenceSource.LEGACY_IMPORT -> 1
     }
 

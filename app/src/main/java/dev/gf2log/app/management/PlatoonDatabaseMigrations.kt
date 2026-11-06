@@ -32,6 +32,69 @@ internal object PlatoonDatabaseMigrations {
         }
         if (oldVersion < 12) PlatoonDatabaseSchema.createWeeklyReportHistoryTables(db)
         if (oldVersion < 13) MembershipRows.synchronizeAllActiveStates(db)
+        if (oldVersion < 14) {
+            markActivityDatedBoundaries(db)
+            MembershipRows.foldAllDuplicateOpenPeriods(db)
+            MembershipRows.synchronizeAllActiveStates(db)
+        }
+    }
+
+    /**
+     * Before v14 a roster boundary dated by a 21935 activity was stored as exact Updates
+     * evidence. Its event is the one an activity fact cites, since only activity dating links
+     * facts to events; it and the period side it dated become [EvidenceSource.ACTIVITY], so a
+     * later 21960 boundary replaces them. A fact evicted by the activity cap cannot be told
+     * apart and keeps its stored source.
+     */
+    private fun markActivityDatedBoundaries(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            UPDATE member_events SET source = ?
+            WHERE source = ?
+              AND id IN (
+                SELECT member_event_id FROM platoon_activity
+                WHERE resolution = ? AND member_event_id IS NOT NULL
+              )
+            """.trimIndent(),
+            arrayOf(
+                EvidenceSource.ACTIVITY.name,
+                EvidenceSource.GAME_UPDATES.name,
+                ActivityResolution.MEMBERSHIP_CORRELATION.name,
+            ),
+        )
+        MembershipBoundary.entries.forEach { boundary ->
+            val types = boundary.eventTypes.map(MemberEventType::name)
+            db.execSQL(
+                """
+                UPDATE membership_periods SET ${boundary.sourceColumn} = ?
+                WHERE ${boundary.sourceColumn} = ?
+                  AND EXISTS (
+                    SELECT 1 FROM member_events event
+                    WHERE event.membership_period_id = membership_periods.id
+                      AND event.source = ?
+                      AND event.event_type IN (?, ?)
+                      AND event.occurred_at = membership_periods.${boundary.atColumn}
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM member_events event
+                    WHERE event.membership_period_id = membership_periods.id
+                      AND event.source = ?
+                      AND event.event_type IN (?, ?)
+                      AND event.occurred_at = membership_periods.${boundary.atColumn}
+                  )
+                """.trimIndent(),
+                arrayOf(
+                    EvidenceSource.ACTIVITY.name,
+                    EvidenceSource.GAME_UPDATES.name,
+                    EvidenceSource.ACTIVITY.name,
+                    types[0],
+                    types[1],
+                    EvidenceSource.GAME_UPDATES.name,
+                    types[0],
+                    types[1],
+                ),
+            )
+        }
     }
 
     private fun renameTenuresToMembershipPeriods(db: SQLiteDatabase, oldVersion: Int) {

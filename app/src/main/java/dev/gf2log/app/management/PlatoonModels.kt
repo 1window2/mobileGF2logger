@@ -144,11 +144,18 @@ enum class EvidencePrecision {
     MANUAL,
 }
 
+/**
+ * Who supplied a membership boundary. Stored by name and encoded by ordinal in weekly history,
+ * so new values are only appended. Only 21960 Updates evidence is [GAME_UPDATES]; a roster
+ * boundary dated by a name-matched 21935 activity is [ACTIVITY] (schema v14), which a later
+ * Updates boundary for the same change replaces.
+ */
 enum class EvidenceSource {
     SNAPSHOT,
     GAME_UPDATES,
     MANUAL,
     LEGACY_IMPORT,
+    ACTIVITY,
 }
 
 enum class DailyEvidence {

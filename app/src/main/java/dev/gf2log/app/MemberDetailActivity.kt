@@ -442,6 +442,7 @@ class MemberDetailActivity : BaseActivity() {
             EvidenceSource.SNAPSHOT -> R.string.source_roster
             EvidenceSource.MANUAL -> R.string.source_manual
             EvidenceSource.LEGACY_IMPORT -> R.string.source_legacy
+            EvidenceSource.ACTIVITY -> R.string.source_activity
         },
     )
 

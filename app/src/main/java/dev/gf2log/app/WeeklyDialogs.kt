@@ -41,22 +41,28 @@ internal object WeeklyDialogs {
         display: CellDisplay,
         explanations: Map<Metric, WeeklyEvidenceAnalyzer.Explanation>,
     ) {
+        // Each value carries the words the table cell speaks for it, never the glyph's name.
         val metrics = buildList {
-            add(Metric.MERIT to display.merit)
+            add(Triple(Metric.MERIT, display.merit, CellSpeech.value(activity, display.merit)))
             if (isGunsmokeWeek) {
-                add(Metric.SCORE to (display.score ?: "-"))
-                add(Metric.ATTEMPTS to (display.attempts ?: "-"))
+                val score = display.score ?: "-"
+                val attempts = display.attempts ?: "-"
+                add(Triple(Metric.SCORE, score, CellSpeech.value(activity, score)))
+                add(Triple(Metric.ATTEMPTS, attempts, CellSpeech.value(activity, attempts)))
             }
-            add(Metric.LOGIN to display.login.symbol)
-            add(Metric.DAILY_PATROL to display.patrol.symbol)
+            add(Triple(Metric.LOGIN, display.login.symbol, CellSpeech.mark(activity, display.login)))
+            add(Triple(Metric.DAILY_PATROL, display.patrol.symbol, CellSpeech.mark(activity, display.patrol)))
         }
         val content = Dialogs.content(activity) {
-            metrics.forEachIndexed { index, (metric, value) ->
+            metrics.forEachIndexed { index, (metric, value, spoken) ->
                 val explanation = explanations[metric] ?: return@forEachIndexed
                 if (index > 0) addView(activity.divider(), activity.lp(top = 12, bottom = 12))
                 addView(activity.row {
                     addView(activity.text(metricLabel(activity, metric), TextRole.SUBTITLE), activity.lp(width = 0, weight = 1f))
-                    addView(activity.text(value, TextRole.TITLE) { gravity = Gravity.END }, activity.lp(WRAP, WRAP, start = 8))
+                    addView(activity.text(value, TextRole.TITLE) {
+                        gravity = Gravity.END
+                        contentDescription = spoken
+                    }, activity.lp(WRAP, WRAP, start = 8))
                 }, activity.lp())
                 addView(certaintyBadge(activity, explanation.certainty), activity.lp(WRAP, WRAP, top = 4))
                 explanation.facts.ifEmpty { listOf(WeeklyEvidenceAnalyzer.Fact.NO_OBSERVATION) }.forEach { fact ->

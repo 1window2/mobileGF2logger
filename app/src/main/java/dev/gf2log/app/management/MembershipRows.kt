@@ -454,6 +454,11 @@ internal object MembershipRows {
             arrayOf(ACTIVE_STATE_RULE_KEY),
         ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
         if (derivedWith != null && derivedWith >= ACTIVE_STATE_RULE_VERSION) return
+        rederiveActiveStates(db)
+    }
+
+    /** Derives every active flag with the current rule and records that rule. */
+    fun rederiveActiveStates(db: SQLiteDatabase) {
         db.inTransaction {
             synchronizeAllActiveStates(db)
             db.insertWithOnConflict(

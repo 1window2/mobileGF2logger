@@ -209,7 +209,8 @@ transitions.
   is superseded by a later recorded exit or by a newer roster that omits the
   member. Opening a database re-derives every stale flag once whenever this
   rule's version changes (platoon_maintenance_state key `active_state_rule`),
-  including databases already at schema v13 and restored backups.
+  including databases already at schema v13; a restore derives every flag
+  again while it rebuilds the backup's rows.
 - A roster CSV imported after newer captures still contributes historical
   presence spans. The replay creates missing inactive members and inferred
   withdrawal/rejoin periods without replacing manual or exact Updates evidence.

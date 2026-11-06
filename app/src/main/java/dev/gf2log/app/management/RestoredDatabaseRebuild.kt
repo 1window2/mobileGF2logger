@@ -41,8 +41,14 @@ internal object RestoredDatabaseRebuild {
             db.execSQL("ATTACH DATABASE ? AS $SOURCE", arrayOf<Any>(source.path))
             try {
                 db.inTransaction {
+                    // Opening the empty copy stamped maintenance state that describes no rows; the
+                    // archive's own state describes the rows that arrive, so it replaces it.
+                    db.execSQL("DELETE FROM main.platoon_maintenance_state")
                     copyStatements(appColumns(db)).forEach(db::execSQL)
                     copySequences(db)
+                    // Active flags are derived data: the archive's flags and rule stamp are not
+                    // trusted, they are derived again with the current rule.
+                    MembershipRows.rederiveActiveStates(db)
                     // Unqualified names resolve to main, the rebuilt copy.
                     WeeklyHistoryIntegrity.dropUnreadableRevisions(db)
                     // An archive already at the current version skipped the upgrade's repair.

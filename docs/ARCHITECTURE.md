@@ -299,7 +299,11 @@ periods, adds `snapshots.clock_suspect`, and removes every row of a member
 stored without a real UID (UID 0 or below); supported older backups are
 upgraded before strict current-schema validation, and every restored database
 runs the same UID repair after its rows are rebuilt, so an archive already at
-v14 cannot bring such a member back.
+v14 cannot bring such a member back. The rebuild copies the archive's own
+`platoon_maintenance_state` (history reset zone, activity-resolution cursor)
+in place of what creating the empty copy stamped, and derives every active
+flag again with the current rule, so an archive's flags or rule stamp are
+never trusted.
 
 `SnapshotClockReview` keeps a roster captured with the phone clock set ahead
 from becoming the permanent current roster. Before each roster that may

@@ -34,14 +34,18 @@ internal class BackupFlow(
         ActivityResultContracts.CreateDocument(PlatoonBackupManager.MIME_TYPE),
     ) { uri ->
         val target = scope()
-        if (uri == null || target == null) return@registerForActivityResult
+        if (uri == null) return@registerForActivityResult
+        if (target == null) {
+            work.run(task = { DocumentAccess.discard(activity.contentResolver, uri) })
+            return@registerForActivityResult
+        }
         val complete = pendingExportComplete
         run(
             progress = R.string.backup_exporting,
             success = if (complete) R.string.full_backup_exported else R.string.status_backup_exported,
-            failure = { backupExportFailureMessage(complete) },
+            failure = { DocumentAccess.exportFailureMessage(it, backupExportFailureMessage(complete)) },
         ) {
-            DocumentAccess.openOutput(activity.contentResolver, uri).use { output ->
+            DocumentAccess.writeExport(activity.contentResolver, uri) { output ->
                 val manager = PlatoonBackupManager(activity, target)
                 if (complete) manager.exportFull(output) else manager.export(output)
             }
@@ -86,27 +90,30 @@ internal class BackupFlow(
                     PlatoonBackupManager.restoreSelected(activity, input)
                 }
             },
-        ) { result ->
-            result.fold(
-                onSuccess = { kind ->
-                    Feedback.show(
-                        activity,
-                        if (kind == RestoredBackupKind.COMPLETE) R.string.full_backup_restored else R.string.status_backup_restored,
-                        long = true,
-                    )
-                    activity.recreate()
-                },
-                onFailure = { Feedback.show(activity, fullBackupRestoreFailureMessage(it), long = true) },
-            )
-        }
+            // Runs even if this screen was recreated meanwhile; the showing screen reloads the data.
+            always = { result ->
+                result.fold(
+                    onSuccess = { kind ->
+                        Feedback.show(
+                            activity,
+                            if (kind == RestoredBackupKind.COMPLETE) R.string.full_backup_restored else R.string.status_backup_restored,
+                            long = true,
+                        )
+                        (activity.takeUnless { it.isFinishing || it.isDestroyed } ?: BaseActivity.foregroundScreen())
+                            ?.recreate()
+                    },
+                    onFailure = { Feedback.show(activity, fullBackupRestoreFailureMessage(it), long = true) },
+                )
+            },
+        )
     }
 
     private fun run(progress: Int, success: Int, failure: (Throwable) -> Int, operation: () -> Unit) {
         if (work.isBusy(maintenanceKey)) return
         Feedback.show(activity, progress)
-        work.run(key = maintenanceKey, task = operation) { result ->
+        work.run(key = maintenanceKey, task = operation, always = { result ->
             Feedback.show(activity, result.fold(onSuccess = { success }, onFailure = failure), long = true)
-        }
+        })
     }
 
     private companion object {

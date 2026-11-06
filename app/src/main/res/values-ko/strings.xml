@@ -229,6 +229,7 @@
     <string name="status_packet_copied">파싱 패킷을 복사했습니다</string>
     <string name="status_preparing">캡처 준비 중</string>
     <string name="status_export_failed">서클 CSV를 내보낼 수 없습니다</string>
+    <string name="export_location_unsupported">이 위치에는 저장할 수 없습니다. 기기 저장공간, 다운로드 또는 Google 드라이브를 선택하세요.</string>
     <string name="status_no_platoon_csv">캡처한 서클 CSV가 없습니다</string>
     <string name="status_save_history_failed">선택 기록을 저장할 수 없습니다</string>
     <string name="status_history_already_saved">선택한 기록은 이미 보관되어 있습니다</string>
@@ -624,6 +625,7 @@
     <string name="standby_only">대기 모드만 켜기</string>
     <string name="standby_no_platoons">저장된 서클이 없어 대기 모드가 기록하지 않습니다. 먼저 서클을 한 번 캡처하세요.</string>
     <string name="standby_vpn_needed">자동 기록에는 VPN 동의가 필요합니다. 이번 대기 모드에서는 기록하지 않습니다.</string>
+    <string name="capture_vpn_needed">기록하려면 VPN 권한이 필요합니다. 다시 시도하려면 기록 시작을 누르세요.</string>
     <string name="standby_servers_title">기록할 서버 선택</string>
     <string name="standby_servers_message">선택한 서버마다 게임 하루가 끝나기 5분 전에 기록한 뒤 휴대전화를 잠급니다. 클라이언트는 한 번에 한 서버에만 접속하므로 클라이언트마다 서버를 하나씩 선택하세요.</string>
     <string name="standby_server_option">%1$s · %2$s · %3$s 시작</string>

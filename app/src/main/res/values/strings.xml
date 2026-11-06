@@ -229,6 +229,7 @@
     <string name="status_packet_copied">Parsed packet copied</string>
     <string name="status_preparing">Preparing capture</string>
     <string name="status_export_failed">Unable to export Platoon CSV</string>
+    <string name="export_location_unsupported">This location is not supported. Choose device storage, Downloads, or Google Drive.</string>
     <string name="status_no_platoon_csv">No Platoon CSV has been captured yet</string>
     <string name="status_save_history_failed">Unable to save selected history</string>
     <string name="status_history_already_saved">Selected history is already saved</string>
@@ -632,6 +633,7 @@
     <string name="standby_only">Standby only</string>
     <string name="standby_no_platoons">No Platoon is saved yet, so standby mode will not record. Capture your Platoon once first.</string>
     <string name="standby_vpn_needed">Automatic recording needs VPN consent. Standby mode will not record this time.</string>
+    <string name="capture_vpn_needed">Capture needs VPN permission. Tap Start capture to try again.</string>
     <string name="standby_servers_title">Choose servers to record</string>
     <string name="standby_servers_message">Each chosen server is recorded 5 minutes before its game day ends, then the phone locks. A client logs in to one server at a time, so choose one server per client.</string>
     <string name="standby_server_option">%1$s · %2$s · starts %3$s</string>

@@ -2,7 +2,10 @@ package dev.gf2log.app.ui
 
 import android.content.ContentResolver
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import androidx.annotation.StringRes
+import dev.gf2log.app.R
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.file.Paths
@@ -38,6 +41,37 @@ internal object DocumentAccess {
         return output ?: error("Document provider did not open an output stream")
     }
 
+    /**
+     * Writes an export into a document the picker has already created. A failed or refused write
+     * deletes that document (best effort), so a 0-byte or truncated file never sits beside real
+     * exports looking like one.
+     */
+    fun writeExport(resolver: ContentResolver, destination: Uri, write: (OutputStream) -> Unit) =
+        writeOrDiscard(
+            open = { openOutput(resolver, destination) },
+            discard = { discard(resolver, destination) },
+            write = write,
+        )
+
+    /** Deletes a created document that will not receive its export; failures are ignored. */
+    fun discard(resolver: ContentResolver, destination: Uri) {
+        runCatching { DocumentsContract.deleteDocument(resolver, destination) }
+    }
+
+    internal fun writeOrDiscard(open: () -> OutputStream, discard: () -> Unit, write: (OutputStream) -> Unit) {
+        try {
+            open().use(write)
+        } catch (error: Throwable) {
+            runCatching(discard).exceptionOrNull()?.let(error::addSuppressed)
+            throw error
+        }
+    }
+
+    /** The failure message for an export: a refused provider names the locations that work. */
+    @StringRes
+    fun exportFailureMessage(error: Throwable?, @StringRes fallback: Int): Int =
+        if (error is UntrustedDocumentProviderException) R.string.export_location_unsupported else fallback
+
     fun openInput(resolver: ContentResolver, source: Uri): InputStream {
         requireTrusted(source)
         return resolver.openInputStream(source)
@@ -50,12 +84,14 @@ internal object DocumentAccess {
         }
     }.getOrNull()
 
-    private fun requireTrusted(uri: Uri) {
-        if (uri.scheme != ContentResolver.SCHEME_CONTENT) {
-            throw SecurityException("Unsupported document URI scheme")
-        }
-        if (uri.authority !in TRUSTED_AUTHORITIES) {
-            throw SecurityException("Untrusted document provider")
+    private fun requireTrusted(uri: Uri) = requireTrusted(uri.scheme, uri.authority)
+
+    internal fun requireTrusted(scheme: String?, authority: String?) {
+        if (scheme != ContentResolver.SCHEME_CONTENT || authority !in TRUSTED_AUTHORITIES) {
+            throw UntrustedDocumentProviderException()
         }
     }
 }
+
+/** A document outside the platform and Google providers; callers say which locations work. */
+internal class UntrustedDocumentProviderException : SecurityException("Untrusted document provider")

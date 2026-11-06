@@ -78,16 +78,29 @@ class PlatoonActivity : BaseActivity() {
     ) { uri ->
         val uids = pendingExport?.toSet()
         pendingExport = null
-        if (uri == null || uids.isNullOrEmpty()) return@registerForActivityResult
+        if (uri == null) return@registerForActivityResult
+        if (uids.isNullOrEmpty()) {
+            work.run(task = { DocumentAccess.discard(contentResolver, uri) })
+            return@registerForActivityResult
+        }
         work.run(
             task = {
                 val statuses = repository.listMemberStatuses().filter { it.uid in uids }
                 val latest = latestMembers(repository.listSnapshots(1).firstOrNull())
                 val csv = PlatoonMemberCsv.format(statuses, latest, repository.gameZone())
-                DocumentAccess.openOutput(contentResolver, uri).writer(Charsets.UTF_8).use { it.write(csv) }
+                DocumentAccess.writeExport(contentResolver, uri) { output ->
+                    output.writer(Charsets.UTF_8).use { it.write(csv) }
+                }
+            },
+            always = { result ->
+                Feedback.show(
+                    this,
+                    result.fold({ R.string.members_exported }) {
+                        DocumentAccess.exportFailureMessage(it, R.string.status_export_failed)
+                    },
+                )
             },
         ) { result ->
-            Feedback.show(this, if (result.isSuccess) R.string.members_exported else R.string.status_export_failed)
             if (result.isSuccess) setSelecting(false)
         }
     }

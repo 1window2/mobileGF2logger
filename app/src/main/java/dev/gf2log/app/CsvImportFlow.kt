@@ -275,10 +275,8 @@ internal class CsvImportFlow(
                     Summary(retained, duplicates, imported)
                 }
             },
-        ) { result ->
-            onProgress(null)
-            pickerTarget = null
-            result.fold(
+            // The summary is reported even if the screen was recreated meanwhile.
+            always = { result -> result.fold(
                 onSuccess = { summary ->
                     Feedback.show(
                         activity,
@@ -293,7 +291,10 @@ internal class CsvImportFlow(
                     )
                 },
                 onFailure = { Feedback.show(activity, R.string.status_platoon_csv_import_failed, long = true) },
-            )
+            ) },
+        ) {
+            onProgress(null)
+            pickerTarget = null
         }
     }
 

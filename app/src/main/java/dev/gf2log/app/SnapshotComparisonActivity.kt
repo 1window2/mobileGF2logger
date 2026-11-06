@@ -93,19 +93,21 @@ class SnapshotComparisonActivity : BaseActivity() {
                 TextRole.SUBTITLE,
             ), lp(top = 2))
             addView(text(
-                getString(R.string.comparison_counts, result.joined.size, result.left.size, result.changes.size),
+                getString(R.string.comparison_counts, result.joined.size, result.left.size, result.counterChanges.size),
                 TextRole.CAPTION,
             ), lp(top = 4))
         }, lp(top = 4))
         section(getString(R.string.joined_members), result.joined.size, result.joined.map { it.name to Labels.uid(this, it.uid) })
         section(getString(R.string.departed_members), result.left.size, result.left.map { it.name to Labels.uid(this, it.uid) })
-        content.addView(sectionHeader(getString(R.string.member_changes_count, result.changes.size)), lp())
-        if (result.changes.isEmpty()) {
+        // Login-only changes have no counter to show; the CSV export still lists them.
+        val changes = result.counterChanges
+        content.addView(sectionHeader(getString(R.string.member_changes_count, changes.size)), lp())
+        if (changes.isEmpty()) {
             content.addView(text(getString(R.string.none), TextRole.SECONDARY), lp(start = 4))
             return
         }
         content.addView(panel(padding = 8) {
-            result.changes.forEachIndexed { index, change ->
+            changes.forEachIndexed { index, change ->
                 if (index > 0) addView(divider(insetStartDp = 8))
                 addView(column {
                     setPadding(dp(8), dp(8), dp(8), dp(8))
@@ -124,7 +126,11 @@ class SnapshotComparisonActivity : BaseActivity() {
                                 change.weeklyMeritDelta,
                                 change.weeklyMeritDeltaCertainty,
                             ),
-                            Triple(getString(R.string.total_merit), change.totalMeritDelta, MetricCertainty.EXACT),
+                            Triple(
+                                getString(R.string.total_merit),
+                                change.totalMeritDelta,
+                                change.totalMeritDeltaCertainty,
+                            ),
                             Triple(
                                 getString(R.string.gunsmoke_score),
                                 change.totalScoreDelta,
@@ -142,7 +148,7 @@ class SnapshotComparisonActivity : BaseActivity() {
                         R.string.member_change_description,
                         change.name,
                         WeeklyMetricPresentation.format(change.weeklyMeritDelta, change.weeklyMeritDeltaCertainty),
-                        change.totalMeritDelta,
+                        WeeklyMetricPresentation.format(change.totalMeritDelta, change.totalMeritDeltaCertainty),
                         WeeklyMetricPresentation.format(change.totalScoreDelta, change.totalScoreDeltaCertainty),
                     )
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES

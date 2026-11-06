@@ -353,6 +353,7 @@
     <string name="clear_discord_webhook">Remove saved webhook</string>
     <string name="discord_webhook_saved">Discord webhook saved securely.</string>
     <string name="discord_webhook_invalid">Enter a valid HTTPS incoming-webhook URL on discord.com.</string>
+    <string name="discord_webhook_store_failed">Unable to store the webhook securely on this device. Try again.</string>
     <string name="clear_discord_webhook_confirm">Remove the saved Discord webhook? You will need to paste it again to send CSV files.</string>
     <string name="discord_webhook_cleared">Saved Discord webhook removed.</string>
     <string name="discord_webhook_clear_failed">Unable to remove the saved Discord webhook.</string>

@@ -49,7 +49,8 @@ internal class BackgroundWork(owner: LifecycleOwner, threadName: String) {
         key?.let { running[it] = (running[it] ?: 0) + 1 }
         executor.execute {
             val result = runCatching(task)
-            result.exceptionOrNull()?.let { Log.w(TAG, "Background task failed", it) }
+            // Only the type: a message can quote user input, such as a pasted webhook token.
+            result.exceptionOrNull()?.let { Log.w(TAG, "Background task failed: ${it.javaClass.name}") }
             main.post {
                 key?.let { running[it] = ((running[it] ?: 1) - 1).coerceAtLeast(0) }
                 if (destroyed) return@post

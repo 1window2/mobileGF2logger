@@ -432,8 +432,9 @@ import seals. Undo quarantines only the planned identities and restores the
 database under the repository's exclusive maintenance lock. Durable restore
 state resumes interrupted quarantine/database replacement after process death;
 ordinary failures restore both the evidence and the preceding undo checkpoint.
-A post-import database digest refuses undo after any later Platoon mutation so
-a one-level rollback cannot silently overwrite newer work; the digest is
+A post-import digest of the primary Platoon evidence refuses undo after any
+later Platoon mutation so a one-level rollback cannot silently overwrite newer
+work, while recording or selecting a derived weekly revision does not; the digest is
 compared again inside the exclusive section that installs the checkpoint, so an
 ingest that lands after the first check is never overwritten. Interrupted
 imports and undos are recovered for every registered Platoon at process start,

@@ -558,6 +558,46 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     @Test
+    fun derivedWeeklyHistoryWrittenAfterACsvImportKeepsItsUndo() {
+        seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
+        val import = CsvImportCheckpointManager(context, storageScope)
+        import.create(emptySet())
+        replaceDatabaseForCheckpoint(CURRENT_UID, "After import", "after-import.csv")
+        import.seal()
+
+        // Opening the Weekly screen on a week without evidence records a derived revision.
+        val repository = PlatoonRepository(context, storageScope)
+        val week = LocalDate.of(2026, 10, 4)
+        repository.buildWeeklyTableRevision(week, java.time.ZoneOffset.UTC, Instant.parse("2026-10-05T00:00:00Z"))
+        assertTrue(repository.listWeeklyReportHistory(week).isNotEmpty())
+
+        val undo = CsvImportCheckpointManager(context, storageScope)
+        assertTrue(undo.canUndo())
+        undo.restore()
+        PlatoonDatabase(context).use { database ->
+            assertEquals(1L, count(database.readableDatabase, "members", "uid = ?", ARCHIVED_UID))
+        }
+    }
+
+    @Test
+    fun aMemberEditAfterACsvImportStillRefusesItsUndo() {
+        seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
+        val import = CsvImportCheckpointManager(context, storageScope)
+        import.create(emptySet())
+        replaceDatabaseForCheckpoint(CURRENT_UID, "After import", "after-import.csv")
+        import.seal()
+
+        assertTrue(PlatoonRepository(context, storageScope).updateMember(CURRENT_UID, "Renamed", "Edited"))
+
+        assertThrows(IllegalStateException::class.java) {
+            CsvImportCheckpointManager(context, storageScope).restore()
+        }
+        PlatoonDatabase(context).use { database ->
+            assertEquals(1L, count(database.readableDatabase, "members", "uid = ?", CURRENT_UID))
+        }
+    }
+
+    @Test
     fun constructingRepositoriesAndManagersDoesNotWaitForTheExclusiveGate() {
         val held = java.util.concurrent.CountDownLatch(1)
         val release = java.util.concurrent.CountDownLatch(1)

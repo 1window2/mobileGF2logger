@@ -28,7 +28,7 @@ class RestoredDatabaseRebuildTest {
 
     @Test
     fun identifiersAreQuotedSoNoNameCanEscapeTheStatement() {
-        assertEquals("\"a\"\"b\"", RestoredDatabaseRebuild.identifier("a\"b"))
+        assertEquals("\"a\"\"b\"", sqlIdentifier("a\"b"))
         assertThrows(IllegalArgumentException::class.java) {
             RestoredDatabaseRebuild.copyStatements(mapOf("empty" to emptyList()))
         }

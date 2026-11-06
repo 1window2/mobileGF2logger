@@ -44,7 +44,7 @@ internal object PlatoonEvidenceDigest {
             buildList { while (cursor.moveToNext()) add(cursor.getString(0)) }
         }
         tables.filter(::covers).forEach { table ->
-            val quoted = "\"" + table.replace("\"", "\"\"") + "\""
+            val quoted = sqlIdentifier(table)
             val columns = db.rawQuery("SELECT * FROM $quoted LIMIT 0", null).use { it.columnNames.toList() }
             hasher.table(table, columns)
             val order = columns.indices.joinToString(", ") { (it + 1).toString() }

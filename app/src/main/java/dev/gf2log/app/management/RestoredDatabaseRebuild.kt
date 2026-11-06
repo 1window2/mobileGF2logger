@@ -76,23 +76,21 @@ internal object RestoredDatabaseRebuild {
     internal fun copyStatements(columnsByTable: Map<String, List<String>>): List<String> =
         columnsByTable.toSortedMap().map { (table, columns) ->
             require(columns.isNotEmpty()) { "Table $table has no columns" }
-            val list = columns.joinToString(", ", transform = ::identifier)
-            "INSERT INTO main.${identifier(table)} ($list) SELECT $list FROM $SOURCE.${identifier(table)}"
+            val list = columns.joinToString(", ", transform = ::sqlIdentifier)
+            val quoted = sqlIdentifier(table)
+            "INSERT INTO main.$quoted ($list) SELECT $list FROM $SOURCE.$quoted"
         }
-
-    internal fun identifier(value: String): String = "\"${value.replace("\"", "\"\"")}\""
 
     internal fun sqliteFiles(database: File): List<File> =
         listOf("", "-wal", "-shm", "-journal").map { File(database.path + it) }
 
     private fun appColumns(db: SQLiteDatabase): Map<String, List<String>> {
         val tables = db.rawQuery(
-            "SELECT name FROM main.sqlite_master WHERE type = 'table' " +
-                "AND name NOT LIKE 'sqlite_%' AND name != 'android_metadata'",
+            "SELECT name FROM main.sqlite_master WHERE $APP_TABLES_FILTER",
             null,
         ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getString(0)) } }
         return tables.associateWith { table ->
-            db.rawQuery("PRAGMA main.table_info(${identifier(table)})", null).use { cursor ->
+            db.rawQuery("PRAGMA main.table_info(${sqlIdentifier(table)})", null).use { cursor ->
                 buildList { while (cursor.moveToNext()) add(cursor.getString(1)) }
             }
         }

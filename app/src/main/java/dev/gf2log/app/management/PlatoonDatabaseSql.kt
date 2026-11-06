@@ -7,6 +7,13 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
+/** Quotes [name] as an SQLite identifier, so no table or column name can escape a statement. */
+internal fun sqlIdentifier(name: String): String = "\"${name.replace("\"", "\"\"")}\""
+
+/** Picks a database's own tables in `sqlite_master`, without SQLite's or Android's bookkeeping. */
+internal const val APP_TABLES_FILTER =
+    "type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'android_metadata'"
+
 /** Snapshot-derived evidence is weak: replay may rebuild it from retained rosters. */
 internal val SNAPSHOT_EVENT_SOURCES = setOf(EvidenceSource.SNAPSHOT, EvidenceSource.LEGACY_IMPORT)
 

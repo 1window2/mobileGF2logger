@@ -48,7 +48,7 @@ class ExportDocumentTest {
     }
 
     @Test
-    fun `an untrusted provider is refused before any stream opens and the document is discarded`() {
+    fun `an untrusted provider is refused before any stream opens and the document is kept`() {
         var opened = false
         var discards = 0
 
@@ -64,11 +64,39 @@ class ExportDocumentTest {
         }
 
         assertTrue(!opened)
-        assertEquals(1, discards)
+        // The picker may have handed over an existing file to overwrite; deleting it would lose it.
+        assertEquals(0, discards)
         assertThrows(UntrustedDocumentProviderException::class.java) {
             DocumentAccess.requireTrusted("file", "com.android.externalstorage.documents")
         }
         DocumentAccess.requireTrusted("content", "com.android.externalstorage.documents")
+    }
+
+    @Test
+    fun `a failed open keeps the picked document`() {
+        var discards = 0
+        val failure = java.io.FileNotFoundException("provider refused")
+
+        val thrown = assertThrows(java.io.FileNotFoundException::class.java) {
+            DocumentAccess.writeOrDiscard(open = { throw failure }, discard = { discards += 1 }) {}
+        }
+
+        assertSame(failure, thrown)
+        assertEquals(0, discards)
+    }
+
+    @Test
+    fun `discarding never calls into an untrusted provider`() {
+        var deletes = 0
+
+        DocumentAccess.discardTrusted("content", "com.microsoft.skydrive.content.StorageAccessProvider") { deletes += 1 }
+        DocumentAccess.discardTrusted("file", "com.android.externalstorage.documents") { deletes += 1 }
+        assertEquals(0, deletes)
+
+        DocumentAccess.discardTrusted("content", "com.android.externalstorage.documents") { deletes += 1 }
+        assertEquals(1, deletes)
+        // A provider failure while deleting is ignored.
+        DocumentAccess.discardTrusted("content", "com.android.externalstorage.documents") { error("gone") }
     }
 
     @Test

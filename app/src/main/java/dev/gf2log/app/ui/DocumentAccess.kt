@@ -42,9 +42,11 @@ internal object DocumentAccess {
     }
 
     /**
-     * Writes an export into a document the picker has already created. A failed or refused write
-     * deletes that document (best effort), so a 0-byte or truncated file never sits beside real
-     * exports looking like one.
+     * Writes an export into a document the picker has already created. A write that fails after
+     * the document opened deletes it (best effort), so a truncated file never sits beside real
+     * exports looking like one. A refused or failed open leaves the picked document as it was:
+     * that may be a 0-byte file the picker created, which is the lesser harm, because the picker
+     * may also have handed over an existing file the user chose to overwrite.
      */
     fun writeExport(resolver: ContentResolver, destination: Uri, write: (OutputStream) -> Unit) =
         writeOrDiscard(
@@ -53,14 +55,26 @@ internal object DocumentAccess {
             write = write,
         )
 
-    /** Deletes a created document that will not receive its export; failures are ignored. */
-    fun discard(resolver: ContentResolver, destination: Uri) {
-        runCatching { DocumentsContract.deleteDocument(resolver, destination) }
+    /**
+     * Deletes a created document that will not receive its export; failures are ignored. A
+     * document from a provider [openOutput] refuses is never touched.
+     */
+    fun discard(resolver: ContentResolver, destination: Uri) =
+        discardTrusted(destination.scheme, destination.authority) {
+            DocumentsContract.deleteDocument(resolver, destination)
+        }
+
+    internal fun discardTrusted(scheme: String?, authority: String?, delete: () -> Unit) {
+        if (runCatching { requireTrusted(scheme, authority) }.isFailure) return
+        runCatching(delete)
     }
 
     internal fun writeOrDiscard(open: () -> OutputStream, discard: () -> Unit, write: (OutputStream) -> Unit) {
+        // Nothing has been truncated or written until open succeeds, so a refused open keeps the
+        // picked document; once open succeeded, its old content is already gone.
+        val output = open()
         try {
-            open().use(write)
+            output.use(write)
         } catch (error: Throwable) {
             runCatching(discard).exceptionOrNull()?.let(error::addSuppressed)
             throw error

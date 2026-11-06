@@ -251,7 +251,8 @@
     <string name="cutline_value">Minimum</string>
     <string name="save_settings">Save settings</string>
     <string name="member_order">Member order</string>
-    <string name="member_order_description">Weekly tables list members in this order. Drag a handle to fine-tune it; changes save automatically.</string>
+    <string name="member_order_description">Weekly tables list members in this order once you arrange it. Drag a handle to fine-tune it; changes save automatically.</string>
+    <string name="member_order_ranked_default">No custom order yet. Weekly tables rank members by merit, or by score in Gunsmoke weeks; the list below starts in join-date order for arranging.</string>
     <string name="sort_criterion">Sort by</string>
     <string name="sort_direction">Direction</string>
     <string name="sort_join_date">Join date</string>
@@ -433,7 +434,7 @@
     <string name="platoon_load_failed">Unable to load Platoon data.</string>
     <string name="present">Present</string>
     <string name="reset">Reset</string>
-    <string name="reset_member_order_warning">Return to the default join-date order? Your custom order will be removed.</string>
+    <string name="reset_member_order_warning">Remove your custom order? Weekly tables go back to ranking members by merit, or by score in Gunsmoke weeks.</string>
     <string name="select_all">Select all</string>
     <string name="select_members">Select members</string>
     <string name="selected">Selected</string>

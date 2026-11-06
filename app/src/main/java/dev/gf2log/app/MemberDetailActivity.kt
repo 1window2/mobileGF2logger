@@ -9,11 +9,13 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import dev.gf2log.app.management.EvidenceSource
+import dev.gf2log.app.management.MemberProfileDraft
 import dev.gf2log.app.management.MemberStatus
 import dev.gf2log.app.management.MembershipPeriod
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.management.isJoinedBoundaryEditable
+import dev.gf2log.app.management.isMembershipBoundaryWithinPresent
 import dev.gf2log.app.management.isLeftBoundaryEditable
 import dev.gf2log.app.management.isValidMembershipRange
 import dev.gf2log.app.ui.onTextChanged
@@ -55,6 +57,7 @@ class MemberDetailActivity : BaseActivity() {
     private var uid = -1L
     private var model: Model? = null
     private var inputsInitialized = false
+    private var finishAfterSave = false
 
     private lateinit var content: LinearLayout
     private lateinit var statusPanel: LinearLayout
@@ -151,8 +154,10 @@ class MemberDetailActivity : BaseActivity() {
                 return@run
             }
             model = loaded
+            // A blank nickname follows the in-game name, which the hint shows.
+            nickname.hint = loaded.status.currentName
             if (!inputsInitialized) {
-                nickname.setText(loaded.status.name)
+                nickname.setText(MemberProfileDraft.nicknameInput(loaded.status))
                 note.setText(loaded.status.note)
                 inputsInitialized = true
             }
@@ -225,8 +230,13 @@ class MemberDetailActivity : BaseActivity() {
 
     /** Unsaved nickname or note edits are confirmed instead of silently discarded. */
     private fun leave() {
-        if (!::saveButton.isInitialized || !saveButton.isEnabled) {
+        if (!::saveButton.isInitialized || !isDirty()) {
             finish()
+            return
+        }
+        if (work.isBusy(SAVE)) {
+            // The edits are already being saved; leave once that save lands.
+            finishAfterSave = true
             return
         }
         Dialogs.show(
@@ -239,11 +249,14 @@ class MemberDetailActivity : BaseActivity() {
         )
     }
 
+    /** Whether the inputs differ from the stored profile, compared in their stored form. */
+    private fun isDirty(): Boolean {
+        val loaded = model?.status ?: return false
+        return MemberProfileDraft.isDirty(nickname.text.toString(), note.text.toString(), loaded)
+    }
+
     private fun updateSaveState() {
-        val loaded = model?.status
-        saveButton.isEnabled = loaded != null && !work.isBusy(SAVE) &&
-            (nickname.text.toString() != loaded.name || note.text.toString() != loaded.note) &&
-            nickname.text.isNotBlank()
+        saveButton.isEnabled = !work.isBusy(SAVE) && isDirty()
     }
 
     private fun saveProfile(thenFinish: Boolean = false) {
@@ -253,7 +266,16 @@ class MemberDetailActivity : BaseActivity() {
         work.run(key = SAVE, task = { repository.updateMember(uid, name, noteText) }) { result ->
             val saved = result.getOrDefault(false)
             Feedback.show(this, if (saved) R.string.saved else R.string.save_failed)
-            if (saved && thenFinish) finish() else load()
+            if (saved && (thenFinish || finishAfterSave)) {
+                finish()
+                return@run
+            }
+            finishAfterSave = false
+            // Re-seed the fields in stored form unless the user kept typing during the save.
+            if (saved && nickname.text.toString() == name && note.text.toString() == noteText) {
+                inputsInitialized = false
+            }
+            load()
         }
         updateSaveState()
     }
@@ -321,6 +343,16 @@ class MemberDetailActivity : BaseActivity() {
                     error.showMessage(getString(R.string.invalid_date))
                     return@setOnClickListener
                 }
+                // Packet-linked sides are read-only and follow the server clock, so only editable
+                // sides must not lie in the future.
+                val futureJoin = period.isJoinedBoundaryEditable &&
+                    !isMembershipBoundaryWithinPresent(joinedBoundary, zone)
+                val futureLeft = period.isLeftBoundaryEditable && leftBoundary != null &&
+                    !isMembershipBoundaryWithinPresent(leftBoundary, zone)
+                if (futureJoin || futureLeft) {
+                    error.showMessage(getString(R.string.invalid_future_date))
+                    return@setOnClickListener
+                }
                 button.isEnabled = false
                 val noteText = noteInput.text.toString()
                 work.run(
@@ -386,6 +418,10 @@ class MemberDetailActivity : BaseActivity() {
                     error.showMessage(getString(R.string.invalid_date))
                     return@setOnClickListener
                 }
+                if (listOfNotNull(joinedBoundary, withdrewBoundary).any { !isMembershipBoundaryWithinPresent(it, zone) }) {
+                    error.showMessage(getString(R.string.invalid_future_date))
+                    return@setOnClickListener
+                }
                 button.isEnabled = false
                 val noteText = noteInput.text.toString()
                 work.run(
@@ -421,6 +457,7 @@ class MemberDetailActivity : BaseActivity() {
             EvidenceSource.SNAPSHOT -> R.string.source_roster
             EvidenceSource.MANUAL -> R.string.source_manual
             EvidenceSource.LEGACY_IMPORT -> R.string.source_legacy
+            EvidenceSource.ACTIVITY -> R.string.source_activity
         },
     )
 

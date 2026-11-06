@@ -103,6 +103,43 @@ class LegacyEventMigrationPolicyTest {
         )
     }
 
+    @Test
+    fun `a manual legacy boundary supersedes the nearest roster event in its gap`() {
+        val candidates = listOf(
+            candidate(1, MemberEventType.JOINED, occurredAt = null, observedAt = BOUNDARY_AT - 5, source = EvidenceSource.SNAPSHOT),
+            candidate(2, MemberEventType.JOINED, occurredAt = null, observedAt = BOUNDARY_AT + 50, source = EvidenceSource.SNAPSHOT),
+            candidate(3, MemberEventType.LEFT, occurredAt = null, observedAt = BOUNDARY_AT, source = EvidenceSource.SNAPSHOT),
+        )
+
+        assertEquals(
+            1L,
+            LegacyEventMigrationPolicy.selectSupersededSnapshotCandidate(
+                MemberEventType.REJOINED,
+                BOUNDARY_AT,
+                lowerBound = null,
+                upperBound = null,
+                candidates = candidates,
+            ),
+        )
+    }
+
+    @Test
+    fun `a roster event outside the period's gap or of the other side is never superseded`() {
+        val outside = candidate(1, MemberEventType.JOINED, occurredAt = null, observedAt = BOUNDARY_AT + 100, source = EvidenceSource.SNAPSHOT)
+        val withdrawal = candidate(2, MemberEventType.LEFT, occurredAt = null, observedAt = BOUNDARY_AT, source = EvidenceSource.SNAPSHOT)
+        val manual = candidate(3, MemberEventType.JOINED, source = EvidenceSource.MANUAL)
+
+        assertNull(
+            LegacyEventMigrationPolicy.selectSupersededSnapshotCandidate(
+                MemberEventType.JOINED,
+                BOUNDARY_AT,
+                lowerBound = BOUNDARY_AT - 10,
+                upperBound = BOUNDARY_AT + 100,
+                candidates = listOf(outside, withdrawal, manual),
+            ),
+        )
+    }
+
     private fun candidate(
         id: Long,
         type: MemberEventType,

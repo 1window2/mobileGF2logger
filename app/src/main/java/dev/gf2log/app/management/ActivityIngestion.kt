@@ -202,8 +202,11 @@ internal object ActivityIngestion {
     }
 
     /**
-     * Caps network-derived activity evidence to the newest bounded history. Runs on open and after
-     * each ingest so an older oversized database self-heals.
+     * Caps network-derived 21935 activity evidence to the newest bounded history. Runs on open
+     * and after each ingest so an older oversized database self-heals. Exact 21960 Daily Patrol
+     * facts share the table but not the cap: they are the only Daily Patrol evidence and are
+     * bounded by their own identity (one per UID, kind, and instant), so newer activity never
+     * evicts them.
      */
     fun trimPlatoonActivity(db: SQLiteDatabase) {
         db.execSQL(
@@ -212,6 +215,7 @@ internal object ActivityIngestion {
             WHERE id IN (
                 SELECT id
                 FROM platoon_activity
+                WHERE resolution != '${ActivityResolution.EXACT_UPDATE.name}'
                 ORDER BY captured_at DESC, id DESC
                 LIMIT -1 OFFSET $MAX_STORED_ACTIVITY_OBSERVATIONS
             )
@@ -231,12 +235,15 @@ internal object ActivityIngestion {
         nameIsUnique: Boolean,
     ) {
         if (!nameIsUnique || from == null) return
+        // The same window as the reconcile path: after the previous roster, no later than the
+        // revealing one, and at most MAX_LEAD_MILLIS before it.
         val candidates = readMembershipActivityCandidates(
             db = db,
+            uid = uid,
             memberName = memberName,
             from = from,
             until = observedAt,
-        )
+        ).filter { MembershipCorrelationWindow.admits(it.occurredAt, observedAt, from) }
         val occurredAt = candidates.map(ActivityCandidate::occurredAt).distinct().singleOrNull()
             ?: return
         applyExactMembershipBoundary(
@@ -248,12 +255,15 @@ internal object ActivityIngestion {
             boundary = boundary,
             occurredAt = occurredAt,
             observedAt = observedAt,
+            source = EvidenceSource.ACTIVITY,
             activityIds = candidates.map(ActivityCandidate::id),
         )
     }
 
+    /** Name-matched facts; one already resolved to another UID can never date [uid]'s boundary. */
     private fun readMembershipActivityCandidates(
         db: SQLiteDatabase,
+        uid: Long,
         memberName: String,
         from: Instant,
         until: Instant,
@@ -262,6 +272,7 @@ internal object ActivityIngestion {
         SELECT id, occurred_at
         FROM platoon_activity
         WHERE member_name = ? COLLATE BINARY
+          AND (resolved_uid IS NULL OR resolved_uid = ?)
           AND occurred_at > ?
           AND occurred_at <= ?
           AND action_id NOT IN (?, ?)
@@ -270,6 +281,7 @@ internal object ActivityIngestion {
         """.trimIndent(),
         arrayOf(
             memberName,
+            uid.toString(),
             from.toEpochMilli().toString(),
             until.toEpochMilli().toString(),
             DAILY_PATROL_REWARD_ACTION_ID.toString(),
@@ -284,10 +296,12 @@ internal object ActivityIngestion {
     }
 
     /**
-     * Upgrades an inferred roster boundary to an exact one when a single linked activity fact
-     * falls within its [MembershipCorrelationWindow]: after the previous roster and no later
-     * than the roster that revealed the change. Candidate boundaries are loaded once per ingest;
-     * an applied boundary becomes exact and therefore leaves the candidate set.
+     * Dates an inferred roster boundary from the UID-resolved activity facts within its
+     * [MembershipCorrelationWindow]: after the previous roster and no later than the roster that
+     * revealed the change. A fact that two of the member's inferred boundaries could both claim
+     * dates neither. Of the remaining facts, see [MembershipCorrelationWindow.datingInstant].
+     * Candidate boundaries are loaded once per ingest; an applied boundary becomes
+     * activity-dated and therefore leaves the candidate set.
      */
     private fun reconcileInferredMembershipBoundaries(db: SQLiteDatabase) {
         val boundariesByUid = readInferredBoundaries(db)
@@ -325,6 +339,7 @@ internal object ActivityIngestion {
                 }
             }
         }
+        val admittedByBoundary = mutableMapOf<InferredBoundary, MutableList<ResolvedActivityCandidate>>()
         activities.forEach { activity ->
             val candidates = boundariesByUid[activity.uid] ?: return@forEach
             val boundary = candidates.singleOrNull { candidate ->
@@ -334,6 +349,14 @@ internal object ActivityIngestion {
                     previousRosterAt = candidate.previousRosterAt,
                 )
             } ?: return@forEach
+            admittedByBoundary.getOrPut(boundary, ::mutableListOf) += activity
+        }
+        admittedByBoundary.forEach { (boundary, admitted) ->
+            val occurredAt = MembershipCorrelationWindow.datingInstant(
+                boundary = boundary.boundary,
+                admitted = admitted.map(ResolvedActivityCandidate::occurredAt),
+            ) ?: return@forEach
+            val dating = admitted.filter { it.occurredAt == occurredAt }
             val eventType = when (boundary.boundary) {
                 MembershipBoundary.WITHDRAW -> MemberEventType.LEFT
                 MembershipBoundary.JOIN ->
@@ -343,14 +366,14 @@ internal object ActivityIngestion {
                 db = db,
                 membershipPeriodId = boundary.membershipPeriodId,
                 uid = boundary.uid,
-                memberName = activity.memberName,
+                memberName = dating.first().memberName,
                 type = eventType,
                 boundary = boundary.boundary,
-                occurredAt = activity.occurredAt,
+                occurredAt = occurredAt,
                 observedAt = boundary.inferredAt,
-                activityIds = listOf(activity.id),
+                source = EvidenceSource.ACTIVITY,
+                activityIds = dating.map(ResolvedActivityCandidate::id),
             )
-            candidates.remove(boundary)
         }
     }
 

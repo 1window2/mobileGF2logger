@@ -4,6 +4,8 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MembershipEventPresentationTest {
@@ -104,6 +106,37 @@ class MembershipEventPresentationTest {
         )
     }
 
+    @Test
+    fun `an activity-dated boundary shows its time and yields to the exact Updates event`() {
+        val activityDated = event(
+            id = 1,
+            source = EvidenceSource.ACTIVITY,
+            occurredAt = Instant.parse("2026-07-29T05:00:00Z"),
+            eventDate = null,
+            timeKnown = true,
+            type = MemberEventType.JOINED,
+        )
+        val exact = event(
+            id = 2,
+            source = EvidenceSource.GAME_UPDATES,
+            occurredAt = Instant.parse("2026-07-29T01:00:00Z"),
+            eventDate = null,
+            timeKnown = true,
+            type = MemberEventType.JOINED,
+        )
+
+        assertEquals("14:00", MembershipEventPresentation.timePrefix(activityDated, zone))
+        assertEquals(listOf(activityDated), MembershipEventPresentation.deduplicate(listOf(activityDated)))
+        assertEquals(listOf(exact), MembershipEventPresentation.deduplicate(listOf(activityDated, exact)))
+    }
+
+    @Test
+    fun `only Updates boundaries are immutable`() {
+        assertTrue(EvidenceSource.GAME_UPDATES.isImmutableMembershipBoundary())
+        assertFalse(EvidenceSource.ACTIVITY.isImmutableMembershipBoundary())
+        assertEquals(setOf(EvidenceSource.GAME_UPDATES, EvidenceSource.ACTIVITY), TIMED_BOUNDARY_SOURCES)
+    }
+
     private fun event(
         id: Long,
         source: EvidenceSource,
@@ -119,7 +152,7 @@ class MembershipEventPresentationTest {
         eventDate = eventDate,
         timeKnown = timeKnown,
         observedAt = occurredAt ?: Instant.parse("2026-07-29T00:00:00Z"),
-        precision = if (source == EvidenceSource.GAME_UPDATES) {
+        precision = if (source in TIMED_BOUNDARY_SOURCES) {
             EvidencePrecision.EXACT
         } else {
             EvidencePrecision.INFERRED

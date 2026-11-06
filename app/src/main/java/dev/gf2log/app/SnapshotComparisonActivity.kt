@@ -49,9 +49,9 @@ class SnapshotComparisonActivity : BaseActivity() {
         work.run(
             task = {
                 val repository = PlatoonRepository(this, scope)
-                val snapshots = repository.listSnapshots(2)
-                snapshots.takeIf { it.size == 2 }?.let {
-                    SnapshotComparison.compare(it[1], it[0], repository.gameZone())
+                val snapshots = repository.listSnapshots(SnapshotComparison.COMPARISON_LOOKBACK)
+                SnapshotComparison.latestComparablePair(snapshots)?.let { (latest, baseline) ->
+                    baseline?.let { SnapshotComparison.compare(it, latest, repository.gameZone()) }
                 }
             },
         ) { result ->

@@ -101,7 +101,10 @@ transitions.
 ## Snapshots and weekly tables
 
 - Every Platoon Members payload is stored as a structured snapshot keyed by its
-  capture instant.
+  capture instant. Home's latest-roster row and Snapshot Comparison compare the
+  latest roster with the newest earlier roster whose members differ, so an
+  unchanged roster resent when the Platoon page reopens never hides the change
+  the session captured.
 - Every supplied Platoon Activity entry is stored as an immutable timestamped
   fact. Only UID-safe Updates kind `8` / action `802001` supplies exact Daily
   Patrol evidence; a missing event never proves that Daily Patrol was skipped.
@@ -167,7 +170,12 @@ transitions.
 
 - UID is the stable member identity; a display name can change over time.
 - A custom nickname is editable and immediately becomes the display name in
-  Platoon management; the personal note remains private to member details.
+  Platoon management; the personal note remains private to member details. A
+  blank nickname, or one equal to the in-game name, stores no nickname, so the
+  member keeps following later in-game renames; saving only the note never
+  turns the current in-game name into a nickname.
+- Member search matches the display name, the in-game name behind a nickname,
+  and the UID, with or without its leading `#`.
 - Manual text is bounded where it is stored, not only by input fields. After
   trimming, a custom nickname or manually added member name holds at most 256
   characters (the roster name limit), and a private member note, membership-period
@@ -179,11 +187,16 @@ transitions.
   join time unless the user supplies one.
 - A UID added between consecutive snapshots opens a join or rejoin membership period.
 - A UID removed between consecutive snapshots closes the active membership period but
-  never deletes the member or prior snapshots.
+  never deletes the member or prior snapshots. Any other period still open for
+  that UID is closed at the same observation, after a duplicate open period that
+  only roster or activity evidence supports has been folded into the stronger
+  one, so the UID keeps no open period.
 - A returning UID opens a new membership period. All previous join/withdraw periods remain
   available.
 - Manual edits are accepted only when every period ends after it starts, no two
-  fully dated periods overlap, and at most one period remains open. An absent
+  fully dated periods overlap, at most one period remains open, and no entered
+  join or withdrawal lies in the future (one hour of device clock skew is
+  allowed, and the date picker stops at today). An absent
   snapshot-derived start remains unknown rather than being treated as an
   infinitely old boundary. Snapshot and exact boundaries are dated in the
   Platoon's game timezone for this check, the same calendar manual dates use,
@@ -192,7 +205,9 @@ transitions.
   periods inside the same transaction with one rule: a member is active while an
   open period remains effective. An open period started by an exact Updates join
   is superseded by a later recorded exit or by a newer roster that omits the
-  member. Schema-v13 upgrade repairs any stale derived flag with the same rule.
+  member. Opening a database re-derives every stale flag once whenever this
+  rule's version changes (platoon_maintenance_state key `active_state_rule`),
+  including databases already at schema v13 and restored backups.
 - A roster CSV imported after newer captures still contributes historical
   presence spans. The replay creates missing inactive members and inferred
   withdrawal/rejoin periods without replacing manual or exact Updates evidence.
@@ -209,15 +224,29 @@ transitions.
   activity can date an inferred join or withdrawal only when it lies after the
   previous roster and no later than the roster that revealed the change, at
   most 12 hours before it; an activity after that roster, which already showed
-  the change, never becomes the boundary. Exact in-game Updates
+  the change, never becomes the boundary. Both the roster-time and the later
+  activity-time correlation apply this window. At roster time the change's
+  name-matched facts must share one instant; later, a UID-resolved join is
+  dated by the earliest admitted fact and a withdrawal by the latest, the
+  tightest bound each proves. A fact already resolved to another UID never
+  dates a boundary. Such a boundary is stored and labelled as dated by activity
+  (source `ACTIVITY`, schema v14), not as exact Updates evidence, and it stays
+  editable. Exact in-game Updates
   events can replace an inferred boundary only when a unique 21917 UID can be
-  correlated safely; 21935 contains names but no UID.
+  correlated safely; 21935 contains names but no UID. A 21960 boundary replaces
+  the roster-inferred or activity-dated boundary of the same change, within 48
+  hours or however late the Updates feed arrives as long as no roster was
+  captured between the two, so one change keeps one period and one event.
 - Exact packet-linked boundary fields are immutable while editing. Users can
   add or edit manual membership periods, including historical withdrawn members
   not present in the incremental activity response; deleting an entire period
   requires the separate confirmation flow described below.
-- Membership-period numbers are assigned by join date from oldest to newest and are
-  recalculated after manual additions or edits.
+- Membership-period numbers are assigned by join date from oldest to newest, using the
+  withdrawal date when the join is unknown, and are recalculated after manual additions or
+  edits.
+- A manually added withdrawn member needs a game UID from 1 to 4294967295.
+- Deleting a member also removes unresolved activity facts under a name that no
+  other member ever held, so they cannot reattach to a member re-added later.
 
 ## Weekly history consistency
 
@@ -290,7 +319,8 @@ software.
 Untrusted evidence is bounded at every persistence boundary. A 21960 Updates entry is dropped whole when any name exceeds 256 characters or it lists more than 256 members. A roster import
 must contain no more than 256 unique UIDs, an activity payload contributes at
 most 250 distinct observations, and the database keeps the newest 10,000
-activity facts. If a newly selected roster CSV fails parsing, duplicate-UID
+21935 activity facts. Exact 21960 Daily Patrol facts do not count toward that
+cap, so newer activity never evicts a week's only Daily Patrol evidence. If a newly selected roster CSV fails parsing, duplicate-UID
 validation, ingestion, or chronological reconciliation, its newly retained file
 is deleted so a failed import cannot poison every later reconciliation. The
 entire selected-file reconciliation runs under one outer SQLite transaction, so

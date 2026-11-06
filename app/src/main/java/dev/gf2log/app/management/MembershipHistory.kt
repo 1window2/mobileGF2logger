@@ -1,5 +1,6 @@
 package dev.gf2log.app.management
 
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -16,6 +17,26 @@ data class MembershipBoundaryValue(
     val timeKnown: Boolean,
 )
 
+/** How far a manual boundary may run ahead of the device clock, as for a roster CSV import. */
+internal val MAX_MANUAL_BOUNDARY_CLOCK_SKEW: Duration = Duration.ofHours(1)
+
+/** The latest calendar date in [zone] that a manual membership boundary may carry at [now]. */
+fun latestMembershipBoundaryDate(zone: ZoneId, now: Instant = Instant.now()): LocalDate =
+    now.plus(MAX_MANUAL_BOUNDARY_CLOCK_SKEW).atZone(zone).toLocalDate()
+
+/**
+ * Whether a manual join or withdrawal has already happened at [now]: its calendar date is not
+ * after [latestMembershipBoundaryDate], and a known time is not after [now] beyond the clock
+ * skew. A future withdrawal would mark a current member withdrawn at once and overlap the next
+ * roster's period, and any future boundary would add phantom weeks.
+ */
+fun isMembershipBoundaryWithinPresent(
+    boundary: MembershipBoundaryValue,
+    zone: ZoneId,
+    now: Instant = Instant.now(),
+): Boolean = !boundary.date.isAfter(latestMembershipBoundaryDate(zone, now)) &&
+    (!boundary.timeKnown || !boundary.instant.isAfter(now.plus(MAX_MANUAL_BOUNDARY_CLOCK_SKEW)))
+
 fun isValidMembershipRange(
     joined: MembershipBoundaryValue,
     withdrew: MembershipBoundaryValue?,
@@ -27,8 +48,18 @@ fun isValidMembershipRange(
     else -> !withdrew.instant.isBefore(joined.instant)
 }
 
+/**
+ * Only 21960 Updates boundaries are immutable. An [EvidenceSource.ACTIVITY] boundary is an
+ * inference from a name-matched activity, so it stays editable like a roster observation.
+ */
 fun EvidenceSource.isImmutableMembershipBoundary(): Boolean =
     this == EvidenceSource.GAME_UPDATES
+
+/**
+ * Sources whose boundary events carry the instant the change happened, so the weekly roster
+ * applies them at that instant: exact Updates and activity-dated roster boundaries.
+ */
+internal val TIMED_BOUNDARY_SOURCES = setOf(EvidenceSource.GAME_UPDATES, EvidenceSource.ACTIVITY)
 
 /**
  * Only a recorded packet-linked boundary is immutable. A period opened by an exact Updates
@@ -99,6 +130,7 @@ object MembershipEventPresentation {
         EvidenceSource.LEGACY_IMPORT,
         EvidenceSource.GAME_UPDATES,
         EvidenceSource.MANUAL,
+        EvidenceSource.ACTIVITY,
     )
 
     fun deduplicate(events: List<MemberEvent>): List<MemberEvent> {
@@ -133,7 +165,7 @@ object MembershipEventPresentation {
     }
 
     fun timePrefix(event: MemberEvent, zoneId: ZoneId): String? = when {
-        event.source == EvidenceSource.GAME_UPDATES && event.occurredAt != null ->
+        event.source in TIMED_BOUNDARY_SOURCES && event.occurredAt != null ->
             eventTime.format(event.occurredAt.atZone(zoneId))
         event.source == EvidenceSource.MANUAL && !event.timeKnown -> "??:??"
         event.source == EvidenceSource.MANUAL && event.occurredAt != null ->
@@ -148,8 +180,9 @@ object MembershipEventPresentation {
         event.type in displayedTypes && event.source in displayedSources
 
     private fun evidencePriority(source: EvidenceSource): Int = when (source) {
-        EvidenceSource.GAME_UPDATES -> 3
-        EvidenceSource.MANUAL -> 2
+        EvidenceSource.GAME_UPDATES -> 4
+        EvidenceSource.MANUAL -> 3
+        EvidenceSource.ACTIVITY -> 2
         EvidenceSource.SNAPSHOT, EvidenceSource.LEGACY_IMPORT -> 1
     }
 

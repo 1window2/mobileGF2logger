@@ -32,6 +32,69 @@ internal object PlatoonDatabaseMigrations {
         }
         if (oldVersion < 12) PlatoonDatabaseSchema.createWeeklyReportHistoryTables(db)
         if (oldVersion < 13) MembershipRows.synchronizeAllActiveStates(db)
+        if (oldVersion < 14) {
+            markActivityDatedBoundaries(db)
+            MembershipRows.foldAllDuplicateOpenPeriods(db)
+            MembershipRows.synchronizeAllActiveStates(db)
+        }
+    }
+
+    /**
+     * Before v14 a roster boundary dated by a 21935 activity was stored as exact Updates
+     * evidence. Its event is the one an activity fact cites, since only activity dating links
+     * facts to events; it and the period side it dated become [EvidenceSource.ACTIVITY], so a
+     * later 21960 boundary replaces them. A fact evicted by the activity cap cannot be told
+     * apart and keeps its stored source.
+     */
+    private fun markActivityDatedBoundaries(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            UPDATE member_events SET source = ?
+            WHERE source = ?
+              AND id IN (
+                SELECT member_event_id FROM platoon_activity
+                WHERE resolution = ? AND member_event_id IS NOT NULL
+              )
+            """.trimIndent(),
+            arrayOf(
+                EvidenceSource.ACTIVITY.name,
+                EvidenceSource.GAME_UPDATES.name,
+                ActivityResolution.MEMBERSHIP_CORRELATION.name,
+            ),
+        )
+        MembershipBoundary.entries.forEach { boundary ->
+            val types = boundary.eventTypes.map(MemberEventType::name)
+            db.execSQL(
+                """
+                UPDATE membership_periods SET ${boundary.sourceColumn} = ?
+                WHERE ${boundary.sourceColumn} = ?
+                  AND EXISTS (
+                    SELECT 1 FROM member_events event
+                    WHERE event.membership_period_id = membership_periods.id
+                      AND event.source = ?
+                      AND event.event_type IN (?, ?)
+                      AND event.occurred_at = membership_periods.${boundary.atColumn}
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM member_events event
+                    WHERE event.membership_period_id = membership_periods.id
+                      AND event.source = ?
+                      AND event.event_type IN (?, ?)
+                      AND event.occurred_at = membership_periods.${boundary.atColumn}
+                  )
+                """.trimIndent(),
+                arrayOf(
+                    EvidenceSource.ACTIVITY.name,
+                    EvidenceSource.GAME_UPDATES.name,
+                    EvidenceSource.ACTIVITY.name,
+                    types[0],
+                    types[1],
+                    EvidenceSource.GAME_UPDATES.name,
+                    types[0],
+                    types[1],
+                ),
+            )
+        }
     }
 
     private fun renameTenuresToMembershipPeriods(db: SQLiteDatabase, oldVersion: Int) {
@@ -207,6 +270,13 @@ internal object PlatoonDatabaseMigrations {
                         expectedType = expectedType,
                     )
                     if (!linked && joinedSource == EvidenceSource.MANUAL) {
+                        deleteSupersededLegacySnapshotEvent(
+                            db,
+                            membershipPeriodId,
+                            uid,
+                            expectedType,
+                            joinedAt,
+                        )
                         insertLegacyManualBoundaryEvent(
                             db,
                             membershipPeriodId,
@@ -229,6 +299,13 @@ internal object PlatoonDatabaseMigrations {
                         expectedType = MemberEventType.LEFT,
                     )
                     if (!linked && leftSource == EvidenceSource.MANUAL) {
+                        deleteSupersededLegacySnapshotEvent(
+                            db,
+                            membershipPeriodId,
+                            uid,
+                            MemberEventType.LEFT,
+                            leftAt,
+                        )
                         insertLegacyManualBoundaryEvent(
                             db,
                             membershipPeriodId,
@@ -296,6 +373,63 @@ internal object PlatoonDatabaseMigrations {
             arrayOf(eventId.toString()),
         )
         return true
+    }
+
+    /**
+     * A 2.0.0 manual tenure edit left the original roster boundary event behind unlinked; it is
+     * removed before the manual event is written, so the boundary keeps a single event. The
+     * member's neighbouring periods, in the id order this loop links them, bound the search.
+     */
+    private fun deleteSupersededLegacySnapshotEvent(
+        db: SQLiteDatabase,
+        membershipPeriodId: Long,
+        uid: Long,
+        expectedType: MemberEventType,
+        boundaryAt: Long,
+    ) {
+        val uidArgument = uid.toString()
+        val periodArgument = membershipPeriodId.toString()
+        val lowerBound = db.rawQuery(
+            "SELECT left_at FROM membership_periods WHERE uid = ? AND id < ? ORDER BY id DESC LIMIT 1",
+            arrayOf(uidArgument, periodArgument),
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getNullableLong(0) else null }
+        val upperBound = db.rawQuery(
+            "SELECT joined_at FROM membership_periods WHERE uid = ? AND id > ? ORDER BY id LIMIT 1",
+            arrayOf(uidArgument, periodArgument),
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getNullableLong(0) else null }
+        val candidates = db.rawQuery(
+            """
+            SELECT id, event_type, occurred_at, observed_at, source
+            FROM member_events
+            WHERE membership_period_id IS NULL
+              AND uid = ?
+              AND source IN (?, ?)
+            ORDER BY id
+            """.trimIndent(),
+            arrayOf(uidArgument, EvidenceSource.SNAPSHOT.name, EvidenceSource.LEGACY_IMPORT.name),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(
+                        LegacyEventCandidate(
+                            id = cursor.getLong(0),
+                            type = MemberEventType.valueOf(cursor.getString(1)),
+                            occurredAt = cursor.getNullableLong(2),
+                            observedAt = cursor.getLong(3),
+                            source = EvidenceSource.valueOf(cursor.getString(4)),
+                        ),
+                    )
+                }
+            }
+        }
+        val eventId = LegacyEventMigrationPolicy.selectSupersededSnapshotCandidate(
+            expectedType = expectedType,
+            boundaryAt = boundaryAt,
+            lowerBound = lowerBound,
+            upperBound = upperBound,
+            candidates = candidates,
+        ) ?: return
+        MembershipRows.deleteEvents(db, "id = ?", arrayOf(eventId.toString()))
     }
 
     private fun insertLegacyManualBoundaryEvent(

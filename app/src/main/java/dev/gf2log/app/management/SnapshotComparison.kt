@@ -70,6 +70,25 @@ object SnapshotComparison {
         )
     }
 
+    /** How many recent rosters the latest-change summaries search for a differing baseline. */
+    const val COMPARISON_LOOKBACK = 32
+
+    /**
+     * The latest roster and the baseline its change is shown against, from [newestFirst]. The
+     * game resends an unchanged roster when the Platoon page reopens, and each copy is stored,
+     * so the baseline is the newest earlier roster whose members differ; capture time and file
+     * are not content. When every fetched roster is identical the oldest one is the baseline,
+     * and a single roster has none.
+     */
+    fun latestComparablePair(newestFirst: List<PlatoonSnapshot>): Pair<PlatoonSnapshot, PlatoonSnapshot?>? {
+        val latest = newestFirst.firstOrNull() ?: return null
+        val earlier = newestFirst.drop(1)
+        val content = latest.memberContent()
+        return latest to (earlier.firstOrNull { it.memberContent() != content } ?: earlier.lastOrNull())
+    }
+
+    private fun PlatoonSnapshot.memberContent(): Set<SnapshotMember> = members.toSet()
+
     /** A reset between the captures, or an unexplained drop, leaves only the newer counter. */
     private fun resettingDelta(
         previous: Long,

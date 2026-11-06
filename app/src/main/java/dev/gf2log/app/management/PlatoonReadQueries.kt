@@ -109,6 +109,8 @@ internal object PlatoonReadQueries {
                             lastSeenAt = Instant.ofEpochMilli(cursor.getLong(5)),
                             note = cursor.getString(6),
                             membershipPeriods = periodsByUid[uid].orEmpty(),
+                            currentName = cursor.getString(7),
+                            customName = cursor.getNullableString(8),
                         ),
                     )
                 }
@@ -126,7 +128,10 @@ internal object PlatoonReadQueries {
         null,
         null,
         null,
-        "uid, CASE WHEN joined_at IS NULL THEN 1 ELSE 0 END, joined_at, id",
+        // Chronological: by join, or by withdrawal when the join is unknown; an undated open
+        // period is the current one and sorts last. Every stored boundary keeps its instant.
+        "uid, CASE WHEN COALESCE(joined_at, left_at) IS NULL THEN 1 ELSE 0 END, " +
+            "COALESCE(joined_at, left_at), id",
     ).use { cursor ->
         val periods = mutableMapOf<Long, MutableList<MembershipPeriod>>()
         while (cursor.moveToNext()) {
@@ -258,6 +263,8 @@ internal object PlatoonReadQueries {
         "first_seen_at",
         "last_seen_at",
         "note",
+        "current_name",
+        "custom_name",
     )
     private val EVENT_COLUMNS = arrayOf(
         "id",

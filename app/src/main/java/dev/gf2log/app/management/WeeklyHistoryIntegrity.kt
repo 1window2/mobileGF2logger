@@ -19,16 +19,19 @@ internal object WeeklyHistoryIntegrity {
      * hold for every revision any app version stored, so a violation proves a crafted file.
      */
     fun requireRestorable(db: SQLiteDatabase) {
+        // The limits are inlined: rawQuery binds text, and an integer never compares above text.
         db.rawQuery(
-            "SELECT 1 FROM weekly_report_history GROUP BY period_start HAVING COUNT(*) > ? LIMIT 1",
-            arrayOf(MAX_WEEKLY_REPORT_HISTORY.toString()),
+            "SELECT 1 FROM weekly_report_history GROUP BY period_start " +
+                "HAVING COUNT(*) > $MAX_WEEKLY_REPORT_HISTORY LIMIT 1",
+            null,
         ).use { cursor -> require(!cursor.moveToFirst()) { "Backup keeps too many weekly revisions" } }
         db.rawQuery(
             "SELECT 1 FROM weekly_report_history WHERE typeof(period_start) != 'integer' " +
-                "OR typeof(report_blob) != 'blob' OR length(report_blob) NOT BETWEEN 1 AND ? " +
+                "OR typeof(report_blob) != 'blob' " +
+                "OR length(report_blob) NOT BETWEEN 1 AND ${WeeklyReportHistoryCodec.MAX_PAYLOAD_BYTES} " +
                 "OR typeof(fingerprint) != 'text' OR length(fingerprint) != 64 " +
                 "OR fingerprint GLOB '*[^0-9a-f]*' LIMIT 1",
-            arrayOf(WeeklyReportHistoryCodec.MAX_PAYLOAD_BYTES.toString()),
+            null,
         ).use { cursor -> require(!cursor.moveToFirst()) { "Backup has an invalid weekly revision" } }
         db.rawQuery(
             "SELECT 1 FROM weekly_report_history_state state " +

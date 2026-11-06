@@ -243,7 +243,11 @@ internal class WeeklyJournalSection(
                 onFailure = { error ->
                     Feedback.show(
                         activity,
-                        if (error is WeeklyNoteLimitException) R.string.weekly_note_limit_reached else R.string.save_failed,
+                        if (error is WeeklyNoteLimitException) {
+                            R.string.weekly_note_limit_reached
+                        } else {
+                            platoonDataFailureMessage(error, R.string.save_failed)
+                        },
                     )
                 },
             )
@@ -272,6 +276,10 @@ internal class WeeklyJournalSection(
 
         /** The message for a note deletion: only a stored `true` counts as deleted. */
         fun deletionFeedback(result: Result<Boolean>): Int =
-            if (result.getOrDefault(false)) R.string.note_deleted else R.string.note_delete_failed
+            if (result.getOrDefault(false)) {
+                R.string.note_deleted
+            } else {
+                platoonDataFailureMessage(result.exceptionOrNull(), R.string.note_delete_failed)
+            }
     }
 }

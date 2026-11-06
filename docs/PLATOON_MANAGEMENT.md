@@ -306,6 +306,14 @@ weekly notes, and manual corrections are stored in the app's private on-device
 database. Raw network traffic is never stored. Export and backup contain only
 parsed management data and must be explicitly initiated by the user.
 
+A damaged Platoon database is never silently replaced. Its screens and Home
+say so and offer Restore backup or Rebuild; rebuilding keeps the damaged copy
+and repopulates only what the retained roster CSVs hold, so Daily Patrol,
+activity, manual edits, notes, and saved weekly tables start empty. Capture
+does not start while any Platoon's database is set aside as damaged, nor while
+a CSV import or undo is running; the screens of a Platoon being imported wait
+for it with Retry.
+
 CSV files created for spreadsheet use neutralize string cells beginning with
 `=`, `+`, `-`, or `@` (including after leading whitespace), preventing a member
 name or note from executing as a spreadsheet formula. Internal retained roster

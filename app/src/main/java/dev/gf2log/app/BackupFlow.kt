@@ -6,10 +6,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import dev.gf2log.app.management.BackupFileName
 import dev.gf2log.app.management.InvalidBackupException
+import dev.gf2log.app.management.PlatoonAccessFailure
 import dev.gf2log.app.management.PlatoonBackupManager
-import dev.gf2log.app.management.PlatoonDatabaseDamage
-import dev.gf2log.app.management.PlatoonDatabaseDamagedException
-import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.management.RestoredBackupKind
 import dev.gf2log.app.ui.BackgroundWork
@@ -46,7 +44,9 @@ internal class BackupFlow(
         run(
             progress = R.string.backup_exporting,
             success = if (complete) R.string.full_backup_exported else R.string.status_backup_exported,
-            failure = { DocumentAccess.exportFailureMessage(it, backupExportFailureMessage(complete)) },
+            failure = {
+                DocumentAccess.exportFailureMessage(it, platoonDataFailureMessage(it, backupExportFailureMessage(complete)))
+            },
         ) {
             DocumentAccess.writeExport(activity.contentResolver, uri) { output ->
                 val manager = PlatoonBackupManager(activity, target)
@@ -127,7 +127,7 @@ internal class BackupFlow(
         Feedback.show(activity, progress)
         work.run(key = maintenanceKey, task = operation, always = { result ->
             val damagedScope = scope()?.takeIf {
-                result.exceptionOrNull()?.hasCause<PlatoonDatabaseDamagedException>() == true
+                PlatoonAccessFailure.of(result.exceptionOrNull()) == PlatoonAccessFailure.DATABASE_DAMAGED
             }
             if (damagedScope != null) {
                 offerRebuild(damagedScope)
@@ -141,40 +141,28 @@ internal class BackupFlow(
      * No backup is written from a damaged database. The user may restore an earlier backup, or
      * continue with a database rebuilt from the retained roster CSVs; the damaged copy is kept.
      */
-    private fun offerRebuild(target: PlatoonStorageScope) {
-        Dialogs.confirm(
-            activity,
-            R.string.platoon_database_damaged_title,
-            R.string.platoon_database_damaged_message,
-            R.string.rebuild_platoon_database,
-            destructive = true,
-        ) confirm@{
-            if (work.isBusy(maintenanceKey)) return@confirm
-            work.run(
-                key = maintenanceKey,
-                task = {
-                    PlatoonDatabaseDamage.setAsideForRebuild(activity, target)
-                    PlatoonRepository(activity, target).reconcileRetainedCsvFiles()
-                },
-                always = { result ->
-                    Feedback.show(
-                        activity,
-                        if (result.isSuccess) R.string.platoon_database_rebuilt else R.string.platoon_database_rebuild_failed,
-                        long = true,
-                    )
-                },
-            )
-        }
-    }
+    private fun offerRebuild(target: PlatoonStorageScope) = PlatoonDataStates.confirmRebuild(
+        activity,
+        work,
+        maintenanceKey,
+        target,
+        R.string.platoon_database_damaged_message,
+    )
 
     private companion object {
         const val STATE_EXPORT_COMPLETE = "settings.export_complete"
     }
 }
 
-/** Known validation failures blame the selected file; anything else is an operational failure. */
-internal fun fullBackupRestoreFailureMessage(error: Throwable): Int =
-    if (error is InvalidBackupException) R.string.invalid_full_backup else R.string.full_backup_restore_failed
+/**
+ * Known validation failures blame the selected file, and a CSV import holding the Platoon asks to
+ * try again shortly; anything else is an operational failure.
+ */
+internal fun fullBackupRestoreFailureMessage(error: Throwable): Int = when {
+    error is InvalidBackupException -> R.string.invalid_full_backup
+    PlatoonAccessFailure.of(error) == PlatoonAccessFailure.IMPORT_IN_PROGRESS -> R.string.platoon_csv_import_in_progress
+    else -> R.string.full_backup_restore_failed
+}
 
 /** A Platoon-only export failure must not claim that the complete backup failed. */
 internal fun backupExportFailureMessage(complete: Boolean): Int =

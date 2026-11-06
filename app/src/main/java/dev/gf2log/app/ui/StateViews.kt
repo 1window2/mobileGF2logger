@@ -25,6 +25,9 @@ internal object StateViews {
         }, context.lp())
     }
 
+    /** One way out of a state view, styled by its [role] like any other control. */
+    class Action(val label: CharSequence, val role: Controls.Role, val onClick: () -> Unit)
+
     fun empty(
         context: Context,
         @DrawableRes icon: Int,
@@ -32,6 +35,26 @@ internal object StateViews {
         detail: CharSequence? = null,
         actionLabel: CharSequence? = null,
         onAction: (() -> Unit)? = null,
+    ): View = blocked(
+        context,
+        icon,
+        title,
+        detail,
+        listOfNotNull(
+            if (actionLabel != null && onAction != null) Action(actionLabel, Controls.Role.SECONDARY, onAction) else null,
+        ),
+    )
+
+    /**
+     * The same composition for a state the user resolves before the screen can show its data,
+     * such as a damaged database, with its [actions] stacked in the order given.
+     */
+    fun blocked(
+        context: Context,
+        @DrawableRes icon: Int,
+        title: CharSequence,
+        detail: CharSequence?,
+        actions: List<Action>,
     ): View = context.column {
         gravity = Gravity.CENTER_HORIZONTAL
         setPadding(context.dp(24), context.dp(40), context.dp(24), context.dp(40))
@@ -47,10 +70,10 @@ internal object StateViews {
                 setPadding(0, context.dp(6), 0, 0)
             }, context.lp())
         }
-        if (actionLabel != null && onAction != null) {
+        actions.forEachIndexed { index, action ->
             addView(
-                context.button(actionLabel, Controls.Role.SECONDARY) { onAction() },
-                context.lp(WRAP, WRAP, top = 16),
+                context.button(action.label, action.role) { action.onClick() },
+                context.lp(WRAP, WRAP, top = if (index == 0) 16 else 8),
             )
         }
     }

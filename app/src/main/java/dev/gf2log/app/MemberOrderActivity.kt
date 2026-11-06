@@ -172,7 +172,15 @@ class MemberOrderActivity : BaseActivity() {
                     }
                     adapter.notifyDataSetChanged()
                 },
-                onFailure = { stateAdapter.view = StateViews.failure(this, getString(R.string.platoon_load_failed)) { load() } },
+                onFailure = { error ->
+                    stateAdapter.view = PlatoonDataStates.failure(
+                        this,
+                        work,
+                        requireNotNull(profileBinding.scope),
+                        error,
+                        getString(R.string.platoon_load_failed),
+                    ) { load() }
+                },
             )
         }
     }

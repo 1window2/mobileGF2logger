@@ -50,6 +50,10 @@ class OptionsActivity : BaseActivity() {
         val screen = Screen(this)
         screen.topBar.setNavigation(::finish).setTitle(getString(R.string.payload_options))
         screen.setBody(Screen.scrollingBody(this, buildContent()))
+        // Opened from a damaged Platoon's Restore backup action; only once, not after recreation.
+        if (savedInstanceState == null && intent.getBooleanExtra(EXTRA_RESTORE_BACKUP, false)) {
+            backup.confirmRestore()
+        }
     }
 
     override fun onScreenResumed() {
@@ -266,7 +270,14 @@ class OptionsActivity : BaseActivity() {
                 }
             },
         ) { result ->
-            Feedback.show(this, if (result.isSuccess) R.string.game_timezone_updated else R.string.game_timezone_update_failed)
+            Feedback.show(
+                this,
+                if (result.isSuccess) {
+                    R.string.game_timezone_updated
+                } else {
+                    platoonDataFailureMessage(result.exceptionOrNull(), R.string.game_timezone_update_failed)
+                },
+            )
             recreate()
         }
     }
@@ -330,8 +341,10 @@ class OptionsActivity : BaseActivity() {
 
     // endregion
 
-    private companion object {
-        const val MAINTENANCE = "maintenance"
+    companion object {
+        /** Shows the backup restore confirmation as soon as Settings opens. */
+        internal const val EXTRA_RESTORE_BACKUP = "dev.gf2log.extra.RESTORE_BACKUP"
+        private const val MAINTENANCE = "maintenance"
     }
 }
 

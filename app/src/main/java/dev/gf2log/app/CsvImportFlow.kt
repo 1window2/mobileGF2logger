@@ -8,7 +8,7 @@ import dev.gf2log.app.management.CsvCheckpointExpiredException
 import dev.gf2log.app.management.CsvImportCheckpointManager
 import dev.gf2log.app.management.CsvImportPreviewAnalyzer
 import dev.gf2log.app.management.PlatoonCsvImportStore
-import dev.gf2log.app.management.PlatoonDatabaseDamagedException
+import dev.gf2log.app.management.PlatoonAccessFailure
 import dev.gf2log.app.management.PlatoonProfile
 import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.management.PlatoonRepository
@@ -85,6 +85,10 @@ internal class CsvImportFlow(
         // One undo at a time: a second restore would run against the already-restored state.
         if (work.isBusy(UNDO)) return@whenStopped
         work.run(key = UNDO, task = { CsvImportCheckpointManager(activity, scope).canUndo() }) { result ->
+            result.exceptionOrNull()?.let { error ->
+                Feedback.show(activity, csvUndoFailureMessage(error), long = true)
+                return@run
+            }
             if (!result.getOrDefault(false)) {
                 Feedback.show(activity, R.string.no_csv_import_checkpoint)
                 return@run
@@ -346,18 +350,20 @@ internal class CsvImportFlow(
     }
 }
 
-/** A damaged database is named, since retrying the import cannot succeed. */
-internal fun csvImportFailureMessage(error: Throwable): Int =
-    if (error.hasCause<PlatoonDatabaseDamagedException>()) {
-        R.string.csv_import_database_damaged
-    } else {
-        R.string.status_platoon_csv_import_failed
-    }
+/**
+ * A damaged database is named, since retrying the import cannot succeed; an import or undo that
+ * still holds the Platoon is named too, since retrying shortly can.
+ */
+internal fun csvImportFailureMessage(error: Throwable): Int = when (PlatoonAccessFailure.of(error)) {
+    PlatoonAccessFailure.DATABASE_DAMAGED -> R.string.csv_import_database_damaged
+    PlatoonAccessFailure.IMPORT_IN_PROGRESS -> R.string.platoon_csv_import_in_progress
+    PlatoonAccessFailure.OTHER -> R.string.status_platoon_csv_import_failed
+}
 
 /** An expired checkpoint was removed; saying so explains why the undo row disappears. */
 internal fun csvUndoFailureMessage(error: Throwable): Int =
     if (error.hasCause<CsvCheckpointExpiredException>()) {
         R.string.csv_import_undo_expired
     } else {
-        R.string.csv_import_undo_failed
+        platoonDataFailureMessage(error, R.string.csv_import_undo_failed)
     }

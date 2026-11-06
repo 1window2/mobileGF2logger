@@ -63,6 +63,17 @@ internal class HomeCapturePanel(
     private val clients = context.column()
     private var lastPhase: CapturePhase? = null
     private var lastAnnounced: CaptureNoticeEvent? = null
+    private val startButtons = mutableListOf<View>()
+
+    /**
+     * Disables both start actions while this screen's CSV import or undo runs: a capture started
+     * meanwhile would be refused, or would make the import roll back.
+     */
+    var startBlocked: Boolean = false
+        set(value) {
+            field = value
+            startButtons.forEach { it.isEnabled = !value }
+        }
 
     val view: LinearLayout = context.panel(outlined = true) {
         addView(context.row {
@@ -214,15 +225,17 @@ internal class HomeCapturePanel(
 
     private fun renderActions(phase: CapturePhase) = with(context) {
         captureActions.removeAllViews()
+        startButtons.clear()
         if (phase == CapturePhase.STOPPED) {
-            captureActions.addView(
-                button(getString(R.string.capture_one_roster), Controls.Role.PRIMARY, R.drawable.ic_bolt) { onStart(true) },
-                lp(width = 0, weight = 1f, end = 4),
-            )
-            captureActions.addView(
-                button(getString(R.string.prepare_capture), Controls.Role.CAPTURE, R.drawable.ic_play) { onStart(false) },
-                lp(width = 0, weight = 1f, start = 4),
-            )
+            startButtons += button(getString(R.string.capture_one_roster), Controls.Role.PRIMARY, R.drawable.ic_bolt) {
+                onStart(true)
+            }
+            startButtons += button(getString(R.string.prepare_capture), Controls.Role.CAPTURE, R.drawable.ic_play) {
+                onStart(false)
+            }
+            startButtons.forEach { it.isEnabled = !startBlocked }
+            captureActions.addView(startButtons[0], lp(width = 0, weight = 1f, end = 4))
+            captureActions.addView(startButtons[1], lp(width = 0, weight = 1f, start = 4))
         } else {
             captureActions.addView(
                 button(getString(R.string.stop_capture), Controls.Role.DESTRUCTIVE, R.drawable.ic_stop) { onStop() }.apply {

@@ -89,7 +89,9 @@ internal object WithdrawnMemberDialog {
                         Feedback.show(this, R.string.saved)
                         onAdded()
                     } else {
-                        error.showMessage(getString(R.string.invalid_withdrawn_member))
+                        error.showMessage(
+                            getString(platoonDataFailureMessage(result.exceptionOrNull(), R.string.invalid_withdrawn_member)),
+                        )
                     }
                 }
             }

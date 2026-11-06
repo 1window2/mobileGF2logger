@@ -13,6 +13,7 @@ import dev.gf2log.app.management.MemberProfileDraft
 import dev.gf2log.app.management.MemberStatus
 import dev.gf2log.app.management.MembershipPeriod
 import dev.gf2log.app.management.PlatoonRepository
+import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.management.isJoinedBoundaryEditable
 import dev.gf2log.app.management.isMembershipBoundaryWithinPresent
@@ -52,6 +53,7 @@ import java.time.ZoneId
 class MemberDetailActivity : BaseActivity() {
 
     private lateinit var profileBinding: ActivePlatoonScopeBinding
+    private lateinit var scope: PlatoonStorageScope
     private lateinit var repository: PlatoonRepository
     private lateinit var screen: Screen
     private val work = BackgroundWork(this, "GF2MemberDetail")
@@ -59,6 +61,9 @@ class MemberDetailActivity : BaseActivity() {
     private var model: Model? = null
     private var inputsInitialized = false
     private var finishAfterSave = false
+
+    /** False while the last load failed: edits wait, but a typed draft stays in its fields. */
+    private var available = true
 
     private lateinit var content: LinearLayout
     private lateinit var statusPanel: LinearLayout
@@ -71,11 +76,12 @@ class MemberDetailActivity : BaseActivity() {
         super.onCreate(savedInstanceState)
         uid = intent.getLongExtra(EXTRA_UID, -1)
         profileBinding = ActivePlatoonScopeBinding(this)
-        val scope = profileBinding.scope
-        if (uid <= 0 || scope == null) {
+        val bound = profileBinding.scope
+        if (uid <= 0 || bound == null) {
             finish()
             return
         }
+        scope = bound
         repository = PlatoonRepository(this, scope)
         inputsInitialized = savedInstanceState?.getBoolean(STATE_INPUTS_INITIALIZED) == true
         screen = Screen(this)
@@ -130,7 +136,7 @@ class MemberDetailActivity : BaseActivity() {
             addView(row {
                 addView(sectionHeader(getString(R.string.membership_history)), lp(width = 0, weight = 1f))
                 addView(button(getString(R.string.add_membership_history_short), Controls.Role.TERTIARY, R.drawable.ic_add) {
-                    addMembershipPeriod()
+                    if (available) addMembershipPeriod()
                 }, lp(WRAP, WRAP, top = 8))
             }, lp())
             addView(periods, lp())
@@ -155,9 +161,10 @@ class MemberDetailActivity : BaseActivity() {
         ) { result ->
             val loaded = result.getOrNull()
             if (loaded == null) {
-                if (result.isSuccess) finish() else render(null)
+                if (result.isSuccess) finish() else render(null, result.exceptionOrNull())
                 return@run
             }
+            available = true
             model = loaded
             // A blank nickname follows the in-game name, which the hint shows.
             nickname.hint = loaded.status.currentName
@@ -171,11 +178,15 @@ class MemberDetailActivity : BaseActivity() {
         }
     }
 
-    private fun render(loaded: Model?) {
+    private fun render(loaded: Model?, error: Throwable? = null) {
         statusPanel.removeAllViews()
         periods.removeAllViews()
         if (loaded == null) {
-            statusPanel.addView(StateViews.failure(this, getString(R.string.platoon_load_failed)) { load() })
+            available = false
+            updateSaveState()
+            statusPanel.addView(
+                PlatoonDataStates.failure(this, work, scope, error, getString(R.string.platoon_load_failed)) { load() },
+            )
             return
         }
         val status = loaded.status
@@ -263,7 +274,7 @@ class MemberDetailActivity : BaseActivity() {
     }
 
     private fun updateSaveState() {
-        saveButton.isEnabled = !work.isBusy(SAVE) && isDirty()
+        saveButton.isEnabled = available && !work.isBusy(SAVE) && isDirty()
     }
 
     private fun saveProfile(thenFinish: Boolean = false) {
@@ -272,7 +283,7 @@ class MemberDetailActivity : BaseActivity() {
         val noteText = note.text.toString()
         work.run(key = SAVE, task = { repository.updateMember(uid, name, noteText) }) { result ->
             val saved = result.getOrDefault(false)
-            Feedback.show(this, if (saved) R.string.saved else R.string.save_failed)
+            Feedback.show(this, if (saved) R.string.saved else platoonDataFailureMessage(result.exceptionOrNull(), R.string.save_failed))
             if (saved && (thenFinish || finishAfterSave)) {
                 finish()
                 return@run
@@ -295,7 +306,7 @@ class MemberDetailActivity : BaseActivity() {
                     Feedback.show(this, R.string.member_deleted)
                     finish()
                 } else {
-                    Feedback.show(this, R.string.member_delete_failed)
+                    Feedback.show(this, platoonDataFailureMessage(result.exceptionOrNull(), R.string.member_delete_failed))
                 }
             }
         }
@@ -383,7 +394,9 @@ class MemberDetailActivity : BaseActivity() {
                         Feedback.show(this, R.string.saved)
                         load()
                     } else {
-                        error.showMessage(getString(R.string.membership_period_save_failed))
+                        error.showMessage(
+                            getString(platoonDataFailureMessage(result.exceptionOrNull(), R.string.membership_period_save_failed)),
+                        )
                     }
                 }
             }
@@ -405,7 +418,11 @@ class MemberDetailActivity : BaseActivity() {
                     Feedback.show(this, R.string.membership_period_deleted)
                     load()
                 } else {
-                    Feedback.show(this, R.string.membership_period_delete_failed, long = true)
+                    Feedback.show(
+                        this,
+                        platoonDataFailureMessage(result.exceptionOrNull(), R.string.membership_period_delete_failed),
+                        long = true,
+                    )
                 }
             }
         }
@@ -454,7 +471,9 @@ class MemberDetailActivity : BaseActivity() {
                         dialog.dismiss()
                         load()
                     } else {
-                        error.showMessage(getString(R.string.membership_period_overlap))
+                        error.showMessage(
+                            getString(platoonDataFailureMessage(result.exceptionOrNull(), R.string.membership_period_overlap)),
+                        )
                     }
                 }
             }

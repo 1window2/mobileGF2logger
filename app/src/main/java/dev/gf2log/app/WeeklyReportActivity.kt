@@ -188,16 +188,22 @@ class WeeklyReportActivity : BaseActivity() {
         ) { result ->
             result.fold(
                 onSuccess = ::render,
-                onFailure = {
+                onFailure = { error ->
+                    // Without a model the edit, share and export actions are disabled; an edit
+                    // draft in progress is kept and comes back once the table loads again.
                     model = null
                     topAdapter.view = null
                     headerAdapter.view = null
                     stickyHeader.visibility = View.GONE
                     rowsAdapter.submit(emptyList())
                     journal.clear()
-                    stateAdapter.view = StateViews.failure(this, getString(R.string.weekly_report_load_failed)) {
-                        requestRender()
-                    }
+                    stateAdapter.view = PlatoonDataStates.failure(
+                        this,
+                        work,
+                        scope,
+                        error,
+                        getString(R.string.weekly_report_load_failed),
+                    ) { requestRender() }
                     updateTopBar()
                 },
             )
@@ -559,7 +565,7 @@ class WeeklyReportActivity : BaseActivity() {
         // missing from the roster would otherwise drop overrides the user never touched.
         work.run(key = SAVE, task = { repository.listWeeklyOverrides(report.periodStart.toEpochDay()) }) { stored ->
             stored.onFailure {
-                Feedback.show(this, R.string.save_failed)
+                Feedback.show(this, platoonDataFailureMessage(it, R.string.save_failed), long = true)
                 updateTopBar()
             }
             stored.onSuccess { saveMerged(current, it, saving) }
@@ -589,7 +595,7 @@ class WeeklyReportActivity : BaseActivity() {
                         Feedback.show(this, R.string.weekly_edits_saved)
                         if (profileBinding.isCurrent(this)) requestRender() else recreate()
                     } else {
-                        Feedback.show(this, R.string.save_failed)
+                        Feedback.show(this, platoonDataFailureMessage(result.exceptionOrNull(), R.string.save_failed), long = true)
                     }
                     updateTopBar()
                 }

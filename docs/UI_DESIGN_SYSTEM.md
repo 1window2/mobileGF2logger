@@ -32,7 +32,7 @@ one-off drawables.
 | `TopBar` | 56dp bar with optional back/close navigation, title and subtitle, up to two icon actions, and an overflow menu for secondary utilities. |
 | `Controls` | Button roles, checkbox/switch tints, and the segmented rail. |
 | `Views` | Text roles, labeled fields, grouped navigation rows, switch rows, panels, badges. |
-| `StateViews` | One loading, empty, and failure composition for every screen. |
+| `StateViews` | One loading, empty, failure, and blocked composition for every screen; `PlatoonDataStates` picks the Platoon-specific one. |
 | `Dialogs` / `Feedback` | Styled dialogs with a red treatment for destructive confirmations; restorable input dialogs; a single replacing toast. |
 | `BackgroundWork` | Serialized off-main work bound to the screen lifecycle; keyed requests supersede stale ones, and `always` effects run even after recreation. |
 | `SingleViewAdapter` | Hosts headers, footers, and state views inside one `RecyclerView` without recycling them. |
@@ -72,6 +72,11 @@ when Android animations are disabled.
   screen shows a loading, empty, or failure state instead of blocking input.
   Feedback and cleanup that do not need the screen go in `always`, so a task
   that finishes after recreation still reports its outcome once.
+- A Platoon whose database is damaged shows a blocked state instead of its
+  data, with Restore backup as the primary action and Rebuild as confirmed
+  destructive text. While a CSV import or undo holds the Platoon, its screens
+  show an import-in-progress state with Retry and disable their edit actions,
+  and a refused action says to try again shortly rather than that it failed.
 - Text fields carry stable view IDs and Activities save transient choices, so
   rotation, theme or language changes, and large-screen resizing keep drafts.
   Input dialogs shown with `Dialogs.showRestorable` reopen with their typed

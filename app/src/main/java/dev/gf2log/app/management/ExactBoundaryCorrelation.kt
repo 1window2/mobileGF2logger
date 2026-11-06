@@ -246,7 +246,7 @@ internal object ExactBoundaryCorrelation {
             WHERE uid = ?
               AND event_type IN (?, ?)
               AND source != ?
-              AND ABS(COALESCE(occurred_at, observed_at) - ?) <= ?
+              AND ABS(COALESCE(occurred_at, observed_at) - ?) <= CAST(? AS INTEGER)
             ORDER BY distance,
                      CASE source WHEN '${EvidenceSource.MANUAL.name}' THEN 0 ELSE 1 END,
                      id DESC
@@ -352,8 +352,8 @@ internal object ExactBoundaryCorrelation {
             FROM member_events
             WHERE uid = ?
               AND event_type IN (?, ?)
-              AND COALESCE(occurred_at, observed_at) > ?
-              AND COALESCE(occurred_at, observed_at) < ?
+              AND COALESCE(occurred_at, observed_at) > CAST(? AS INTEGER)
+              AND COALESCE(occurred_at, observed_at) < CAST(? AS INTEGER)
             LIMIT 1
             """.trimIndent(),
             arrayOf(
@@ -381,8 +381,8 @@ internal object ExactBoundaryCorrelation {
             FROM member_events
             WHERE uid = ?
               AND event_type IN (?, ?)
-              AND COALESCE(occurred_at, observed_at) > ?
-              AND COALESCE(occurred_at, observed_at) <= ?
+              AND COALESCE(occurred_at, observed_at) > CAST(? AS INTEGER)
+              AND COALESCE(occurred_at, observed_at) <= CAST(? AS INTEGER)
             """.trimIndent(),
             arrayOf(
                 uid.toString(),
@@ -419,7 +419,7 @@ internal object ExactBoundaryCorrelation {
                     joined_at IS NULL
                     OR (
                       (joined_precision != ? OR joined_source = ?)
-                      AND ABS(joined_at - ?) <= ?
+                      AND ABS(joined_at - ?) <= CAST(? AS INTEGER)
                     )
                     OR ${weakBoundaryInSameRosterGap(MembershipBoundary.JOIN)}
                   )
@@ -452,7 +452,7 @@ internal object ExactBoundaryCorrelation {
                     left_at IS NULL
                     OR (
                       (left_precision != ? OR left_source = ?)
-                      AND ABS(left_at - ?) <= ?
+                      AND ABS(left_at - ?) <= CAST(? AS INTEGER)
                     )
                     OR ${weakBoundaryInSameRosterGap(MembershipBoundary.WITHDRAW)}
                   )
@@ -577,7 +577,7 @@ internal object ExactBoundaryCorrelation {
               AND (${boundary.precisionColumn} IN (?, ?) OR ${boundary.sourceColumn} = ?)
               AND (
                 ${boundary.atColumn} IS NULL
-                OR ABS(${boundary.atColumn} - ?) <= ?
+                OR ABS(${boundary.atColumn} - ?) <= CAST(? AS INTEGER)
               )
             LIMIT 1
             """.trimIndent(),

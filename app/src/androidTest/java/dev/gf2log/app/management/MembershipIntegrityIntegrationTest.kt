@@ -204,6 +204,36 @@ class MembershipIntegrityIntegrationTest {
     }
 
     @Test
+    fun anUpdatesRejoinNeverFoldsAnEarlierMembershipAcrossItsWithdrawal() {
+        val joined = Instant.parse("2026-08-04T00:00:00Z")
+        val omitted = Instant.parse("2026-08-07T00:00:00Z")
+        val back = Instant.parse("2026-08-11T00:00:00Z")
+        roster(Instant.parse("2026-08-03T00:00:00Z"), member(OTHER_UID, "Other"))
+        roster(joined, member(OTHER_UID, "Other"), member(TARGET_UID, "Target"))
+        roster(omitted, member(OTHER_UID, "Other"))
+        roster(back, member(OTHER_UID, "Other"), member(TARGET_UID, "Target"))
+        assertEquals(2, status(TARGET_UID).membershipPeriods.size)
+
+        // The rejoin lies in the last roster gap; the first join is a week older and the first
+        // membership ended in between, so only the rejoin's roster boundary records this change.
+        val rejoinedAt = Instant.parse("2026-08-10T10:00:00Z")
+        database.ingestPlatoonUpdates(
+            listOf(update(PlatoonUpdateSemantics.KIND_JOIN, rejoinedAt, TARGET_UID, "Target")),
+            back.plusSeconds(HOUR),
+        )
+
+        val periods = status(TARGET_UID).membershipPeriods.sortedBy { it.leftAt == null }
+        assertEquals(2, periods.size)
+        assertEquals(joined, periods.first().joinedAt)
+        assertEquals(omitted, periods.first().leftAt)
+        assertEquals(rejoinedAt, periods.last().joinedAt)
+        assertEquals(EvidenceSource.GAME_UPDATES, periods.last().joinedSource)
+        assertNull(periods.last().leftAt)
+        assertEquals(2L, count("member_events", "uid = $TARGET_UID AND event_type IN ('JOINED', 'REJOINED')"))
+        assertForeignKeysValid()
+    }
+
+    @Test
     fun aRosterOmissionClosesEveryOpenPeriod() {
         roster(T0, member(OTHER_UID, "Other"), member(TARGET_UID, "Target"))
         insertOpenPeriod(TARGET_UID, T0.minusSeconds(10 * 24 * HOUR), EvidencePrecision.MANUAL, EvidenceSource.MANUAL)

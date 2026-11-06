@@ -11,7 +11,6 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import dev.gf2log.app.StandbyActivity
-import dev.gf2log.app.capture.CaptureNotice
 import dev.gf2log.app.capture.CapturePhase
 import dev.gf2log.app.capture.CaptureSnapshot
 import dev.gf2log.app.capture.CaptureStatus
@@ -162,9 +161,9 @@ internal object StandbyAutomation {
                 CaptureStatus.snapshot().phase.let { it == CapturePhase.STOPPING || it == CapturePhase.STOPPED } ->
                     endRun(StandbyOutcome.CAPTURE_FAILED)
                 now >= runTimeoutAt -> endRun(StandbyOutcome.TIMED_OUT)
-                // Taps only reach the title screen: they stop at login, and in any case after the
-                // window, so nothing inside the game is ever pressed.
-                now >= nextTapAt && now < tapsUntil && !loggedIn -> {
+                // Taps repeat at the title screen's Start position until the first capture notice
+                // that only a logged-in game produces, and never after the window.
+                StandbyTapPolicy.tapDue(now, nextTapAt, tapsUntil, loggedIn) -> {
                     nextTapAt = now + TAP_INTERVAL_MS
                     val (x, y) = startButton(runs[index].server.packageName)
                     StandbyAutomationService.instance?.tapIfFront(runs[index].server.packageName, x, y)
@@ -311,13 +310,16 @@ internal object StandbyAutomation {
         enter(Phase.IN_GAME)
     }
 
-    /** Platoon notices only follow a login, so the title screen is gone once one arrives. */
+    /**
+     * Platoon notices only follow a login, so the title screen is gone once one arrives, even one
+     * saying the data could not be used.
+     */
     private fun onCaptureChanged(snapshot: CaptureSnapshot) {
         ownStopPending(snapshot)
         val notice = snapshot.notice ?: return
-        if (phase == Phase.IN_GAME && notice.notice in LOGIN_NOTICES && notice.atMillis >= phaseStartedAt) {
-            loggedIn = true
-        }
+        if (phase != Phase.IN_GAME || notice.atMillis < phaseStartedAt) return
+        if (StandbyTapPolicy.stopsTaps(notice.notice)) loggedIn = true
+        StandbyTapPolicy.endsRun(notice.notice)?.let(::endRun)
     }
 
     private fun onRosterPersisted(storageId: String) {
@@ -483,14 +485,4 @@ internal object StandbyAutomation {
     private const val CLOSE_GAME_DELAY_MS = 1_500L
     private const val START_X = 0.5f
     private const val START_Y = 0.85f
-    private val LOGIN_NOTICES = setOf(
-        CaptureNotice.PLATOON_DETECTED,
-        CaptureNotice.PENDING_DETECTED,
-        CaptureNotice.PLATOON_CONFIRMED,
-        CaptureNotice.IDENTITY_CHANGED,
-        CaptureNotice.PENDING_IDENTITY_CHANGED,
-        CaptureNotice.ROSTER_SAVED,
-        CaptureNotice.ROSTER_UPDATED,
-        CaptureNotice.ROSTER_RECOVERED,
-    )
 }

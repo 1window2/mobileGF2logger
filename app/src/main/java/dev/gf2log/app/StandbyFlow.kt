@@ -179,6 +179,7 @@ internal class StandbyFlow(
         StandbyOutcome.RECORDED -> R.string.standby_outcome_recorded
         StandbyOutcome.OTHER_PLATOON -> R.string.standby_outcome_other_platoon
         StandbyOutcome.TIMED_OUT -> R.string.standby_outcome_timed_out
+        StandbyOutcome.CLIENT_UNVERIFIED -> R.string.standby_outcome_client_unverified
         StandbyOutcome.MISSED -> R.string.standby_outcome_missed
         StandbyOutcome.NO_ACCESSIBILITY -> R.string.standby_outcome_no_accessibility
         StandbyOutcome.NO_VPN_CONSENT -> R.string.standby_outcome_no_vpn

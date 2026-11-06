@@ -630,6 +630,7 @@
     <string name="standby_outcome_recorded">멤버 기록 완료</string>
     <string name="standby_outcome_other_platoon">다른 서클로 접속됨</string>
     <string name="standby_outcome_timed_out">제한 시간 안에 멤버 정보가 들어오지 않음</string>
+    <string name="standby_outcome_client_unverified">게임에 로그인했지만 클라이언트를 확인하지 못함</string>
     <string name="standby_outcome_missed">시간 안에 시작하지 못함</string>
     <string name="standby_outcome_no_accessibility">접근성 서비스가 꺼져 있음</string>
     <string name="standby_outcome_no_vpn">VPN 동의가 없음</string>

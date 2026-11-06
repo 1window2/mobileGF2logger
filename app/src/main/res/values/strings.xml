@@ -638,6 +638,7 @@
     <string name="standby_outcome_recorded">Members recorded</string>
     <string name="standby_outcome_other_platoon">Logged in to a different Platoon</string>
     <string name="standby_outcome_timed_out">No members data before the time limit</string>
+    <string name="standby_outcome_client_unverified">The game logged in, but its client could not be verified</string>
     <string name="standby_outcome_missed">Not started in time</string>
     <string name="standby_outcome_no_accessibility">Accessibility service was off</string>
     <string name="standby_outcome_no_vpn">VPN consent was missing</string>

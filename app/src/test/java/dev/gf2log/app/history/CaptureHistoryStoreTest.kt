@@ -119,6 +119,57 @@ class CaptureHistoryStoreTest {
     }
 
     @Test
+    fun aClockMovedBackwardsNeverRotatesOutTheEntryJustSaved() {
+        val directory = Files.createTempDirectory("gf2log-history-clock-test").toFile()
+        try {
+            val start = Instant.parse("2026-07-22T08:00:00Z")
+            val original = Clock.fixed(start, ZoneOffset.UTC)
+            val ids = (0 until CaptureHistoryStore.MAX_ENTRIES).map { index ->
+                CaptureHistoryStore(directory, original).save(payload(index)).id
+            }
+            val rewound = Clock.fixed(start.minusSeconds(3_600), ZoneOffset.UTC)
+
+            val first = CaptureHistoryStore(directory, rewound).save(payload(1_000))
+            val second = CaptureHistoryStore(directory, rewound).save(payload(1_001))
+
+            val listed = CaptureHistoryStore(directory).list().map { it.id }
+            assertEquals(CaptureHistoryStore.MAX_ENTRIES, listed.size)
+            assertTrue(first.id in listed)
+            assertTrue(second.id in listed)
+            assertFalse(ids[0] in listed)
+            assertFalse(ids[1] in listed)
+            assertTrue(ids[2] in listed)
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun entriesWithoutAPersistedSequenceAreRotatedOutFirst() {
+        val directory = Files.createTempDirectory("gf2log-history-legacy-test").toFile()
+        try {
+            val clock = Clock.fixed(Instant.parse("2026-07-22T08:00:00Z"), ZoneOffset.UTC)
+            val sequenced = CaptureHistoryStore(directory, clock).save(payload(0)).id
+            repeat(CaptureHistoryStore.MAX_ENTRIES - 1) { index ->
+                // A legacy ID carries a process-local counter that says nothing about order.
+                directory.resolve("${index + 1}_11138_${500 - index}.txt").apply {
+                    writeText("legacy $index")
+                    setLastModified(Instant.parse("2026-08-01T00:00:00Z").toEpochMilli() + index)
+                }
+            }
+
+            CaptureHistoryStore(directory, clock).save(payload(1))
+
+            val listed = CaptureHistoryStore(directory).list().map { it.id }
+            assertEquals(CaptureHistoryStore.MAX_ENTRIES, listed.size)
+            assertTrue(sequenced in listed)
+            assertFalse("1_11138_500.txt" in listed)
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
     fun oversizedPayloadWritesNothingAndKeepsEarlierEntries() {
         val directory = Files.createTempDirectory("gf2log-history-oversized-test").toFile()
         try {

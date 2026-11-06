@@ -375,8 +375,11 @@ Every completed recognized payload is formatted in protocol order and written
 atomically below the admitted profile's private
 `files/platoons/<storage-id>/capture-history` directory. Unconfirmed payloads
 never enter history. `CaptureHistoryStore` returns entries newest-first, trims
-the oldest files once the count exceeds 100, rejects path-like identifiers, and
-supports explicit deletion of user-selected entries. `SavedHistoryStore`
+the earliest-recorded files once the count exceeds 100, rejects path-like
+identifiers, and supports explicit deletion of user-selected entries. Recording
+order is a sequence persisted in each entry ID rather than the wall clock, so a
+clock moved backwards never rotates out the entry just saved. Every history and
+roster file is synced before it is renamed into place. `SavedHistoryStore`
 atomically copies selected entries into the same profile's `saved-history`
 directory, rejects duplicates, caps the collection at 50 without FIFO deletion,
 and keeps saved entries independent from recent-history rotation.

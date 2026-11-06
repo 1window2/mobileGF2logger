@@ -714,11 +714,12 @@ class PlatoonBackupManagerIntegrationTest {
     @Test
     fun unfinishedCsvImportRecoversBeforePreviewRepositoryReads() {
         seedDatabase(ARCHIVED_UID, "Before interrupted import", "before-interrupted-import.csv")
+        // Exported before the checkpoint appears: an export's first repository access finishes
+        // interrupted imports, and a half-written checkpoint would be one.
+        val archive = ByteArrayOutputStream().also { PlatoonBackupManager(context).export(it) }
         val checkpoint = FilePaths.csvCheckpointDirectory(context)
         assertTrue(checkpoint.mkdirs())
-        java.io.FileOutputStream(java.io.File(checkpoint, "platoon.gf2backup")).use { output ->
-            PlatoonBackupManager(context).export(output)
-        }
+        java.io.File(checkpoint, "platoon.gf2backup").writeBytes(archive.toByteArray())
         val plannedFileName = "import-20260811T000000Z-00000000000000000006.csv"
         java.io.File(checkpoint, "planned-files.txt").writeText(
             "$plannedFileName\n",
@@ -768,11 +769,12 @@ class PlatoonBackupManagerIntegrationTest {
     @Test
     fun startupRecoveryFinishesInterruptedImportsAndSurvivesABrokenScope() {
         seedDatabase(ARCHIVED_UID, "Before interrupted import", "before-interrupted-import.csv")
+        // Exported before the checkpoint appears: an export's first repository access finishes
+        // interrupted imports, and a half-written checkpoint would be one.
+        val archive = ByteArrayOutputStream().also { PlatoonBackupManager(context).export(it) }
         val checkpoint = FilePaths.csvCheckpointDirectory(context)
         assertTrue(checkpoint.mkdirs())
-        java.io.FileOutputStream(java.io.File(checkpoint, "platoon.gf2backup")).use { output ->
-            PlatoonBackupManager(context).export(output)
-        }
+        java.io.File(checkpoint, "platoon.gf2backup").writeBytes(archive.toByteArray())
         java.io.File(checkpoint, "planned-files.txt").writeText("\n", Charsets.UTF_8)
         replaceDatabaseForCheckpoint(CURRENT_UID, "Interrupted import", "interrupted-import.csv")
         val brokenScope = PlatoonStorageScope(

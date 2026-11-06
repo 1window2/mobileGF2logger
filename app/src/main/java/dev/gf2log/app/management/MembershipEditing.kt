@@ -78,6 +78,7 @@ internal object MembershipEditing {
         return db.inTransaction {
             if (!memberExists(db, uid)) return@inTransaction false
             val uidArgument = arrayOf(uid.toString())
+            WeeklyHistoryIntegrity.purgeRevisionsReferencing(db, uid)
             db.delete("weekly_overrides", "uid = ?", uidArgument)
             db.delete(
                 "platoon_activity",

@@ -329,6 +329,11 @@
     <string name="csv_import_undoing">CSV 가져오기 체크포인트를 복원하는 중…</string>
     <string name="csv_import_undone">마지막 CSV 가져오기를 실행 취소했습니다.</string>
     <string name="csv_import_undo_failed">체크포인트가 없거나 올바르지 않거나, 가져오기 이후 서클 데이터가 변경되어 되돌릴 수 없습니다.</string>
+    <string name="platoon_database_damaged_title">서클 데이터베이스가 손상되었습니다</string>
+    <string name="platoon_database_damaged_message">백업을 저장하지 않았습니다. 이전 백업을 복원하거나, 보관된 명단 CSV로 이 서클을 다시 만드세요. 다시 만들어도 손상된 사본은 휴대폰에 남지만, 명단에 없는 과업, 활동, 수정 내용, 메모, 저장된 주간 표는 비어 있는 상태로 시작합니다.</string>
+    <string name="rebuild_platoon_database">다시 만들기</string>
+    <string name="platoon_database_rebuilt">보관된 명단 CSV로 이 서클을 다시 만들었습니다.</string>
+    <string name="platoon_database_rebuild_failed">이 서클을 다시 만들 수 없습니다. 손상된 사본은 그대로 남아 있습니다.</string>
     <string name="stop_capture_before_csv_import">명단이 겹쳐 기록되지 않도록 CSV 가져오기와 되돌리기는 캡처가 멈춘 뒤에 할 수 있습니다.</string>
     <string name="share_weekly_table">주간 테이블 공유</string>
     <string name="share_include_member_names">멤버 이름 포함</string>

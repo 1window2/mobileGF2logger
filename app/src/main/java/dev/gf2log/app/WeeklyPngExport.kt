@@ -90,12 +90,22 @@ internal object WeeklyPngExport {
         File(root, name).canonicalFile.takeIf { it.isFile && it.parentFile == root }
     }.getOrNull()
 
-    private fun revokeAndDeleteOld(context: Context, directory: File) {
+    /**
+     * Revokes and deletes every cached share. Deleting a Platoon or a member calls this, since the
+     * last shared PNG can still show their names, UIDs or notes until the next render.
+     */
+    fun clearShareCache(context: Context) = revokeAndDeleteOld(context, directory(context.cacheDir))
+
+    private fun revokeAndDeleteOld(context: Context, directory: File) =
+        deleteCachedFiles(directory) { stale ->
+            val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", stale)
+            context.revokeUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+    /** Deletes each cached file after [revoke]; a failed revoke never keeps the file. */
+    internal fun deleteCachedFiles(directory: File, revoke: (File) -> Unit) {
         directory.listFiles().orEmpty().filter(File::isFile).forEach { stale ->
-            runCatching {
-                val uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", stale)
-                context.revokeUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
+            runCatching { revoke(stale) }
             stale.delete()
         }
     }

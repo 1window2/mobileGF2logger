@@ -16,6 +16,7 @@ import dev.gf2log.app.settings.PayloadHistoryPreferences
 import dev.gf2log.app.standby.ScheduledRecording
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
+import dev.gf2log.app.ui.CaptureGuard
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
@@ -231,7 +232,8 @@ class OptionsActivity : BaseActivity() {
         ) { which ->
             val selected = if (which == 0) null else regions[which - 1]
             val changed = if (selected == null) !automatic else automatic || selected != current
-            if (changed) updateResetRegion(scope, selected)
+            // A capture ingesting while history is rebuilt would record old-zone revisions after it.
+            if (changed) CaptureGuard.whenStopped(this, R.string.stop_capture_before_profile_change) { updateResetRegion(scope, selected) }
         }
     }
 

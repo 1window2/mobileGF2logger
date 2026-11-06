@@ -78,6 +78,25 @@ internal data class DatabaseSchemaContract(
             )
         }
 
+        /**
+         * Each app table's normalized CREATE statement. Structural metadata cannot report CHECK,
+         * ON CONFLICT, column COLLATE, STRICT or WITHOUT ROWID clauses; comparing the statement
+         * itself proves a database was created by the current schema code. Databases upgraded in
+         * place carry ALTER-appended text, so only rebuilt and freshly created files compare equal.
+         */
+        fun readTableSql(database: SQLiteDatabase): Map<String, String> = database.rawQuery(
+            "SELECT name, sql FROM sqlite_master " +
+                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' " +
+                "AND name != 'android_metadata' ORDER BY name",
+            null,
+        ).use { cursor ->
+            buildMap {
+                while (cursor.moveToNext()) {
+                    put(cursor.getString(0), normalizeSql(cursor.getStringOrNull(1).orEmpty()))
+                }
+            }
+        }
+
         private fun readAuxiliaryObjects(database: SQLiteDatabase): Set<SchemaObjectContract> =
             database.rawQuery(
                 "SELECT type, name, tbl_name, sql FROM sqlite_master " +

@@ -268,6 +268,20 @@ internal class PlatoonDatabase private constructor(
         zoneId,
     )
 
+    /** The [uids] without a row in `members`, read in chunks that stay under SQLite's bound-argument limit. */
+    @Synchronized
+    fun missingMemberUids(uids: Collection<Long>): Set<Long> {
+        val db = readableDatabase
+        val missing = uids.toMutableSet()
+        uids.distinct().chunked(MAX_BOUND_ARGUMENTS).forEach { chunk ->
+            db.rawQuery(
+                "SELECT uid FROM members WHERE uid IN (${chunk.joinToString(",") { "?" }})",
+                chunk.map(Long::toString).toTypedArray(),
+            ).use { cursor -> while (cursor.moveToNext()) missing -= cursor.getLong(0) }
+        }
+        return missing
+    }
+
     @Synchronized
     fun listWeeklyReportHistory(periodStartEpochDay: Long): List<WeeklyReportHistoryEntry> =
         WeeklyHistoryStore.list(readableDatabase, periodStartEpochDay)
@@ -311,5 +325,6 @@ internal class PlatoonDatabase private constructor(
         const val DAILY_PATROL_REWARD_ACTION_ID = 802001L
         internal const val MAX_STORED_ACTIVITY_OBSERVATIONS = 10_000
         internal const val MAX_WEEKLY_REPORT_HISTORY = 15
+        private const val MAX_BOUND_ARGUMENTS = 500
     }
 }

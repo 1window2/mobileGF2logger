@@ -2,6 +2,7 @@ package dev.gf2log.app.management
 
 import android.content.Context
 import android.util.Log
+import androidx.annotation.VisibleForTesting
 import dev.gf2log.app.WeeklyPngExport
 import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.MemberOrderPreferences
@@ -383,7 +384,8 @@ internal class PlatoonRepository(
         WeeklyReportHistoryCodec.decodeRevision(payload)
     }.getOrNull()
 
-    private fun buildLiveWeeklyRevision(
+    @VisibleForTesting
+    internal fun buildLiveWeeklyRevision(
         referenceDay: LocalDate,
         zoneId: ZoneId,
         asOf: Instant,
@@ -664,25 +666,42 @@ internal class PlatoonRepository(
      * Stores [revision] only while [zone] is still the scope's reset zone. A revision built
      * before a reset-region change would otherwise land after that change's history rebuild;
      * rebuilding replaces every row, so checking inside the inserting access closes the race.
+     *
+     * Likewise it is stored only while every member it names still exists. A revision built
+     * before a member delete would otherwise bring the deleted member's name and private note
+     * back after the delete purged them; the access holds the read lock, which the delete's
+     * exclusive section excludes, so no delete can commit between the check and the insert.
      */
-    private fun recordHistory(
+    @VisibleForTesting
+    internal fun recordHistory(
         revision: WeeklyTableRevision,
         zone: ZoneId,
         recordedAt: Instant,
         clearActiveOnChange: Boolean,
     ) {
         val encoded = WeeklyReportHistoryCodec.encode(revision)
+        val referenced = revision.referencedUids()
         access { database ->
             if (gameZone().normalized() != zone.normalized()) return@access
-            database.recordWeeklyReportHistory(
-                periodStartEpochDay = revision.report.periodStart.toEpochDay(),
-                recordedAt = recordedAt,
-                fingerprint = encoded.fingerprint,
-                payload = encoded.payload,
-                clearActiveOnChange = clearActiveOnChange,
-                zoneId = zone,
-            )
+            database.runInTransaction {
+                if (database.missingMemberUids(referenced).isNotEmpty()) return@runInTransaction
+                database.recordWeeklyReportHistory(
+                    periodStartEpochDay = revision.report.periodStart.toEpochDay(),
+                    recordedAt = recordedAt,
+                    fingerprint = encoded.fingerprint,
+                    payload = encoded.payload,
+                    clearActiveOnChange = clearActiveOnChange,
+                    zoneId = zone,
+                )
+            }
         }
+    }
+
+    private fun WeeklyTableRevision.referencedUids(): Set<Long> = buildSet {
+        report.members.mapTo(this) { it.uid }
+        membershipEvents.mapTo(this) { it.uid }
+        addAll(memberNamesByUid.keys)
+        addAll(memberPrivateNotesByUid.keys)
     }
 
     private fun recordLiveWeeklyRevision(periodStart: LocalDate) {

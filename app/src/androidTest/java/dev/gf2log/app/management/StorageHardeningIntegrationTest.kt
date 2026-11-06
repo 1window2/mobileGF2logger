@@ -404,6 +404,36 @@ class StorageHardeningIntegrationTest {
     }
 
     @Test
+    fun aWeeklyRevisionBuiltBeforeAMemberDeleteIsNotRecordedAfterIt() {
+        val repository = PlatoonRepository(context, scope)
+        repository.ingest(CAPTURED_AT, listOf(member(GONE, "Gone"), member(STAYS, "Stays")), "roster.csv")
+        assertTrue(repository.updateMember(GONE, "Gone", "private note"))
+        // Built under one read lock, before the delete takes the write lock.
+        val stale = repository.buildLiveWeeklyRevision(WEEK, ZoneOffset.UTC, Instant.now())
+        assertTrue(stale.report.members.any { it.uid == GONE })
+
+        assertTrue(repository.deleteMember(GONE))
+        // The capture worker's insert lands only after the delete committed.
+        repository.recordHistory(stale, ZoneOffset.UTC, Instant.now(), clearActiveOnChange = true)
+
+        val stored = repository.listWeeklyReportHistory(WEEK).mapNotNull { entry ->
+            PlatoonDatabase(context, scope.databaseName).use { database ->
+                database.weeklyReportHistoryPayload(entry.id, WEEK.toEpochDay())
+            }
+        }
+        assertTrue(stored.none { payload ->
+            val revision = WeeklyReportHistoryCodec.decodeRevision(payload)
+            revision.report.members.any { it.uid == GONE } ||
+                GONE in revision.memberNamesByUid ||
+                GONE in revision.memberPrivateNotesByUid
+        })
+        // A revision of the members that still exist is recorded as before.
+        val fresh = repository.buildLiveWeeklyRevision(WEEK, ZoneOffset.UTC, Instant.now())
+        repository.recordHistory(fresh, ZoneOffset.UTC, Instant.now(), clearActiveOnChange = true)
+        assertTrue(repository.listWeeklyReportHistory(WEEK).isNotEmpty())
+    }
+
+    @Test
     fun constructingARepositoryOnTheMainThreadNeverWaitsForTheMaintenanceGate() {
         // A transaction directory without state only needs cleanup, which takes the exclusive gate.
         val transaction = File(scope.rootDirectory(context), "platoon-full-restore").apply { mkdirs() }

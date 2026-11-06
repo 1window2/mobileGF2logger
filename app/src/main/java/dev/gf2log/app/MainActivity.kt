@@ -18,8 +18,8 @@ import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.capture.CaptureVpnService
 import dev.gf2log.app.capture.format
 import dev.gf2log.app.management.CsvImportCheckpointManager
-import dev.gf2log.app.management.PlatoonCsvImportStore
 import dev.gf2log.app.management.PlatoonRepository
+import dev.gf2log.app.management.RosterCsvExport
 import dev.gf2log.app.management.SnapshotComparison
 import dev.gf2log.app.standby.ScheduledRecording
 import dev.gf2log.app.ui.BackgroundWork
@@ -93,10 +93,8 @@ class MainActivity : BaseActivity() {
         }
         work.run(
             task = {
-                val latest = requireNotNull(PlatoonCsvImportStore.latestRetainedFile(scope.retainedCsvDirectory(this)))
-                val snapshot = requireNotNull(GuildMembersCsv.parse(latest.readText(Charsets.UTF_8))) {
-                    "Stored Platoon CSV is invalid"
-                }
+                val latest = requireNotNull(RosterCsvExport.latest(PlatoonRepository(this, scope)))
+                val snapshot = RosterCsvExport.csvSnapshot(latest)
                 DocumentAccess.writeExport(contentResolver, uri) { output ->
                     output.writer(Charsets.UTF_8).use { it.write(GuildMembersCsv.formatForSpreadsheet(snapshot)) }
                 }
@@ -283,7 +281,7 @@ class MainActivity : BaseActivity() {
             Feedback.show(this, R.string.no_platoon_detected_detail, long = true)
             return
         }
-        work.run(task = { PlatoonCsvImportStore.latestRetainedFile(scope.retainedCsvDirectory(this))?.name }) { result ->
+        work.run(task = { RosterCsvExport.latest(PlatoonRepository(this, scope))?.let(RosterCsvExport::fileName) }) { result ->
             val name = result.getOrNull()
             if (name == null) Feedback.show(this, R.string.status_no_platoon_csv) else exportRoster.launch(name)
         }

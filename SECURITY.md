@@ -90,18 +90,43 @@ scoped settings, and retained CSV retirement share one durable restore journal.
 A process death before the commit marker restores the previous values together.
 Destructive profile deletion requires two confirmations including an exact-name
 match, then uses a durable deletion queue so interrupted scoped cleanup resumes
-before profiles are listed again.
+before profiles are listed again. Deletion is refused while that Platoon's CSV
+import or undo runs, and work that was already running cannot recreate the
+deleted database. It also removes the restore rollback and staging copies,
+quarantined corrupt copies, the weekly PNG share cache, and a capture
+diagnostics status that names the Platoon.
 
 Exports and Discord sends are explicit user actions that move selected data out
 of Android private storage. Backups are checksummed and strictly validated but
 are not encrypted or signed. Treat exported files and webhook destinations as
-sensitive.
+sensitive. A restore never installs the selected file's schema: after
+validation its rows are copied, column by column, into a database that the
+current schema code creates, so table constraints an archive declares (CHECK,
+ON CONFLICT, COLLATE, STRICT, WITHOUT ROWID) are discarded and the installed
+DDL must equal the app's own text exactly. While a Platoon's CSV import or
+undo holds its checkpoint claim, captures, edits, and backup restores of that
+Platoon are refused instead of being sealed into, or later erased by, the
+import's undo.
+
+A database that fails SQLite's integrity check is never exported or used for a
+CSV checkpoint. A database that SQLite reports as corrupt is moved aside under a
+`.corrupt-<time>` name instead of being deleted, and that Platoon stays
+unavailable, rather than silently starting empty, until a backup is restored or
+the user chooses to rebuild it from the retained roster CSVs.
 
 Weekly history remains inside the private SQLite database. Its report payloads
 use a versioned bounded format, reject oversized compressed or decompressed
 content, validate the complete immutable rendering context before storage or
 restore, and are never exposed through the PNG `FileProvider` unless the user
-separately chooses the existing share workflow.
+separately chooses the existing share workflow. A restored database must hold
+only history the app could have written: at most 15 revisions per week, each a
+bounded decodable payload filed under its own week, and selections that point
+within their week. Deleting a member deletes every stored revision that shows
+or names them, discards the CSV-import undo checkpoint that still contains
+them, and clears the weekly PNG share cache. Editing a private note leaves
+earlier revisions with the note they were recorded with until they are
+replaced or the member is deleted. Captured packets in Packet history are raw
+evidence and stay until the user deletes them there.
 
 Packet-triggered weekly-history generation consumes only the same validated,
 deduplicated, count-bounded activity and update observations accepted for

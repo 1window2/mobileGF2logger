@@ -102,7 +102,7 @@
     <string name="add_membership_history">가입 이력 추가</string>
     <string name="add_membership_history_short">가입 이력 추가</string>
     <string name="delete_member">멤버 삭제</string>
-    <string name="delete_member_warning">멤버를 삭제하면 가입 이력, 개인 메모, 주간 과업표 수정 내용이 영구적으로 삭제됩니다. 이후 명단에서 다시 추가될 수 있지만 삭제된 정보는 복구되지 않습니다.</string>
+    <string name="delete_member_warning">멤버를 삭제하면 가입 이력, 개인 메모, 주간 과업표 수정 내용과 이 멤버가 표시된 저장된 주간 표 기록이 모두 영구적으로 삭제됩니다. 이후 명단에서 다시 추가될 수 있지만 삭제된 정보는 복구되지 않습니다. 패킷 기록에 캡처된 패킷은 원본 근거 자료라서 그곳에서 직접 삭제할 때까지 남아 있습니다.</string>
     <string name="member_deleted">멤버를 삭제했습니다</string>
     <string name="packet_too_large_to_copy">패킷이 너무 커서 클립보드에 복사할 수 없습니다.</string>
     <string name="packet_raw_truncated">전체 %2$s자 중 처음 %1$s자만 표시합니다.</string>
@@ -334,6 +334,13 @@
     <string name="csv_import_undoing">CSV 가져오기 체크포인트를 복원하는 중…</string>
     <string name="csv_import_undone">마지막 CSV 가져오기를 실행 취소했습니다.</string>
     <string name="csv_import_undo_failed">체크포인트가 없거나 올바르지 않거나, 가져오기 이후 서클 데이터가 변경되어 되돌릴 수 없습니다.</string>
+    <string name="csv_import_undo_expired">마지막 CSV 가져오기 이후 서클 데이터가 변경되어 더 이상 되돌릴 수 없습니다. 해당 체크포인트를 삭제했습니다.</string>
+    <string name="csv_import_database_damaged">아무것도 가져오지 않았습니다. 이 서클의 데이터베이스가 무결성 검사를 통과하지 못해 가져오기를 되돌릴 수 없기 때문입니다.</string>
+    <string name="platoon_database_damaged_title">서클 데이터베이스가 손상되었습니다</string>
+    <string name="platoon_database_damaged_message">백업을 저장하지 않았습니다. 이전 백업을 복원하거나, 보관된 명단 CSV로 이 서클을 다시 만드세요. 다시 만들어도 손상된 사본은 휴대폰에 남지만, 명단에 없는 과업, 활동, 수정 내용, 메모, 저장된 주간 표는 비어 있는 상태로 시작합니다.</string>
+    <string name="rebuild_platoon_database">다시 만들기</string>
+    <string name="platoon_database_rebuilt">보관된 명단 CSV로 이 서클을 다시 만들었습니다.</string>
+    <string name="platoon_database_rebuild_failed">이 서클을 다시 만들 수 없습니다. 손상된 사본은 그대로 남아 있습니다.</string>
     <string name="stop_capture_before_csv_import">명단이 겹쳐 기록되지 않도록 CSV 가져오기와 되돌리기는 캡처가 멈춘 뒤에 할 수 있습니다.</string>
     <string name="share_weekly_table">주간 테이블 공유</string>
     <string name="share_include_member_names">멤버 이름 포함</string>

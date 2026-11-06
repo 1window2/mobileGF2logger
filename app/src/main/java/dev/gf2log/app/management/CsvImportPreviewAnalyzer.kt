@@ -18,19 +18,50 @@ object CsvImportPreviewAnalyzer {
         val lastCapture: Instant?,
     )
 
-    /** Returns selected source identities already represented in the database. */
+    /**
+     * Returns selected source identities already represented in the database: by retained file
+     * name, or as a stored roster with the same capture instant and member rows, such as Home's
+     * own roster export or a capture the device already made. [storedRostersAt] lists the stored
+     * rosters captured at exactly one instant.
+     */
     fun duplicateFileNames(
         prepared: List<PlatoonCsvImportStore.PreparedImport>,
         representedSourceFiles: Set<String>,
-    ): Set<String> {
-        val selectedNames = prepared.mapTo(mutableSetOf()) { it.fileName }
-        return selectedNames.intersect(representedSourceFiles)
-    }
+        storedRostersAt: (Instant) -> List<PlatoonSnapshot>,
+    ): Set<String> = prepared
+        .filter { item ->
+            item.fileName in representedSourceFiles ||
+                storedRostersAt(item.capturedAt).any { isStoredCopy(item, it) }
+        }
+        .mapTo(mutableSetOf()) { it.fileName }
 
+    /** The same roster as data, whatever file or format carried it. */
+    internal fun isStoredCopy(
+        item: PlatoonCsvImportStore.PreparedImport,
+        stored: PlatoonSnapshot,
+    ): Boolean = stored.capturedAt == item.capturedAt &&
+        stored.members.toSet() == item.snapshot.members.mapTo(mutableSetOf()) { member ->
+            SnapshotMember(
+                uid = member.uid.toLong(),
+                name = member.name,
+                level = member.level.toLong(),
+                weeklyMerit = member.weeklyMerit.toLong(),
+                totalMerit = member.totalMerit.toLong(),
+                highScore = member.highScore.toLong(),
+                totalScore = member.totalScore.toLong(),
+                lastLogin = member.lastLogin.toLong(),
+            )
+        }
+
+    /**
+     * [currentNames] are the members' in-game names without nicknames, the baseline ingestion
+     * records renames against, so a nickname alone never counts as a name change.
+     */
     fun analyze(
         prepared: List<PlatoonCsvImportStore.PreparedImport>,
         duplicateFileNames: Set<String>,
         existingMembers: List<MemberStatus>,
+        currentNames: Map<Long, String>,
         latestSnapshot: PlatoonSnapshot?,
     ): Preview {
         require(duplicateFileNames.all { name -> prepared.any { it.fileName == name } })
@@ -45,7 +76,6 @@ object CsvImportPreviewAnalyzer {
         actionable.forEach { item ->
             item.snapshot.members.forEach { importedNames[it.uid.toLong()] = it.name }
         }
-        val existingNames = existingMembers.associate { it.uid to it.name }
         fun isHistorical(item: PlatoonCsvImportStore.PreparedImport): Boolean {
             val baseline = latestSnapshot ?: return false
             return SnapshotReconciler.isHistorical(
@@ -78,7 +108,7 @@ object CsvImportPreviewAnalyzer {
             uniqueMembers = importedUids.size,
             newMembers = (importedUids - knownUids).size,
             nameDifferences = importedNames.count { (uid, name) ->
-                existingNames[uid]?.let { it != name } == true
+                currentNames[uid]?.let { it != name } == true
             },
             potentialJoins = joins,
             potentialWithdrawals = withdrawals,

@@ -4,6 +4,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteException
 import android.util.AtomicFile
+import android.util.Log
 import dev.gf2log.app.settings.AppBackupSettings
 import dev.gf2log.app.settings.AppBackupSettingsCodec
 import dev.gf2log.app.settings.BackupSettingsStore
@@ -46,10 +47,16 @@ class PlatoonBackupManager internal constructor(
         recoverInterruptedFullRestore(appContext, settingsStore, storageScope)
     }
 
-    fun export(output: OutputStream) {
+    /**
+     * No backup or CSV checkpoint is written from a database that fails its integrity check.
+     * SQLite corruption met while reconciling first is reported the same way; its handler has
+     * already moved the file aside instead of deleting it.
+     */
+    fun export(output: OutputStream) = PlatoonDatabaseDamage.reporting {
         PlatoonRepository(appContext, storageScope).reconcileRetainedCsvFiles()
         PlatoonRepository.withExclusiveDatabase(storageScope) {
             ensureDatabaseExists()
+            PlatoonDatabaseDamage.requireIntact(appContext, storageScope, databaseFile)
             BackupArchive.write(
                 output,
                 databaseFile,
@@ -69,11 +76,12 @@ class PlatoonBackupManager internal constructor(
             PlatoonEvidenceDigest.sha256(databaseFile)
         }
 
-    fun exportFull(output: OutputStream) {
+    fun exportFull(output: OutputStream) = PlatoonDatabaseDamage.reporting {
         PlatoonRepository(appContext, storageScope).reconcileRetainedCsvFiles()
         PlatoonRepository.withExclusiveDatabase(storageScope) {
             val settings = settingsStore.read()
             ensureDatabaseExists()
+            PlatoonDatabaseDamage.requireIntact(appContext, storageScope, databaseFile)
             BackupArchive.write(
                 output,
                 databaseFile,
@@ -96,16 +104,17 @@ class PlatoonBackupManager internal constructor(
      */
     internal fun restoreCheckpoint(input: InputStream, expectedDatabaseSha256: String? = null) =
         withStagedArchive(input) { stagedDatabase, staged ->
-            validateSelectedBackup {
+            val rebuilt = validateSelectedBackup {
                 BackupFormatPolicy.requirePlatoonOnly(
                     staged.formatVersion,
                     staged.settings != null,
                 )
                 requireArchiveMatchesScope(staged)
                 validateDatabase(stagedDatabase, requireCurrentSchema = true)
+                rebuildValidated(stagedDatabase)
             }
             replaceRestoredState(
-                stagedDatabase,
+                rebuilt,
                 restoredSettings = null,
                 retireRetainedCsv = false,
                 expectedDatabaseSha256 = expectedDatabaseSha256,
@@ -131,7 +140,7 @@ class PlatoonBackupManager internal constructor(
         try {
             restoreStaged(stagedDatabase, stageSelectedArchive(input, stagedDatabase))
         } finally {
-            stagedDatabase.delete()
+            deleteStagedFiles(stagedDatabase)
         }
     }
 
@@ -140,12 +149,13 @@ class PlatoonBackupManager internal constructor(
         staged: BackupArchive.StagedArchive,
         target: RestoreTarget,
     ) {
-        validateSelectedBackup {
+        val rebuilt = validateSelectedBackup {
             BackupFormatPolicy.requirePlatoonOnly(staged.formatVersion, staged.settings != null)
             requireArchiveMatchesScope(staged)
             validateDatabase(stagedDatabase, requireCurrentSchema = false)
+            rebuildValidated(stagedDatabase)
         }
-        replaceRestoredState(stagedDatabase, restoredSettings = null, restoreTarget = target)
+        replaceRestoredState(rebuilt, restoredSettings = null, restoreTarget = target)
     }
 
     private fun restoreStagedComplete(
@@ -153,14 +163,26 @@ class PlatoonBackupManager internal constructor(
         staged: BackupArchive.StagedArchive,
         target: RestoreTarget,
     ) {
-        val restoredSettings = validateSelectedBackup {
+        val (restoredSettings, rebuilt) = validateSelectedBackup {
             BackupFormatPolicy.requireComplete(staged.formatVersion, staged.settings != null)
             requireArchiveMatchesScope(staged)
-            AppBackupSettingsCodec.decode(requireNotNull(staged.settings)).also {
-                validateDatabase(stagedDatabase, requireCurrentSchema = false)
-            }
+            val settings = AppBackupSettingsCodec.decode(requireNotNull(staged.settings))
+            validateDatabase(stagedDatabase, requireCurrentSchema = false)
+            settings to rebuildValidated(stagedDatabase)
         }
-        replaceRestoredState(stagedDatabase, restoredSettings, restoreTarget = target)
+        replaceRestoredState(rebuilt, restoredSettings, restoreTarget = target)
+    }
+
+    /**
+     * Copies the validated rows into a database the current schema code creates, so the live
+     * schema is always app-authored DDL and never bytes from the selected file; see
+     * [RestoredDatabaseRebuild]. The result passes the same validation plus exact DDL equality.
+     */
+    private fun rebuildValidated(staged: File): File {
+        val rebuilt = rebuiltDatabaseFile(staged)
+        RestoredDatabaseRebuild.rebuild(appContext, storageScope, staged, rebuilt)
+        validateDatabase(rebuilt, requireCurrentSchema = true, requireAppAuthoredSchema = true)
+        return rebuilt
     }
 
     private fun managerFor(staged: BackupArchive.StagedArchive): RestoreTarget {
@@ -271,6 +293,18 @@ class PlatoonBackupManager internal constructor(
                     "Platoon data changed after the CSV import; undo would overwrite newer changes"
                 }
             }
+            // A CSV import's later rollback or undo would silently put back the pre-restore data.
+            // The checkpoint's own restore runs under that import's claim and is exempt.
+            check(!retireRetainedCsv || !CsvImportCheckpointManager.isBusy(storageScope.storageId)) {
+                "A CSV import or undo is still running for this Platoon"
+            }
+            // Without a pending transaction a rollback copy is stale, for example one left beside
+            // a deleted Platoon's database; a rollback must never install it over live data.
+            if (!restoreTransactionDirectory(appContext, storageScope).exists()) {
+                check(deletePreviousDatabase(previousDatabaseFile(appContext, storageScope))) {
+                    "Unable to clear a stale restore rollback copy"
+                }
+            }
             try {
                 beginRestoreTransaction(
                     previousSettings = if (restoredSettings == null) {
@@ -307,6 +341,7 @@ class PlatoonBackupManager internal constructor(
                 // Once committed, so constructing the repository cannot roll the restore back:
                 // derived weekly history follows the restored scope's effective reset zone.
                 PlatoonRepository(appContext, storageScope).reconcileWeeklyHistoryZone()
+                afterCommittedRestore(discardCsvCheckpoint = retireRetainedCsv)
             } catch (error: Exception) {
                 runCatching {
                     recoverInterruptedFullRestore(appContext, settingsStore, storageScope)
@@ -318,14 +353,37 @@ class PlatoonBackupManager internal constructor(
         }
     }
 
-    private fun validateDatabase(file: File, requireCurrentSchema: Boolean) {
+    /**
+     * The committed restore replaced whatever a damaged-database marker protected, and the CSV
+     * checkpoint describes data that no longer exists. Neither failure can undo the commit.
+     */
+    private fun afterCommittedRestore(discardCsvCheckpoint: Boolean) {
+        runCatching { PlatoonDatabaseDamage.clear(appContext, storageScope) }
+            .onFailure { Log.e(TAG, "Unable to clear the damaged-database marker", it) }
+        if (discardCsvCheckpoint) {
+            runCatching { CsvImportCheckpointManager.discardCheckpoints(appContext, storageScope) }
+                .onFailure { Log.e(TAG, "Unable to discard the CSV import checkpoint", it) }
+        }
+    }
+
+    private fun validateDatabase(
+        file: File,
+        requireCurrentSchema: Boolean,
+        requireAppAuthoredSchema: Boolean = false,
+    ) {
         file.inputStream().use { input ->
             val header = ByteArray(SQLITE_HEADER.size)
             require(input.read(header) == header.size && header.contentEquals(SQLITE_HEADER)) {
                 "Backup is not a SQLite database"
             }
         }
-        SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+        // The checked file may be the live one after install: a failure must not delete it.
+        SQLiteDatabase.openDatabase(
+            file.path,
+            null,
+            SQLiteDatabase.OPEN_READONLY,
+            PlatoonDatabaseDamage.keepFiles,
+        ).use { db ->
             val version = db.rawQuery("PRAGMA user_version", null).use { cursor ->
                 require(cursor.moveToFirst()) { "Backup schema version is missing" }
                 cursor.getInt(0)
@@ -365,19 +423,32 @@ class PlatoonBackupManager internal constructor(
                         missingColumns.sorted().joinToString()
                 }
             }
-            if (version == PlatoonSchema.CURRENT_VERSION) validateCurrentSchema(db)
+            if (version == PlatoonSchema.CURRENT_VERSION) {
+                validateCurrentSchema(db, requireAppAuthoredSchema)
+                WeeklyHistoryIntegrity.requireRestorable(db)
+            }
             db.rawQuery("PRAGMA foreign_key_check", null).use { cursor ->
                 require(!cursor.moveToFirst()) { "Backup database has invalid references" }
             }
         }
     }
 
-    /** The reference schema lives in memory, so concurrent restores never share a file. */
-    private fun validateCurrentSchema(database: SQLiteDatabase) {
+    /**
+     * The reference schema lives in memory, so concurrent restores never share a file. With
+     * [requireAppAuthoredSchema] every table's DDL must also equal the reference text exactly.
+     */
+    private fun validateCurrentSchema(database: SQLiteDatabase, requireAppAuthoredSchema: Boolean) {
         PlatoonDatabase.inMemory(appContext, storageScope).use { helper ->
             val expected = DatabaseSchemaContract.read(helper.readableDatabase)
             val actual = DatabaseSchemaContract.read(database)
             require(actual == expected) {
+                "Full backup database does not match the current Platoon schema"
+            }
+            require(
+                !requireAppAuthoredSchema ||
+                    DatabaseSchemaContract.readTableSql(database) ==
+                    DatabaseSchemaContract.readTableSql(helper.readableDatabase),
+            ) {
                 "Full backup database does not match the current Platoon schema"
             }
         }
@@ -410,9 +481,8 @@ class PlatoonBackupManager internal constructor(
             error("Unable to install the restored Platoon database")
         }
         try {
-            // Opening through the real helper upgrades old supported backups
-            // and verifies that the installed database serves the current
-            // schema before the rollback copy is discarded.
+            // The installed file is a rebuilt current-schema database; opening it through the
+            // real helper verifies that it serves the app before the rollback copy is discarded.
             PlatoonDatabase(appContext, storageScope.databaseName).use { helper ->
                 helper.readableDatabase.rawQuery(
                     "SELECT COUNT(*) FROM members",
@@ -421,7 +491,7 @@ class PlatoonBackupManager internal constructor(
                     check(cursor.moveToFirst())
                 }
             }
-            validateDatabase(databaseFile, requireCurrentSchema = true)
+            validateDatabase(databaseFile, requireCurrentSchema = true, requireAppAuthoredSchema = true)
             if (!preservePrevious && !deletePreviousDatabase(previous)) {
                 error("Unable to discard the previous Platoon database")
             }
@@ -506,6 +576,8 @@ class PlatoonBackupManager internal constructor(
     companion object {
         const val FILE_EXTENSION = "gf2backup"
         const val MIME_TYPE = "application/vnd.dev.gf2log.backup"
+        private const val TAG = "GF2BackupManager"
+        private const val REBUILT_SUFFIX = ".rebuilt"
         private const val RESTORE_TRANSACTION_DIRECTORY = "platoon-full-restore"
         private const val RESTORE_STATE_FILE = "state"
         private const val RESTORE_SETTINGS_FILE = "settings.pre_restore"
@@ -551,9 +623,33 @@ class PlatoonBackupManager internal constructor(
                 }
                 return kind
             } finally {
-                stagedDatabase.delete()
+                deleteStagedFiles(stagedDatabase)
                 stagingDirectory.delete()
             }
+        }
+
+        private fun rebuiltDatabaseFile(staged: File) = File(staged.path + REBUILT_SUFFIX)
+
+        /** The staged copy, its rebuilt replacement, and the journals either can leave behind. */
+        private fun deleteStagedFiles(staged: File) {
+            (RestoredDatabaseRebuild.sqliteFiles(staged) +
+                RestoredDatabaseRebuild.sqliteFiles(rebuiltDatabaseFile(staged)))
+                .forEach(File::delete)
+        }
+
+        /**
+         * Removes every restore copy keyed by [scope] that a Platoon deletion must not leave: the
+         * rollback copy and its journals, quarantined corrupt copies, and the staging directory.
+         * Returns whether nothing of them remains. Callers hold the exclusive gate.
+         */
+        internal fun deleteScopeArtifacts(context: Context, scope: PlatoonStorageScope): Boolean {
+            val appContext = context.applicationContext
+            val previous = deletePreviousDatabase(previousDatabaseFile(appContext, scope))
+            val quarantined = PlatoonDatabaseDamage.quarantinedFiles(appContext, scope)
+                .all { !it.exists() || it.delete() }
+            val staging = File(appContext.cacheDir, "platoon-restore/${scope.storageId}")
+            val staged = !staging.exists() || staging.deleteRecursively()
+            return previous && quarantined && staged
         }
 
         /**

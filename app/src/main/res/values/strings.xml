@@ -102,7 +102,7 @@
     <string name="add_membership_history">Add membership period</string>
     <string name="add_membership_history_short">Add period</string>
     <string name="delete_member">Delete member</string>
-    <string name="delete_member_warning">Deleting this member permanently removes their history, personal notes, and weekly edits. A later roster may add the member again, but the deleted details cannot be recovered.</string>
+    <string name="delete_member_warning">Deleting this member permanently removes their history, personal notes, weekly edits, and every saved weekly table revision that shows them. A later roster may add the member again, but the deleted details cannot be recovered. Captured packets in Packet history are raw evidence and stay until you delete them there.</string>
     <string name="member_deleted">Member deleted</string>
     <string name="packet_too_large_to_copy">This packet is too large to copy to the clipboard.</string>
     <string name="packet_raw_truncated">Showing the first %1$s of %2$s characters.</string>
@@ -338,6 +338,13 @@
     <string name="csv_import_undoing">Restoring the CSV import checkpoint…</string>
     <string name="csv_import_undone">The last CSV import was undone.</string>
     <string name="csv_import_undo_failed">Undo is unavailable, invalid, or blocked because Platoon data changed after the import.</string>
+    <string name="csv_import_undo_expired">Platoon data changed after the last CSV import, so it can no longer be undone. Its checkpoint was removed.</string>
+    <string name="csv_import_database_damaged">Nothing was imported. This Platoon\'s database failed its integrity check, so an import could not be undone.</string>
+    <string name="platoon_database_damaged_title">Platoon database is damaged</string>
+    <string name="platoon_database_damaged_message">No backup was written. Restore an earlier backup, or rebuild this Platoon from its retained roster CSVs. Rebuilding keeps the damaged copy on the phone, but Daily Patrol, activity, edits, notes and saved weekly tables are not in the rosters and start empty.</string>
+    <string name="rebuild_platoon_database">Rebuild</string>
+    <string name="platoon_database_rebuilt">This Platoon was rebuilt from its retained roster CSVs.</string>
+    <string name="platoon_database_rebuild_failed">Unable to rebuild this Platoon. The damaged copy was kept.</string>
     <string name="stop_capture_before_csv_import">CSV import and undo wait until capture stops, so the roster isn\'t written twice.</string>
     <string name="share_weekly_table">Share weekly table</string>
     <string name="share_include_member_names">Include member names</string>

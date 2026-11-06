@@ -38,6 +38,7 @@ class CsvImportPreviewAnalyzerTest {
             prepared = prepared,
             duplicateFileNames = emptySet(),
             existingMembers = existing,
+            currentNames = existing.associate { it.uid to it.name },
             latestSnapshot = latest,
         )
 
@@ -61,6 +62,7 @@ class CsvImportPreviewAnalyzerTest {
             prepared = listOf(item),
             duplicateFileNames = setOf(item.fileName),
             existingMembers = listOf(status(1, "One", active = true)),
+            currentNames = mapOf(1L to "One"),
             latestSnapshot = null,
         )
 
@@ -81,9 +83,65 @@ class CsvImportPreviewAnalyzerTest {
         val duplicates = CsvImportPreviewAnalyzer.duplicateFileNames(
             prepared = listOf(item),
             representedSourceFiles = setOf(item.fileName),
+            storedRostersAt = { emptyList() },
         )
 
         assertEquals(setOf(item.fileName), duplicates)
+    }
+
+    @Test
+    fun aStoredRosterWithTheSameCaptureAndMembersIsADuplicateUnderAnyFileName() {
+        val item = prepared(
+            "import-20260811T000000Z-00000000000000000006.csv",
+            "2026-08-11T00:00:00Z",
+            member(6, "Six"),
+            member(7, "Seven"),
+        )
+        val capture = PlatoonSnapshot(
+            id = 1,
+            capturedAt = Instant.parse("2026-08-11T00:00:00Z"),
+            members = listOf(snapshotMember(7, "Seven"), snapshotMember(6, "Six")),
+            sourceFile = "gf2log_platoonmembers_20260811T000000Z.csv",
+        )
+        val changed = capture.copy(members = listOf(snapshotMember(6, "Six")))
+
+        assertEquals(
+            setOf(item.fileName),
+            CsvImportPreviewAnalyzer.duplicateFileNames(listOf(item), emptySet()) { at ->
+                listOf(capture).filter { it.capturedAt == at }
+            },
+        )
+        assertEquals(
+            emptySet<String>(),
+            CsvImportPreviewAnalyzer.duplicateFileNames(listOf(item), emptySet()) { listOf(changed) },
+        )
+        assertEquals(
+            emptySet<String>(),
+            CsvImportPreviewAnalyzer.duplicateFileNames(listOf(item), emptySet()) {
+                listOf(capture.copy(capturedAt = capture.capturedAt.plusSeconds(1)))
+            },
+        )
+    }
+
+    @Test
+    fun aNicknameAloneIsNotCountedAsANameChange() {
+        val nicknamed = status(1, "Boss", active = true)
+        fun preview(importedName: String) = CsvImportPreviewAnalyzer.analyze(
+            prepared = listOf(
+                prepared(
+                    "import-20260811T000000Z-00000000000000000007.csv",
+                    "2026-08-11T00:00:00Z",
+                    member(1, importedName),
+                ),
+            ),
+            duplicateFileNames = emptySet(),
+            existingMembers = listOf(nicknamed),
+            currentNames = mapOf(1L to "Kai"),
+            latestSnapshot = null,
+        )
+
+        assertEquals(0, preview("Kai").nameDifferences)
+        assertEquals(1, preview("Kai2").nameDifferences)
     }
 
     @Test
@@ -97,6 +155,7 @@ class CsvImportPreviewAnalyzerTest {
         val duplicates = CsvImportPreviewAnalyzer.duplicateFileNames(
             prepared = listOf(item),
             representedSourceFiles = emptySet(),
+            storedRostersAt = { emptyList() },
         )
 
         assertEquals(emptySet<String>(), duplicates)
@@ -132,6 +191,7 @@ class CsvImportPreviewAnalyzerTest {
                 status(1, "One", active = true),
                 status(2, "Two", active = true),
             ),
+            currentNames = mapOf(1L to "One", 2L to "Two"),
             latestSnapshot = latest,
         )
 

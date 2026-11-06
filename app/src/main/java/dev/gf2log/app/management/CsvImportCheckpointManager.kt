@@ -45,12 +45,28 @@ class CsvImportCheckpointManager internal constructor(
 
     init {
         synchronized(scopeState) {
-            if (!scopeState.operationInProgress) recoverInterruptedState()
+            if (!scopeState.operationInProgress) {
+                recoverInterruptedState()
+                synchronized(RECOVERED_SCOPES) { RECOVERED_SCOPES += storageScope.storageId }
+            }
         }
     }
 
     fun canUndo(): Boolean = synchronized(scopeState) {
         !scopeState.operationInProgress && hasBaseCheckpoint() && digest(root).isFile
+    }
+
+    /**
+     * Removes the undo checkpoint once its data must not survive, as after deleting a member it
+     * contains. Leaves an interrupted undo's quarantine for recovery to finish.
+     */
+    fun discardCheckpoint() {
+        claimOperation()
+        try {
+            discardSettled(profileRoot)
+        } finally {
+            releaseOperation()
+        }
     }
     private fun hasBaseCheckpoint(): Boolean = archive(root).isFile && manifest(root).isFile
 
@@ -62,6 +78,8 @@ class CsvImportCheckpointManager internal constructor(
         claimOperation()
         var published = false
         try {
+            // Staging would otherwise recreate the directory of a Platoon deleted meanwhile.
+            PlatoonProfileAdministration.requireStorageAllowed(appContext, storageScope)
             val names = plannedFileNames.toSortedSet()
             require(names.size <= MAX_PLANNED_FILES) { "Too many CSV files for one checkpoint" }
             names.forEach(::requireSafeImportName)
@@ -159,9 +177,11 @@ class CsvImportCheckpointManager internal constructor(
             val expectedDigest = digest(root).readText(Charsets.US_ASCII)
             require(expectedDigest.matches(SHA256)) { "Invalid CSV checkpoint digest" }
             // Fails fast before quarantining anything; the authoritative comparison runs again
-            // inside the exclusive section that installs the checkpoint.
-            check(backupManager().currentDatabaseSha256() == expectedDigest) {
-                "Platoon data changed after the CSV import; undo would overwrite newer changes"
+            // inside the exclusive section that installs the checkpoint. A changed database never
+            // returns to the sealed digest, so the checkpoint and its pre-import copy go now.
+            if (backupManager().currentDatabaseSha256() != expectedDigest) {
+                discardSettled(profileRoot)
+                throw CsvCheckpointExpiredException()
             }
             restoreUnchecked(expectedDigest)
         } finally {
@@ -219,6 +239,9 @@ class CsvImportCheckpointManager internal constructor(
                 backupManager.restoreCheckpoint(input, expectedDatabaseSha256)
             }
         } catch (error: Exception) {
+            // The checkpoint still waits to be applied: the next repository access retries it
+            // before any write, instead of a later recovery erasing what was written meanwhile.
+            synchronized(RECOVERED_SCOPES) { RECOVERED_SCOPES -= storageScope.storageId }
             val marker = restoreMarker(root)
             if (marker.exists() && !marker.delete()) {
                 error.addSuppressed(
@@ -246,7 +269,14 @@ class CsvImportCheckpointManager internal constructor(
         check(hasBaseCheckpoint()) { "CSV import checkpoint state is incomplete" }
         val quarantine = File(root, QUARANTINE_DIRECTORY)
         if (!digest(root).isFile || restoreMarker(root).isFile || quarantine.exists()) {
-            restoreUnchecked()
+            // The rollback holds the claim like an import, so no foreign write or backup restore
+            // lands on the state it is about to replace.
+            scopeState.owner = Thread.currentThread()
+            try {
+                restoreUnchecked()
+            } finally {
+                scopeState.owner = null
+            }
         } else if (previous.exists()) {
             discard(previous)
         }
@@ -304,18 +334,28 @@ class CsvImportCheckpointManager internal constructor(
             check(!scopeState.operationInProgress) {
                 "Another CSV checkpoint operation is in progress"
             }
-            scopeState.operationInProgress = true
+            scopeState.owner = Thread.currentThread()
         }
     }
 
     private fun releaseOperation() {
         synchronized(scopeState) {
-            scopeState.operationInProgress = false
+            scopeState.owner = null
         }
     }
 
+    /**
+     * The thread holding this scope's claim. Every import, rollback, undo and recovery step runs
+     * on that one thread, so any other thread's write would be sealed into the undo digest or
+     * erased by a rollback. Read without the monitor by the repository gate, which runs while
+     * holding the maintenance lock and so must never wait on a claim.
+     */
     private class ScopeState {
-        var operationInProgress = false
+        @Volatile
+        var owner: Thread? = null
+
+        val operationInProgress: Boolean
+            get() = owner != null
     }
 
     /**
@@ -362,6 +402,61 @@ class CsvImportCheckpointManager internal constructor(
         private const val TAG = "GF2CsvCheckpoint"
         private val SCOPE_STATES = mutableMapOf<String, ScopeState>()
 
+        /** Scopes whose interrupted import or undo this process has already finished. */
+        private val RECOVERED_SCOPES = mutableSetOf<String>()
+
+        private fun claimOwner(storageId: String): Thread? =
+            synchronized(SCOPE_STATES) { SCOPE_STATES[storageId] }?.owner
+
+        /** Whether an import, rollback, undo or recovery currently holds [storageId]'s claim. */
+        internal fun isBusy(storageId: String): Boolean = claimOwner(storageId) != null
+
+        /**
+         * Refuses database access to [scope] from any thread but its claim holder. Never waits,
+         * so it is safe under the maintenance lock; a refused write is reported, not later erased.
+         */
+        internal fun requireAccessAllowed(scope: PlatoonStorageScope) {
+            val owner = claimOwner(scope.storageId) ?: return
+            if (owner !== Thread.currentThread()) throw CsvImportInProgressException()
+        }
+
+        /**
+         * Finishes [scope]'s interrupted import or undo once per process before a repository
+         * first touches it, so an edit can never commit ahead of a rollback that would erase it.
+         * Skipped on the claim holder's own thread. Failures propagate and refuse the access.
+         */
+        internal fun recoverOnce(context: Context, scope: PlatoonStorageScope) {
+            if (synchronized(RECOVERED_SCOPES) { scope.storageId in RECOVERED_SCOPES }) return
+            if (claimOwner(scope.storageId) === Thread.currentThread()) return
+            CsvImportCheckpointManager(context, scope)
+        }
+
+        /**
+         * Removes [scope]'s checkpoint after a committed backup restore replaced the data it
+         * describes. Called under the exclusive gate, so it takes no claim; see [discardSettled].
+         */
+        internal fun discardCheckpoints(context: Context, scope: PlatoonStorageScope) {
+            discardSettled(scope.rootDirectory(context))
+        }
+
+        /**
+         * Retires the checkpoint and its predecessor unless an interrupted undo's quarantine or
+         * install marker still needs recovery to return its evidence.
+         */
+        private fun discardSettled(profileRoot: File) {
+            val root = File(profileRoot, CHECKPOINT_DIRECTORY)
+            if (File(root, QUARANTINE_DIRECTORY).exists() || File(root, RESTORE_MARKER).exists()) return
+            val discarded = File(profileRoot, DISCARDED_DIRECTORY)
+            listOf(root, File(profileRoot, PREVIOUS_DIRECTORY)).forEach { directory ->
+                if (!directory.exists()) return@forEach
+                if (discarded.exists()) check(discarded.deleteRecursively()) {
+                    "Unable to remove CSV import checkpoint state"
+                }
+                check(directory.renameTo(discarded)) { "Unable to retire CSV import checkpoint state" }
+                discarded.deleteRecursively()
+            }
+        }
+
         private const val CHECKPOINT_DIRECTORY = "csv-import-checkpoint"
         private const val STAGING_DIRECTORY = "csv-import-checkpoint.staging"
         private const val PREVIOUS_DIRECTORY = "csv-import-checkpoint.previous"
@@ -383,6 +478,11 @@ class CsvImportCheckpointManager internal constructor(
         internal fun recoverInterruptedImports(context: Context, scopes: List<PlatoonStorageScope>): Int =
             scopes.count { scope ->
                 try {
+                    // A claim still held means an import is writing: capture must not start on it.
+                    if (isBusy(scope.storageId)) {
+                        Log.w(TAG, "CSV import still running for ${scope.storageId}")
+                        return@count true
+                    }
                     CsvImportCheckpointManager(context, scope)
                     false
                 } catch (error: Exception) {
@@ -403,3 +503,11 @@ class CsvImportCheckpointManager internal constructor(
         }
     }
 }
+
+/** Another thread's import, rollback, undo or recovery owns this Platoon's database right now. */
+internal class CsvImportInProgressException :
+    IllegalStateException("A CSV import or undo is in progress for this Platoon")
+
+/** The Platoon changed after the import, so its checkpoint was discarded instead of applied. */
+internal class CsvCheckpointExpiredException :
+    IllegalStateException("Platoon data changed after the CSV import; undo would overwrite newer changes")

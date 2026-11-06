@@ -7,6 +7,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import dev.gf2log.app.management.BackupFileName
 import dev.gf2log.app.management.InvalidBackupException
 import dev.gf2log.app.management.PlatoonBackupManager
+import dev.gf2log.app.management.PlatoonDatabaseDamage
+import dev.gf2log.app.management.PlatoonDatabaseDamagedException
+import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.management.RestoredBackupKind
 import dev.gf2log.app.ui.BackgroundWork
@@ -123,8 +126,45 @@ internal class BackupFlow(
         if (work.isBusy(maintenanceKey)) return
         Feedback.show(activity, progress)
         work.run(key = maintenanceKey, task = operation, always = { result ->
-            Feedback.show(activity, result.fold(onSuccess = { success }, onFailure = failure), long = true)
+            val damagedScope = scope()?.takeIf {
+                result.exceptionOrNull()?.hasCause<PlatoonDatabaseDamagedException>() == true
+            }
+            if (damagedScope != null) {
+                offerRebuild(damagedScope)
+            } else {
+                Feedback.show(activity, result.fold(onSuccess = { success }, onFailure = failure), long = true)
+            }
         })
+    }
+
+    /**
+     * No backup is written from a damaged database. The user may restore an earlier backup, or
+     * continue with a database rebuilt from the retained roster CSVs; the damaged copy is kept.
+     */
+    private fun offerRebuild(target: PlatoonStorageScope) {
+        Dialogs.confirm(
+            activity,
+            R.string.platoon_database_damaged_title,
+            R.string.platoon_database_damaged_message,
+            R.string.rebuild_platoon_database,
+            destructive = true,
+        ) confirm@{
+            if (work.isBusy(maintenanceKey)) return@confirm
+            work.run(
+                key = maintenanceKey,
+                task = {
+                    PlatoonDatabaseDamage.setAsideForRebuild(activity, target)
+                    PlatoonRepository(activity, target).reconcileRetainedCsvFiles()
+                },
+                always = { result ->
+                    Feedback.show(
+                        activity,
+                        if (result.isSuccess) R.string.platoon_database_rebuilt else R.string.platoon_database_rebuild_failed,
+                        long = true,
+                    )
+                },
+            )
+        }
     }
 
     private companion object {
@@ -139,4 +179,8 @@ internal fun fullBackupRestoreFailureMessage(error: Throwable): Int =
 /** A Platoon-only export failure must not claim that the complete backup failed. */
 internal fun backupExportFailureMessage(complete: Boolean): Int =
     if (complete) R.string.full_backup_export_failed else R.string.status_backup_export_failed
+
+/** Whether [T] caused this failure anywhere along its cause chain. */
+internal inline fun <reified T : Throwable> Throwable.hasCause(): Boolean =
+    generateSequence(this) { it.cause }.any { it is T }
 

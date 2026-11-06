@@ -2,6 +2,7 @@ package dev.gf2log.app.management
 
 import android.content.Context
 import android.util.Log
+import dev.gf2log.app.WeeklyPngExport
 import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.MemberOrderPreferences
 import dev.gf2log.protocol.GuildMembersCsv
@@ -22,9 +23,12 @@ internal class PlatoonRepository(
 ) {
     private val appContext = context.applicationContext
 
-    init {
-        PlatoonBackupManager.recoverInterruptedFullRestore(appContext, storageScope)
-    }
+    /**
+     * Recovery waits for the exclusive gate, so it runs on the first access, always a worker
+     * thread, rather than when a screen constructs the repository on the main thread.
+     */
+    @Volatile
+    private var accessPrepared = false
 
     /** The 05:00 reset zone of this repository's own Platoon, never the currently active one. */
     fun gameZone(): ZoneId = GameTimeZonePreferences.get(appContext, storageScope.storageId)
@@ -200,6 +204,13 @@ internal class PlatoonRepository(
     fun listMemberStatuses(activeOnly: Boolean = false): List<MemberStatus> =
         access { it.listMemberStatuses(activeOnly) }
 
+    fun memberCurrentNames(): Map<Long, String> = access(PlatoonDatabase::memberCurrentNames)
+
+    /** Stored rosters captured at exactly [capturedAt], to recognize a re-imported copy. */
+    fun snapshotsCapturedAt(capturedAt: Instant): List<PlatoonSnapshot> =
+        access { it.listSnapshotsForPeriod(capturedAt, capturedAt.plusMillis(1)) }
+            .filter { it.capturedAt == capturedAt }
+
     fun listEvents(
         from: Instant,
         until: Instant,
@@ -220,6 +231,7 @@ internal class PlatoonRepository(
         WeeklyHistoryWorkPolicy.MemberEdit.REMOVAL,
     ) {
         withExclusiveDatabase(storageScope) {
+            CsvImportCheckpointManager.requireAccessAllowed(storageScope)
             val order = MemberOrderPreferences(appContext, storageScope.storageId)
             val previousOrder = order.read()
             val updatedOrder = previousOrder.filterNot { it == uid }
@@ -245,6 +257,17 @@ internal class PlatoonRepository(
                 throw error
             }
         }
+    }.also { deleted -> if (deleted) removeCopiesOfDeletedMember() }
+
+    /**
+     * The CSV undo checkpoint is a full pre-import copy that still holds the deleted member, and
+     * the last shared weekly PNG can show them. The deletion has committed, so failures only log.
+     */
+    private fun removeCopiesOfDeletedMember() {
+        runCatching { CsvImportCheckpointManager(appContext, storageScope).discardCheckpoint() }
+            .onFailure { Log.e(TAG, "Unable to discard the CSV import checkpoint", it) }
+        runCatching { WeeklyPngExport.clearShareCache(appContext) }
+            .onFailure { Log.e(TAG, "Unable to clear the weekly share cache", it) }
     }
 
     fun updateMembershipPeriod(
@@ -480,6 +503,8 @@ internal class PlatoonRepository(
         access { it.clearActiveWeeklyReportHistory(periodStart.toEpochDay()) }
 
     fun rebuildWeeklyHistoryForTimeZoneChange(zoneId: ZoneId) {
+        // Its accesses run under the exclusive gate, where recovery cannot start.
+        prepareAccess()
         withExclusiveDatabase(storageScope) {
             val recordedAt = Instant.now()
             val replacements = WeeklyReportRange
@@ -621,21 +646,27 @@ internal class PlatoonRepository(
                 )
         }
 
+    /**
+     * Stores [revision] only while [zone] is still the scope's reset zone. A revision built
+     * before a reset-region change would otherwise land after that change's history rebuild;
+     * rebuilding replaces every row, so checking inside the inserting access closes the race.
+     */
     private fun recordHistory(
         revision: WeeklyTableRevision,
-        zoneId: ZoneId,
+        zone: ZoneId,
         recordedAt: Instant,
         clearActiveOnChange: Boolean,
     ) {
         val encoded = WeeklyReportHistoryCodec.encode(revision)
         access { database ->
+            if (gameZone().normalized() != zone.normalized()) return@access
             database.recordWeeklyReportHistory(
                 periodStartEpochDay = revision.report.periodStart.toEpochDay(),
                 recordedAt = recordedAt,
                 fingerprint = encoded.fingerprint,
                 payload = encoded.payload,
                 clearActiveOnChange = clearActiveOnChange,
-                zoneId = zoneId,
+                zoneId = zone,
             )
         }
     }
@@ -674,8 +705,23 @@ internal class PlatoonRepository(
         }
     }
 
-    private fun <T> access(block: (PlatoonDatabase) -> T): T =
-        withDatabase(appContext, storageScope, block)
+    private fun <T> access(block: (PlatoonDatabase) -> T): T {
+        prepareAccess()
+        return withDatabase(appContext, storageScope, block)
+    }
+
+    /**
+     * Finishes this scope's interrupted backup restore and CSV import or undo before the first
+     * read or write, so no edit can commit ahead of a rollback that would replace it. Skipped,
+     * and retried by a later access, while this thread already holds the maintenance lock: the
+     * read lock cannot be upgraded, and recovery must take a CSV claim before that lock.
+     */
+    private fun prepareAccess() {
+        if (accessPrepared || holdsMaintenanceLock()) return
+        PlatoonBackupManager.recoverInterruptedFullRestore(appContext, storageScope)
+        CsvImportCheckpointManager.recoverOnce(appContext, storageScope)
+        accessPrepared = true
+    }
 
     data class ImportResult(
         val imported: Int,
@@ -731,6 +777,9 @@ internal class PlatoonRepository(
 
         internal fun holdsSharedDatabaseAccess(): Boolean = maintenanceLock.readHoldCount > 0
 
+        private fun holdsMaintenanceLock(): Boolean =
+            maintenanceLock.readHoldCount > 0 || maintenanceLock.isWriteLockedByCurrentThread
+
         private val databaseInstances = mutableMapOf<String, PlatoonDatabase>()
 
         private fun database(context: Context, scope: PlatoonStorageScope): PlatoonDatabase =
@@ -746,6 +795,8 @@ internal class PlatoonRepository(
             scope: PlatoonStorageScope,
             block: (PlatoonDatabase) -> T,
         ): T = maintenanceLock.readLock().withLock {
+            // While a CSV import or undo holds the scope, only its own thread may write there.
+            CsvImportCheckpointManager.requireAccessAllowed(scope)
             block(database(context, scope))
         }
 

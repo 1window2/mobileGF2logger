@@ -23,6 +23,7 @@ internal class PlatoonDatabase private constructor(
         databaseName,
         null,
         PlatoonSchema.CURRENT_VERSION,
+        PlatoonDatabaseDamage.errorHandler(context.applicationContext, storageScope, databaseName),
     ) {
     constructor(
         context: Context,
@@ -33,6 +34,26 @@ internal class PlatoonDatabase private constructor(
     private val appContext = context.applicationContext
 
     private fun gameZone(): ZoneId = GameTimeZonePreferences.get(appContext, storageScope.storageId)
+
+    /**
+     * Opening the scope's live database must never create an empty one over a quarantined
+     * corrupt file, nor recreate storage for a Platoon that was deleted meanwhile.
+     */
+    private fun requireLiveStorageUsable() {
+        if (databaseName != storageScope.databaseName) return
+        PlatoonDatabaseDamage.requireUsable(appContext, storageScope)
+        PlatoonProfileAdministration.requireStorageAllowed(appContext, storageScope)
+    }
+
+    override fun getWritableDatabase(): SQLiteDatabase {
+        requireLiveStorageUsable()
+        return super.getWritableDatabase()
+    }
+
+    override fun getReadableDatabase(): SQLiteDatabase {
+        requireLiveStorageUsable()
+        return super.getReadableDatabase()
+    }
 
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
@@ -152,6 +173,13 @@ internal class PlatoonDatabase private constructor(
     @Synchronized
     fun listMemberStatuses(activeOnly: Boolean = false): List<MemberStatus> =
         PlatoonReadQueries.listMemberStatuses(readableDatabase, activeOnly)
+
+    /** In-game names without nicknames: the baseline roster ingestion detects renames against. */
+    @Synchronized
+    fun memberCurrentNames(): Map<Long, String> =
+        readableDatabase.rawQuery("SELECT uid, current_name FROM members", null).use { cursor ->
+            buildMap { while (cursor.moveToNext()) put(cursor.getLong(0), cursor.getString(1)) }
+        }
 
     @Synchronized
     fun listEvents(

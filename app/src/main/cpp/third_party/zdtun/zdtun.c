@@ -835,7 +835,8 @@ static void check_dns_request(zdtun_conn_t *conn, char *l4_payload, uint16_t l4_
 
   dns = (struct dns_packet*)l4_payload;
 
-  if((dns->flags & DNS_FLAGS_MASK) == DNS_TYPE_REQUEST)
+  // flags is in network byte order; the mask selects the QR bit
+  if((ntohs(dns->flags) & DNS_FLAGS_MASK) == DNS_TYPE_REQUEST)
     conn->dns.pending_queries++;
 }
 
@@ -850,7 +851,7 @@ static int check_dns_purge(zdtun_t *tun, zdtun_conn_t *conn,
 
     dns = (struct dns_packet*)l4_payload;
 
-    if(((dns->flags & DNS_FLAGS_MASK) == DNS_TYPE_RESPONSE)
+    if(((ntohs(dns->flags) & DNS_FLAGS_MASK) == DNS_TYPE_RESPONSE)
         && (conn->dns.pending_queries > 0)) {
       conn->dns.pending_queries--;
 

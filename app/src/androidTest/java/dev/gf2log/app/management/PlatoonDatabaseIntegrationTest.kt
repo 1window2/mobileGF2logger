@@ -1421,6 +1421,23 @@ class PlatoonDatabaseIntegrationTest {
     }
 
     @Test
+    fun snapshotWithUidZeroIsRejectedBeforeAnythingIsStored() {
+        assertThrows(IllegalArgumentException::class.java) {
+            database.ingestSnapshot(
+                PlatoonSnapshot(
+                    id = 0,
+                    capturedAt = Instant.parse("2026-08-10T00:00:00Z"),
+                    sourceFile = "gf2log_platoonmembers_20260810T000000Z.csv",
+                    members = listOf(member(0, "Ghost"), member(TARGET_UID, "Target")),
+                ),
+                EvidenceSource.SNAPSHOT,
+            )
+        }
+
+        assertTrue(database.listMemberStatuses().isEmpty())
+    }
+
+    @Test
     fun unknownJoinOfAnUpdatesWithdrawalPeriodStaysEditable() {
         val withdrewAt = Instant.parse("2026-08-10T12:00:00Z")
         database.ingestPlatoonUpdates(

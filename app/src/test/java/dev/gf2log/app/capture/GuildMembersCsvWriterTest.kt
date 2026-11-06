@@ -98,6 +98,23 @@ class GuildMembersCsvWriterTest {
     }
 
     @Test
+    fun membersWithoutAUidAreDroppedInsteadOfFailingTheRoster() {
+        val output = temporaryFolder.newFolder("uid-zero")
+        val completed = mutableListOf<GuildMembersCsvWriter.CompletedBatch>()
+        val writer = GuildMembersCsvWriter(output, onBatchClosed = completed::add)
+
+        val saved = writer.accept(payload(42, end = true, member(0u, "No UID"), member(7u, "Member")))
+
+        assertEquals(1, saved?.rowCount)
+        assertEquals(listOf(7u), completed.single().members.map { it.uid })
+        assertEquals(
+            listOf("Member"),
+            GuildMembersCsv.parse(saved!!.file.readText(Charsets.UTF_8))?.members?.map { it.name },
+        )
+        assertNull(writer.accept(payload(messageId = 43, uid = 0u, name = "Only no UID", end = true)))
+    }
+
+    @Test
     fun workingFileIsCompleteAndSyncedBeforeItIsPublished() {
         val output = temporaryFolder.newFolder("synced-publication")
         val events = mutableListOf<String>()

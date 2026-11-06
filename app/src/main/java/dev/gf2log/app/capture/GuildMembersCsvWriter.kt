@@ -35,7 +35,8 @@ class GuildMembersCsvWriter(
         val data = payload.data as? GuildMembersData ?: return null
         if (payload.messageId == 0 || !payload.isEndOfMessage) return null
         val members = linkedMapOf<UInt, GuildMember>()
-        data.members.forEach { member -> members[member.uid] = member }
+        // UID 0 is the protobuf default of a member whose UID field is missing: no identity.
+        data.members.forEach { member -> if (member.uid != 0u) members[member.uid] = member }
         if (members.isEmpty()) return null
         // Bounded after deduplication: merged continuation frames may repeat a member.
         val roster = members.values.toList()

@@ -29,6 +29,9 @@ internal object SnapshotIngestion {
         require(snapshot.members.all { it.name.length <= GuildMembersCsv.MAX_MEMBER_NAME_CHARS }) {
             "A Platoon snapshot contains an oversized member name"
         }
+        require(snapshot.members.all { it.uid > 0 }) {
+            "A Platoon snapshot contains an invalid member identity"
+        }
         require(snapshot.members.map(SnapshotMember::uid).distinct().size == snapshot.members.size) {
             "A Platoon snapshot cannot contain duplicate UIDs"
         }

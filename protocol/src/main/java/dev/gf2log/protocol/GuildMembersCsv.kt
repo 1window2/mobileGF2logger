@@ -55,9 +55,11 @@ object GuildMembersCsv {
         members.size <= MAX_ROSTER_MEMBERS &&
             members.all { it.name.length <= MAX_MEMBER_NAME_CHARS }
 
+    /** UID 0 is the protobuf default of an omitted field, never a real member identity. */
     fun isValidRoster(members: List<GuildMember>): Boolean =
         members.isNotEmpty() &&
             hasValidMemberBounds(members) &&
+            members.none { it.uid == 0u } &&
             members.map(GuildMember::uid).distinct().size == members.size
 
     // Function Name: parse
@@ -90,7 +92,7 @@ object GuildMembersCsv {
                 val rowLogTime = row[8].trim().takeIf(String::isNotBlank) ?: return null
                 if (logTime == null) logTime = rowLogTime
                 if (rowLogTime != logTime) return null
-                val uid = row[0].trim().toUIntOrNull() ?: return null
+                val uid = row[0].trim().toUIntOrNull()?.takeIf { it != 0u } ?: return null
                 if (!seenUids.add(uid)) return null
                 val name = if (unescapeSpreadsheet) CsvCell.unescapeSpreadsheet(row[1]) else row[1]
                 if (name.length > MAX_MEMBER_NAME_CHARS) return null

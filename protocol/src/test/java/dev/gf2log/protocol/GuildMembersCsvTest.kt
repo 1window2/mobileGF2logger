@@ -188,6 +188,20 @@ class GuildMembersCsvTest {
     }
 
     @Test
+    fun uidZeroIsNeverAValidRosterMember() {
+        val content = """
+            ${GuildMembersCsv.HEADER}
+            0,Ghost,60,1,2,3,4,5,2026-01-01T00:00:00Z
+            1,Member,60,1,2,3,4,5,2026-01-01T00:00:00Z
+        """.trimIndent()
+
+        assertNull(GuildMembersCsv.parse(content))
+        assertFalse(
+            GuildMembersCsv.isValidRoster(listOf(GuildMember(0u, "Ghost", 1u, 0u, 0u, 0u, 0u, 0u))),
+        )
+    }
+
+    @Test
     fun namesWithCarriageReturnsRoundTripThroughRetainedRows() {
         val snapshot = GuildMembersCsv.Snapshot(
             logTime = "2026-01-01T00:00:00Z",

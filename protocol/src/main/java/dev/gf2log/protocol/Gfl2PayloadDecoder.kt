@@ -1,5 +1,6 @@
 package dev.gf2log.protocol
 
+import dev.gf2log.protocol.internal.DecodeBudget
 import dev.gf2log.protocol.internal.ProtoReader
 import dev.gf2log.protocol.internal.collectMessages
 import dev.gf2log.protocol.internal.forEachField
@@ -59,18 +60,38 @@ object Gfl2PayloadDecoder {
         else -> false
     }
 
+    /**
+     * Upper bound on the submessages and repeated scalars one logical payload may decode. A
+     * two-byte empty submessage would otherwise turn a 2 MiB continuation sequence into about a
+     * million objects; real rosters, inventories, and formations stay far below this.
+     */
+    const val MAX_DECODED_ELEMENTS = 32_768
+
     @Throws(ProtocolException::class)
-    fun decode(type: Int, bytes: ByteArray): GameData? = when (type) {
-        TYPE_WEAPONS -> decodeWeapons(ProtoReader(bytes))
-        TYPE_WEAPON_MODS -> decodeWeaponMods(ProtoReader(bytes))
-        TYPE_PUBLIC_SKILL_ITEMS -> decodePublicSkillItems(ProtoReader(bytes))
-        TYPE_PLATOON_PROFILE -> decodePlatoonProfile(ProtoReader(bytes))
-        TYPE_GUILD_MEMBERS -> decodeGuildMembers(ProtoReader(bytes))
-        TYPE_PLATOON_ACTIVITY -> decodePlatoonActivity(ProtoReader(bytes))
-        TYPE_PLATOON_UPDATES -> decodePlatoonUpdates(ProtoReader(bytes))
-        TYPE_FORMATIONS -> decodeFormationsResponse(ProtoReader(bytes))
-        else -> null
+    fun decode(type: Int, bytes: ByteArray): GameData? =
+        decodeCounted(type, bytes, MAX_DECODED_ELEMENTS)?.data
+
+    /** Decodes [bytes] while charging every element to a budget of [maxElements]. */
+    @Throws(ProtocolException::class)
+    internal fun decodeCounted(type: Int, bytes: ByteArray, maxElements: Int): Decoded? {
+        val budget = DecodeBudget(maxElements)
+        val reader = ProtoReader(bytes, budget)
+        val data = when (type) {
+            TYPE_WEAPONS -> decodeWeapons(reader)
+            TYPE_WEAPON_MODS -> decodeWeaponMods(reader)
+            TYPE_PUBLIC_SKILL_ITEMS -> decodePublicSkillItems(reader)
+            TYPE_PLATOON_PROFILE -> decodePlatoonProfile(reader)
+            TYPE_GUILD_MEMBERS -> decodeGuildMembers(reader)
+            TYPE_PLATOON_ACTIVITY -> decodePlatoonActivity(reader)
+            TYPE_PLATOON_UPDATES -> decodePlatoonUpdates(reader)
+            TYPE_FORMATIONS -> decodeFormationsResponse(reader)
+            else -> return null
+        }
+        return Decoded(data, budget.consumed)
     }
+
+    /** One decoded payload and the elements its decoding charged to the budget. */
+    internal class Decoded(val data: GameData, val elements: Int)
 
     private fun decodeWeapons(reader: ProtoReader) =
         WeaponsData(reader.collectMessages(1, ::decodeWeapon))
@@ -200,15 +221,15 @@ object Gfl2PayloadDecoder {
         reader.forEachField { field ->
             when (field.number) {
                 1 -> platoonId = reader.readUInt(field).toUInt()
-                2 -> platoonName = reader.readString(field).take(MAX_PLATOON_NAME_CHARS)
+                2 -> platoonName = reader.readString(field).takeCodePoints(MAX_PLATOON_NAME_CHARS)
                 3 -> level = reader.readUInt(field).toUInt()
                 4 -> exp = reader.readUInt(field).toUInt()
-                6 -> announcement = reader.readString(field).take(MAX_PLATOON_TEXT_CHARS)
+                6 -> announcement = reader.readString(field).takeCodePoints(MAX_PLATOON_TEXT_CHARS)
                 // CS_ChangeGuildFlag and asymmetric live profiles establish that field 9 is
                 // the mark/design selector while field 10 is the colored frame selector.
                 9 -> bannerMarkId = reader.readUInt(field).toUInt()
                 10 -> bannerFrameId = reader.readUInt(field).toUInt()
-                12 -> declaration = reader.readString(field).take(MAX_PLATOON_TEXT_CHARS)
+                12 -> declaration = reader.readString(field).takeCodePoints(MAX_PLATOON_TEXT_CHARS)
                 13 -> joinPolicyFlag = reader.readBoolean(field)
                 else -> reader.skip(field)
             }
@@ -394,6 +415,16 @@ object Gfl2PayloadDecoder {
         }
 
         return Doll(dollId, weaponUid, attachmentUids, fixedKeyIds, expansionKeyIds, commonKeyUids)
+    }
+
+    /**
+     * Truncates to at most [maxUnits] UTF-16 units without splitting a surrogate pair, so a
+     * stored name never ends in an unpaired surrogate that no keyboard can type back.
+     */
+    internal fun String.takeCodePoints(maxUnits: Int): String {
+        if (length <= maxUnits) return this
+        val splitsPair = maxUnits > 0 && Character.isHighSurrogate(this[maxUnits - 1])
+        return substring(0, if (splitsPair) maxUnits - 1 else maxUnits)
     }
 
     private const val MAX_PLATOON_NAME_CHARS = 128

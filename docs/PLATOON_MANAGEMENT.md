@@ -275,6 +275,14 @@ CSV files created for spreadsheet use neutralize string cells beginning with
 `=`, `+`, `-`, or `@` (including after leading whitespace), preventing a member
 name or note from executing as a spreadsheet formula. Internal retained roster
 evidence remains lossless and is not rewritten with that export-only prefix.
+Text that is formula-like after its leading apostrophes also gets one, so the
+prefix is reversible: importing the app's own roster export removes exactly one
+apostrophe and restores every name, and such an import is retained in the
+lossless form. The one residue is a lossless file whose real name is an
+apostrophe followed by a formula character, which loses that apostrophe on
+import. A roster import ignores one leading UTF-8 byte order mark, and a row
+with UID 0, the protobuf default of a missing UID, is rejected; captured
+rosters drop such a member instead.
 The same neutralization is applied to captured roster, activity, Updates, and
 formation packet tables before they can be copied or opened in spreadsheet
 software.

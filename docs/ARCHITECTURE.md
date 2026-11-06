@@ -115,6 +115,10 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   A malformed or truncated continuation frame discards its dataset the same way.
   Quarantine is advanced from frame metadata before protobuf decoding, so even
   a malformed terminal fragment clears the discarded dataset deterministically.
+  Decoding also charges every submessage and repeated scalar against a budget of
+  32,768 elements per logical payload, across its continuations, and exceeding
+  it is handled like the byte limit, so a frame of minimal elements cannot
+  amplify into an unbounded object graph.
 - One serial `CaptureWorker` owns every parser, flow, session, and admission
   structure, so that state needs no locks. Native callbacks share a budget of
   256 queued chunks; lifecycle, confirm, and discard tasks bypass that budget
@@ -129,11 +133,13 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   when the service is destroyed meanwhile, so nothing that waits for `STOPPED`
   can overlap the native loop or the drain.
 - Before identity is established, each flow retains at most 32 decoded payload
-  objects. Overflow rejects that flow until closure. The profile registry holds
-  at most 16 bounded identities.
+  objects, all flows together at most 65,536 decoded elements, and only payload
+  types whose history is on. Overflow rejects that flow until closure. The
+  profile registry holds at most 16 bounded identities.
 - Unconfirmed profile admission is capped at 4 candidates, 64 decoded payloads
-  per candidate, and 128 payloads total. Overflow rejects every flow belonging
-  to that candidate rather than partially persisting it.
+  per candidate, 128 payloads total, and 65,536 decoded elements total.
+  Overflow rejects every flow belonging to that candidate rather than partially
+  persisting it.
 - A bound flow cannot change its Platoon identity. Admission failure clears its
   session and quarantines the flow until native closure. Replay binds every
   claimed flow before routing any buffered payload, so a replay that fails has
@@ -152,16 +158,19 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   quarantines its flow, so an earlier queued open callback cannot recreate stale metadata.
 - Queue saturation is counted and surfaced in the capture status instead of being silently discarded.
 - Raw IP packets and application payloads are not persisted.
-- One parsed history entry is capped at 2 MiB. The packet-table projection
-  accepts at most 512 KiB, 250 rows, 16 columns, 2,048 cells, and 8 KiB per
-  cell; rejected content remains available only through the already bounded raw
-  history view rather than constructing an unbounded Android view hierarchy.
+- One parsed history entry is capped at 2 MiB, enforced while it is formatted.
+  The packet-table projection accepts at most 512 KiB, 256 rows (the roster
+  member limit), 16 columns, 2,313 cells, and 8 KiB per cell; rejected content
+  remains available only through the already bounded raw history view rather
+  than constructing an unbounded Android view hierarchy.
 
 CSV retained as internal roster evidence preserves protocol text exactly.
 Explicit spreadsheet-facing roster, member, comparison, and weekly exports pass
 string cells through a shared encoder that quotes delimiters and prefixes
 formula-like values with an apostrophe. Numeric counters remain numeric, and
-the protection is never fed back into retained member identity.
+the protection is never fed back into retained member identity: the prefix is
+reversible, a selected roster import removes exactly one, and a file whose names
+changed that way is retained in the lossless form.
 
 The single worker is deliberate: these eight responses are sparse, and avoiding
 a worker pool reduces scheduling, memory, and ordering complexity. If
@@ -369,8 +378,11 @@ Every completed recognized payload is formatted in protocol order and written
 atomically below the admitted profile's private
 `files/platoons/<storage-id>/capture-history` directory. Unconfirmed payloads
 never enter history. `CaptureHistoryStore` returns entries newest-first, trims
-the oldest files once the count exceeds 100, rejects path-like identifiers, and
-supports explicit deletion of user-selected entries. `SavedHistoryStore`
+the earliest-recorded files once the count exceeds 100, rejects path-like
+identifiers, and supports explicit deletion of user-selected entries. Recording
+order is a sequence persisted in each entry ID rather than the wall clock, so a
+clock moved backwards never rotates out the entry just saved. Every history and
+roster file is synced before it is renamed into place. `SavedHistoryStore`
 atomically copies selected entries into the same profile's `saved-history`
 directory, rejects duplicates, caps the collection at 50 without FIFO deletion,
 and keeps saved entries independent from recent-history rotation.

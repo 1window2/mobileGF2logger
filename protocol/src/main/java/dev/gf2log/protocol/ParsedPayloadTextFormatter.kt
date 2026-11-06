@@ -11,7 +11,27 @@ import dev.gf2log.protocol.model.WeaponModsData
 import dev.gf2log.protocol.model.WeaponsData
 
 object ParsedPayloadTextFormatter {
-    fun format(payload: ParsedPayload, capturedAt: String): String = buildString {
+    fun format(payload: ParsedPayload, capturedAt: String): String =
+        checkNotNull(format(payload, capturedAt, Int.MAX_VALUE))
+
+    /**
+     * Formats [payload], or returns null as soon as the text would exceed [maxChars], before a
+     * crafted payload can allocate its whole oversized text. A UTF-8 encoding is never shorter
+     * than its UTF-16 unit count, so a byte limit can be passed as [maxChars] directly.
+     */
+    fun format(payload: ParsedPayload, capturedAt: String, maxChars: Int): String? {
+        require(maxChars >= 0) { "Character limit must not be negative" }
+        // The trailing line break is trimmed after writing, so it may briefly pass the limit.
+        val text = BoundedText(maxChars.toLong() + 1)
+        try {
+            text.write(payload, capturedAt)
+        } catch (_: BoundedText.LimitExceeded) {
+            return null
+        }
+        return text.toString().trimEnd().takeIf { it.length <= maxChars }
+    }
+
+    private fun Appendable.write(payload: ParsedPayload, capturedAt: String) {
         appendLine("capturedAt=$capturedAt")
         appendLine("messageId=${payload.messageId}")
         appendLine("payloadType=${payload.payloadType}")
@@ -129,6 +149,31 @@ object ParsedPayloadTextFormatter {
                 }
             }
         }
-    }.trimEnd()
+    }
 
+    /** A text buffer that refuses to grow past [maxChars]. */
+    private class BoundedText(private val maxChars: Long) : Appendable {
+        private val builder = StringBuilder()
+
+        override fun append(value: CharSequence?): Appendable {
+            val text = value ?: "null"
+            return append(text, 0, text.length)
+        }
+
+        override fun append(value: CharSequence?, start: Int, end: Int): Appendable {
+            if (builder.length.toLong() + (end - start) > maxChars) throw LimitExceeded()
+            builder.append(value ?: "null", start, end)
+            return this
+        }
+
+        override fun append(value: Char): Appendable {
+            if (builder.length.toLong() + 1 > maxChars) throw LimitExceeded()
+            builder.append(value)
+            return this
+        }
+
+        override fun toString(): String = builder.toString()
+
+        class LimitExceeded : RuntimeException(null, null, false, false)
+    }
 }

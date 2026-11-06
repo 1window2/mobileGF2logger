@@ -7,8 +7,28 @@ internal data class ProtoField(
     val wireType: Int,
 )
 
+/**
+ * Counts the submessages and repeated scalars one payload decodes, so a crafted payload of
+ * minimal elements cannot amplify a bounded frame into an unbounded object graph. Every reader
+ * nested inside one payload shares the same budget.
+ */
+internal class DecodeBudget(private val limit: Int) {
+    var consumed = 0
+        private set
+
+    init {
+        require(limit > 0) { "Decode element limit must be positive" }
+    }
+
+    fun consume() {
+        if (consumed >= limit) throw ProtocolException("Payload exceeds $limit decoded elements")
+        consumed += 1
+    }
+}
+
 internal class ProtoReader(
     private val bytes: ByteArray,
+    private val budget: DecodeBudget,
 ) {
     private var position = 0
 
@@ -33,14 +53,25 @@ internal class ProtoReader(
 
     fun readString(field: ProtoField): String = readBytes(field).toString(Charsets.UTF_8)
 
-    fun readMessage(field: ProtoField): ProtoReader = ProtoReader(readBytes(field))
+    /** Each submessage is one decoded element, charged before its bytes are copied. */
+    fun readMessage(field: ProtoField): ProtoReader {
+        requireWireType(field, 2)
+        budget.consume()
+        return ProtoReader(readLengthDelimited(), budget)
+    }
 
     fun readRepeatedUInt(field: ProtoField): List<ULong> = when (field.wireType) {
-        0 -> listOf(readVarint())
+        0 -> {
+            budget.consume()
+            listOf(readVarint())
+        }
         2 -> {
-            val packed = ProtoReader(readLengthDelimited())
+            val packed = ProtoReader(readLengthDelimited(), budget)
             buildList {
-                while (!packed.exhausted) add(packed.readVarint())
+                while (!packed.exhausted) {
+                    budget.consume()
+                    add(packed.readVarint())
+                }
             }
         }
         else -> throw ProtocolException(

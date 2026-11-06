@@ -1,5 +1,7 @@
 package dev.gf2log.app.management
 
+import dev.gf2log.protocol.GuildMembersCsv
+import dev.gf2log.protocol.model.GuildMember
 import java.io.ByteArrayInputStream
 import java.time.Instant
 import org.junit.Assert.assertEquals
@@ -42,6 +44,41 @@ class PlatoonCsvImportStoreTest {
         assertFalse(retained.duplicate)
     }
 
+
+    @Test
+    fun spreadsheetExportImportsWithItsNamesAndIsRetainedLossless() {
+        val snapshot = GuildMembersCsv.Snapshot(
+            logTime = "2026-07-19T19:29:33Z",
+            members = listOf(
+                GuildMember(1u, "-Kai-", 60u, 1u, 2u, 3u, 4u, 5u),
+                GuildMember(2u, "'=x", 60u, 1u, 2u, 3u, 4u, 5u),
+                GuildMember(3u, "Plain", 60u, 1u, 2u, 3u, 4u, 5u),
+            ),
+        )
+        val store = PlatoonCsvImportStore(temporary.newFolder("spreadsheet"))
+        val exported = GuildMembersCsv.formatForSpreadsheet(snapshot).toByteArray()
+
+        val prepared = store.prepare(ByteArrayInputStream(exported))
+        val retained = store.retain(prepared)
+
+        assertEquals(snapshot, prepared.snapshot)
+        assertEquals(GuildMembersCsv.format(snapshot), retained.file.readText())
+        assertEquals(snapshot, GuildMembersCsv.parse(retained.file.readText()))
+    }
+
+    @Test
+    fun aCsvSavedWithAByteOrderMarkImportsAndKeepsItsBytes() {
+        val store = PlatoonCsvImportStore(temporary.newFolder("bom"))
+        val bytes = ("﻿" + VALID_CSV).toByteArray()
+
+        val retained = store.retain(ByteArrayInputStream(bytes))
+
+        assertTrue(retained.file.readBytes().contentEquals(bytes))
+        assertEquals(
+            GuildMembersCsv.parse(VALID_CSV),
+            GuildMembersCsv.parse(retained.file.readText()),
+        )
+    }
 
     @Test(expected = IllegalArgumentException::class)
     fun malformedCsvIsRejectedBeforeAnythingIsRetained() {

@@ -22,8 +22,9 @@ class PlatoonCsvImportStore(
     private val now: () -> Instant = Instant::now,
 ) {
     /**
-     * Reads a bounded UTF-8 roster CSV, validates its complete schema, and hashes its bytes. Does
-     * not create files, allowing callers to preview a whole selection before confirmation. Returns
+     * Reads a bounded UTF-8 roster CSV, validates its complete schema, and hashes the bytes it
+     * retains. Does not create files, allowing callers to preview a whole selection before
+     * confirmation. Returns
      * an immutable prepared import containing only validated data and its stable identity.
      */
     fun prepare(input: InputStream): PreparedImport {
@@ -33,15 +34,25 @@ class PlatoonCsvImportStore(
             .onUnmappableCharacter(CodingErrorAction.REPORT)
             .decode(ByteBuffer.wrap(bytes))
             .toString()
-        val parsed = requireNotNull(GuildMembersCsv.parse(text)) { "Invalid Platoon CSV" }
+        // The file may be this app's own spreadsheet export, whose formula-safe name prefix is
+        // removed here. Retained files are always lossless, so a file whose names changed is
+        // retained in that form instead of as the selected bytes.
+        val parsed = requireNotNull(GuildMembersCsv.parse(text, unescapeSpreadsheet = true)) {
+            "Invalid Platoon CSV"
+        }
         require(parsed.members.isNotEmpty()) { "Platoon CSV contains no roster members" }
         val capturedAt = Instant.parse(parsed.logTime)
         // A roster from the future would stay the "current" roster and hide every real capture
         // after it; a mistyped year is the usual cause.
         require(!capturedAt.isAfter(now().plus(MAX_CLOCK_SKEW))) { "Platoon CSV is dated in the future" }
-        val hash = bytes.sha256().copyOf(HASH_BYTES).toHex()
+        val encoded = if (GuildMembersCsv.parse(text) == parsed) {
+            bytes
+        } else {
+            GuildMembersCsv.format(parsed).toByteArray(StandardCharsets.UTF_8)
+        }
+        val hash = encoded.sha256().copyOf(HASH_BYTES).toHex()
         return PreparedImport(
-            encoded = bytes,
+            encoded = encoded,
             snapshot = parsed,
             capturedAt = capturedAt,
             fileName = "import-" + FILE_TIME.format(capturedAt) + "-" + hash + ".csv",

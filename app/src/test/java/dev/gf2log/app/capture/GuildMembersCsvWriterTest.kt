@@ -98,6 +98,45 @@ class GuildMembersCsvWriterTest {
     }
 
     @Test
+    fun membersWithoutAUidAreDroppedInsteadOfFailingTheRoster() {
+        val output = temporaryFolder.newFolder("uid-zero")
+        val completed = mutableListOf<GuildMembersCsvWriter.CompletedBatch>()
+        val writer = GuildMembersCsvWriter(output, onBatchClosed = completed::add)
+
+        val saved = writer.accept(payload(42, end = true, member(0u, "No UID"), member(7u, "Member")))
+
+        assertEquals(1, saved?.rowCount)
+        assertEquals(listOf(7u), completed.single().members.map { it.uid })
+        assertEquals(
+            listOf("Member"),
+            GuildMembersCsv.parse(saved!!.file.readText(Charsets.UTF_8))?.members?.map { it.name },
+        )
+        assertNull(writer.accept(payload(messageId = 43, uid = 0u, name = "Only no UID", end = true)))
+    }
+
+    @Test
+    fun workingFileIsCompleteAndSyncedBeforeItIsPublished() {
+        val output = temporaryFolder.newFolder("synced-publication")
+        val events = mutableListOf<String>()
+        val writer = GuildMembersCsvWriter(
+            outputDirectory = output,
+            publisher = { working, final ->
+                events += "publish:" + working.readText(Charsets.UTF_8).lines().size
+                assertTrue(working.renameTo(final))
+            },
+            sync = { stream ->
+                events += "sync"
+                stream.fd.sync()
+            },
+        )
+
+        writer.accept(payload(42, end = true, member(1u, "One"), member(2u, "Two")))
+
+        // The header, two rows, and the empty remainder after the final line break.
+        assertEquals(listOf("sync", "publish:4"), events)
+    }
+
+    @Test
     fun transientPublicationFailureRetriesImmediately() {
         val output = temporaryFolder.newFolder("publication-failure")
         val clock = Clock.fixed(Instant.parse("2026-07-21T19:11:09Z"), ZoneOffset.UTC)

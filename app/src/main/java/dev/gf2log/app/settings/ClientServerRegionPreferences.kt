@@ -25,8 +25,8 @@ internal class ClientServerRegionPreferences(context: Context) {
         val legacy = legacySeed(GameTimeZonePreferences.legacyRegion(appContext), packageName)
         val editor = preferences.edit().putBoolean(legacyMigratedKey(packageName), true)
         legacy?.let { editor.putString(packageName, it.storedValue) }
-        // An unwritten migration still answers this call and is retried by the next one.
-        editor.commit()
+        // Memory is updated at once; a write that never reaches the disk is retried by the next process.
+        editor.apply()
         return legacy
     }
 

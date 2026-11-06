@@ -2,14 +2,16 @@ package dev.gf2log.protocol.internal
 
 /** Bounded RFC-4180-style tokenizer shared by every CSV reader in this module. */
 internal object CsvRecords {
-    /** Returns null for unbalanced quotes or when any bound would be exceeded. */
+    /**
+     * Returns null for unbalanced quotes or when any bound would be exceeded. Quoted fields keep
+     * their content exactly, line breaks included; only an unquoted CRLF, CR, or LF ends a record.
+     */
     fun parse(
         content: String,
         maxColumns: Int,
         maxRecords: Int,
         maxFieldChars: Int,
     ): List<List<String>>? {
-        val csv = normalizeLineEndings(content)
         val records = mutableListOf<List<String>>()
         val row = mutableListOf<String>()
         val field = StringBuilder()
@@ -30,10 +32,10 @@ internal object CsvRecords {
             return true
         }
 
-        while (index < csv.length) {
-            when (val character = csv[index]) {
+        while (index < content.length) {
+            when (val character = content[index]) {
                 '"' -> {
-                    if (quoted && index + 1 < csv.length && csv[index + 1] == '"') {
+                    if (quoted && index + 1 < content.length && content[index + 1] == '"') {
                         field.append('"')
                         index += 1
                     } else {
@@ -41,10 +43,11 @@ internal object CsvRecords {
                     }
                 }
                 ',' -> if (quoted) field.append(character) else if (!endField()) return null
-                '\n' -> if (quoted) {
+                '\r', '\n' -> if (quoted) {
                     field.append(character)
-                } else if (!endField() || !endRecord()) {
-                    return null
+                } else {
+                    if (!endField() || !endRecord()) return null
+                    if (character == '\r' && content.getOrNull(index + 1) == '\n') index += 1
                 }
                 else -> {
                     if (field.length >= maxFieldChars) return null
@@ -60,7 +63,4 @@ internal object CsvRecords {
         }
         return records
     }
-
-    fun normalizeLineEndings(content: String): String =
-        content.replace("\r\n", "\n").replace('\r', '\n')
 }

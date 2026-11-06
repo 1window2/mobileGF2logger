@@ -65,7 +65,7 @@ object GuildMembersCsv {
     // - Returns null when any required field is malformed or capture times disagree.
     fun parse(content: String): Snapshot? {
         if (content.length > MAX_CONTENT_CHARS) return null
-        val records = CsvRecords.parse(content, MAX_COLUMNS, MAX_RECORDS, MAX_FIELD_CHARS)
+        val records = CsvRecords.parse(content, COLUMN_COUNT, MAX_RECORDS, MAX_FIELD_CHARS)
             ?: return null
         val header = records.firstOrNull() ?: return null
         if (header != HEADER.split(',')) return null
@@ -119,7 +119,8 @@ object GuildMembersCsv {
     private const val MAX_CONTENT_CHARS = 2 * 1024 * 1024
     const val MAX_ROSTER_MEMBERS = 256
     const val MAX_MEMBER_NAME_CHARS = 256
-    private const val MAX_COLUMNS = 9
+    /** The number of columns in [HEADER]. */
+    const val COLUMN_COUNT = 9
     private const val MAX_RECORDS = MAX_ROSTER_MEMBERS + 2
     private const val MAX_FIELD_CHARS = 512
 }

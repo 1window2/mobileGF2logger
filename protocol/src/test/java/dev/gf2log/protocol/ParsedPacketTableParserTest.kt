@@ -1,5 +1,8 @@
 package dev.gf2log.protocol
 
+import dev.gf2log.protocol.model.GuildMember
+import dev.gf2log.protocol.model.GuildMembersData
+import dev.gf2log.protocol.model.ParsedPayload
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -44,7 +47,9 @@ class ParsedPacketTableParserTest {
             .joinToString(",")
         val wideContent = metadata() + "$tooManyColumns\n"
         val header = List(16) { "c$it" }.joinToString(",")
-        val rows = List(128) { index -> List(16) { "$index" }.joinToString(",") }
+        val rows = List(ParsedPacketTableParser.MAX_CELLS / 16) { index ->
+            List(16) { "$index" }.joinToString(",")
+        }
         val tooManyCells = metadata() + (listOf(header) + rows).joinToString("\n")
 
         assertNull(ParsedPacketTableParser.parse(wideContent))
@@ -60,6 +65,31 @@ class ParsedPacketTableParserTest {
 
         assertNull(ParsedPacketTableParser.parse(largeHistory))
         assertNull(ParsedPacketTableParser.parse(largeCell))
+    }
+
+    @Test
+    fun everyAcceptedRosterSizeRendersFromItsHistoryEntry() {
+        val name = "\"".repeat(GuildMembersCsv.MAX_MEMBER_NAME_CHARS)
+        val members = (1..GuildMembersCsv.MAX_ROSTER_MEMBERS).map { index ->
+            GuildMember(index.toUInt(), name, 60u, 1u, 2u, 3u, 4u, 5u)
+        }
+        val content = ParsedPayloadTextFormatter.format(
+            ParsedPayload(7, Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS, true, GuildMembersData(members)),
+            "2026-08-08T00:00:00Z",
+        )
+
+        val table = ParsedPacketTableParser.parse(content)
+
+        assertEquals(GuildMembersCsv.MAX_ROSTER_MEMBERS, table?.rows?.size)
+        assertEquals(name, table?.rows?.last()?.get(1))
+    }
+
+    @Test
+    fun bodyKeepsAQuotedCarriageReturnAndAcceptsCrlfEnvelopes() {
+        val content = "capturedAt=2026-08-08T00:00:00Z\r\nmessageId=1\r\n\r\nuid,name\r\n1,\"a\rb\""
+
+        assertEquals("uid,name\r\n1,\"a\rb\"", ParsedPacketTableParser.csvBody(content))
+        assertEquals(listOf("1", "a\rb"), ParsedPacketTableParser.parse(content)?.rows?.single())
     }
 
     private fun metadata(): String =

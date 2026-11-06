@@ -21,12 +21,25 @@ object ParsedPacketTableParser {
         )
     }
 
-    /** Returns the line-ending-normalized CSV after a history envelope's blank separator line. */
+    /**
+     * Returns the CSV after a history envelope's blank separator line. The body keeps its line
+     * endings, so a quoted carriage return in a member name survives to the table and upload.
+     */
     fun csvBody(content: String): String? {
-        val normalized = CsvRecords.normalizeLineEndings(content)
-        val separator = normalized.indexOf("\n\n")
-        if (separator < 0 || separator + 2 >= normalized.length) return null
-        return normalized.substring(separator + 2)
+        var index = 0
+        var previousWasLineBreak = false
+        while (index < content.length) {
+            val character = content[index]
+            if (character != '\r' && character != '\n') {
+                previousWasLineBreak = false
+                index += 1
+                continue
+            }
+            index += if (character == '\r' && content.getOrNull(index + 1) == '\n') 2 else 1
+            if (previousWasLineBreak) return content.substring(index).takeIf(String::isNotEmpty)
+            previousWasLineBreak = true
+        }
+        return null
     }
 
     data class Table(
@@ -35,9 +48,10 @@ object ParsedPacketTableParser {
     )
 
     const val MAX_CONTENT_CHARS = 512 * 1024
-    const val MAX_ROWS = 250
+    /** Every roster that [GuildMembersCsv.isValidRoster] accepts must render and upload. */
+    const val MAX_ROWS = GuildMembersCsv.MAX_ROSTER_MEMBERS
     const val MAX_COLUMNS = 16
-    const val MAX_CELLS = 2_048
+    const val MAX_CELLS = (MAX_ROWS + 1) * GuildMembersCsv.COLUMN_COUNT
     const val MAX_CELL_CHARS = 8 * 1024
     private const val MAX_RECORDS = MAX_ROWS + 1
 }

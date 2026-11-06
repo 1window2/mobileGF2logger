@@ -158,10 +158,11 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   quarantines its flow, so an earlier queued open callback cannot recreate stale metadata.
 - Queue saturation is counted and surfaced in the capture status instead of being silently discarded.
 - Raw IP packets and application payloads are not persisted.
-- One parsed history entry is capped at 2 MiB. The packet-table projection
-  accepts at most 512 KiB, 250 rows, 16 columns, 2,048 cells, and 8 KiB per
-  cell; rejected content remains available only through the already bounded raw
-  history view rather than constructing an unbounded Android view hierarchy.
+- One parsed history entry is capped at 2 MiB, enforced while it is formatted.
+  The packet-table projection accepts at most 512 KiB, 256 rows (the roster
+  member limit), 16 columns, 2,313 cells, and 8 KiB per cell; rejected content
+  remains available only through the already bounded raw history view rather
+  than constructing an unbounded Android view hierarchy.
 
 CSV retained as internal roster evidence preserves protocol text exactly.
 Explicit spreadsheet-facing roster, member, comparison, and weekly exports pass

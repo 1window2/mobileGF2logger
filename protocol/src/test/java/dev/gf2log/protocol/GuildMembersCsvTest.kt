@@ -2,6 +2,7 @@ package dev.gf2log.protocol
 
 import dev.gf2log.protocol.model.GuildMember
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -130,5 +131,72 @@ class GuildMembersCsvTest {
         """.trimIndent()
 
         assertNull(GuildMembersCsv.parse(content))
+    }
+
+    @Test
+    fun spreadsheetExportRoundTripsThroughAnUnescapingImport() {
+        val names = listOf(
+            "-Kai-",
+            "=x",
+            "'=x",
+            "''@y",
+            "  +y",
+            "\t@z",
+            "'abc",
+            "' -",
+            "plain",
+            "-".repeat(GuildMembersCsv.MAX_MEMBER_NAME_CHARS),
+        )
+        val snapshot = GuildMembersCsv.Snapshot(
+            logTime = "2026-01-01T00:00:00Z",
+            members = names.mapIndexed { index, name ->
+                GuildMember((index + 1).toUInt(), name, 60u, 1u, 2u, 3u, 4u, 5u)
+            },
+        )
+
+        val exported = GuildMembersCsv.formatForSpreadsheet(snapshot)
+
+        assertEquals(snapshot, GuildMembersCsv.parse(exported, unescapeSpreadsheet = true))
+        assertEquals(snapshot, GuildMembersCsv.parse(GuildMembersCsv.format(snapshot)))
+    }
+
+    @Test
+    fun retainedRosterNamesAreNeverUnescaped() {
+        val content = listOf(
+            GuildMembersCsv.HEADER,
+            "1,'-Kai-,60,1,2,3,4,5,2026-01-01T00:00:00Z",
+        ).joinToString("\n")
+
+        assertEquals("'-Kai-", GuildMembersCsv.parse(content)?.members?.single()?.name)
+        assertEquals(
+            "-Kai-",
+            GuildMembersCsv.parse(content, unescapeSpreadsheet = true)?.members?.single()?.name,
+        )
+    }
+
+    @Test
+    fun aLeadingByteOrderMarkIsIgnoredButNotOneElsewhere() {
+        val content = listOf(
+            GuildMembersCsv.HEADER,
+            "1,Member,60,1,2,3,4,5,2026-01-01T00:00:00Z",
+        ).joinToString("\r\n")
+
+        assertEquals(GuildMembersCsv.parse(content), GuildMembersCsv.parse("\uFEFF" + content))
+        assertNull(GuildMembersCsv.parse("\uFEFF\uFEFF" + content))
+        val inner = GuildMembersCsv.parse(content.replace(",Member,", ",\uFEFFMember,"))
+        assertEquals("\uFEFFMember", inner?.members?.single()?.name)
+    }
+
+    @Test
+    fun namesWithCarriageReturnsRoundTripThroughRetainedRows() {
+        val snapshot = GuildMembersCsv.Snapshot(
+            logTime = "2026-01-01T00:00:00Z",
+            members = listOf(
+                GuildMember(1u, "a\rb", 60u, 1u, 2u, 3u, 4u, 5u),
+                GuildMember(2u, "a\r\nb", 60u, 1u, 2u, 3u, 4u, 5u),
+            ),
+        )
+
+        assertEquals(snapshot, GuildMembersCsv.parse(GuildMembersCsv.format(snapshot)))
     }
 }

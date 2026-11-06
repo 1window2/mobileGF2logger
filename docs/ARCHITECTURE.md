@@ -168,7 +168,9 @@ CSV retained as internal roster evidence preserves protocol text exactly.
 Explicit spreadsheet-facing roster, member, comparison, and weekly exports pass
 string cells through a shared encoder that quotes delimiters and prefixes
 formula-like values with an apostrophe. Numeric counters remain numeric, and
-the protection is never fed back into retained member identity.
+the protection is never fed back into retained member identity: the prefix is
+reversible, a selected roster import removes exactly one, and a file whose names
+changed that way is retained in the lossless form.
 
 The single worker is deliberate: these eight responses are sparse, and avoiding
 a worker pool reduces scheduling, memory, and ordering complexity. If

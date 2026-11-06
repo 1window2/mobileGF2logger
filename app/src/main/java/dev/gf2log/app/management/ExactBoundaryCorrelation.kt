@@ -496,7 +496,8 @@ internal object ExactBoundaryCorrelation {
      * boundary at the bound instant, however late the Updates feed arrives: no roster was
      * captured between the two instants, so the first roster after the real change revealed it.
      * An inferred boundary sits on that revealing roster, so it cannot precede the change. Bind
-     * [weakBoundaryInSameRosterGapArguments] in place.
+     * [weakBoundaryInSameRosterGapArguments] in place; the instant arrives as text, and MIN and
+     * MAX compare an integer below any text, so it is cast before either sees it.
      */
     private fun weakBoundaryInSameRosterGap(boundary: MembershipBoundary): String {
         val at = boundary.atColumn
@@ -509,8 +510,8 @@ internal object ExactBoundaryCorrelation {
               )
               AND NOT EXISTS (
                 SELECT 1 FROM snapshots roster
-                WHERE roster.captured_at >= MIN($at, ?)
-                  AND roster.captured_at < MAX($at, ?)
+                WHERE roster.captured_at >= MIN($at, CAST(? AS INTEGER))
+                  AND roster.captured_at < MAX($at, CAST(? AS INTEGER))
                   AND roster.clock_suspect = 0
               )
             )

@@ -49,7 +49,8 @@ class WeeklyTableCellIntegrationTest {
         val cutlines = WeeklyCutlines(dailyGunsmokeScore = 40_000, weeklyLoginDays = 5)
         val table = WeeklyTable(base, isGunsmokeWeek = true, zone = ZoneOffset.UTC, cutlines = cutlines)
         val row = table.MemberRow()
-        row.bind(member(), rankValue = 1, edits = emptyMap()) {}
+        // A positive score proves that day's login, so only three days carry one: Login is 3.
+        row.bind(member(scoredDays = 3), rankValue = 1, edits = emptyMap()) {}
         val below = base.getString(R.string.below_cutline)
 
         val day = cells(row.view).first()
@@ -76,16 +77,17 @@ class WeeklyTableCellIntegrationTest {
         assertEquals(base.getString(R.string.evidence_unknown_short), CellSpeech.value(base, "?"))
     }
 
-    private fun member(): WeeklyReportBuilder.MemberRow {
+    private fun member(scoredDays: Int = 7): WeeklyReportBuilder.MemberRow {
         val days = (0L until 7L).map { offset ->
+            val scored = offset < scoredDays
             WeeklyReportBuilder.DayCell(
                 gameDay = week.plusDays(offset),
                 meritDelta = 90,
-                scoreDelta = 31_635,
+                scoreDelta = 31_635L.takeIf { scored },
                 inference = null,
                 evidence = DailyEvidence.PARTIAL_DAY,
                 isGunsmokeWeek = true,
-                solvedAttempts = 2,
+                solvedAttempts = 2.takeIf { scored },
                 solvedScoreCertainty = MetricCertainty.LOWER_BOUND,
                 solvedAttemptsCertainty = MetricCertainty.LOWER_BOUND,
             )

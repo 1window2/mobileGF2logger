@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.LinearLayout
 import dev.gf2log.app.capture.CaptureDiagnosticsStore
+import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.settings.CapturePreferences
@@ -219,7 +220,7 @@ class OptionsActivity : BaseActivity() {
     }
 
     private fun chooseResetRegion(scope: PlatoonStorageScope) {
-        val regions = GameServerRegion.entries.filterNot { it == GameServerRegion.MANUAL }
+        val regions = resetRegionChoices(PlatoonProfileRegistry(this).find(scope.storageId)?.client?.packageName)
         val automatic = GameTimeZonePreferences.isAutomatic(this, scope.storageId)
         val current = GameTimeZonePreferences.region(this, scope.storageId)
         val checked = if (automatic) 0 else regions.indexOf(current).takeIf { it >= 0 }?.plus(1) ?: -1
@@ -331,3 +332,11 @@ class OptionsActivity : BaseActivity() {
         const val MAINTENANCE = "maintenance"
     }
 }
+
+/**
+ * Reset regions offered for a Platoon of [packageName]'s publisher, after Automatic. Another
+ * publisher's servers use offsets this Platoon's server never does, so they are not offered.
+ */
+internal fun resetRegionChoices(packageName: String?): List<GameServerRegion> =
+    packageName?.let(ClientServerRegionPreferences::allowedFor)
+        ?: GameServerRegion.entries.filterNot { it == GameServerRegion.MANUAL }

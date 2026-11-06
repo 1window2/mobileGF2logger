@@ -1,6 +1,8 @@
 package dev.gf2log.app.settings
 
 import android.content.Context
+import dev.gf2log.app.management.PlatoonProfile
+import dev.gf2log.app.management.PlatoonProfileRegistry
 import java.time.ZoneId
 
 internal interface BackupSettingsStore {
@@ -18,10 +20,15 @@ internal class AppSettingsStore(context: Context) : BackupSettingsStore {
         UserSettingsPreferences.replace(appContext, settings)
 }
 
-/** Projects global presentation settings plus one Platoon's isolated reporting settings. */
+/**
+ * Projects global presentation settings plus one Platoon's isolated reporting settings.
+ * [restoredProfile] names the profile a restore installs after these settings; otherwise the
+ * scope's registered profile describes the Platoon.
+ */
 internal class ScopedAppSettingsStore(
     context: Context,
     private val storageId: String,
+    private val restoredProfile: PlatoonProfile? = null,
 ) : BackupSettingsStore {
     private val appContext = context.applicationContext
 
@@ -50,6 +57,8 @@ internal class ScopedAppSettingsStore(
         val previousOrder = memberOrder.read()
         val previousCutlines = cutlines.read()
         val previousZone = GameTimeZonePreferences.scopedStateOrNull(appContext, storageId)
+        val profile = (restoredProfile ?: PlatoonProfileRegistry(appContext).find(storageId))
+            ?.takeUnless(PlatoonProfile::legacy)
         val rollbacks = ArrayDeque<() -> Unit>()
         try {
             UserSettingsPreferences.replace(
@@ -67,10 +76,14 @@ internal class ScopedAppSettingsStore(
                     GameTimeZonePreferences.restoreScopedState(appContext, storageId, previousZone)
                 }
             }
-            if (manualZone != null) {
-                GameTimeZonePreferences.set(appContext, manualZone, storageId)
-            } else {
-                GameTimeZonePreferences.setRegion(appContext, region, storageId)
+            when {
+                manualZone != null -> GameTimeZonePreferences.set(appContext, manualZone, storageId)
+                ScopedResetRegionPolicy.restoresAutomatic(
+                    region = region,
+                    profileRegion = profile?.serverRegion,
+                    allowed = profile?.let { ClientServerRegionPreferences.allowedFor(it.client.packageName) },
+                ) -> GameTimeZonePreferences.clearRegionOverride(appContext, storageId)
+                else -> GameTimeZonePreferences.setRegion(appContext, region, storageId)
             }
             rollbacks.addFirst { check(memberOrder.write(previousOrder)) }
             check(memberOrder.write(settings.memberOrder)) {
@@ -84,5 +97,26 @@ internal class ScopedAppSettingsStore(
             }
             throw error
         }
+    }
+}
+
+/**
+ * Settings record only a scope's effective reset region, so replaying them must not turn the
+ * automatic choice into an explicit override, and a region the Platoon's publisher does not run
+ * can never become its reset region.
+ */
+internal object ScopedResetRegionPolicy {
+    /**
+     * True when restoring non-manual [region] clears the scope's override: it equals the profile's
+     * own region, or the profile's publisher does not run it. With no known profile, the region
+     * stays explicit and the restore reconciles it once the profile is installed.
+     */
+    fun restoresAutomatic(
+        region: GameServerRegion,
+        profileRegion: GameServerRegion?,
+        allowed: List<GameServerRegion>?,
+    ): Boolean {
+        if (region == GameServerRegion.MANUAL || profileRegion == null || allowed == null) return false
+        return region == profileRegion || region !in allowed
     }
 }

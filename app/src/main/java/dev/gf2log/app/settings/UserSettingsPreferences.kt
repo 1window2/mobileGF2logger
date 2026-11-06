@@ -2,6 +2,7 @@ package dev.gf2log.app.settings
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import dev.gf2log.app.LanguagePreferences
 import dev.gf2log.app.TargetPackagePreferences
 import dev.gf2log.protocol.PayloadCatalog
@@ -9,6 +10,7 @@ import java.time.ZoneId
 
 internal object UserSettingsPreferences {
     private const val PREFERENCES = "user_settings"
+    private const val TAG = "GF2Settings"
     private const val SCHEMA_VERSION = 4
     private const val LEGACY_UNIFIED_SCHEMA_VERSION = 1
     private const val KEY_SCHEMA_VERSION = "schema_version"
@@ -146,8 +148,23 @@ internal object UserSettingsPreferences {
         editor.apply()
     }
 
-    private fun preferencesLocked(context: Context): SharedPreferences {
-        val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+    private fun preferencesLocked(context: Context): SharedPreferences = migratedLocked(
+        preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE),
+        readLegacy = { readLegacy(context) },
+        notPersisted = { Log.w(TAG, "Settings migration not persisted; will retry") },
+    )
+
+    /**
+     * Brings [preferences] to the current schema. A commit that cannot reach the disk, such as on
+     * a full device, has still updated the in-memory values, so this process reads the migrated
+     * settings and the next one migrates again from the untouched sources instead of crashing at
+     * every cold start. [replace] keeps its strict check: a user's explicit change must persist.
+     */
+    internal fun migratedLocked(
+        preferences: SharedPreferences,
+        readLegacy: () -> AppBackupSettings,
+        notPersisted: () -> Unit,
+    ): SharedPreferences {
         val storedVersion = preferences.getInt(KEY_SCHEMA_VERSION, 0)
         if (storedVersion == SCHEMA_VERSION) return preferences
         val migrated = if (storedVersion in LEGACY_UNIFIED_SCHEMA_VERSION until SCHEMA_VERSION) {
@@ -163,11 +180,9 @@ internal object UserSettingsPreferences {
                     .orEmpty(),
             )
         } else {
-            readLegacy(context)
+            readLegacy()
         }
-        check(writeSettings(preferences.edit().clear(), migrated).commit()) {
-            "Unable to migrate app settings"
-        }
+        if (!writeSettings(preferences.edit().clear(), migrated).commit()) notPersisted()
         return preferences
     }
 

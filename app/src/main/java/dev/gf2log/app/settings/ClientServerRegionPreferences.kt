@@ -13,12 +13,21 @@ internal class ClientServerRegionPreferences(context: Context) {
         return configured(packageName) ?: default(packageName)
     }
 
-    /** Returns only a persisted or migrated operator choice, never a guessed default. */
+    /**
+     * Returns only a persisted or migrated operator choice, never a guessed default. The pre-2.4
+     * global region seeds each client at most once; after that only this store answers, so a
+     * later [clear] leaves the client unconfigured.
+     */
     fun configured(packageName: String): GameServerRegion? {
         require(packageName in SupportedGamePackages.all)
         stored(packageName)?.let { return it }
-        val legacy = GameTimeZonePreferences.legacyRegion(appContext)
-        return legacy.takeIf { it in allowed(packageName) }
+        if (preferences.getBoolean(legacyMigratedKey(packageName), false)) return null
+        val legacy = legacySeed(GameTimeZonePreferences.legacyRegion(appContext), packageName)
+        val editor = preferences.edit().putBoolean(legacyMigratedKey(packageName), true)
+        legacy?.let { editor.putString(packageName, it.storedValue) }
+        // An unwritten migration still answers this call and is retried by the next one.
+        editor.commit()
+        return legacy
     }
 
     fun set(packageName: String, region: GameServerRegion) {
@@ -36,7 +45,8 @@ internal class ClientServerRegionPreferences(context: Context) {
 
     fun clear(packageName: String) {
         require(packageName in SupportedGamePackages.all)
-        check(preferences.edit().remove(packageName).commit()) {
+        // Marking the migration done keeps the legacy global region from answering again.
+        check(preferences.edit().remove(packageName).putBoolean(legacyMigratedKey(packageName), true).commit()) {
             "Unable to clear the client server region"
         }
     }
@@ -51,6 +61,12 @@ internal class ClientServerRegionPreferences(context: Context) {
 
     internal companion object {
         const val PREFERENCES = "capture_server_regions"
+
+        private fun legacyMigratedKey(packageName: String) = "legacy_migrated.$packageName"
+
+        /** The legacy global region when [packageName]'s publisher runs it; otherwise nothing. */
+        fun legacySeed(legacy: GameServerRegion, packageName: String): GameServerRegion? =
+            legacy.takeIf { it in allowedFor(packageName) }
 
         fun allowedFor(packageName: String): List<GameServerRegion> = when (packageName) {
             SupportedGamePackages.HAOPLAY -> listOf(

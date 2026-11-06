@@ -618,6 +618,9 @@
     <string name="open_standby_mode">Turn on standby mode</string>
     <string name="standby_running">Standby mode is on</string>
     <string name="standby_touch_to_leave">Tap the screen to leave standby mode.</string>
+    <string name="standby_touch_to_leave_unlocked">Tap the screen to leave standby mode. Until then the phone stays unlocked.</string>
+    <string name="standby_unlocked_title">Your phone stays unlocked</string>
+    <string name="standby_unlocked_message">Standby mode keeps your phone unlocked until it ends, even though the black screen looks switched off. Anyone who picks the phone up meanwhile can use it without your PIN, pattern, or password.</string>
     <string name="standby_battery_title">Allow standby mode to run overnight</string>
     <string name="standby_battery_message">Android may stop GF2logger in the background to save battery. Exclude it from battery optimization to keep standby mode running overnight. You can change this later in the app\'s battery settings.</string>
     <string name="standby_battery_allow">Allow</string>

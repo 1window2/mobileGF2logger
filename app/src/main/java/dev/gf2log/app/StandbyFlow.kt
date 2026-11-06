@@ -14,6 +14,7 @@ import dev.gf2log.app.standby.StandbyPlanner
 import dev.gf2log.app.standby.StandbyProfiles
 import dev.gf2log.app.standby.StandbyResults
 import dev.gf2log.app.standby.StandbyServer
+import dev.gf2log.app.standby.StandbyUnlockedWarning
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Feedback
@@ -49,6 +50,7 @@ internal class StandbyFlow(
     }
 
     fun start() {
+        if (StandbyUnlockedWarning.shouldWarn(activity)) return warnUnlocked()
         if (!StandbyBatteryPrompt.shouldAsk(activity)) return prepareRecording()
         Dialogs.show(
             Dialogs.builder(activity)
@@ -63,6 +65,23 @@ internal class StandbyFlow(
                     // Some phones have no such dialog; the exemption is a help, not a requirement.
                     runCatching { batteryExemption.launch(StandbyBatteryPrompt.requestIntent(activity)) }
                         .onFailure { prepareRecording() }
+                },
+        )
+    }
+
+    /**
+     * The black screen looks like a phone that is off, so on a phone with a screen lock the user
+     * agrees once, before standby first opens, that it stays unlocked until standby ends.
+     */
+    private fun warnUnlocked() {
+        Dialogs.show(
+            Dialogs.builder(activity)
+                .setTitle(R.string.standby_unlocked_title)
+                .setMessage(R.string.standby_unlocked_message)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.continue_action) { _, _ ->
+                    StandbyUnlockedWarning.acknowledge(activity)
+                    start()
                 },
         )
     }

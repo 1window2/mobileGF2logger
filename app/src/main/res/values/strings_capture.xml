@@ -12,9 +12,9 @@
     <string name="capture_notice_stopped_unexpectedly">Capture stopped unexpectedly. Start capture again to retry.</string>
     <string name="capture_notice_capture_once_complete">Captured Platoon roster, activity, and updates</string>
     <string name="capture_notice_capture_once_partial">Captured Platoon roster; missing %1$s after the navigation period</string>
-    <string name="capture_notice_traffic">Forwarded %1$s KiB; inspected %2$s KiB; decoded %3$s payloads; warnings %4$s; dropped %5$s</string>
+    <string name="capture_notice_traffic">Forwarded %1$s KiB; inspected %2$s KiB; payloads decoded: %3$s; warnings: %4$s; dropped: %5$s</string>
     <string name="capture_notice_processing_failed">Protocol processing failed: %1$s</string>
-    <string name="capture_notice_parser_overloaded">Parser overloaded; dropped %1$s queued chunks</string>
+    <string name="capture_notice_parser_overloaded">Parser overloaded; queued chunks dropped: %1$s</string>
     <string name="capture_notice_flow_buffer_overflow">Discarded an unidentified Platoon flow that exceeded its buffer</string>
     <string name="capture_notice_identified_flow_buffer_overflow">Discarded an identified flow whose pre-identity buffer overflowed</string>
     <string name="capture_notice_client_unverified">Detected a Platoon profile, but its game client could not be verified</string>
@@ -33,7 +33,7 @@
     <string name="capture_notice_admission_replay_failed">Unable to apply the confirmed Platoon packets</string>
     <string name="capture_notice_platoon_confirmed">Confirmed %1$s (%2$s) via %3$s</string>
     <string name="capture_notice_pending_discarded">Discarded the unconfirmed Platoon packets</string>
-    <string name="capture_notice_roster_saved">Saved %1$s members for %2$s</string>
+    <string name="capture_notice_roster_saved">Saved the %2$s roster (members: %1$s)</string>
     <string name="capture_notice_roster_save_failed">Unable to save Platoon CSV</string>
     <string name="capture_notice_roster_updated">Updated %1$s: +%2$s, -%3$s</string>
     <string name="capture_notice_roster_recovered">Recovered %1$s from the completed roster CSV</string>

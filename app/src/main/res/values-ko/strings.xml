@@ -185,7 +185,9 @@
     <string name="delete_platoon_description">%1$s 삭제</string>
     <string name="delete_platoon_first_warning">%1$s 서클을 삭제하면 멤버, 주간 표, 설정, 체크포인트 및 보관된 근거 자료가 영구적으로 제거됩니다. 복구할 수 없습니다.</string>
     <string name="delete_platoon_name_warning">삭제하려면 서클 이름을 정확하게 입력하세요: %1$s</string>
+    <string name="delete_platoon_id_warning">삭제하려면 서클 ID를 정확하게 입력하세요: %1$d</string>
     <string name="type_platoon_name">정확한 서클 이름 입력</string>
+    <string name="type_platoon_id">서클 ID 입력</string>
     <string name="platoon_delete_failed">서클 삭제를 완료할 수 없습니다. 안전하게 다시 정리합니다.</string>
     <string name="server_reset_summary">%1$s · 이 기기의 다음 초기화 %2$s (%3$s)</string>
     <string name="manual_reset_region_summary">수동 · %1$s (기기: %2$s)</string>
@@ -228,6 +230,7 @@
     <string name="status_packet_copied">파싱 패킷을 복사했습니다</string>
     <string name="status_preparing">캡처 준비 중</string>
     <string name="status_export_failed">서클 CSV를 내보낼 수 없습니다</string>
+    <string name="export_location_unsupported">이 위치에는 저장할 수 없습니다. 기기 저장공간, 다운로드 또는 Google 드라이브를 선택하세요.</string>
     <string name="status_no_platoon_csv">캡처한 서클 CSV가 없습니다</string>
     <string name="status_save_history_failed">선택 기록을 저장할 수 없습니다</string>
     <string name="status_history_already_saved">선택한 기록은 이미 보관되어 있습니다</string>
@@ -351,6 +354,7 @@
     <string name="clear_discord_webhook">저장된 웹훅 제거</string>
     <string name="discord_webhook_saved">Discord 웹훅을 안전하게 저장했습니다.</string>
     <string name="discord_webhook_invalid">discord.com의 유효한 HTTPS 수신 웹훅 URL을 입력하세요.</string>
+    <string name="discord_webhook_store_failed">이 기기에 웹훅을 안전하게 저장할 수 없습니다. 다시 시도하세요.</string>
     <string name="clear_discord_webhook_confirm">저장된 Discord 웹훅을 제거할까요? CSV를 보내려면 다시 붙여 넣어야 합니다.</string>
     <string name="discord_webhook_cleared">저장된 Discord 웹훅을 제거했습니다.</string>
     <string name="discord_webhook_clear_failed">저장된 Discord 웹훅을 제거할 수 없습니다.</string>
@@ -499,8 +503,10 @@
     <string name="total_not_editable">합계는 일별 칸에서 계산됩니다.</string>
     <string name="unsaved_changes_message">나가기 전에 변경 내용을 저장할까요?</string>
     <string name="unsaved_changes_title">저장하지 않은 변경</string>
+    <string name="platoon_changed_unsaved_message">다른 서클이 선택되었습니다. 이 변경 사항을 이전 서클에 먼저 저장할까요?</string>
     <string name="week_range">%1$s – %2$s</string>
     <string name="week_reset_zone">초기화 05:00 · %1$s</string>
+    <string name="server_time_zone">서버 시간 · %1$s</string>
     <string name="weekly_cell_description">%1$s, %2$s</string>
     <string name="labeled_value">%1$s: %2$s</string>
     <string name="member_uid">#%1$d</string>
@@ -627,6 +633,7 @@
     <string name="standby_only">대기 모드만 켜기</string>
     <string name="standby_no_platoons">저장된 서클이 없어 대기 모드가 기록하지 않습니다. 먼저 서클을 한 번 캡처하세요.</string>
     <string name="standby_vpn_needed">자동 기록에는 VPN 동의가 필요합니다. 이번 대기 모드에서는 기록하지 않습니다.</string>
+    <string name="capture_vpn_needed">기록하려면 VPN 권한이 필요합니다. 다시 시도하려면 기록 시작을 누르세요.</string>
     <string name="standby_servers_title">기록할 서버 선택</string>
     <string name="standby_servers_message">선택한 서버마다 게임 하루가 끝나기 5분 전에 기록한 뒤 휴대전화를 잠급니다. 클라이언트는 한 번에 한 서버에만 접속하므로 클라이언트마다 서버를 하나씩 선택하세요.</string>
     <string name="standby_server_option">%1$s · %2$s · %3$s 시작</string>

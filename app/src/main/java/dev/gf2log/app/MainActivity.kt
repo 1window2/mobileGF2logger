@@ -72,7 +72,13 @@ class MainActivity : BaseActivity() {
 
     private val vpnConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         startPending = false
-        if (result.resultCode == RESULT_OK) startCaptureService() else CaptureStatus.clearIdleNotice()
+        if (result.resultCode == RESULT_OK) {
+            startCaptureService()
+        } else {
+            CaptureStatus.clearIdleNotice()
+            // A consent screen that closes on its own (a managed or restricted device) is explained.
+            vpnConsentDeniedMessage(result.resultCode)?.let { Feedback.show(this, it, long = true) }
+        }
     }
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -80,21 +86,30 @@ class MainActivity : BaseActivity() {
     }
 
     private val exportRoster = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
-        val scope = profileBinding.scope ?: return@registerForActivityResult
         if (uri == null) return@registerForActivityResult
+        val scope = profileBinding.scope ?: run {
+            work.run(task = { DocumentAccess.discard(contentResolver, uri) })
+            return@registerForActivityResult
+        }
         work.run(
             task = {
                 val latest = requireNotNull(PlatoonCsvImportStore.latestRetainedFile(scope.retainedCsvDirectory(this)))
                 val snapshot = requireNotNull(GuildMembersCsv.parse(latest.readText(Charsets.UTF_8))) {
                     "Stored Platoon CSV is invalid"
                 }
-                DocumentAccess.openOutput(contentResolver, uri).writer(Charsets.UTF_8).use {
-                    it.write(GuildMembersCsv.formatForSpreadsheet(snapshot))
+                DocumentAccess.writeExport(contentResolver, uri) { output ->
+                    output.writer(Charsets.UTF_8).use { it.write(GuildMembersCsv.formatForSpreadsheet(snapshot)) }
                 }
             },
-        ) { result ->
-            Feedback.show(this, if (result.isSuccess) R.string.roster_csv_exported else R.string.status_export_failed)
-        }
+            always = { result ->
+                Feedback.show(
+                    this,
+                    result.fold({ R.string.roster_csv_exported }) {
+                        DocumentAccess.exportFailureMessage(it, R.string.status_export_failed)
+                    },
+                )
+            },
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -318,3 +333,10 @@ class MainActivity : BaseActivity() {
         const val STATE_CAPTURE_ONCE = "home.capture_once"
     }
 }
+
+/**
+ * What Home says when VPN consent comes back without approval; every consent launcher explains a
+ * refusal the same way, so Start capture is never a silent no-op.
+ */
+internal fun vpnConsentDeniedMessage(resultCode: Int): Int? =
+    if (resultCode == android.app.Activity.RESULT_OK) null else R.string.capture_vpn_needed

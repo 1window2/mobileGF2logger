@@ -33,8 +33,8 @@ one-off drawables.
 | `Controls` | Button roles, checkbox/switch tints, and the segmented rail. |
 | `Views` | Text roles, labeled fields, grouped navigation rows, switch rows, panels, badges. |
 | `StateViews` | One loading, empty, and failure composition for every screen. |
-| `Dialogs` / `Feedback` | Styled dialogs with a red treatment for destructive confirmations; a single replacing toast. |
-| `BackgroundWork` | Serialized off-main work bound to the screen lifecycle; keyed requests supersede stale ones. |
+| `Dialogs` / `Feedback` | Styled dialogs with a red treatment for destructive confirmations; restorable input dialogs; a single replacing toast. |
+| `BackgroundWork` | Serialized off-main work bound to the screen lifecycle; keyed requests supersede stale ones, and `always` effects run even after recreation. |
 | `SingleViewAdapter` | Hosts headers, footers, and state views inside one `RecyclerView` without recycling them. |
 
 ## Control roles
@@ -65,13 +65,25 @@ when Android animations are disabled.
   bar becomes a contextual bar (close, count, actions) and Back exits selection.
 - Edit modes (the weekly table) replace the top bar with close and save actions,
   highlight changed cells, and confirm before discarding unsaved changes.
+- A screen holding an unsaved draft (weekly edits, member details, cutlines)
+  stays bound to the draft's Platoon when another Platoon becomes active, and
+  asks to save or discard before it follows the new one.
 - Every repository, file, and network call runs through `BackgroundWork`; the
   screen shows a loading, empty, or failure state instead of blocking input.
+  Feedback and cleanup that do not need the screen go in `always`, so a task
+  that finishes after recreation still reports its outcome once.
 - Text fields carry stable view IDs and Activities save transient choices, so
   rotation, theme or language changes, and large-screen resizing keep drafts.
+  Input dialogs shown with `Dialogs.showRestorable` reopen with their typed
+  values; the Discord webhook dialog deliberately does not, because its token
+  must never enter saved instance state.
 - Document pickers use the Activity Result API. Exports regenerate their content
   from the repository when the destination returns rather than holding it in
-  memory across process death.
+  memory across process death. `DocumentAccess.writeExport` deletes the created
+  document when the write fails or the provider is refused, and a refused
+  provider names the supported locations.
+- Times shown or edited in a Platoon's game reset zone carry a "Server time"
+  caption whenever that zone's offset differs from the device's.
 
 ## Layout and accessibility
 
@@ -96,8 +108,12 @@ when Android animations are disabled.
 - Text wraps when it carries meaning; only short button labels may ellipsize.
 - Icon-only controls require an accessible name and show it as a tooltip.
   Decorative icons beside text are hidden from the accessibility tree.
-- Composite rows expose one button with a combined description; validation
-  errors and live status use polite accessibility live regions.
+- Composite rows expose one button with a combined description; a row without
+  an action is focusable information, never a button. Validation errors, live
+  status, a changed top-bar title, and every loading, empty, or failure state use
+  polite live regions; a state view sets its text just after it is attached so
+  the change is announced. Re-applied top-bar actions keep their buttons, so
+  screen-reader focus survives in-place updates such as Select all.
 - Pressed and disabled states are explicit. Destructive operations use a
   confirmation dialog, and async work disables duplicate submission.
 - Motion is limited to short transform/opacity transitions and is skipped when

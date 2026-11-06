@@ -29,6 +29,7 @@ import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.BarAction
 import dev.gf2log.app.ui.Dialogs
+import dev.gf2log.app.ui.DialogDraft
 import dev.gf2log.app.ui.DocumentAccess
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
@@ -65,6 +66,7 @@ class PlatoonActivity : BaseActivity() {
     private lateinit var searchInput: EditText
     private lateinit var sortButton: TextView
     private lateinit var resultCount: TextView
+    private lateinit var zoneCaption: TextView
 
     private var model: Model? = null
     private var filter = Filter.ACTIVE
@@ -78,16 +80,29 @@ class PlatoonActivity : BaseActivity() {
     ) { uri ->
         val uids = pendingExport?.toSet()
         pendingExport = null
-        if (uri == null || uids.isNullOrEmpty()) return@registerForActivityResult
+        if (uri == null) return@registerForActivityResult
+        if (uids.isNullOrEmpty()) {
+            work.run(task = { DocumentAccess.discard(contentResolver, uri) })
+            return@registerForActivityResult
+        }
         work.run(
             task = {
                 val statuses = repository.listMemberStatuses().filter { it.uid in uids }
                 val latest = latestMembers(repository.listSnapshots(1).firstOrNull())
                 val csv = PlatoonMemberCsv.format(statuses, latest, repository.gameZone())
-                DocumentAccess.openOutput(contentResolver, uri).writer(Charsets.UTF_8).use { it.write(csv) }
+                DocumentAccess.writeExport(contentResolver, uri) { output ->
+                    output.writer(Charsets.UTF_8).use { it.write(csv) }
+                }
+            },
+            always = { result ->
+                Feedback.show(
+                    this,
+                    result.fold({ R.string.members_exported }) {
+                        DocumentAccess.exportFailureMessage(it, R.string.status_export_failed)
+                    },
+                )
             },
         ) { result ->
-            Feedback.show(this, if (result.isSuccess) R.string.members_exported else R.string.status_export_failed)
             if (result.isSuccess) setSelecting(false)
         }
     }
@@ -123,6 +138,7 @@ class PlatoonActivity : BaseActivity() {
             setPadding(dp(16), 0, dp(16), dp(24))
         })
         setSelecting(selecting)
+        takeDialogDraft(WithdrawnMemberDialog.KEY)?.let(::addWithdrawnMember)
     }
 
     override fun onScreenResumed() {
@@ -211,6 +227,7 @@ class PlatoonActivity : BaseActivity() {
         resultCount = text(null, TextRole.LABEL) {
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
+        zoneCaption = text(null, TextRole.CAPTION) { visibility = View.GONE }
         summary = row(Gravity.TOP)
         updateSortLabel()
         return column {
@@ -229,11 +246,15 @@ class PlatoonActivity : BaseActivity() {
                 addView(resultCount, lp(width = 0, weight = 1f, start = 4))
                 addView(sortButton, lp(WRAP, WRAP))
             }, lp(top = 4, bottom = 4))
+            addView(zoneCaption, lp(start = 4, end = 4, bottom = 4))
         }
     }
 
     private fun renderSummary(loaded: Model) {
         summary.removeAllViews()
+        val caption = Labels.zoneCaption(this, loaded.zone)
+        zoneCaption.text = caption
+        zoneCaption.visibility = if (caption == null) View.GONE else View.VISIBLE
         val active = loaded.statuses.count(MemberStatus::isActive)
         val tiles = listOf(
             getString(R.string.stat_active) to active.toString(),
@@ -335,11 +356,7 @@ class PlatoonActivity : BaseActivity() {
                     }),
                     overflow = listOf(
                         MenuEntry(getString(R.string.select_members)) { setSelecting(true) },
-                        MenuEntry(getString(R.string.add_withdrawn_member)) {
-                            WithdrawnMemberDialog.show(this, work, repository, { uid ->
-                                model?.statuses?.any { it.uid == uid } == true
-                            }, ::load)
-                        },
+                        MenuEntry(getString(R.string.add_withdrawn_member)) { addWithdrawnMember() },
                         MenuEntry(getString(R.string.edit_member_order)) {
                             startActivity(Intent(this, MemberOrderActivity::class.java))
                         },
@@ -347,6 +364,12 @@ class PlatoonActivity : BaseActivity() {
                 )
         }
         memberAdapter.notifyItemRangeChanged(0, memberAdapter.itemCount)
+    }
+
+    private fun addWithdrawnMember(restored: DialogDraft? = null) {
+        WithdrawnMemberDialog.show(this, work, repository, { uid ->
+            model?.statuses?.any { it.uid == uid } == true
+        }, ::load, restored)
     }
 
     private fun toggle(uid: Long) {

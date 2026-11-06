@@ -178,7 +178,7 @@ class PlatoonBackupManager internal constructor(
         } else {
             PlatoonBackupManager(
                 context = appContext,
-                settingsStore = ScopedAppSettingsStore(appContext, scope.storageId),
+                settingsStore = ScopedAppSettingsStore(appContext, scope.storageId, restoredProfile),
                 restoreObserver = restoreObserver,
                 storageScope = scope,
             )

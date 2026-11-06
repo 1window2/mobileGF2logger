@@ -123,11 +123,18 @@ class WeeklyReportActivity : BaseActivity() {
 
     override fun onScreenResumed() {
         if (!profileBinding.isCurrent(this)) {
-            recreate()
+            // Edits belong to the bound Platoon; they are saved or discarded before the switch.
+            if (!profileBinding.isSameStorage(this) && hasUnsavedEdits()) {
+                confirmDraftBeforeScopeChange(R.string.save_weekly_edits, ::saveEdits, ::finishEditing)
+            } else {
+                recreate()
+            }
             return
         }
         requestRender(reconcileRetainedCsv = true)
     }
+
+    private fun hasUnsavedEdits(): Boolean = edits.period != null && !edits.isEmpty()
 
     /** A roster captured while this screen is showing updates the table; edits in progress stay. */
     private val rosterSaved: (String) -> Unit = { storageId ->
@@ -534,6 +541,11 @@ class WeeklyReportActivity : BaseActivity() {
 
     private fun finishEditing() {
         edits.finish()
+        // A Platoon selected while editing is followed once the draft is gone.
+        if (!profileBinding.isCurrent(this)) {
+            recreate()
+            return
+        }
         model?.let(::render) ?: updateTopBar()
     }
 
@@ -575,7 +587,7 @@ class WeeklyReportActivity : BaseActivity() {
                     if (result.isSuccess) {
                         if (edits.isEditing(report.periodStart)) edits.finish()
                         Feedback.show(this, R.string.weekly_edits_saved)
-                        requestRender()
+                        if (profileBinding.isCurrent(this)) requestRender() else recreate()
                     } else {
                         Feedback.show(this, R.string.save_failed)
                     }

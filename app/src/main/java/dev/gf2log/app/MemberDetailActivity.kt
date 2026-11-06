@@ -21,6 +21,7 @@ import dev.gf2log.app.management.isValidMembershipRange
 import dev.gf2log.app.ui.onTextChanged
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
+import dev.gf2log.app.ui.DialogDraft
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.LabeledField
@@ -94,8 +95,12 @@ class MemberDetailActivity : BaseActivity() {
 
     override fun onScreenResumed() {
         if (!profileBinding.isSameStorage(this)) {
-            // The member belongs to the previous Platoon scope.
-            finish()
+            // The member belongs to the previous Platoon scope; unsaved edits are not dropped silently.
+            if (::saveButton.isInitialized && saveButton.isEnabled) {
+                confirmDraftBeforeScopeChange(R.string.save_member, { saveProfile(thenFinish = true) }, ::finish)
+            } else {
+                finish()
+            }
             return
         }
         load()
@@ -162,6 +167,7 @@ class MemberDetailActivity : BaseActivity() {
                 inputsInitialized = true
             }
             render(loaded)
+            reopenMembershipDialog(loaded.status)
         }
     }
 
@@ -203,6 +209,7 @@ class MemberDetailActivity : BaseActivity() {
                 }
             }, lp(top = 12))
         }
+        Labels.zoneCaption(this, loaded.zone)?.let { statusPanel.addView(text(it, TextRole.CAPTION), lp(top = 12)) }
         val rows = status.membershipPeriods.mapIndexed { index, period ->
             navigationRow(
                 title = getString(R.string.membership_period_title, index + 1) +
@@ -294,7 +301,16 @@ class MemberDetailActivity : BaseActivity() {
         }
     }
 
-    private fun editMembershipPeriod(status: MemberStatus, period: MembershipPeriod) {
+    /** A membership editor that was open before recreation comes back with what was typed. */
+    private fun reopenMembershipDialog(status: MemberStatus) {
+        takeDialogDraft(ADD_PERIOD_DIALOG)?.let(::addMembershipPeriod)
+        takeDialogDraft(EDIT_PERIOD_DIALOG)?.let { draft ->
+            val period = status.membershipPeriods.firstOrNull { it.id == draft.arguments.getLong(ARG_PERIOD_ID) }
+            period?.let { editMembershipPeriod(status, it, draft) }
+        }
+    }
+
+    private fun editMembershipPeriod(status: MemberStatus, period: MembershipPeriod, restored: DialogDraft? = null) {
         val zone = model?.zone ?: return
         val joined = DateTimePickerInput(
             context = this,
@@ -305,6 +321,7 @@ class MemberDetailActivity : BaseActivity() {
             dateRequired = true,
             editable = period.isJoinedBoundaryEditable,
             zone = zone,
+            stateId = R.id.dialog_joined_input,
         )
         val left = DateTimePickerInput(
             context = this,
@@ -314,8 +331,9 @@ class MemberDetailActivity : BaseActivity() {
             initialTimeKnown = period.leftTimeKnown ?: (period.leftAt != null),
             editable = period.isLeftBoundaryEditable,
             zone = zone,
+            stateId = R.id.dialog_left_input,
         )
-        val noteInput = textField(getString(R.string.membership_note_hint), singleLine = false, maxLength = ManualTextPolicy.MAX_NOTE_CHARS).apply { setText(period.note) }
+        val noteInput = textField(getString(R.string.membership_note_hint), id = R.id.dialog_note_input, singleLine = false, maxLength = ManualTextPolicy.MAX_NOTE_CHARS).apply { setText(period.note) }
         val error = errorLine()
         val canDelete = status.membershipPeriods.size > 1
         val body = Dialogs.content(this) {
@@ -331,7 +349,8 @@ class MemberDetailActivity : BaseActivity() {
             .setNegativeButton(R.string.cancel, null)
             .setPositiveButton(R.string.save_member, null)
         if (canDelete) builder.setNeutralButton(R.string.delete, null)
-        Dialogs.show(builder) { dialog ->
+        val arguments = Bundle().apply { putLong(ARG_PERIOD_ID, period.id) }
+        Dialogs.showRestorable(builder, EDIT_PERIOD_DIALOG, body, arguments, restored) { dialog ->
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.apply {
                 setTextColor(getColor(R.color.destructive_action))
                 setOnClickListener { confirmMembershipPeriodDeletion(dialog, period) }
@@ -392,11 +411,11 @@ class MemberDetailActivity : BaseActivity() {
         }
     }
 
-    private fun addMembershipPeriod() {
+    private fun addMembershipPeriod(restored: DialogDraft? = null) {
         val zone = model?.zone ?: return
-        val joined = DateTimePickerInput(this, getString(R.string.join_label), dateRequired = true, zone = zone)
-        val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_label), zone = zone)
-        val noteInput = textField(getString(R.string.membership_note_hint), singleLine = false, maxLength = ManualTextPolicy.MAX_NOTE_CHARS)
+        val joined = DateTimePickerInput(this, getString(R.string.join_label), dateRequired = true, zone = zone, stateId = R.id.dialog_joined_input)
+        val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_label), zone = zone, stateId = R.id.dialog_left_input)
+        val noteInput = textField(getString(R.string.membership_note_hint), id = R.id.dialog_note_input, singleLine = false, maxLength = ManualTextPolicy.MAX_NOTE_CHARS)
         val error = errorLine()
         val body = Dialogs.content(this) {
             addView(joined, lp())
@@ -404,12 +423,15 @@ class MemberDetailActivity : BaseActivity() {
             addView(LabeledField(context, getString(R.string.membership_note_hint), noteInput), lp(top = 12))
             addView(error, lp(top = 8))
         }
-        Dialogs.show(
+        Dialogs.showRestorable(
             Dialogs.builder(this)
                 .setTitle(R.string.add_membership_history)
                 .setView(body)
                 .setNegativeButton(R.string.cancel, null)
                 .setPositiveButton(R.string.add, null),
+            key = ADD_PERIOD_DIALOG,
+            content = body,
+            restored = restored,
         ) { dialog ->
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { button ->
                 val joinedBoundary = joined.boundary
@@ -473,5 +495,8 @@ class MemberDetailActivity : BaseActivity() {
         private const val SAVE = "save"
         private const val DELETE = "delete"
         private const val STATE_INPUTS_INITIALIZED = "member.inputs_initialized"
+        private const val ADD_PERIOD_DIALOG = "membership.add"
+        private const val EDIT_PERIOD_DIALOG = "membership.edit"
+        private const val ARG_PERIOD_ID = "period_id"
     }
 }

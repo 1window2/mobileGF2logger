@@ -238,10 +238,23 @@ internal object PlatoonProfileSelector {
     }
 
     private fun confirmDeleteByName(activity: Activity, profile: PlatoonProfile) {
-        val input = activity.textField(activity.getString(R.string.type_platoon_name), inputType = InputType.TYPE_CLASS_TEXT)
+        val typeable = PlatoonNameConfirmation.typeable(profile.platoonName)
+        val input = activity.textField(
+            activity.getString(if (typeable.isEmpty()) R.string.type_platoon_id else R.string.type_platoon_name),
+            // Suggestions would append a space or swap the spelling of a name that must match exactly.
+            inputType = if (typeable.isEmpty()) {
+                InputType.TYPE_CLASS_NUMBER
+            } else {
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            },
+        )
         val content = Dialogs.content(activity) {
             addView(activity.text(
-                activity.getString(R.string.delete_platoon_name_warning, profile.platoonName),
+                if (typeable.isEmpty()) {
+                    activity.getString(R.string.delete_platoon_id_warning, profile.platoonId)
+                } else {
+                    activity.getString(R.string.delete_platoon_name_warning, typeable)
+                },
                 TextRole.SECONDARY,
             ), activity.lp())
             addView(input, activity.lp(top = 12))
@@ -257,7 +270,9 @@ internal object PlatoonProfileSelector {
             val delete = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
             delete.isEnabled = false
             delete.setOnClickListener {
-                if (input.text.toString() != profile.platoonName) return@setOnClickListener
+                if (!PlatoonNameConfirmation.matches(input.text.toString(), profile.platoonName, profile.platoonId)) {
+                    return@setOnClickListener
+                }
                 dialog.dismiss()
                 runMaintenance(activity, R.string.platoon_delete_failed) {
                     check(PlatoonProfileAdministration(activity).deleteProfile(profile.storageId)) {
@@ -265,7 +280,9 @@ internal object PlatoonProfileSelector {
                     }
                 }
             }
-            input.onTextChanged { delete.isEnabled = it == profile.platoonName }
+            input.onTextChanged {
+                delete.isEnabled = PlatoonNameConfirmation.matches(it, profile.platoonName, profile.platoonId)
+            }
         }
     }
 
@@ -325,4 +342,41 @@ internal object PlatoonProfileSelector {
     private val maintenanceExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "GF2ProfileMaintenance")
     }
+}
+
+/**
+ * The type-the-name delete confirmation compares the visible, typeable form of both sides, so a
+ * keyboard's trailing space, a decomposed Hangul spelling, or an invisible format or bidi control
+ * in a captured name can never make the confirmation impossible to satisfy.
+ */
+internal object PlatoonNameConfirmation {
+    /**
+     * NFC text with whitespace runs collapsed, controls, format characters (zero-width and bidi
+     * marks), and unpaired surrogates removed, and the ends trimmed; empty when nothing is typeable.
+     */
+    fun typeable(value: String): String {
+        val text = java.text.Normalizer.normalize(value.replace(WHITESPACE, " "), java.text.Normalizer.Form.NFC)
+        val kept = StringBuilder(text.length)
+        var index = 0
+        while (index < text.length) {
+            val codePoint = text.codePointAt(index)
+            val width = Character.charCount(codePoint)
+            val unpaired = width == 1 && Character.isSurrogate(text[index])
+            val type = Character.getType(codePoint)
+            if (!unpaired && type != Character.FORMAT.toInt() && type != Character.CONTROL.toInt()) {
+                kept.appendCodePoint(codePoint)
+            }
+            index += width
+        }
+        return kept.toString().replace(WHITESPACE, " ").trim()
+    }
+
+    /** A name with no typeable characters is confirmed by its Platoon ID instead. */
+    fun matches(typed: String, platoonName: String, platoonId: Long): Boolean {
+        val expected = typeable(platoonName)
+        if (expected.isEmpty()) return typed.trim() == platoonId.toString()
+        return typeable(typed) == expected
+    }
+
+    private val WHITESPACE = Regex("\\s+")
 }

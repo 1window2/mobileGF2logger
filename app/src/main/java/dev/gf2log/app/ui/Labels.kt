@@ -33,6 +33,20 @@ internal object Labels {
 
     fun format(formatter: DateTimeFormatter, value: TemporalAccessor): String = formatter.format(value)
 
+    /**
+     * "Server time · Asia/Seoul" while [gameZone] is not the device's current offset, so a time
+     * shown or edited in the game reset zone is never mistaken for a phone-clock time.
+     */
+    fun zoneCaption(
+        context: Context,
+        gameZone: ZoneId,
+        deviceZone: ZoneId = ZoneId.systemDefault(),
+        now: Instant = Instant.now(),
+    ): String? = if (sameOffset(gameZone, deviceZone, now)) null else context.getString(R.string.server_time_zone, gameZone.id)
+
+    fun sameOffset(first: ZoneId, second: ZoneId, now: Instant): Boolean =
+        first.rules.getOffset(now) == second.rules.getOffset(now)
+
     /** "10/12 Sun" with the weekday in the active app language. */
     fun dayHeader(context: Context, day: java.time.LocalDate): String =
         "${day.monthValue}/${day.dayOfMonth} " +

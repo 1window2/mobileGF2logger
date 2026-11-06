@@ -122,7 +122,11 @@ sensitive. A restore never installs the selected file's schema: after
 validation its rows are copied, column by column, into a database that the
 current schema code creates, so table constraints an archive declares (CHECK,
 ON CONFLICT, COLLATE, STRICT, WITHOUT ROWID) are discarded and the installed
-DDL must equal the app's own text exactly. While a Platoon's CSV import or
+DDL must equal the app's own text exactly. The copied rows are refused, and the
+restore fails as an invalid backup, when an enum column holds a name the app
+does not define, a text value is oversized, or a row id or AUTOINCREMENT
+counter is out of range; maintenance keys the app never writes are dropped.
+While a Platoon's CSV import or
 undo holds its checkpoint claim, captures, edits, and backup restores of that
 Platoon are refused instead of being sealed into, or later erased by, the
 import's undo.

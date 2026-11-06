@@ -236,7 +236,7 @@ internal object WeeklyHistoryStore {
     }
 
     private val FINGERPRINT = Regex("[0-9a-f]{64}")
-    private const val HISTORY_ZONE_KEY = "weekly_history_zone"
+    internal const val HISTORY_ZONE_KEY = "weekly_history_zone"
 
     /** Selects report_blob only within the payload limit, otherwise NULL. */
     private val BOUNDED_PAYLOAD =

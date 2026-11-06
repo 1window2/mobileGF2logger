@@ -231,6 +231,14 @@ internal object PlatoonDatabaseSchema {
         )
     }
 
+    /** Every key the app keeps in platoon_maintenance_state; a restore drops any other. */
+    val MAINTENANCE_KEYS: Set<String>
+        get() = setOf(
+            MembershipRows.ACTIVE_STATE_RULE_KEY,
+            ActivityIngestion.ACTIVITY_RESOLUTION_CURSOR_KEY,
+            WeeklyHistoryStore.HISTORY_ZONE_KEY,
+        )
+
     fun createPlatoonMaintenanceStateTable(db: SQLiteDatabase) {
         db.execSQL(
             """

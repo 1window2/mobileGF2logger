@@ -453,7 +453,7 @@ internal object ActivityIngestion {
     )
 
     private const val MAX_UNRESOLVED_ACTIVITY_RESOLUTIONS = 250
-    private const val ACTIVITY_RESOLUTION_CURSOR_KEY = "activity_resolution_cursor"
+    internal const val ACTIVITY_RESOLUTION_CURSOR_KEY = "activity_resolution_cursor"
     private const val DAILY_PATROL_RELATED_ACTION_ID = 801005L
     private const val NAME_RESOLUTION_WINDOW_MILLIS = 30L * 24L * 60L * 60L * 1000L
 }

@@ -105,6 +105,120 @@ class StorageHardeningIntegrationTest {
     }
 
     @Test
+    fun restoreRefusesRowsThatWouldBreakTheRestoredPlatoonForGood() {
+        val repository = PlatoonRepository(context, scope)
+        repository.ingest(CAPTURED_AT, listOf(member(1, "One"), member(2, "Two")), "roster.csv")
+        assertTrue(repository.updateMember(1, "One", "live note"))
+        val counterAtTheTop = copyOfLiveDatabase().also { file ->
+            writable(file) { db -> db.execSQL("UPDATE sqlite_sequence SET seq = ${Long.MAX_VALUE} WHERE name = 'snapshots'") }
+        }
+        val idAtTheTop = copyOfLiveDatabase().also { file ->
+            writable(file) { db ->
+                db.execSQL(
+                    "INSERT INTO weekly_notes (id, period_start, game_day, text) " +
+                        "VALUES (${Long.MAX_VALUE}, ${WEEK.toEpochDay()}, ${WEEK.toEpochDay()}, 'note')",
+                )
+            }
+        }
+        val unknownPrecision = copyOfLiveDatabase().also { file ->
+            writable(file) { db -> db.execSQL("UPDATE membership_periods SET joined_precision = 'X'") }
+        }
+        val unknownEventSource = copyOfLiveDatabase().also { file ->
+            writable(file) { db ->
+                db.execSQL(
+                    "INSERT INTO member_events (uid, event_type, observed_at, precision, source) " +
+                        "VALUES (1, 'JOINED', 0, 'EXACT', 'X')",
+                )
+            }
+        }
+        val oversizedNote = copyOfLiveDatabase().also { file ->
+            // Three million characters: larger than a cursor window can hold.
+            writable(file) { db -> db.execSQL("UPDATE members SET note = hex(zeroblob(1500000)) WHERE uid = 1") }
+        }
+        val blobName = copyOfLiveDatabase().also { file ->
+            writable(file) { db -> db.execSQL("UPDATE members SET current_name = x'00ff' WHERE uid = 2") }
+        }
+
+        mapOf(
+            "counter" to counterAtTheTop,
+            "id" to idAtTheTop,
+            "precision" to unknownPrecision,
+            "event source" to unknownEventSource,
+            "note" to oversizedNote,
+            "blob name" to blobName,
+        ).forEach { (case, file) ->
+            val failure = runCatching {
+                PlatoonBackupManager.restoreSelected(context, ByteArrayInputStream(archiveOf(file)))
+            }.exceptionOrNull()
+            assertTrue("$case: $failure", failure is InvalidBackupException)
+        }
+
+        val members = PlatoonRepository(context, scope).listMemberStatuses()
+        assertEquals(listOf(1L, 2L), members.map { it.uid }.sorted())
+        assertEquals("live note", members.single { it.uid == 1L }.note)
+        PlatoonRepository(context, scope).ingest(
+            CAPTURED_AT.plusSeconds(60),
+            listOf(member(1, "One"), member(2, "Two")),
+            "later.csv",
+        )
+        assertEquals(2, PlatoonRepository(context, scope).listSnapshots().size)
+    }
+
+    @Test
+    fun restoreDropsMaintenanceKeysTheAppNeverWrites() {
+        val repository = PlatoonRepository(context, scope)
+        repository.ingest(CAPTURED_AT, listOf(member(1, "One")), "roster.csv")
+        val withUnknownKey = copyOfLiveDatabase().also { file ->
+            writable(file) { db ->
+                db.execSQL("INSERT INTO platoon_maintenance_state (key, value) VALUES ('crafted_key', 7)")
+            }
+        }
+
+        PlatoonBackupManager.restoreSelected(context, ByteArrayInputStream(archiveOf(withUnknownKey)))
+
+        PlatoonRepository.withExclusiveDatabase(scope) {
+            readOnlyLive { live ->
+                assertEquals(0L, count(live, "platoon_maintenance_state", "key = 'crafted_key'"))
+                assertEquals(
+                    0L,
+                    count(
+                        live,
+                        "platoon_maintenance_state",
+                        "key NOT IN (" + PlatoonDatabaseSchema.MAINTENANCE_KEYS.joinToString(", ") { "'$it'" } + ")",
+                    ),
+                )
+            }
+        }
+        assertEquals(1, PlatoonRepository(context, scope).listMemberStatuses().size)
+    }
+
+    @Test
+    fun everyAppTextColumnIsCheckedWhenRestored() {
+        val checked = (
+            RestoredDatabaseRebuild.ENUM_COLUMNS.map { it.table to it.column } +
+                RestoredDatabaseRebuild.TEXT_COLUMNS.map { it.table to it.column }
+            ).toSet()
+        // Checked elsewhere: fingerprints by WeeklyHistoryIntegrity, keys by the known-key filter.
+        val elsewhere = setOf("weekly_report_history" to "fingerprint", "platoon_maintenance_state" to "key")
+        PlatoonDatabase.inMemory(context, scope).use { helper ->
+            val db = helper.readableDatabase
+            val textColumns = db.rawQuery("SELECT name FROM sqlite_master WHERE $APP_TABLES_FILTER", null)
+                .use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getString(0)) } }
+                .flatMap { table ->
+                    db.rawQuery("PRAGMA table_info(${sqlIdentifier(table)})", null).use { cursor ->
+                        buildList {
+                            while (cursor.moveToNext()) {
+                                if (cursor.getString(2).equals("TEXT", ignoreCase = true)) add(table to cursor.getString(1))
+                            }
+                        }
+                    }
+                }
+                .toSet()
+            assertEquals(textColumns - elsewhere, checked)
+        }
+    }
+
+    @Test
     fun restoreRejectsWeeklyHistoryTheAppCouldNotHaveWritten() {
         val repository = PlatoonRepository(context, scope)
         repository.ingest(CAPTURED_AT, listOf(member(1, "One")), "roster.csv")

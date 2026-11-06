@@ -221,15 +221,15 @@ object Gfl2PayloadDecoder {
         reader.forEachField { field ->
             when (field.number) {
                 1 -> platoonId = reader.readUInt(field).toUInt()
-                2 -> platoonName = reader.readString(field).take(MAX_PLATOON_NAME_CHARS)
+                2 -> platoonName = reader.readString(field).takeCodePoints(MAX_PLATOON_NAME_CHARS)
                 3 -> level = reader.readUInt(field).toUInt()
                 4 -> exp = reader.readUInt(field).toUInt()
-                6 -> announcement = reader.readString(field).take(MAX_PLATOON_TEXT_CHARS)
+                6 -> announcement = reader.readString(field).takeCodePoints(MAX_PLATOON_TEXT_CHARS)
                 // CS_ChangeGuildFlag and asymmetric live profiles establish that field 9 is
                 // the mark/design selector while field 10 is the colored frame selector.
                 9 -> bannerMarkId = reader.readUInt(field).toUInt()
                 10 -> bannerFrameId = reader.readUInt(field).toUInt()
-                12 -> declaration = reader.readString(field).take(MAX_PLATOON_TEXT_CHARS)
+                12 -> declaration = reader.readString(field).takeCodePoints(MAX_PLATOON_TEXT_CHARS)
                 13 -> joinPolicyFlag = reader.readBoolean(field)
                 else -> reader.skip(field)
             }
@@ -415,6 +415,16 @@ object Gfl2PayloadDecoder {
         }
 
         return Doll(dollId, weaponUid, attachmentUids, fixedKeyIds, expansionKeyIds, commonKeyUids)
+    }
+
+    /**
+     * Truncates to at most [maxUnits] UTF-16 units without splitting a surrogate pair, so a
+     * stored name never ends in an unpaired surrogate that no keyboard can type back.
+     */
+    internal fun String.takeCodePoints(maxUnits: Int): String {
+        if (length <= maxUnits) return this
+        val splitsPair = maxUnits > 0 && Character.isHighSurrogate(this[maxUnits - 1])
+        return substring(0, if (splitsPair) maxUnits - 1 else maxUnits)
     }
 
     private const val MAX_PLATOON_NAME_CHARS = 128

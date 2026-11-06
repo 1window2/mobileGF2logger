@@ -553,6 +553,22 @@ class Gfl2StreamParserTest {
         assertEquals(12, merged.decodedElementCount())
     }
 
+    @Test
+    fun platoonTextIsTruncatedOnACodePointBoundary() {
+        val emoji = "😀"
+        val split = Gfl2PayloadDecoder.decode(
+            Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE,
+            platoonProfilePayload(1uL, "a".repeat(127) + emoji),
+        ) as PlatoonProfileData
+        val exact = Gfl2PayloadDecoder.decode(
+            Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE,
+            platoonProfilePayload(1uL, "a".repeat(126) + emoji + "b"),
+        ) as PlatoonProfileData
+
+        assertEquals("a".repeat(127), split.platoonName)
+        assertEquals("a".repeat(126) + emoji, exact.platoonName)
+    }
+
     private fun weaponsPayload(): ByteArray {
         val weaponMod = uintField(1, 91uL) + uintField(2, 17uL)
         val weapon = uintField(1, 42uL) +

@@ -153,7 +153,7 @@ class MemberDetailActivity : BaseActivity() {
                 status?.let {
                     Model(
                         status = it,
-                        latest = repository.listSnapshots(1).firstOrNull()?.members?.firstOrNull { member -> member.uid == uid },
+                        latest = repository.latestSnapshot()?.members?.firstOrNull { member -> member.uid == uid },
                         zone = repository.gameZone(),
                     )
                 }

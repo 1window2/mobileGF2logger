@@ -59,6 +59,7 @@ class SnapshotClockIntegrationTest {
         assertFalse(real.historical)
         assertTrue(real.clockReviewChanged)
         assertEquals(listOf(REAL), repository.listSnapshots().map { it.capturedAt })
+        assertEquals(REAL, repository.latestSnapshot()?.capturedAt)
         assertEquals(1, repository.setAsideSnapshotCount())
         assertEquals(setOf(A, C), activeUids())
         assertTrue(repository.listAllWeeklyReports(ZoneOffset.UTC, REAL).none { it.periodStart.year == 2027 })
@@ -107,7 +108,7 @@ class SnapshotClockIntegrationTest {
         assertTrue(behind.historical)
         assertFalse(behind.clockReviewChanged)
         assertEquals(0, repository.setAsideSnapshotCount())
-        assertEquals(REAL, repository.listSnapshots(1).single().capturedAt)
+        assertEquals(REAL, repository.latestSnapshot()?.capturedAt)
     }
 
     @Test

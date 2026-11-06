@@ -155,7 +155,7 @@ class MemberOrderActivity : BaseActivity() {
                 val defaults = MemberOrderSorter.sort(active, emptyMap(), MemberSortField.JOIN_DATE, MemberSortDirection.ASCENDING)
                 val saved = preferences.read()
                 val ordered = if (saved.isEmpty()) defaults else MemberOrderMerge.apply(saved, defaults, MemberStatus::uid)
-                val latest = repository.listSnapshots(1).firstOrNull()?.members.orEmpty().associateBy(SnapshotMember::uid)
+                val latest = repository.latestSnapshot()?.members.orEmpty().associateBy(SnapshotMember::uid)
                 Triple(ordered, latest, saved.isEmpty())
             },
         ) { result ->

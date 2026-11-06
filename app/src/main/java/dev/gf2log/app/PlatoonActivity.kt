@@ -90,7 +90,7 @@ class PlatoonActivity : BaseActivity() {
         work.run(
             task = {
                 val statuses = repository.listMemberStatuses().filter { it.uid in uids }
-                val latest = latestMembers(repository.listSnapshots(1).firstOrNull())
+                val latest = latestMembers(repository.latestSnapshot())
                 val csv = PlatoonMemberCsv.format(statuses, latest, repository.gameZone())
                 DocumentAccess.writeExport(contentResolver, uri) { output ->
                     output.writer(Charsets.UTF_8).use { it.write(csv) }
@@ -182,7 +182,7 @@ class PlatoonActivity : BaseActivity() {
             key = LOAD,
             task = {
                 repository.reconcileRetainedCsvFiles()
-                val latest = repository.listSnapshots(1).firstOrNull()
+                val latest = repository.latestSnapshot()
                 Model(
                     latest = latest,
                     statuses = repository.listMemberStatuses(),

@@ -196,6 +196,9 @@ internal class PlatoonRepository(
     fun listSnapshots(limit: Int = 100): List<PlatoonSnapshot> =
         access { it.listSnapshots(limit) }
 
+    /** The current roster: the newest one kept in the history, never one set aside. */
+    fun latestSnapshot(): PlatoonSnapshot? = listSnapshots(limit = 1).firstOrNull()
+
     /** Rosters kept but left out of every roster read because they were dated ahead of the clock. */
     fun setAsideSnapshotCount(): Int = access(PlatoonDatabase::setAsideSnapshotCount)
 

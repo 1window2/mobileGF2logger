@@ -95,7 +95,7 @@ class MainActivity : BaseActivity() {
         }
         work.run(
             task = {
-                val latest = requireNotNull(RosterCsvExport.latest(PlatoonRepository(this, scope)))
+                val latest = requireNotNull(PlatoonRepository(this, scope).latestSnapshot())
                 val snapshot = RosterCsvExport.csvSnapshot(latest)
                 DocumentAccess.writeExport(contentResolver, uri) { output ->
                     output.writer(Charsets.UTF_8).use { it.write(GuildMembersCsv.formatForSpreadsheet(snapshot)) }
@@ -296,7 +296,7 @@ class MainActivity : BaseActivity() {
             Feedback.show(this, R.string.no_platoon_detected_detail, long = true)
             return
         }
-        work.run(task = { RosterCsvExport.latest(PlatoonRepository(this, scope))?.let(RosterCsvExport::fileName) }) { result ->
+        work.run(task = { PlatoonRepository(this, scope).latestSnapshot()?.let(RosterCsvExport::fileName) }) { result ->
             val name = result.getOrElse {
                 Feedback.show(this, platoonDataFailureMessage(it, R.string.status_export_failed), long = true)
                 return@run

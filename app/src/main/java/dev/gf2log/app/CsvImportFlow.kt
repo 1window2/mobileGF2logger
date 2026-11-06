@@ -164,7 +164,7 @@ internal class CsvImportFlow(
                     duplicateFileNames = duplicates,
                     existingMembers = repository.listMemberStatuses(),
                     currentNames = repository.memberCurrentNames(),
-                    latestSnapshot = repository.listSnapshots(limit = 1).firstOrNull(),
+                    latestSnapshot = repository.latestSnapshot(),
                 )
                 PendingImport(
                     target = target,

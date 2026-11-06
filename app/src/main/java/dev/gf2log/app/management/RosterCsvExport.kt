@@ -7,14 +7,11 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 /**
- * Home's "Export roster CSV" source: the newest stored roster, the one Home summarizes. Retained
- * CSV files are not used: a backup restore retires them, and an imported older CSV is newer on
- * disk than the latest capture. Deleted members are already absent from stored rosters.
+ * Home's "Export roster CSV" of [PlatoonRepository.latestSnapshot], the roster Home summarizes.
+ * Retained CSV files are not used: a backup restore retires them, and an imported older CSV is
+ * newer on disk than the latest capture. Deleted members are already absent from stored rosters.
  */
 internal object RosterCsvExport {
-    fun latest(repository: PlatoonRepository): PlatoonSnapshot? =
-        repository.listSnapshots(limit = 1).firstOrNull()
-
     fun csvSnapshot(snapshot: PlatoonSnapshot): GuildMembersCsv.Snapshot = GuildMembersCsv.Snapshot(
         logTime = LogTime.format(snapshot.capturedAt),
         members = snapshot.members.map { member ->

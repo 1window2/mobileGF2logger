@@ -147,6 +147,7 @@
     <string name="delete_note">Delete note</string>
     <string name="delete">Delete</string>
     <string name="note_deleted">Note deleted</string>
+    <string name="note_delete_failed">Unable to delete the note</string>
     <string name="export_weekly_csv">Export weekly CSV</string>
     <string name="weekly_csv_exported">Weekly CSV exported</string>
     <string name="weekly_csv_export_failed">Unable to export weekly CSV</string>

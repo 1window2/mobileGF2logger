@@ -147,6 +147,7 @@
     <string name="delete_note">비고 삭제</string>
     <string name="delete">삭제</string>
     <string name="note_deleted">비고를 삭제했습니다</string>
+    <string name="note_delete_failed">비고를 삭제할 수 없습니다</string>
     <string name="export_weekly_csv">주간 CSV 내보내기</string>
     <string name="weekly_csv_exported">주간 CSV를 내보냈습니다</string>
     <string name="weekly_csv_export_failed">주간 CSV를 내보낼 수 없습니다</string>

@@ -9,6 +9,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import androidx.annotation.StringRes
+import androidx.annotation.VisibleForTesting
 import dev.gf2log.app.capture.CaptureNotice
 import dev.gf2log.app.capture.CaptureNoticeEvent
 import dev.gf2log.app.capture.CapturePhase
@@ -47,11 +48,12 @@ internal class HomeCapturePanel(
     private val stateTitle = context.text(null, TextRole.HEADLINE) {
         accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
     }
-    private val stateDetail = context.text(null, TextRole.SECONDARY) {
-        maxLines = 4
-        // Large font sizes would otherwise cut a notice off mid-word with no sign of it.
-        ellipsize = android.text.TextUtils.TruncateAt.END
-    }
+    /**
+     * Wraps in full: a warning or error notice ends with its recovery step, which a line cap
+     * would hide at large font sizes.
+     */
+    @VisibleForTesting
+    internal val stateDetail = context.text(null, TextRole.SECONDARY)
     private val checklist = context.column { visibility = View.GONE }
     // Built once and updated in place, so frequent renders never detach a row TalkBack is on.
     private val checklistRows = CaptureRunTracker.CHECKLIST_LABELS.map { (type, label) ->

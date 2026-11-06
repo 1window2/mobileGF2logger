@@ -333,6 +333,8 @@
     <string name="csv_import_undoing">Restoring the CSV import checkpoint…</string>
     <string name="csv_import_undone">The last CSV import was undone.</string>
     <string name="csv_import_undo_failed">Undo is unavailable, invalid, or blocked because Platoon data changed after the import.</string>
+    <string name="csv_import_undo_expired">Platoon data changed after the last CSV import, so it can no longer be undone. Its checkpoint was removed.</string>
+    <string name="csv_import_database_damaged">Nothing was imported. This Platoon\'s database failed its integrity check, so an import could not be undone.</string>
     <string name="platoon_database_damaged_title">Platoon database is damaged</string>
     <string name="platoon_database_damaged_message">No backup was written. Restore an earlier backup, or rebuild this Platoon from its retained roster CSVs. Rebuilding keeps the damaged copy on the phone, but Daily Patrol, activity, edits, notes and saved weekly tables are not in the rosters and start empty.</string>
     <string name="rebuild_platoon_database">Rebuild</string>

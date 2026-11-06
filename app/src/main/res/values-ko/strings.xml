@@ -329,6 +329,8 @@
     <string name="csv_import_undoing">CSV 가져오기 체크포인트를 복원하는 중…</string>
     <string name="csv_import_undone">마지막 CSV 가져오기를 실행 취소했습니다.</string>
     <string name="csv_import_undo_failed">체크포인트가 없거나 올바르지 않거나, 가져오기 이후 서클 데이터가 변경되어 되돌릴 수 없습니다.</string>
+    <string name="csv_import_undo_expired">마지막 CSV 가져오기 이후 서클 데이터가 변경되어 더 이상 되돌릴 수 없습니다. 해당 체크포인트를 삭제했습니다.</string>
+    <string name="csv_import_database_damaged">아무것도 가져오지 않았습니다. 이 서클의 데이터베이스가 무결성 검사를 통과하지 못해 가져오기를 되돌릴 수 없기 때문입니다.</string>
     <string name="platoon_database_damaged_title">서클 데이터베이스가 손상되었습니다</string>
     <string name="platoon_database_damaged_message">백업을 저장하지 않았습니다. 이전 백업을 복원하거나, 보관된 명단 CSV로 이 서클을 다시 만드세요. 다시 만들어도 손상된 사본은 휴대폰에 남지만, 명단에 없는 과업, 활동, 수정 내용, 메모, 저장된 주간 표는 비어 있는 상태로 시작합니다.</string>
     <string name="rebuild_platoon_database">다시 만들기</string>

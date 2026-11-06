@@ -4,9 +4,11 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import androidx.activity.result.contract.ActivityResultContracts
+import dev.gf2log.app.management.CsvCheckpointExpiredException
 import dev.gf2log.app.management.CsvImportCheckpointManager
 import dev.gf2log.app.management.CsvImportPreviewAnalyzer
 import dev.gf2log.app.management.PlatoonCsvImportStore
+import dev.gf2log.app.management.PlatoonDatabaseDamagedException
 import dev.gf2log.app.management.PlatoonProfile
 import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.management.PlatoonRepository
@@ -91,10 +93,11 @@ internal class CsvImportFlow(
                 if (work.isBusy(UNDO)) return@confirm
                 onProgress(activity.getString(R.string.csv_import_undoing))
                 work.run(key = UNDO, task = { CsvImportCheckpointManager(activity, scope).restore() }) { restore ->
+                    // Also reloads the undo row, which an expired checkpoint no longer shows.
                     onProgress(null)
                     Feedback.show(
                         activity,
-                        if (restore.isSuccess) R.string.csv_import_undone else R.string.csv_import_undo_failed,
+                        restore.fold(onSuccess = { R.string.csv_import_undone }, onFailure = ::csvUndoFailureMessage),
                         long = restore.isFailure,
                     )
                 }
@@ -151,11 +154,12 @@ internal class CsvImportFlow(
                 val unique = selected.distinctBy(PlatoonCsvImportStore.PreparedImport::fileName)
                 val repository = PlatoonRepository(activity, target.scope)
                 repository.reconcileRetainedCsvFiles(directory)
-                val duplicates = CsvImportPreviewAnalyzer.duplicateFileNames(unique, repository.representedSnapshotSources())
+                val duplicates = storedDuplicates(repository, unique)
                 val analyzed = CsvImportPreviewAnalyzer.analyze(
                     prepared = unique,
                     duplicateFileNames = duplicates,
                     existingMembers = repository.listMemberStatuses(),
+                    currentNames = repository.memberCurrentNames(),
                     latestSnapshot = repository.listSnapshots(limit = 1).firstOrNull(),
                 )
                 PendingImport(
@@ -178,11 +182,21 @@ internal class CsvImportFlow(
                 },
                 onFailure = {
                     pickerTarget = null
-                    Feedback.show(activity, R.string.status_platoon_csv_import_failed, long = true)
+                    Feedback.show(activity, csvImportFailureMessage(it), long = true)
                 },
             )
         }
     }
+
+    /** Selected rosters the Platoon already stores, by retained name or as identical data. */
+    private fun storedDuplicates(
+        repository: PlatoonRepository,
+        prepared: List<PlatoonCsvImportStore.PreparedImport>,
+    ): Set<String> = CsvImportPreviewAnalyzer.duplicateFileNames(
+        prepared,
+        repository.representedSnapshotSources(),
+        repository::snapshotsCapturedAt,
+    )
 
     private fun showPreview(import: PendingImport) {
         val preview = import.preview
@@ -266,12 +280,22 @@ internal class CsvImportFlow(
                     .filterNot { it.fileName in import.duplicateFileNames }
                     .mapTo(mutableSetOf()) { it.fileName }
                 CsvImportCheckpointManager(activity, import.target.scope).runImport(planned) {
+                    // The claim now refuses capture writes, but one that started after the tap
+                    // check would still lose its evidence; the import rolls back instead.
+                    check(!captureActive) { "Capture started before the CSV import began" }
+                    val repository = PlatoonRepository(activity, import.target.scope)
+                    // Rechecked under the claim: a capture since the preview may store the roster.
+                    val stored = storedDuplicates(repository, import.prepared)
                     var retained = 0
                     var duplicates = 0
                     import.prepared.forEach { prepared ->
-                        if (store.retain(prepared).duplicate) duplicates += 1 else retained += 1
+                        if (prepared.fileName in stored || store.retain(prepared).duplicate) {
+                            duplicates += 1
+                        } else {
+                            retained += 1
+                        }
                     }
-                    val imported = PlatoonRepository(activity, import.target.scope).reconcileRetainedCsvFiles(directory)
+                    val imported = repository.reconcileRetainedCsvFiles(directory)
                     Summary(retained, duplicates, imported)
                 }
             },
@@ -292,7 +316,7 @@ internal class CsvImportFlow(
                         long = true,
                     )
                 },
-                onFailure = { Feedback.show(activity, R.string.status_platoon_csv_import_failed, long = true) },
+                onFailure = { Feedback.show(activity, csvImportFailureMessage(it), long = true) },
             )
         }
     }
@@ -320,3 +344,19 @@ internal class CsvImportFlow(
         const val STATE_LAUNCH = "csv_import.launch_picker"
     }
 }
+
+/** A damaged database is named, since retrying the import cannot succeed. */
+internal fun csvImportFailureMessage(error: Throwable): Int =
+    if (error.hasCause<PlatoonDatabaseDamagedException>()) {
+        R.string.csv_import_database_damaged
+    } else {
+        R.string.status_platoon_csv_import_failed
+    }
+
+/** An expired checkpoint was removed; saying so explains why the undo row disappears. */
+internal fun csvUndoFailureMessage(error: Throwable): Int =
+    if (error.hasCause<CsvCheckpointExpiredException>()) {
+        R.string.csv_import_undo_expired
+    } else {
+        R.string.csv_import_undo_failed
+    }

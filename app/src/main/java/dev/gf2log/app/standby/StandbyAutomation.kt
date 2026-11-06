@@ -96,6 +96,7 @@ internal object StandbyAutomation {
     fun arm(context: Context, plan: List<StandbyRun>, profilePackages: Map<String, String>, lockWhenDone: Boolean = true) {
         if (isArmed) cancel()
         if (plan.isEmpty()) return
+        StandbyAttendance.attended()
         appContext = context.applicationContext
         runs = plan
         index = 0
@@ -384,6 +385,8 @@ internal object StandbyAutomation {
     /** Ends standby with the phone locked; also used by the watchdog deadline. */
     private fun finish() {
         if (phase == Phase.IDLE) return
+        // Before the standby screen closes: Home resumes under it with nobody present.
+        StandbyAttendance.automationEnded()
         val games = runs.map { it.server.packageName }.distinct()
         if (phase == Phase.STARTING_CAPTURE || phase == Phase.IN_GAME) {
             record(StandbyOutcome.TIMED_OUT)
@@ -424,9 +427,14 @@ internal object StandbyAutomation {
         }
     }
 
-    /** The user is back (left standby or turned the screen off): stop without locking. */
-    fun cancel() {
+    /**
+     * The user is back (left standby or turned the screen off): stop without locking. Only a tap
+     * on the standby screen ([byUser]) proves someone is looking; the screen turning off, or
+     * standby being replaced, does not.
+     */
+    fun cancel(byUser: Boolean = false) {
         if (phase == Phase.IDLE) return
+        if (byUser) StandbyAttendance.attended() else StandbyAttendance.automationEnded()
         while (index < runs.size) {
             record(StandbyOutcome.CANCELLED)
             index++

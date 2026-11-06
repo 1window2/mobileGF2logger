@@ -23,6 +23,7 @@ import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.RosterCsvExport
 import dev.gf2log.app.management.SnapshotComparison
 import dev.gf2log.app.standby.ScheduledRecording
+import dev.gf2log.app.standby.StandbyAttendance
 import dev.gf2log.app.standby.StandbyAutomation
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.CaptureGuard
@@ -159,8 +160,8 @@ class MainActivity : BaseActivity() {
             return
         }
         // Home shown to the user trusts clients installed since; a Home briefly resumed while
-        // standby runs unattended does not.
-        if (!StandbyAutomation.isArmed) SupportedClientSigners.of(this).pinFirstSeen()
+        // standby runs unattended, or resumed by standby closing itself, does not.
+        if (StandbyAttendance.mayPinOnResume(StandbyAutomation.isArmed)) SupportedClientSigners.of(this).pinFirstSeen()
         capturePanel.renderClients()
         packetHistory.load()
         loadRosterSummary()
@@ -169,6 +170,15 @@ class MainActivity : BaseActivity() {
         standbyFlow.showUnseenResults()
         // Revoking exact alarms cancels the next wake-up without telling the app; plan it again.
         if (ScheduledRecording.isEnabled(this)) ScheduledRecording.reschedule(this)
+    }
+
+    /** The first touch after standby ended on its own proves someone is here: pin now. */
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        if (!::capturePanel.isInitialized) return
+        if (!StandbyAttendance.takeUserReturn(StandbyAutomation.isArmed)) return
+        SupportedClientSigners.of(this).pinFirstSeen()
+        capturePanel.renderClients()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

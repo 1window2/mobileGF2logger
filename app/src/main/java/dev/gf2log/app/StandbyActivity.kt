@@ -15,6 +15,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import java.time.Instant
 import java.time.ZoneId
 import dev.gf2log.app.standby.ScheduledRecording
+import dev.gf2log.app.standby.StandbyAttendance
 import dev.gf2log.app.standby.StandbyAutomation
 import dev.gf2log.app.standby.StandbyAutomationService
 import dev.gf2log.app.standby.StandbyPlanner
@@ -183,13 +184,16 @@ class StandbyActivity : BaseActivity() {
     internal fun finishForAutomation() {
         if (leaving) return
         leaving = true
+        // Whatever this screen covered resumes now, with nobody necessarily present.
+        StandbyAttendance.automationEnded()
         finish()
     }
 
     private fun leave() {
         if (leaving) return
         leaving = true
-        StandbyAutomation.cancel()
+        StandbyAutomation.cancel(byUser = true)
+        StandbyAttendance.attended()
         finish()
     }
 

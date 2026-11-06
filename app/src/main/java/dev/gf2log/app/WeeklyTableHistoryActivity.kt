@@ -68,8 +68,16 @@ class WeeklyTableHistoryActivity : BaseActivity() {
             },
         ) { result ->
             content.removeAllViews()
-            val (entries, zone) = result.getOrElse {
-                content.addView(StateViews.failure(this, getString(R.string.weekly_report_load_failed)) { load() })
+            val (entries, zone) = result.getOrElse { error ->
+                content.addView(
+                    PlatoonDataStates.failure(
+                        this,
+                        work,
+                        requireNotNull(profileBinding.scope),
+                        error,
+                        getString(R.string.weekly_report_load_failed),
+                    ) { load() },
+                )
                 return@run
             }
             content.addView(text(getString(R.string.weekly_table_history_description), TextRole.SECONDARY), lp(top = 4, bottom = 12))

@@ -39,7 +39,11 @@ internal class WeeklyExportFlow(
     private val csvDocument = activity.registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         val request = pendingCsv
         pendingCsv = null
-        if (uri == null || request == null) return@registerForActivityResult
+        if (uri == null) return@registerForActivityResult
+        if (request == null) {
+            work.run(task = { DocumentAccess.discard(activity.contentResolver, uri) })
+            return@registerForActivityResult
+        }
         work.run(
             task = {
                 val zone = GameTimeZonePreferences.get(activity, storageId())
@@ -49,11 +53,19 @@ internal class WeeklyExportFlow(
                     // Exporting reads the displayed table; it never adds a history revision.
                     WeeklyReportCsv.format(repository().buildWeeklyReport(LocalDate.ofEpochDay(request.toLong()), zone))
                 }
-                DocumentAccess.openOutput(activity.contentResolver, uri).writer(Charsets.UTF_8).use { it.write(csv) }
+                DocumentAccess.writeExport(activity.contentResolver, uri) { output ->
+                    output.writer(Charsets.UTF_8).use { it.write(csv) }
+                }
             },
-        ) { result ->
-            Feedback.show(activity, if (result.isSuccess) R.string.weekly_csv_exported else R.string.weekly_csv_export_failed)
-        }
+            always = { result ->
+                Feedback.show(
+                    activity,
+                    result.fold({ R.string.weekly_csv_exported }) {
+                        platoonExportFailureMessage(it, R.string.weekly_csv_export_failed)
+                    },
+                )
+            },
+        )
     }
 
     private val pngDocument = activity.registerForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
@@ -61,18 +73,33 @@ internal class WeeklyExportFlow(
         pendingPng = null
         if (uri == null || source == null) {
             source?.delete()
+            if (uri != null) {
+                // The rendered image is gone, so the created document can never be filled.
+                work.run(task = { DocumentAccess.discard(activity.contentResolver, uri) })
+                Feedback.show(activity, R.string.weekly_png_failed)
+            }
             return@registerForActivityResult
         }
         work.run(
             task = {
-                DocumentAccess.openOutput(activity.contentResolver, uri).use { output ->
-                    source.inputStream().use { it.copyTo(output) }
+                try {
+                    DocumentAccess.writeExport(activity.contentResolver, uri) { output ->
+                        source.inputStream().use { it.copyTo(output) }
+                    }
+                } finally {
+                    // The privacy-filtered render never outlives its export, even across recreation.
+                    source.delete()
                 }
             },
-        ) { result ->
-            source.delete()
-            Feedback.show(activity, if (result.isSuccess) R.string.weekly_png_saved else R.string.weekly_png_failed)
-        }
+            always = { result ->
+                Feedback.show(
+                    activity,
+                    result.fold({ R.string.weekly_png_saved }) {
+                        DocumentAccess.exportFailureMessage(it, R.string.weekly_png_failed)
+                    },
+                )
+            },
+        )
     }
 
     fun saveState(outState: Bundle) {
@@ -94,11 +121,17 @@ internal class WeeklyExportFlow(
         work.run(
             task = { repository().hasWeeklyReports(GameTimeZonePreferences.get(activity, storageId())) },
         ) { result ->
-            if (result.getOrDefault(false)) {
-                pendingCsv = EXPORT_ALL
-                csvDocument.launch("GF2logger-all-weekly-tables.csv")
-            } else {
-                Feedback.show(activity, R.string.no_weekly_tables_to_export)
+            when {
+                result.isFailure -> Feedback.show(
+                    activity,
+                    platoonDataFailureMessage(result.exceptionOrNull(), R.string.weekly_csv_export_failed),
+                    long = true,
+                )
+                result.getOrDefault(false) -> {
+                    pendingCsv = EXPORT_ALL
+                    csvDocument.launch("GF2logger-all-weekly-tables.csv")
+                }
+                else -> Feedback.show(activity, R.string.no_weekly_tables_to_export)
             }
         }
     }

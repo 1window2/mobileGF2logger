@@ -4,6 +4,7 @@ import androidx.annotation.VisibleForTesting
 import dev.gf2log.app.SupportedGamePackages
 import dev.gf2log.protocol.model.ParsedPayload
 import dev.gf2log.protocol.model.PlatoonProfileData
+import dev.gf2log.protocol.model.decodedElementCount
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArraySet
@@ -32,6 +33,8 @@ internal object PendingPlatoonAdmissionStore {
     data class BufferedPayload(
         val flowId: Long,
         val payload: ParsedPayload,
+        /** When it arrived; a confirmation hours later still dates what it records by this. */
+        val receivedAt: Instant,
     )
 
     data class Claim(
@@ -71,6 +74,7 @@ internal object PendingPlatoonAdmissionStore {
     private val candidates = linkedMapOf<String, Candidate>()
     private val tokenByIdentity = mutableMapOf<IdentityKey, String>()
     private var totalPayloads = 0
+    private var totalElements = 0L
     private val listeners = CopyOnWriteArraySet<(List<Summary>) -> Unit>()
 
     /**
@@ -127,18 +131,26 @@ internal object PendingPlatoonAdmissionStore {
     }
 
     @Synchronized
-    fun offer(token: String, flowId: Long, payload: ParsedPayload): OfferResult {
+    fun offer(
+        token: String,
+        flowId: Long,
+        payload: ParsedPayload,
+        receivedAt: Instant = Instant.now(),
+    ): OfferResult {
         val candidate = candidates[token] ?: return OfferResult.Missing
         if (candidate.claimed) return OfferResult.Claimed
+        val elements = payload.data.decodedElementCount()
         if (
             candidate.payloads.size >= MAX_PAYLOADS_PER_CANDIDATE ||
-            totalPayloads >= MAX_TOTAL_PAYLOADS
+            totalPayloads >= MAX_TOTAL_PAYLOADS ||
+            totalElements + elements > MAX_TOTAL_ELEMENTS
         ) {
             return OfferResult.Overflow(removeLocked(token)?.flowIds.orEmpty())
         }
         candidate.flowIds += flowId
-        candidate.payloads += BufferedPayload(flowId, payload)
+        candidate.payloads += BufferedPayload(flowId, payload, receivedAt)
         totalPayloads += 1
+        totalElements += elements
         return OfferResult.Accepted
     }
 
@@ -217,6 +229,7 @@ internal object PendingPlatoonAdmissionStore {
         candidates.clear()
         tokenByIdentity.clear()
         totalPayloads = 0
+        totalElements = 0
         listeners.clear()
     }
 
@@ -235,6 +248,7 @@ internal object PendingPlatoonAdmissionStore {
         val removed = candidates.remove(token) ?: return null
         tokenByIdentity.remove(IdentityKey(removed.ownerPackage, removed.profile.platoonId), token)
         totalPayloads -= removed.payloads.size
+        totalElements -= removed.payloads.sumOf { it.payload.data.decodedElementCount().toLong() }
         notifyChanged()
         return removed
     }
@@ -251,4 +265,7 @@ internal object PendingPlatoonAdmissionStore {
     internal const val MAX_CANDIDATES = 4
     internal const val MAX_PAYLOADS_PER_CANDIDATE = 64
     internal const val MAX_TOTAL_PAYLOADS = 128
+
+    /** Decoded elements every candidate together may hold; a payload count alone bounds no memory. */
+    internal const val MAX_TOTAL_ELEMENTS = 65_536L
 }

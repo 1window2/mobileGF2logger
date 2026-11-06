@@ -24,12 +24,23 @@ object WeeklyReportPngRenderer {
         val notesWidth = if (document.includeNotes) 300 else 0
         val days = document.headers.size - 2 - if (document.includeNotes) 1 else 0
         val naturalWidth = PADDING * 2 + memberWidth + dayWidth * days + totalWidth + notesWidth
-        val rowHeight = if (document.rows.any { row -> row.dailyCells.any { it.count { c -> c == '\n' } >= 4 } }) {
+        val paints = CellPaints()
+        val baseRowHeight = if (document.rows.any { row -> row.dailyCells.any { it.count { c -> c == '\n' } >= 4 } }) {
             112
         } else {
             88
         }
-        val naturalHeight = PADDING * 2 + TITLE_HEIGHT + HEADER_HEIGHT + rowHeight * document.rows.size
+        // A row grows to show its longest cell (a long note or member label), up to MAX_CELL_LINES.
+        val rowHeights = document.rows.map { row ->
+            val lines = buildList {
+                add(row.member to memberWidth)
+                row.dailyCells.forEach { add(it to dayWidth) }
+                add(row.total to totalWidth)
+                if (document.includeNotes) add(row.privateNote.orEmpty() to notesWidth)
+            }.maxOf { (value, cellWidth) -> wrap(value, paints.bodyText, cellWidth - CELL_PADDING * 2).size }
+            maxOf(baseRowHeight, paints.bodyText.heightFor(lines.coerceAtMost(MAX_CELL_LINES)))
+        }
+        val naturalHeight = PADDING * 2 + TITLE_HEIGHT + HEADER_HEIGHT + rowHeights.sum()
         val naturalPixels = naturalWidth.toLong() * naturalHeight
         val scale = min(
             1f,
@@ -42,7 +53,6 @@ object WeeklyReportPngRenderer {
         val height = maxOf(1, (naturalHeight * scale).toInt())
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        val paints = CellPaints()
         canvas.drawColor(PAPER)
         canvas.scale(scale, scale)
 
@@ -88,7 +98,8 @@ object WeeklyReportPngRenderer {
         }
 
         top += HEADER_HEIGHT
-        document.rows.forEach { row ->
+        document.rows.forEachIndexed { rowIndex, row ->
+            val rowHeight = rowHeights[rowIndex]
             left = PADDING
             drawCell(canvas, row.member, left, top, memberWidth, rowHeight, paints)
             left += memberWidth
@@ -122,17 +133,22 @@ object WeeklyReportPngRenderer {
         val bottom = (top + height).toFloat()
         canvas.drawRect(left.toFloat(), top.toFloat(), right, bottom, paints.fill)
         canvas.drawRect(left.toFloat(), top.toFloat(), right, bottom, paints.border)
-        val lines = wrap(value, textPaint, width - CELL_PADDING * 2)
-            .take(MAX_CELL_LINES)
-        val lineHeight = textPaint.fontSpacing
+        val maxWidth = width - CELL_PADDING * 2
+        val fit = WeeklyPngTextLayout.linesFitting(height, CELL_PADDING, -textPaint.fontMetrics.top, textPaint.fontSpacing)
+            .coerceAtMost(MAX_CELL_LINES)
+        // Text that does not fit ends its last visible line with an ellipsis instead of vanishing.
+        val lines = WeeklyPngTextLayout.truncate(wrap(value, textPaint, maxWidth), fit) {
+            textPaint.measureText(it) <= maxWidth
+        }
         var baseline = top + CELL_PADDING - textPaint.fontMetrics.top
         lines.forEach { line ->
-            if (baseline <= top + height - CELL_PADDING) {
-                canvas.drawText(line, (left + CELL_PADDING).toFloat(), baseline, textPaint)
-            }
-            baseline += lineHeight
+            canvas.drawText(line, (left + CELL_PADDING).toFloat(), baseline, textPaint)
+            baseline += textPaint.fontSpacing
         }
     }
+
+    private fun Paint.heightFor(lines: Int): Int =
+        WeeklyPngTextLayout.heightFor(lines, CELL_PADDING, -fontMetrics.top, fontSpacing)
 
     /** Paints reused for every cell of one render; each render owns its own set. */
     private class CellPaints {
@@ -152,25 +168,8 @@ object WeeklyReportPngRenderer {
         }
     }
 
-    private fun wrap(value: String, paint: Paint, maxWidth: Int): List<String> = buildList {
-        value.lineSequence().forEach { source ->
-            var remaining = source.trim()
-            if (remaining.isEmpty()) {
-                add("")
-                return@forEach
-            }
-            while (remaining.isNotEmpty()) {
-                val count = paint.breakText(remaining, true, maxWidth.toFloat(), null)
-                    .coerceAtLeast(1)
-                var split = count
-                if (count < remaining.length) {
-                    remaining.lastIndexOf(' ', count - 1).takeIf { it > 0 }?.let { split = it }
-                }
-                add(remaining.take(split).trim())
-                remaining = remaining.drop(split).trimStart()
-            }
-        }
-    }
+    private fun wrap(value: String, paint: Paint, maxWidth: Int): List<String> =
+        WeeklyPngTextLayout.wrap(value) { paint.breakText(it, true, maxWidth.toFloat(), null) }
 
     private val PAPER = Color.rgb(0xF7, 0xF4, 0xEF)
     private val SURFACE = Color.rgb(0xFF, 0xFC, 0xF8)
@@ -187,4 +186,63 @@ object WeeklyReportPngRenderer {
     private const val MAX_ROWS = 256
     private const val MAX_DIMENSION = 16_000
     private const val MAX_PIXELS = 12_000_000
+}
+
+/**
+ * Cell text layout of the weekly PNG without a Canvas: measuring arrives as functions, so wrapping,
+ * row heights and truncation share one baseline rule with the draw loop.
+ */
+internal object WeeklyPngTextLayout {
+    const val ELLIPSIS = "…"
+
+    /**
+     * Splits [value] at its own line breaks, then at the last space that keeps each line within the
+     * cell; [fitCount] returns how many leading characters of a string fit the cell width.
+     */
+    fun wrap(value: String, fitCount: (String) -> Int): List<String> = buildList {
+        value.lineSequence().forEach { source ->
+            var remaining = source.trim()
+            if (remaining.isEmpty()) {
+                add("")
+                return@forEach
+            }
+            while (remaining.isNotEmpty()) {
+                val count = fitCount(remaining).coerceAtLeast(1)
+                var split = count
+                if (count < remaining.length) {
+                    remaining.lastIndexOf(' ', count - 1).takeIf { it > 0 }?.let { split = it }
+                }
+                add(remaining.take(split).trim())
+                remaining = remaining.drop(split).trimStart()
+            }
+        }
+    }
+
+    /**
+     * How many lines a cell of [height] draws: line `i` sits on baseline
+     * `padding + ascent + i * spacing`, which must stay within `height - padding`.
+     */
+    fun linesFitting(height: Int, padding: Int, ascent: Float, spacing: Float): Int {
+        val room = height - padding * 2 - ascent
+        // The epsilon keeps a height from heightFor() at its line count despite float rounding.
+        return if (room < 0f) 0 else (room / spacing + 1e-3f).toInt() + 1
+    }
+
+    /** The smallest cell height whose [linesFitting] covers [lines] lines. */
+    fun heightFor(lines: Int, padding: Int, ascent: Float, spacing: Float): Int =
+        kotlin.math.ceil(padding * 2 + ascent + (lines.coerceAtLeast(1) - 1) * spacing).toInt()
+
+    /**
+     * The first [fit] of [lines]. When some are left out, the last kept line is shortened until it
+     * and a trailing [ELLIPSIS] pass [fits], so a cut cell always says that text is missing.
+     */
+    fun truncate(lines: List<String>, fit: Int, fits: (String) -> Boolean): List<String> {
+        if (lines.size <= fit) return lines
+        if (fit <= 0) return emptyList()
+        var last = lines[fit - 1].trimEnd()
+        while (last.isNotEmpty() && !fits(last + ELLIPSIS)) {
+            last = last.dropLast(if (last.length >= 2 && Character.isLowSurrogate(last.last())) 2 else 1).trimEnd()
+        }
+        return lines.take(fit - 1) + (last + ELLIPSIS)
+    }
 }

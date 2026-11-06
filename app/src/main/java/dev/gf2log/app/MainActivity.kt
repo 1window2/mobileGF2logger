@@ -18,10 +18,13 @@ import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.capture.CaptureVpnService
 import dev.gf2log.app.capture.format
 import dev.gf2log.app.management.CsvImportCheckpointManager
-import dev.gf2log.app.management.PlatoonCsvImportStore
+import dev.gf2log.app.management.PlatoonAccessFailure
 import dev.gf2log.app.management.PlatoonRepository
+import dev.gf2log.app.management.RosterCsvExport
 import dev.gf2log.app.management.SnapshotComparison
 import dev.gf2log.app.standby.ScheduledRecording
+import dev.gf2log.app.standby.StandbyAttendance
+import dev.gf2log.app.standby.StandbyAutomation
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.CaptureGuard
 import dev.gf2log.app.ui.BarAction
@@ -72,7 +75,13 @@ class MainActivity : BaseActivity() {
 
     private val vpnConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         startPending = false
-        if (result.resultCode == RESULT_OK) startCaptureService() else CaptureStatus.clearIdleNotice()
+        if (result.resultCode == RESULT_OK) {
+            startCaptureService()
+        } else {
+            CaptureStatus.clearIdleNotice()
+            // A consent screen that closes on its own (a managed or restricted device) is explained.
+            vpnConsentDeniedMessage(result.resultCode)?.let { Feedback.show(this, it, long = true) }
+        }
     }
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -80,21 +89,28 @@ class MainActivity : BaseActivity() {
     }
 
     private val exportRoster = registerForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
-        val scope = profileBinding.scope ?: return@registerForActivityResult
         if (uri == null) return@registerForActivityResult
+        val scope = profileBinding.scope ?: run {
+            work.run(task = { DocumentAccess.discard(contentResolver, uri) })
+            return@registerForActivityResult
+        }
         work.run(
             task = {
-                val latest = requireNotNull(PlatoonCsvImportStore.latestRetainedFile(scope.retainedCsvDirectory(this)))
-                val snapshot = requireNotNull(GuildMembersCsv.parse(latest.readText(Charsets.UTF_8))) {
-                    "Stored Platoon CSV is invalid"
-                }
-                DocumentAccess.openOutput(contentResolver, uri).writer(Charsets.UTF_8).use {
-                    it.write(GuildMembersCsv.formatForSpreadsheet(snapshot))
+                val latest = requireNotNull(PlatoonRepository(this, scope).latestSnapshot())
+                val snapshot = RosterCsvExport.csvSnapshot(latest)
+                DocumentAccess.writeExport(contentResolver, uri) { output ->
+                    output.writer(Charsets.UTF_8).use { it.write(GuildMembersCsv.formatForSpreadsheet(snapshot)) }
                 }
             },
-        ) { result ->
-            Feedback.show(this, if (result.isSuccess) R.string.roster_csv_exported else R.string.status_export_failed)
-        }
+            always = { result ->
+                Feedback.show(
+                    this,
+                    result.fold({ R.string.roster_csv_exported }) {
+                        platoonExportFailureMessage(it, R.string.status_export_failed)
+                    },
+                )
+            },
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -143,6 +159,9 @@ class MainActivity : BaseActivity() {
             recreate()
             return
         }
+        // Home shown to the user trusts clients installed since; a Home briefly resumed while
+        // standby runs unattended, or resumed by standby closing itself, does not.
+        if (StandbyAttendance.mayPinOnResume(StandbyAutomation.isArmed)) SupportedClientSigners.of(this).pinFirstSeen()
         capturePanel.renderClients()
         packetHistory.load()
         loadRosterSummary()
@@ -151,6 +170,15 @@ class MainActivity : BaseActivity() {
         standbyFlow.showUnseenResults()
         // Revoking exact alarms cancels the next wake-up without telling the app; plan it again.
         if (ScheduledRecording.isEnabled(this)) ScheduledRecording.reschedule(this)
+    }
+
+    /** The first touch after standby ended on its own proves someone is here: pin now. */
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        if (!::capturePanel.isInitialized) return
+        if (!StandbyAttendance.takeUserReturn(StandbyAutomation.isArmed)) return
+        SupportedClientSigners.of(this).pinFirstSeen()
+        capturePanel.renderClients()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -205,6 +233,12 @@ class MainActivity : BaseActivity() {
 
     private fun beginCapture(once: Boolean) {
         if (startPending || captureActive) return
+        // Capture would refuse to start anyway. This also catches an import whose progress this
+        // screen no longer shows, such as one started before a recreation.
+        if (CsvImportCheckpointManager.anyBusy()) {
+            Feedback.show(this, R.string.capture_notice_csv_import_in_progress, long = true)
+            return
+        }
         startPending = true
         captureOnceRequested = once
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -224,7 +258,15 @@ class MainActivity : BaseActivity() {
     }
 
     private fun startCaptureService() {
-        CaptureStatus.markStarting()
+        if (!CaptureGuard.beginCaptureStart()) {
+            // A Platoon delete, server change, or restore is still running on its scope.
+            Feedback.show(this, R.string.capture_start_after_maintenance, long = true)
+            captureOnceRequested = false
+            startPending = false
+            return
+        }
+        // A start from Home is the user's own: clients installed since the last one are trusted now.
+        SupportedClientSigners.of(this).pinFirstSeen()
         startForegroundService(
             Intent(this, CaptureVpnService::class.java)
                 .setAction(CaptureVpnService.ACTION_START)
@@ -242,6 +284,8 @@ class MainActivity : BaseActivity() {
     private fun showProgress(message: CharSequence?) {
         progressBanner.visibility = if (message == null) View.GONE else View.VISIBLE
         progressText.text = message
+        // A capture started now would make the import roll back, or be refused while it runs.
+        capturePanel.startBlocked = message != null
         if (message == null) {
             // An import or undo just finished: the roster and the undo checkpoint may have changed.
             loadRosterSummary()
@@ -262,8 +306,11 @@ class MainActivity : BaseActivity() {
             Feedback.show(this, R.string.no_platoon_detected_detail, long = true)
             return
         }
-        work.run(task = { PlatoonCsvImportStore.latestRetainedFile(scope.retainedCsvDirectory(this))?.name }) { result ->
-            val name = result.getOrNull()
+        work.run(task = { PlatoonRepository(this, scope).latestSnapshot()?.let(RosterCsvExport::fileName) }) { result ->
+            val name = result.getOrElse {
+                Feedback.show(this, platoonDataFailureMessage(it, R.string.status_export_failed), long = true)
+                return@run
+            }
             if (name == null) Feedback.show(this, R.string.status_no_platoon_csv) else exportRoster.launch(name)
         }
     }
@@ -277,22 +324,32 @@ class MainActivity : BaseActivity() {
             key = SUMMARY,
             task = {
                 val repository = PlatoonRepository(this, scope)
-                val snapshots = repository.listSnapshots(2)
-                val latest = snapshots.firstOrNull()
-                latest?.let {
-                    it to snapshots.getOrNull(1)?.let { older ->
-                        SnapshotComparison.compare(older, it, repository.gameZone())
-                    }
+                val snapshots = repository.listSnapshots(SnapshotComparison.COMPARISON_LOOKBACK)
+                SnapshotComparison.latestComparablePair(snapshots)?.let { (latest, baseline) ->
+                    Triple(
+                        latest,
+                        baseline?.let { older -> SnapshotComparison.compare(older, latest, repository.gameZone()) },
+                        repository.setAsideSnapshotCount(),
+                    )
                 }
             },
         ) { result ->
+            rosterSummary.removeAllViews()
+            // A damaged database blocks the Platoon here as on its own screens; the rest of Home,
+            // capture and packet history included, stays usable.
+            if (PlatoonAccessFailure.of(result.exceptionOrNull()) == PlatoonAccessFailure.DATABASE_DAMAGED) {
+                rosterSummary.visibility = View.VISIBLE
+                rosterSummary.addView(panel(outlined = true) {
+                    addView(PlatoonDataStates.damaged(this@MainActivity, work, scope), lp())
+                }, lp())
+                return@run
+            }
             val summary = result.getOrNull()
             if (summary == null) {
                 rosterSummary.visibility = View.GONE
                 return@run
             }
-            val (latest, comparison) = summary
-            rosterSummary.removeAllViews()
+            val (latest, comparison, setAside) = summary
             rosterSummary.visibility = View.VISIBLE
             val detail = buildList {
                 add(resources.getQuantityString(R.plurals.member_count, latest.members.size, latest.members.size))
@@ -300,6 +357,8 @@ class MainActivity : BaseActivity() {
                     add(getString(R.string.roster_joined_count, it.joined.size))
                     add(getString(R.string.roster_withdrew_count, it.left.size))
                 }
+                // Kept but unused rosters stay visible, so a wrong phone clock is never silent.
+                if (setAside > 0) add(resources.getQuantityString(R.plurals.roster_set_aside_count, setAside, setAside))
             }.joinToString(" · ")
             rosterSummary.addView(group(listOf(
                 navigationRow(
@@ -319,3 +378,10 @@ class MainActivity : BaseActivity() {
         const val STATE_CAPTURE_ONCE = "home.capture_once"
     }
 }
+
+/**
+ * What Home says when VPN consent comes back without approval; every consent launcher explains a
+ * refusal the same way, so Start capture is never a silent no-op.
+ */
+internal fun vpnConsentDeniedMessage(resultCode: Int): Int? =
+    if (resultCode == android.app.Activity.RESULT_OK) null else R.string.capture_vpn_needed

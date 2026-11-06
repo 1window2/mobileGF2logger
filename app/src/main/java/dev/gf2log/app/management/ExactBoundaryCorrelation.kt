@@ -47,6 +47,8 @@ internal object ExactBoundaryCorrelation {
                         ) {
                             membershipEvents += 1
                         }
+                        // The exact boundary supersedes a weak open period for the same change.
+                        MembershipRows.foldDuplicateOpenPeriods(db, member.uid)
                         synchronizeCurrentMembershipFromUpdate(db, member.uid)
                     }
                 } else if (effect == PlatoonUpdateEffect.DAILY_PATROL) {
@@ -244,7 +246,7 @@ internal object ExactBoundaryCorrelation {
             WHERE uid = ?
               AND event_type IN (?, ?)
               AND source != ?
-              AND ABS(COALESCE(occurred_at, observed_at) - ?) <= ?
+              AND ABS(COALESCE(occurred_at, observed_at) - ?) <= CAST(? AS INTEGER)
             ORDER BY distance,
                      CASE source WHEN '${EvidenceSource.MANUAL.name}' THEN 0 ELSE 1 END,
                      id DESC
@@ -285,7 +287,7 @@ internal object ExactBoundaryCorrelation {
             ?: findOrCreateUpdateMembershipPeriod(db, member.uid, boundary, occurredAt)
 
         correlatableCandidates.forEach { candidate ->
-            db.delete("member_events", "id = ?", arrayOf(candidate.id.toString()))
+            MembershipRows.deleteSupersededEvents(db, "id = ?", arrayOf(candidate.id.toString()))
         }
         correlatableCandidates.mapNotNull(BoundaryEventCandidate::membershipPeriodId)
             .filter { it != membershipPeriodId }
@@ -313,6 +315,7 @@ internal object ExactBoundaryCorrelation {
             boundary = boundary,
             occurredAt = occurredAt,
             observedAt = observedAt,
+            source = EvidenceSource.GAME_UPDATES,
             activityIds = emptyList(),
         )
         if (boundary == MembershipBoundary.WITHDRAW &&
@@ -349,8 +352,8 @@ internal object ExactBoundaryCorrelation {
             FROM member_events
             WHERE uid = ?
               AND event_type IN (?, ?)
-              AND COALESCE(occurred_at, observed_at) > ?
-              AND COALESCE(occurred_at, observed_at) < ?
+              AND COALESCE(occurred_at, observed_at) > CAST(? AS INTEGER)
+              AND COALESCE(occurred_at, observed_at) < CAST(? AS INTEGER)
             LIMIT 1
             """.trimIndent(),
             arrayOf(
@@ -378,8 +381,8 @@ internal object ExactBoundaryCorrelation {
             FROM member_events
             WHERE uid = ?
               AND event_type IN (?, ?)
-              AND COALESCE(occurred_at, observed_at) > ?
-              AND COALESCE(occurred_at, observed_at) <= ?
+              AND COALESCE(occurred_at, observed_at) > CAST(? AS INTEGER)
+              AND COALESCE(occurred_at, observed_at) <= CAST(? AS INTEGER)
             """.trimIndent(),
             arrayOf(
                 uid.toString(),
@@ -415,9 +418,10 @@ internal object ExactBoundaryCorrelation {
                   AND (
                     joined_at IS NULL
                     OR (
-                      joined_precision != ?
-                      AND ABS(joined_at - ?) <= ?
+                      (joined_precision != ? OR joined_source = ?)
+                      AND ABS(joined_at - ?) <= CAST(? AS INTEGER)
                     )
+                    OR ${weakBoundaryInSameRosterGap(MembershipBoundary.JOIN)}
                   )
                 ORDER BY
                   CASE WHEN left_at IS NULL THEN 0 ELSE 1 END,
@@ -430,8 +434,10 @@ internal object ExactBoundaryCorrelation {
                     uid.toString(),
                     occurredAtMillis.toString(),
                     EvidencePrecision.EXACT.name,
+                    EvidenceSource.ACTIVITY.name,
                     occurredAtMillis.toString(),
                     EXACT_UPDATE_CORRELATION_WINDOW_MILLIS.toString(),
+                    *weakBoundaryInSameRosterGapArguments(occurredAtMillis),
                     occurredAtMillis.toString(),
                     occurredAtMillis.toString(),
                 ),
@@ -445,9 +451,10 @@ internal object ExactBoundaryCorrelation {
                   AND (
                     left_at IS NULL
                     OR (
-                      left_precision != ?
-                      AND ABS(left_at - ?) <= ?
+                      (left_precision != ? OR left_source = ?)
+                      AND ABS(left_at - ?) <= CAST(? AS INTEGER)
                     )
+                    OR ${weakBoundaryInSameRosterGap(MembershipBoundary.WITHDRAW)}
                   )
                 ORDER BY
                   CASE WHEN left_at IS NULL THEN 0 ELSE 1 END,
@@ -461,8 +468,10 @@ internal object ExactBoundaryCorrelation {
                     uid.toString(),
                     occurredAtMillis.toString(),
                     EvidencePrecision.EXACT.name,
+                    EvidenceSource.ACTIVITY.name,
                     occurredAtMillis.toString(),
                     EXACT_UPDATE_CORRELATION_WINDOW_MILLIS.toString(),
+                    *weakBoundaryInSameRosterGapArguments(occurredAtMillis),
                     occurredAtMillis.toString(),
                     occurredAtMillis.toString(),
                 ),
@@ -482,6 +491,43 @@ internal object ExactBoundaryCorrelation {
         )
     }
 
+    /**
+     * A roster-inferred or activity-dated [boundary] that records the same change as an Updates
+     * boundary at the bound instant, however late the Updates feed arrives: no roster was
+     * captured between the two instants, so the first roster after the real change revealed it.
+     * An inferred boundary sits on that revealing roster, so it cannot precede the change. Bind
+     * [weakBoundaryInSameRosterGapArguments] in place; the instant arrives as text, and MIN and
+     * MAX compare an integer below any text, so it is cast before either sees it.
+     */
+    private fun weakBoundaryInSameRosterGap(boundary: MembershipBoundary): String {
+        val at = boundary.atColumn
+        return """
+            (
+              $at IS NOT NULL
+              AND (
+                (${boundary.sourceColumn} IN (?, ?) AND ${boundary.precisionColumn} = ? AND $at >= ?)
+                OR ${boundary.sourceColumn} = ?
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM snapshots roster
+                WHERE roster.captured_at >= MIN($at, CAST(? AS INTEGER))
+                  AND roster.captured_at < MAX($at, CAST(? AS INTEGER))
+                  AND roster.clock_suspect = 0
+              )
+            )
+        """.trimIndent()
+    }
+
+    private fun weakBoundaryInSameRosterGapArguments(occurredAtMillis: Long): Array<String> = arrayOf(
+        EvidenceSource.SNAPSHOT.name,
+        EvidenceSource.LEGACY_IMPORT.name,
+        EvidencePrecision.INFERRED.name,
+        occurredAtMillis.toString(),
+        EvidenceSource.ACTIVITY.name,
+        occurredAtMillis.toString(),
+        occurredAtMillis.toString(),
+    )
+
     private fun isActiveMember(db: SQLiteDatabase, uid: Long): Boolean =
         db.rawQuery(
             "SELECT is_active FROM members WHERE uid = ? LIMIT 1",
@@ -498,7 +544,7 @@ internal object ExactBoundaryCorrelation {
             SELECT MAX(snapshot.captured_at)
             FROM snapshots snapshot
             JOIN snapshot_members member ON member.snapshot_id = snapshot.id
-            WHERE member.uid = ?
+            WHERE member.uid = ? AND snapshot.clock_suspect = 0
             """.trimIndent(),
             arrayOf(uid.toString()),
         ).use { cursor ->
@@ -528,10 +574,10 @@ internal object ExactBoundaryCorrelation {
                    ${opposite}_precision, ${opposite}_source
             FROM membership_periods
             WHERE id = ?
-              AND ${boundary.precisionColumn} IN (?, ?)
+              AND (${boundary.precisionColumn} IN (?, ?) OR ${boundary.sourceColumn} = ?)
               AND (
                 ${boundary.atColumn} IS NULL
-                OR ABS(${boundary.atColumn} - ?) <= ?
+                OR ABS(${boundary.atColumn} - ?) <= CAST(? AS INTEGER)
               )
             LIMIT 1
             """.trimIndent(),
@@ -539,6 +585,7 @@ internal object ExactBoundaryCorrelation {
                 shadowMembershipPeriodId.toString(),
                 EvidencePrecision.INFERRED.name,
                 EvidencePrecision.UNKNOWN.name,
+                EvidenceSource.ACTIVITY.name,
                 occurredAt.toEpochMilli().toString(),
                 EXACT_UPDATE_CORRELATION_WINDOW_MILLIS.toString(),
             ),
@@ -587,10 +634,20 @@ internal object ExactBoundaryCorrelation {
                 ),
             )
         }
-        db.delete("member_events", "membership_period_id = ?", arrayOf(shadowMembershipPeriodId.toString()))
+        MembershipRows.deleteSupersededEvents(
+            db,
+            "membership_period_id = ?",
+            arrayOf(shadowMembershipPeriodId.toString()),
+        )
         db.delete("membership_periods", "id = ?", arrayOf(shadowMembershipPeriodId.toString()))
     }
 
+    /**
+     * Dates [boundary] of a period at the instant [occurredAt] and replaces the weaker roster or
+     * activity event that recorded it. [source] is [EvidenceSource.GAME_UPDATES] only for a
+     * 21960 boundary; an activity-dated roster boundary is [EvidenceSource.ACTIVITY], so it is
+     * never presented as Updates evidence and a later Updates boundary still replaces it.
+     */
     fun applyExactMembershipBoundary(
         db: SQLiteDatabase,
         membershipPeriodId: Long,
@@ -600,24 +657,27 @@ internal object ExactBoundaryCorrelation {
         boundary: MembershipBoundary,
         occurredAt: Instant,
         observedAt: Instant,
+        source: EvidenceSource,
         activityIds: List<Long>,
     ) {
+        require(source == EvidenceSource.GAME_UPDATES || source == EvidenceSource.ACTIVITY)
         val values = ContentValues().apply {
             put(boundary.atColumn, occurredAt.toEpochMilli())
             putNull("${boundary.prefix}_date")
             put("${boundary.prefix}_time_known", 1)
             put(boundary.precisionColumn, EvidencePrecision.EXACT.name)
-            put(boundary.sourceColumn, EvidenceSource.GAME_UPDATES.name)
+            put(boundary.sourceColumn, source.name)
         }
         db.update("membership_periods", values, "id = ?", arrayOf(membershipPeriodId.toString()))
         val inferredTypes = boundary.eventTypes.map(MemberEventType::name)
-        db.delete(
-            "member_events",
-            "membership_period_id = ? AND source IN (?, ?) AND event_type IN (?, ?)",
+        MembershipRows.deleteSupersededEvents(
+            db,
+            "membership_period_id = ? AND source IN (?, ?, ?) AND event_type IN (?, ?)",
             arrayOf(
                 membershipPeriodId.toString(),
                 EvidenceSource.SNAPSHOT.name,
                 EvidenceSource.LEGACY_IMPORT.name,
+                EvidenceSource.ACTIVITY.name,
                 inferredTypes[0],
                 inferredTypes[1],
             ),
@@ -629,7 +689,7 @@ internal object ExactBoundaryCorrelation {
             occurredAt = occurredAt,
             observedAt = observedAt,
             precision = EvidencePrecision.EXACT,
-            source = EvidenceSource.GAME_UPDATES,
+            source = source,
             note = memberName,
             membershipPeriodId = membershipPeriodId,
         )
@@ -667,5 +727,5 @@ internal object ExactBoundaryCorrelation {
         PlatoonUpdateEffect.REMOVED to (MemberEventType.REMOVED to MembershipBoundary.WITHDRAW),
     )
 
-    private const val EXACT_UPDATE_CORRELATION_WINDOW_MILLIS = 48L * 60L * 60L * 1000L
+    internal const val EXACT_UPDATE_CORRELATION_WINDOW_MILLIS = 48L * 60L * 60L * 1000L
 }

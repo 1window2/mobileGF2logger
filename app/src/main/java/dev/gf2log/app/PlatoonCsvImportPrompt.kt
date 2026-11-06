@@ -8,6 +8,7 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
+import dev.gf2log.app.management.GAME_ID_RANGE
 import dev.gf2log.app.management.PlatoonClient
 import dev.gf2log.app.management.PlatoonProfile
 import dev.gf2log.app.management.PlatoonProfileRegistry
@@ -93,7 +94,7 @@ internal object PlatoonCsvImportPrompt {
         val servers = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
         val error = activity.errorLine()
         lateinit var dialog: AlertDialog
-        fun validId(): Long? = platoonId.input.text.toString().toLongOrNull()?.takeIf { it in 1L..UInt.MAX_VALUE.toLong() }
+        fun validId(): Long? = platoonId.input.text.toString().toLongOrNull()?.takeIf { it in GAME_ID_RANGE }
         fun updateEnabled() {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled =
                 name.input.text.isNotBlank() && validId() != null && region != null

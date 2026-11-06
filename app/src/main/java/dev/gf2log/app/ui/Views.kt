@@ -391,7 +391,10 @@ internal fun View.setShownInGroup(shown: Boolean) {
     if (index > 0) parent.getChildAt(index - 1).visibility = visibility
 }
 
-/** A tappable grouped row with an optional icon, supporting text, and trailing value. */
+/**
+ * A grouped row with an optional icon, supporting text, and trailing value. Without [onClick] it
+ * is an information row: focusable so it is read, but neither clickable nor announced as a button.
+ */
 internal fun Context.navigationRow(
     title: CharSequence,
     detail: CharSequence? = null,
@@ -400,17 +403,21 @@ internal fun Context.navigationRow(
     destructive: Boolean = false,
     enabled: Boolean = true,
     showChevron: Boolean = true,
-    onClick: () -> Unit,
-): View = AccessibleRow(this).apply {
+    onClick: (() -> Unit)? = null,
+): View = (if (onClick == null) LinearLayout(this) else AccessibleRow(this)).apply {
     orientation = LinearLayout.HORIZONTAL
     gravity = Gravity.CENTER_VERTICAL
     minimumHeight = dp(if (detail.isNullOrBlank()) 52 else 64)
     setPadding(dp(8), dp(8), dp(4), dp(8))
-    background = selectableRect()
     isEnabled = enabled
     contentDescription = listOfNotNull(title, trailing, detail?.takeIf(CharSequence::isNotBlank))
         .joinToString(". ")
-    setOnClickListener { onClick() }
+    if (onClick == null) {
+        isFocusable = true
+    } else {
+        background = selectableRect()
+        setOnClickListener { onClick() }
+    }
     val primaryColor = when {
         !enabled -> R.color.text_secondary
         destructive -> R.color.destructive_action

@@ -243,7 +243,11 @@ internal class WeeklyJournalSection(
                 onFailure = { error ->
                     Feedback.show(
                         activity,
-                        if (error is WeeklyNoteLimitException) R.string.weekly_note_limit_reached else R.string.save_failed,
+                        if (error is WeeklyNoteLimitException) {
+                            R.string.weekly_note_limit_reached
+                        } else {
+                            platoonDataFailureMessage(error, R.string.save_failed)
+                        },
                     )
                 },
             )
@@ -258,17 +262,24 @@ internal class WeeklyJournalSection(
             activity.getString(R.string.delete),
             destructive = true,
         ) {
+            // A failure is reported too, and the list reloads so it shows what is actually stored.
             work.run(task = { repository().deleteWeeklyNote(note.id) }) { result ->
-                if (result.getOrDefault(false)) {
-                    Feedback.show(activity, R.string.note_deleted)
-                    onChanged()
-                }
+                Feedback.show(activity, deletionFeedback(result))
+                onChanged()
             }
         }
     }
 
-    private companion object {
-        const val STATE_NOTE_DAY = "weekly.note_day"
-        const val STATE_NOTE_DRAFT = "weekly.note_draft"
+    internal companion object {
+        private const val STATE_NOTE_DAY = "weekly.note_day"
+        private const val STATE_NOTE_DRAFT = "weekly.note_draft"
+
+        /** The message for a note deletion: only a stored `true` counts as deleted. */
+        fun deletionFeedback(result: Result<Boolean>): Int =
+            if (result.getOrDefault(false)) {
+                R.string.note_deleted
+            } else {
+                platoonDataFailureMessage(result.exceptionOrNull(), R.string.note_delete_failed)
+            }
     }
 }

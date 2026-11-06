@@ -6,15 +6,15 @@ object SnapshotComparisonCsv {
     const val HEADER =
         "olderCapturedAt,newerCapturedAt,changeType,uid,name,weeklyMeritDelta," +
             "totalMeritDelta,totalScoreDelta,lastLoginChanged,weeklyMeritDeltaCertainty," +
-            "totalScoreDeltaCertainty"
+            "totalScoreDeltaCertainty,totalMeritDeltaCertainty"
 
     fun format(result: SnapshotComparison.Result): String = buildString {
         appendLine(HEADER)
         result.joined.forEach { member ->
-            appendRow(result, "JOINED", member.uid, member.name, null, null, null, null, null, null)
+            appendRow(result, "JOINED", member.uid, member.name, null, null, null, null, null, null, null)
         }
         result.left.forEach { member ->
-            appendRow(result, "WITHDREW", member.uid, member.name, null, null, null, null, null, null)
+            appendRow(result, "WITHDREW", member.uid, member.name, null, null, null, null, null, null, null)
         }
         result.changes.forEach { change ->
             appendRow(
@@ -28,6 +28,7 @@ object SnapshotComparisonCsv {
                 change.lastLoginChanged,
                 change.weeklyMeritDeltaCertainty,
                 change.totalScoreDeltaCertainty,
+                change.totalMeritDeltaCertainty,
             )
         }
     }.trimEnd() + "\n"
@@ -43,6 +44,7 @@ object SnapshotComparisonCsv {
         lastLoginChanged: Boolean?,
         weeklyMeritCertainty: MetricCertainty?,
         totalScoreCertainty: MetricCertainty?,
+        totalMeritCertainty: MetricCertainty?,
     ) {
         appendLine(
             listOf(
@@ -57,6 +59,7 @@ object SnapshotComparisonCsv {
                 lastLoginChanged,
                 weeklyMeritCertainty,
                 totalScoreCertainty,
+                totalMeritCertainty,
             ).joinToString(",") { CsvCell.escape(it) },
         )
     }

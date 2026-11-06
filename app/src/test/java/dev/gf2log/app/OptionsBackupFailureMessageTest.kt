@@ -37,4 +37,13 @@ class OptionsBackupFailureMessageTest {
         assertEquals(R.string.full_backup_export_failed, backupExportFailureMessage(complete = true))
         assertEquals(R.string.status_backup_export_failed, backupExportFailureMessage(complete = false))
     }
+
+    @Test
+    fun `a damaged export is still reported after its screen was recreated or closed`() {
+        // The rebuild prompt cannot show on a destroyed screen, so the outcome falls back to a toast.
+        assertEquals(BackupOutcomeDelivery.DAMAGED_NOTICE, backupOutcomeDelivery(damaged = true, ownerGone = true))
+        assertEquals(BackupOutcomeDelivery.OFFER_REBUILD, backupOutcomeDelivery(damaged = true, ownerGone = false))
+        assertEquals(BackupOutcomeDelivery.RESULT_NOTICE, backupOutcomeDelivery(damaged = false, ownerGone = true))
+        assertEquals(BackupOutcomeDelivery.RESULT_NOTICE, backupOutcomeDelivery(damaged = false, ownerGone = false))
+    }
 }

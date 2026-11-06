@@ -2,6 +2,30 @@ package dev.gf2log.protocol.model
 
 sealed interface GameData
 
+/**
+ * The number of list elements, nested ones included, that this payload retains; never below one.
+ * Buffers that hold decoded payloads weigh them by it, because a payload count alone says nothing
+ * about how much memory a crafted payload pins.
+ */
+fun GameData.decodedElementCount(): Int {
+    val count = when (this) {
+        is WeaponsData -> weapons.size + weapons.sumOf { it.weaponMods.size }
+        is WeaponModsData -> mods.size
+        is PublicSkillItemsData -> items.size
+        is GuildMembersData -> members.size
+        is PlatoonProfileData -> 1
+        is PlatoonActivityData -> summaries.size + entries.size
+        is PlatoonUpdatesData -> entries.size + entries.sumOf { it.members.size }
+        is FormationsData -> formations.size + formations.sumOf { formation ->
+            formation.dolls.size + formation.dolls.sumOf { doll ->
+                doll.attachmentUids.size + doll.fixedKeyIds.size +
+                    doll.expansionKeyIds.size + doll.commonKeyUids.size
+            }
+        }
+    }
+    return count.coerceAtLeast(1)
+}
+
 data class WeaponsData(val weapons: List<Weapon>) : GameData
 
 data class Weapon(

@@ -26,4 +26,17 @@ class CsvCellTest {
     fun internalCsvCanPreserveFormulaLikeTextWithoutNeutralization() {
         assertEquals("=literal-name", CsvCell.escape("=literal-name", spreadsheetSafe = false))
     }
+
+    @Test
+    fun spreadsheetPrefixIsReversibleForEveryText() {
+        listOf(
+            "=x", "'=x", "''=x", "  -y", "'  @z", "'abc", "abc", "", "'", " '=x", "\r+1",
+        ).forEach { value ->
+            val escaped = CsvCell.escape(value).removeSurrounding("\"").replace("\"\"", "\"")
+
+            assertEquals(value, CsvCell.unescapeSpreadsheet(escaped))
+        }
+        assertEquals("''=x", CsvCell.escape("'=x"))
+        assertEquals("'abc", CsvCell.escape("'abc"))
+    }
 }

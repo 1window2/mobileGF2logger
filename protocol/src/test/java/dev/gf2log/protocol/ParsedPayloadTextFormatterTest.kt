@@ -9,6 +9,8 @@ import dev.gf2log.protocol.model.PlatoonActivitySummary
 import dev.gf2log.protocol.model.PlatoonUpdateEntry
 import dev.gf2log.protocol.model.PlatoonUpdateMember
 import dev.gf2log.protocol.model.PlatoonUpdatesData
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -31,6 +33,22 @@ class ParsedPayloadTextFormatterTest {
 
         assertTrue(text.indexOf("1,First") < text.indexOf("2,Second"))
         assertTrue(text.contains(GuildMembersCsv.HEADER))
+    }
+
+    @Test
+    fun boundedFormattingStopsBeforeExceedingItsLimit() {
+        val payload = ParsedPayload(
+            messageId = 7,
+            payloadType = Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS,
+            isEndOfMessage = true,
+            data = GuildMembersData(List(200) { member((it + 1).toUInt(), "Member $it") }),
+        )
+        val capturedAt = "2026-07-22T08:52:37Z"
+        val full = ParsedPayloadTextFormatter.format(payload, capturedAt)
+
+        assertNull(ParsedPayloadTextFormatter.format(payload, capturedAt, 512))
+        assertNull(ParsedPayloadTextFormatter.format(payload, capturedAt, full.length - 1))
+        assertEquals(full, ParsedPayloadTextFormatter.format(payload, capturedAt, full.length))
     }
 
     @Test

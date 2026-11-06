@@ -2,6 +2,9 @@ package dev.gf2log.app.ui
 
 import android.app.AlertDialog
 import android.content.Context
+import android.os.Bundle
+import android.os.Parcelable
+import android.util.SparseArray
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -71,6 +74,48 @@ internal object Dialogs {
         open.remove(owner)?.forEach { it.get()?.takeIf(android.app.Dialog::isShowing)?.dismiss() }
     }
 
+    private class Restorable(val key: String, val arguments: Bundle, val content: View)
+
+    private val restorable = java.util.WeakHashMap<android.app.Dialog, Restorable>()
+
+    /**
+     * Shows an input dialog that its screen reopens, with the values typed so far, after a theme,
+     * language, or window-size change or process death. [key] names the dialog within its screen,
+     * [arguments] hold what rebuilding it needs, and [content] is the view set on [builder]; its
+     * fields need stable view ids. A screen passes the [DialogDraft] it took back as [restored].
+     */
+    fun showRestorable(
+        builder: AlertDialog.Builder,
+        key: String,
+        content: View,
+        arguments: Bundle = Bundle(),
+        restored: DialogDraft? = null,
+        destructive: Boolean = false,
+        onShown: (AlertDialog) -> Unit = {},
+    ): AlertDialog {
+        restored?.let { content.restoreHierarchyState(it.views) }
+        return show(builder, destructive, onShown).also { restorable[it] = Restorable(key, arguments, content) }
+    }
+
+    /** Saves the open restorable dialogs of [owner], plus [pending] drafts not reopened yet. */
+    fun saveDrafts(owner: android.app.Activity, outState: Bundle, pending: List<DialogDraft>) {
+        val drafts = ArrayList<Bundle>()
+        pending.mapTo(drafts, DialogDraft::toBundle)
+        open[owner]?.mapNotNull { it.get()?.takeIf(android.app.Dialog::isShowing) }?.forEach { dialog ->
+            val shown = restorable[dialog] ?: return@forEach
+            val views = SparseArray<Parcelable>().also(shown.content::saveHierarchyState)
+            drafts += DialogDraft(shown.key, shown.arguments, views).toBundle()
+        }
+        if (drafts.isNotEmpty()) outState.putParcelableArrayList(STATE_DRAFTS, drafts)
+    }
+
+    fun readDrafts(state: Bundle?): List<DialogDraft> = state
+        ?.let { androidx.core.os.BundleCompat.getParcelableArrayList(it, STATE_DRAFTS, Bundle::class.java) }
+        .orEmpty()
+        .mapNotNull(DialogDraft::fromBundle)
+
+    private const val STATE_DRAFTS = "dialogs.drafts"
+
     fun confirm(
         context: Context,
         title: CharSequence,
@@ -132,6 +177,32 @@ internal object Dialogs {
             setPadding(context.dp(24), context.dp(8), context.dp(24), context.dp(8))
             block()
         })
+    }
+}
+
+/** An input dialog's typed values, kept across recreation of its screen; see [Dialogs.showRestorable]. */
+internal class DialogDraft(
+    val key: String,
+    val arguments: Bundle,
+    internal val views: SparseArray<Parcelable>,
+) {
+    internal fun toBundle(): Bundle = Bundle().apply {
+        putString(KEY, key)
+        putBundle(ARGUMENTS, arguments)
+        putSparseParcelableArray(VIEWS, views)
+    }
+
+    internal companion object {
+        private const val KEY = "key"
+        private const val ARGUMENTS = "arguments"
+        private const val VIEWS = "views"
+
+        fun fromBundle(bundle: Bundle): DialogDraft? {
+            val key = bundle.getString(KEY) ?: return null
+            val views = androidx.core.os.BundleCompat.getSparseParcelableArray(bundle, VIEWS, Parcelable::class.java)
+                ?: return null
+            return DialogDraft(key, bundle.getBundle(ARGUMENTS) ?: Bundle(), views)
+        }
     }
 }
 

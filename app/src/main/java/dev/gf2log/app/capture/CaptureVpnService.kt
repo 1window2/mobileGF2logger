@@ -11,8 +11,13 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import dev.gf2log.app.LanguagePreferences
 import dev.gf2log.app.R
+import dev.gf2log.app.SupportedClientSigners
+import dev.gf2log.app.SupportedClientTrust
 import dev.gf2log.app.SupportedGamePackages
 import dev.gf2log.app.management.CsvImportCheckpointManager
+import dev.gf2log.app.management.CsvImportInProgressException
+import dev.gf2log.app.management.PlatoonAccessFailure
+import dev.gf2log.app.management.PlatoonProfile
 import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonStorageScope
@@ -50,8 +55,8 @@ class CaptureVpnService : VpnService() {
     private var destroyed = false
 
     private val captureOnceGraceStop = Runnable {
-        val missing = run?.takeIf { state == State.RUNNING }?.missingAfterRoster() ?: return@Runnable
-        stop(CaptureNotice.CAPTURE_ONCE_PARTIAL, missing.joinToString())
+        val (notice, args) = run?.takeIf { state == State.RUNNING }?.graceOutcome() ?: return@Runnable
+        stop(notice, *args.toTypedArray())
     }
 
     override fun onCreate() {
@@ -99,7 +104,8 @@ class CaptureVpnService : VpnService() {
     }
 
     override fun onRevoke() {
-        stop()
+        // Another VPN app took over or the user disconnected this one in system settings.
+        stop(CaptureNotice.VPN_PERMISSION_REVOKED)
         super.onRevoke()
     }
 
@@ -185,11 +191,19 @@ class CaptureVpnService : VpnService() {
         }
         worker.execute {
             val migration = runCatching {
-                val scopes = profileRegistry.ensureInitialized().map { PlatoonStorageScope(it.storageId) }
-                // An interrupted CSV import or undo must finish first, or its later recovery would
-                // overwrite what this capture ingests. A failing scope stays for the next attempt.
-                CsvImportCheckpointManager.recoverInterruptedImports(this, scopes)
-                scopes.forEach { scope ->
+                val profiles = profileRegistry.ensureInitialized()
+                CaptureHistoryPreparation.run(
+                    profiles,
+                    busy = { CsvImportCheckpointManager.isBusy(it.storageId) },
+                    name = PlatoonProfile::platoonName,
+                    recover = { listed ->
+                        CsvImportCheckpointManager.recoverInterruptedImports(
+                            this,
+                            listed.map { PlatoonStorageScope(it.storageId) },
+                        )
+                    },
+                ) { profile ->
+                    val scope = PlatoonStorageScope(profile.storageId)
                     GuildMembersCsvWriter.deleteStalePartials(scope.retainedCsvDirectory(this))
                     PlatoonRepository(this, scope).reconcileRetainedCsvFiles()
                 }
@@ -199,7 +213,8 @@ class CaptureVpnService : VpnService() {
                 if (migration.isSuccess) {
                     establish(tracker)
                 } else {
-                    stop(CaptureNotice.HISTORY_IMPORT_FAILED)
+                    val (notice, args) = CaptureHistoryPreparation.stopNotice(migration.exceptionOrNull())
+                    stop(notice, *args.toTypedArray())
                 }
             }
         }
@@ -218,7 +233,11 @@ class CaptureVpnService : VpnService() {
             builder.setMetered(false)
         }
 
-        val installedTargets = SupportedGamePackages.all.filter { targetPackage ->
+        // Only a client signed by its trusted signer is routed: another app installed under the same
+        // package name stays outside the VPN until the user trusts it in Settings.
+        val signers = SupportedClientSigners.of(this)
+        val trust = SupportedGamePackages.all.associateWith(signers::trust)
+        val installedTargets = trust.filterValues { it == SupportedClientTrust.VERIFIED }.keys.filter { targetPackage ->
             try {
                 builder.addAllowedApplication(targetPackage)
                 true
@@ -227,7 +246,7 @@ class CaptureVpnService : VpnService() {
             }
         }
         if (installedTargets.isEmpty()) {
-            stop(CaptureNotice.NO_SUPPORTED_CLIENT)
+            stop(CaptureTargetPolicy.noTargetNotice(trust.values))
             return
         }
 
@@ -348,4 +367,51 @@ class CaptureVpnService : VpnService() {
         /** Process-wide and main-thread only: a teardown can outlive the instance that began it. */
         private var teardownsInFlight = 0
     }
+}
+
+/**
+ * Readies every scope's retained history before a capture may ingest into it. An interrupted CSV
+ * import or undo must finish first, or its later recovery would overwrite what this capture
+ * ingests, so one scope whose [recover]y failed fails the whole start; it is retried next time.
+ * A scope whose import is still running, or whose database is damaged, fails it the same way: the
+ * import would roll back or seal what capture writes, and a damaged scope accepts nothing.
+ */
+internal object CaptureHistoryPreparation {
+    /** Preparing the scope called [scopeName] failed, so the stop notice can name it. */
+    class ScopeFailure(val scopeName: String, cause: Throwable) :
+        IllegalStateException("Unable to prepare Platoon history", cause)
+
+    fun <S> run(
+        scopes: List<S>,
+        busy: (S) -> Boolean = { false },
+        name: (S) -> String = { it.toString() },
+        recover: (List<S>) -> Int,
+        prepare: (S) -> Unit,
+    ) {
+        // Not a failed recovery: the import is writing, and starting again once it ends works.
+        if (scopes.any(busy)) throw CsvImportInProgressException()
+        val failed = recover(scopes)
+        check(failed == 0) { "CSV import recovery is incomplete for $failed Platoon scope(s)" }
+        scopes.forEach { scope ->
+            try {
+                prepare(scope)
+            } catch (error: Exception) {
+                throw ScopeFailure(name(scope), error)
+            }
+        }
+    }
+
+    /**
+     * Why a start that could not prepare history stops. A damaged database names its Platoon, and
+     * a running import says that trying later works; anything else keeps the generic notice.
+     */
+    fun stopNotice(error: Throwable?): Pair<CaptureNotice, List<String>> =
+        when (PlatoonAccessFailure.of(error)) {
+            PlatoonAccessFailure.DATABASE_DAMAGED -> (error as? ScopeFailure)?.scopeName
+                ?.takeIf(String::isNotBlank)
+                ?.let { CaptureNotice.DATABASE_DAMAGED to listOf(it) }
+                ?: (CaptureNotice.HISTORY_IMPORT_FAILED to emptyList())
+            PlatoonAccessFailure.IMPORT_IN_PROGRESS -> CaptureNotice.CSV_IMPORT_IN_PROGRESS to emptyList()
+            PlatoonAccessFailure.OTHER -> CaptureNotice.HISTORY_IMPORT_FAILED to emptyList()
+        }
 }

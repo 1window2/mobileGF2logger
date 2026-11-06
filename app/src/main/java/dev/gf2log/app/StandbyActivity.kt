@@ -15,9 +15,11 @@ import androidx.core.view.WindowInsetsControllerCompat
 import java.time.Instant
 import java.time.ZoneId
 import dev.gf2log.app.standby.ScheduledRecording
+import dev.gf2log.app.standby.StandbyAttendance
 import dev.gf2log.app.standby.StandbyAutomation
 import dev.gf2log.app.standby.StandbyAutomationService
 import dev.gf2log.app.standby.StandbyPlanner
+import dev.gf2log.app.standby.hasScreenLock
 import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.TextRole
 import dev.gf2log.app.ui.dp
@@ -71,14 +73,20 @@ class StandbyActivity : BaseActivity() {
         }
 
         // Shown on every entry, so someone who skipped the first-time explanation still learns
-        // what this black screen is and how to leave it.
+        // what this black screen is and how to leave it, and on a phone with a screen lock that it
+        // is not locked meanwhile (a scheduled recording never runs on one).
+        val leaveHint = when {
+            scheduled -> R.string.scheduled_touch_to_cancel
+            hasScreenLock(this) -> R.string.standby_touch_to_leave_unlocked
+            else -> R.string.standby_touch_to_leave
+        }
         val hint = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(text(getString(if (scheduled) R.string.scheduled_running else R.string.standby_running), TextRole.TITLE) {
                 gravity = Gravity.CENTER
                 setTextColor(getColor(R.color.standby_hint))
             })
-            addView(text(getString(if (scheduled) R.string.scheduled_touch_to_cancel else R.string.standby_touch_to_leave), TextRole.SECONDARY) {
+            addView(text(getString(leaveHint), TextRole.SECONDARY) {
                 gravity = Gravity.CENTER
                 setTextColor(getColor(R.color.standby_hint))
                 setPadding(0, dp(6), 0, 0)
@@ -93,7 +101,7 @@ class StandbyActivity : BaseActivity() {
         }
         root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
-            contentDescription = getString(if (scheduled) R.string.scheduled_touch_to_cancel else R.string.standby_touch_to_leave)
+            contentDescription = getString(leaveHint)
             setOnClickListener { leave() }
             addView(hint, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -176,13 +184,16 @@ class StandbyActivity : BaseActivity() {
     internal fun finishForAutomation() {
         if (leaving) return
         leaving = true
+        // Whatever this screen covered resumes now, with nobody necessarily present.
+        StandbyAttendance.automationEnded()
         finish()
     }
 
     private fun leave() {
         if (leaving) return
         leaving = true
-        StandbyAutomation.cancel()
+        StandbyAutomation.cancel(byUser = true)
+        StandbyAttendance.attended()
         finish()
     }
 

@@ -159,7 +159,7 @@ Home, Platoon, and Weekly share a 64dp bottom bar. Each destination has a 24dp i
 
 ### Capture Status Panel
 
-Capture state, its localized latest notice, the one-time capture checklist, the two supported clients with their package IDs and install state, and the capture actions form one operational group. While stopped the panel offers One-time capture (primary) and Continuous capture; while preparing or capturing those are replaced by a single Stop action.
+Capture state, its localized latest notice, the one-time capture checklist, the two supported clients with their package IDs and install or signer-trust state, and the capture actions form one operational group. While stopped the panel offers One-time capture (primary) and Continuous capture; while preparing or capturing those are replaced by a single Stop action.
 
 ### Weekly Table
 

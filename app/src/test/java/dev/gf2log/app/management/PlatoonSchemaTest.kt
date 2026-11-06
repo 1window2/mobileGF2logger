@@ -27,5 +27,11 @@ class PlatoonSchemaTest {
         assertTrue("joined_date" in columns.getValue("membership_periods"))
         assertTrue("time_known" in columns.getValue("member_events"))
         assertTrue("key" in columns.getValue("platoon_maintenance_state"))
+        assertTrue("clock_suspect" in columns.getValue("snapshots"))
+    }
+
+    @Test
+    fun `a backup from before v14 needs no clock column`() {
+        assertFalse("clock_suspect" in PlatoonSchema.requiredColumns(13).getValue("snapshots"))
     }
 }

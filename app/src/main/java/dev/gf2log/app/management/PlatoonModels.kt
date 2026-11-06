@@ -3,6 +3,12 @@ package dev.gf2log.app.management
 import java.time.Instant
 import java.time.LocalDate
 
+/**
+ * Member UIDs and Platoon IDs the game can send: unsigned 32-bit values, where 0 is the protobuf
+ * default of a missing field. Any other number can never match a packet.
+ */
+internal val GAME_ID_RANGE: LongRange = 1L..UInt.MAX_VALUE.toLong()
+
 data class PlatoonSnapshot(
     val id: Long,
     val capturedAt: Instant,
@@ -40,6 +46,10 @@ data class MembershipPeriod(
     val note: String,
 )
 
+/**
+ * [name] is the display name: [customName] when the user set one, otherwise [currentName], the
+ * latest in-game name.
+ */
 data class MemberStatus(
     val uid: Long,
     val name: String,
@@ -49,7 +59,23 @@ data class MemberStatus(
     val lastSeenAt: Instant,
     val note: String,
     val membershipPeriods: List<MembershipPeriod>,
+    val currentName: String = name,
+    val customName: String? = null,
 )
+
+/**
+ * Whether a member-list search [query] finds this member: the display name, the in-game name
+ * behind a nickname, or the UID, which may be typed as shown (`#1234`).
+ */
+fun MemberStatus.matchesSearch(query: String): Boolean {
+    val trimmed = query.trim()
+    if (trimmed.isEmpty()) return true
+    if (name.contains(trimmed, ignoreCase = true) || currentName.contains(trimmed, ignoreCase = true)) {
+        return true
+    }
+    val uidQuery = trimmed.removePrefix("#").trim()
+    return uidQuery.isNotEmpty() && uidQuery.all(Char::isDigit) && uid.toString().contains(uidQuery)
+}
 
 /**
  * The membership period a member list shows: the open period, or the most recently closed one
@@ -124,11 +150,18 @@ enum class EvidencePrecision {
     MANUAL,
 }
 
+/**
+ * Who supplied a membership boundary. Stored by name and encoded by ordinal in weekly history,
+ * so new values are only appended. Only 21960 Updates evidence is [GAME_UPDATES]; a roster
+ * boundary dated by a name-matched 21935 activity is [ACTIVITY] (schema v14), which a later
+ * Updates boundary for the same change replaces.
+ */
 enum class EvidenceSource {
     SNAPSHOT,
     GAME_UPDATES,
     MANUAL,
     LEGACY_IMPORT,
+    ACTIVITY,
 }
 
 enum class DailyEvidence {

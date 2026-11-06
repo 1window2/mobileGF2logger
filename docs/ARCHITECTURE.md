@@ -70,9 +70,52 @@ Android 10 and newer, the capture service also resolves the original connection
 tuple to the owning supported package through Android's VPN owner API. Remote
 IP addresses and DNS/SNI labels are diagnostic endpoint metadata only; they are
 not currently collected as server identity and are not persistence keys.
-Android 8–9 falls back only when exactly one supported client is installed.
-Management payloads are not persisted until a flow has both a verified
-supported owner and valid `21905`.
+Android 8–9 falls back only when exactly one verified supported client is
+installed. Management payloads are not persisted until a flow has both a
+verified supported owner and valid `21905`.
+
+### Supported-client signer trust
+
+A supported client is a package name plus a pinned signer. The publishers'
+certificate digests are not shipped with the app, so `SupportedClientSigner`
+pins trust on first use: per supported package, the SHA-256 digests of the
+signing certificates installed when GF2logger first sees it while the user is
+using the app. Only user-facing entry points pin: Home's resume (skipped while
+standby is armed, since automation can briefly resume Home), Home's capture
+start, the standby button, and turning scheduled recording on. The capture
+service, standby runs, and scheduled wake-ups only read the pins, so nothing
+installed while nobody is using the app is trusted by being routed or launched.
+
+| State | Meaning | Capture | Standby/scheduled run |
+| --- | --- | --- | --- |
+| `NOT_INSTALLED` | Package absent; its pin, if any, is kept | not routed | `NOT_INSTALLED` |
+| `UNPINNED` | Installed, never seen while the app was in use | not routed | `CLIENT_NOT_TRUSTED` |
+| `VERIFIED` | Every pinned certificate still signs it | routed and attributed | opened |
+| `MISMATCH` | Signed by another certificate than the pinned one | not routed | `CLIENT_SIGNER_CHANGED` |
+
+Verification on Android 9 and newer is `PackageManager.hasSigningCertificate`
+with `CERT_INPUT_SHA256`, which also accepts a pinned certificate the client
+has since rotated away from under APK Signature Scheme v3; Android 8 compares
+the current `GET_SIGNATURES` digests. `CaptureVpnService` adds only `VERIFIED`
+packages as allowed applications; when none qualifies it stops with
+`CLIENT_SIGNER_CHANGED`, `CLIENT_NOT_TRUSTED`, or `NO_SUPPORTED_CLIENT`, in that
+order. `CaptureFlowOwnerResolver` maps only verified packages' UIDs, so the
+Android 8–9 single-client fallback never counts an unverified install.
+`StandbyAutomation` checks the trust before a run starts capture and again just
+before it opens the game. Home marks a changed or untrusted client, and
+Settings › Capture lists each client's state; a changed or untrusted one opens a
+confirmation that shows the installed certificate's fingerprint (the first 16
+hex digits) and pins exactly the digests shown, refusing if the package changed
+behind the dialog.
+
+The trust boundary is that of any trust on first use: the first install
+GF2logger sees under a supported package name is trusted, whoever signed it.
+Uninstalling keeps the pin, so a reinstall by the same signer still matches and
+one by any other signer is refused until the user re-trusts it. Pins live in the
+private `supported_client_signers` preferences; `backup_rules.xml` and
+`data_extraction_rules.xml` exclude all preferences, and the `.gf2backup`
+settings codec has no key for them, so pins never leave the device, a restore
+leaves them as they are, and a new device starts with none.
 
 For a previously unknown `(client package, Platoon ID)`, decoded payloads enter
 a bounded process-memory admission queue. Returning to the app presents the
@@ -91,7 +134,8 @@ is initially derived from `(client package, selected server region, Platoon ID)`
 when available, with a random collision-safe fallback, but later server edits do
 not rename or move the scope. Every database, import, retained CSV, checkpoint,
 weekly setting, and backup path remains bound to that opaque ID. Client identity
-is read-only because it comes from Android's VPN owner API; server metadata can
+is read-only because it comes from Android's VPN owner API, limited to clients
+whose signer is verified; server metadata can
 be corrected only within that client's compatible regions. Unscoped v2.3.x
 files remain untouched for forensic safety but are not registered, selectable,
 or reachable through production management paths. Captured packets require a
@@ -115,11 +159,18 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   A malformed or truncated continuation frame discards its dataset the same way.
   Quarantine is advanced from frame metadata before protobuf decoding, so even
   a malformed terminal fragment clears the discarded dataset deterministically.
+  Decoding also charges every submessage and repeated scalar against a budget of
+  32,768 elements per logical payload, across its continuations, and exceeding
+  it is handled like the byte limit, so a frame of minimal elements cannot
+  amplify into an unbounded object graph.
 - One serial `CaptureWorker` owns every parser, flow, session, and admission
-  structure, so that state needs no locks. Native callbacks share a budget of
-  256 queued chunks; lifecycle, confirm, and discard tasks bypass that budget
-  and are never rejected, so a pending Platoon can be confirmed or discarded
-  after capture stops. `CaptureFlowEngine` routes payloads,
+  structure, so that state needs no locks. Native flow opens and chunks share
+  a budget of 256 queued chunks, and a flow that loses either is ignored until
+  it closes; flow closes, lifecycle, confirm, and discard tasks bypass that
+  budget and are never rejected, so every closed flow releases its state and a
+  pending Platoon can be confirmed or discarded after capture stops. Each
+  payload keeps the time it arrived, so one held for identity or confirmation
+  is still dated by that time. `CaptureFlowEngine` routes payloads,
   `PlatoonAdmissionCoordinator` owns pending admission, and the service is
   lifecycle glue whose fields are main-thread only.
 - Stopping capture never blocks the main thread: the worker stops the native
@@ -128,12 +179,17 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   for that whole teardown and becomes `STOPPED` only once it completes, even
   when the service is destroyed meanwhile, so nothing that waits for `STOPPED`
   can overlap the native loop or the drain.
-- Before identity is established, each flow retains at most 32 decoded payload
-  objects. Overflow rejects that flow until closure. The profile registry holds
-  at most 16 bounded identities.
+- Before identity is established, each flow retains at most 32 roster,
+  activity, and updates payloads (128 across flows); overflow rejects that flow
+  until closure. Other payloads are held only for enabled parsed-packet history,
+  under a separate budget of the same size that drops instead of rejecting, and
+  are otherwise discarded. Everything held counts against 65,536 decoded
+  elements across flows. The profile registry holds at most 16 bounded
+  identities.
 - Unconfirmed profile admission is capped at 4 candidates, 64 decoded payloads
-  per candidate, and 128 payloads total. Overflow rejects every flow belonging
-  to that candidate rather than partially persisting it.
+  per candidate, 128 payloads total, and 65,536 decoded elements total.
+  Overflow rejects every flow belonging to that candidate rather than partially
+  persisting it.
 - A bound flow cannot change its Platoon identity. Admission failure clears its
   session and quarantines the flow until native closure. Replay binds every
   claimed flow before routing any buffered payload, so a replay that fails has
@@ -152,16 +208,19 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   quarantines its flow, so an earlier queued open callback cannot recreate stale metadata.
 - Queue saturation is counted and surfaced in the capture status instead of being silently discarded.
 - Raw IP packets and application payloads are not persisted.
-- One parsed history entry is capped at 2 MiB. The packet-table projection
-  accepts at most 512 KiB, 250 rows, 16 columns, 2,048 cells, and 8 KiB per
-  cell; rejected content remains available only through the already bounded raw
-  history view rather than constructing an unbounded Android view hierarchy.
+- One parsed history entry is capped at 2 MiB, enforced while it is formatted.
+  The packet-table projection accepts at most 512 KiB, 256 rows (the roster
+  member limit), 16 columns, 2,313 cells, and 8 KiB per cell; rejected content
+  remains available only through the already bounded raw history view rather
+  than constructing an unbounded Android view hierarchy.
 
 CSV retained as internal roster evidence preserves protocol text exactly.
 Explicit spreadsheet-facing roster, member, comparison, and weekly exports pass
 string cells through a shared encoder that quotes delimiters and prefixes
 formula-like values with an apostrophe. Numeric counters remain numeric, and
-the protection is never fed back into retained member identity.
+the protection is never fed back into retained member identity: the prefix is
+reversible, a selected roster import removes exactly one, and a file whose names
+changed that way is retained in the lossless form.
 
 The single worker is deliberate: these eight responses are sparse, and avoiding
 a worker pool reduces scheduling, memory, and ordering complexity. If
@@ -190,8 +249,10 @@ timestamp but no UID, so a fact is linked only when nearby roster snapshots
 map the name to exactly one member. Ambiguous duplicate names remain stored
 but unresolved.
 
-Observed action `802001` is deduplicated to one Daily Patrol fact per UID and
-matching 05:00-based game day. Membership boundaries remain available as
+Only the UID-safe 21960 Updates kind `8` supplies Daily Patrol evidence,
+deduplicated to one fact per UID and 05:00-based game day; 21935 `802001` and
+`801005` rows are name-only supporting history and never count as Daily Patrol.
+Membership boundaries remain available as
 UID-safe 21917 observation facts. Payload 21960 supplies exact UID and event
 timestamps for Join, Withdraw, and Remove boundaries; those individual
 boundaries are immutable. Manual boundaries remain editable and can coexist
@@ -225,13 +286,45 @@ SQLite work. Within that cap, `WeeklyHistoryWorkPolicy` adds the listed
 neighbouring weeks that read an instant across a 05:00 reset (the closed week
 of an exact-reset roster, the calendar-day Join / Withdraw week, and later
 weeks up to the next stored roster), so their stored revisions never lag the
-live projection. SQLite retains the newest 10,000 activity
-facts, and one ingestion resolves at most 250 unresolved facts. A database-local
+live projection. SQLite retains the newest 10,000 21935 activity
+facts; exact 21960 Daily Patrol facts are outside that cap. One ingestion
+resolves at most 250 unresolved facts. A database-local
 cursor rotates those bounded batches through the complete retained backlog.
 Schema v11 owns the rotation cursor and a global `(captured_at, id)` retention
 index. Schema v13 repairs the derived active-member projection from canonical
-membership periods during upgrade; supported older backups are upgraded before
-strict current-schema validation.
+membership periods during upgrade, and every writable open re-derives it once
+more whenever the rule's `active_state_rule` version changes. Schema v14 marks
+activity-dated roster boundaries as `ACTIVITY` evidence, folds duplicate open
+periods, adds `snapshots.clock_suspect`, and removes every row of a member
+stored without a real UID (UID 0 or below); supported older backups are
+upgraded before strict current-schema validation, and every restored database
+runs the same UID repair after its rows are rebuilt, so an archive already at
+v14 cannot bring such a member back. The rebuild copies the archive's own
+`platoon_maintenance_state` (history reset zone, activity-resolution cursor)
+in place of what creating the empty copy stamped, and derives every active
+flag again with the current rule, so an archive's flags or rule stamp are
+never trusted.
+
+`SnapshotClockReview` keeps a roster captured with the phone clock set ahead
+from becoming the permanent current roster. Before each roster that may
+become current is placed, every stored roster dated more than one hour after
+the best known present is set aside (`clock_suspect = 1`): that present is the
+phone clock or, when later, the newest server time stored or carried by the
+incoming roster (a member login, a 21935 activity, or a 21960 Updates time).
+Server times trail the real present, so they can vouch for a roster but never
+convict one; only a later phone-clock reading reveals a future date. Setting a
+roster aside withdraws the renames and withdrawals it inferred as the current
+roster, reopening those withdrawals on periods the replay keeps, and replays
+the remaining roster history. A set-aside roster keeps every row and returns,
+with another replay, once the clock has reached its date and no roster dated
+earlier shows a newer login for one of its members (`SnapshotClockPolicy`):
+one set aside because a later capture ran on a clock set behind comes back,
+while one really captured ahead stays aside even after its date passes, so it
+never lands among the rosters captured meanwhile. Every read that picks or
+orders rosters (latest roster, comparison baseline, weekly inputs and evidence
+days, replay frames, membership correlation and the active-state rule)
+selects `clock_suspect = 0`; source-file deduplication and the evidence digest
+still see every row.
 These limits are enforced again at repository and persistence boundaries so a
 future caller cannot bypass the protocol-layer checks. User-entered text has
 the same treatment: `ManualTextPolicy` trims and then rejects a member name
@@ -363,14 +456,40 @@ the repository maintenance lock, the database helper, the profile registry,
 then settings stores. Restore recovery runs only when durable restore artifacts
 exist, so constructing a repository never takes the exclusive gate.
 
+`PlatoonAccessFailure` classifies why a Platoon could not be read or written
+the same way for screens, capture, and maintenance. A damaged database (moved
+aside under `.corrupt-<time>`, or SQLite corruption met while reading) blocks
+Home's roster summary and the Platoon, Weekly, member, order, comparison, and
+history screens with Restore backup, which opens Settings' restore
+confirmation, and Rebuild, which `PlatoonDatabaseDamage.rebuildFromRetainedCsv`
+performs once capture is stopped: the database is set aside, its damaged copy
+kept, and a fresh one repopulated from the retained roster CSVs. While another
+thread's CSV import, rollback, or undo holds a Platoon's claim, every
+repository call for it refuses with `CsvImportInProgressException`, as
+do a second import or undo, a backup restore, a rebuild, and Platoon deletion.
+Screens then show an import-in-progress state with Retry and actions say to try
+again shortly instead of reporting a failure; Home also disables its start
+actions while its own import or undo runs and refuses a start while any claim
+is held. Capture start fails closed: a held claim stops it with
+`CSV_IMPORT_IN_PROGRESS` before recovery runs, and a damaged scope stops it with
+`DATABASE_DAMAGED` naming the Platoon. During a run, a save into a damaged
+database reports `DATABASE_DAMAGED`, which stays shown until another error
+replaces it, and a failed roster ingest is not "recovered" by reconciling the
+retained CSVs into a roster-only copy; its CSV is already retained, so a later
+reconcile ingests it. Standby and scheduled recording treat such a refused start
+as a failed run and try again at the next planned run.
+
 ## Parsed-packet history
 
 Every completed recognized payload is formatted in protocol order and written
 atomically below the admitted profile's private
 `files/platoons/<storage-id>/capture-history` directory. Unconfirmed payloads
 never enter history. `CaptureHistoryStore` returns entries newest-first, trims
-the oldest files once the count exceeds 100, rejects path-like identifiers, and
-supports explicit deletion of user-selected entries. `SavedHistoryStore`
+the earliest-recorded files once the count exceeds 100, rejects path-like
+identifiers, and supports explicit deletion of user-selected entries. Recording
+order is a sequence persisted in each entry ID rather than the wall clock, so a
+clock moved backwards never rotates out the entry just saved. Every history and
+roster file is synced before it is renamed into place. `SavedHistoryStore`
 atomically copies selected entries into the same profile's `saved-history`
 directory, rejects duplicates, caps the collection at 50 without FIFO deletion,
 and keeps saved entries independent from recent-history rotation.
@@ -432,8 +551,9 @@ import seals. Undo quarantines only the planned identities and restores the
 database under the repository's exclusive maintenance lock. Durable restore
 state resumes interrupted quarantine/database replacement after process death;
 ordinary failures restore both the evidence and the preceding undo checkpoint.
-A post-import database digest refuses undo after any later Platoon mutation so
-a one-level rollback cannot silently overwrite newer work; the digest is
+A post-import digest of the primary Platoon evidence refuses undo after any
+later Platoon mutation so a one-level rollback cannot silently overwrite newer
+work, while recording or selecting a derived weekly revision does not; the digest is
 compared again inside the exclusive section that installs the checkpoint, so an
 ingest that lands after the first check is never overwritten. Interrupted
 imports and undos are recovered for every registered Platoon at process start,

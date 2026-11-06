@@ -1,8 +1,11 @@
 package dev.gf2log.app.capture
 
 import dev.gf2log.app.SupportedGamePackages
+import dev.gf2log.protocol.Gfl2PayloadDecoder
 import dev.gf2log.protocol.model.ParsedPayload
 import dev.gf2log.protocol.model.PlatoonProfileData
+import dev.gf2log.protocol.model.Weapon
+import dev.gf2log.protocol.model.WeaponsData
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -110,6 +113,20 @@ class PendingPlatoonAdmissionStoreTest {
     }
 
     @Test
+    fun aClaimReplaysEachPayloadWithTheTimeItArrived() {
+        val profile = profile(4u, "Early")
+        val token = requireNotNull(
+            PendingPlatoonAdmissionStore.begin(SupportedGamePackages.HAOPLAY, profile, flowId = 3L).token,
+        )
+        val arrived = Instant.parse("2026-07-22T04:50:00Z")
+        PendingPlatoonAdmissionStore.offer(token, 3L, payload(profile), arrived)
+
+        val buffered = requireNotNull(PendingPlatoonAdmissionStore.claim(token)).payloads.single()
+        assertEquals(arrived, buffered.receivedAt)
+        assertEquals(3L, buffered.flowId)
+    }
+
+    @Test
     fun failedOrThrowingAdmissionReleasesTheClaimForAnotherDecision() {
         val token = requireNotNull(
             PendingPlatoonAdmissionStore.begin(
@@ -203,6 +220,34 @@ class PendingPlatoonAdmissionStoreTest {
     }
 
     @Test
+    fun decodedElementBudgetIsSharedAcrossCandidatesAndReleasedOnRemoval() {
+        val tokens = (1..3).map { index ->
+            requireNotNull(
+                PendingPlatoonAdmissionStore.begin(
+                    SupportedGamePackages.HAOPLAY,
+                    profile(index.toUInt(), "P$index"),
+                    flowId = index.toLong(),
+                ).token,
+            )
+        }
+        val large = (PendingPlatoonAdmissionStore.MAX_TOTAL_ELEMENTS * 3 / 5).toInt()
+
+        assertEquals(
+            PendingPlatoonAdmissionStore.OfferResult.Accepted,
+            PendingPlatoonAdmissionStore.offer(tokens[0], 1L, weapons(large)),
+        )
+        assertEquals(
+            PendingPlatoonAdmissionStore.OfferResult.Overflow(setOf(2L)),
+            PendingPlatoonAdmissionStore.offer(tokens[1], 2L, weapons(large)),
+        )
+        PendingPlatoonAdmissionStore.discard(tokens[0])
+        assertEquals(
+            PendingPlatoonAdmissionStore.OfferResult.Accepted,
+            PendingPlatoonAdmissionStore.offer(tokens[2], 3L, weapons(large)),
+        )
+    }
+
+    @Test
     fun candidateCountRejectsOnlyTheNewFlow() {
         repeat(PendingPlatoonAdmissionStore.MAX_CANDIDATES) { index ->
             assertNotNull(
@@ -234,5 +279,12 @@ class PendingPlatoonAdmissionStoreTest {
         payloadType = 21905,
         isEndOfMessage = true,
         data = profile,
+    )
+
+    private fun weapons(count: Int) = ParsedPayload(
+        messageId = 1,
+        payloadType = Gfl2PayloadDecoder.TYPE_WEAPONS,
+        isEndOfMessage = true,
+        data = WeaponsData(List(count) { Weapon(it.toUInt(), 0u, 0u, 0u, 0u, 0u, 0u, emptyList()) }),
     )
 }

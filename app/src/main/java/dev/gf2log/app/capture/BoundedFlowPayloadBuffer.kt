@@ -2,15 +2,23 @@ package dev.gf2log.app.capture
 
 /**
  * Bounded pre-identity quarantine; overflow permanently rejects that flow until closure.
+ * Optional items have budgets of their own and are only dropped at their limit, so they can
+ * neither reject a flow nor take room from the items that would.
+ * Besides counting items, it sums each item's [weigh] against [maxTotalWeight], because one
+ * decoded payload can hold far more elements than another.
  * Capture confines it to the worker thread; access stays serialized so sharing it remains safe.
  */
 internal class BoundedFlowPayloadBuffer<T>(
     private val maxItemsPerFlow: Int,
     private val maxTotalItems: Int,
+    private val maxTotalWeight: Long = Long.MAX_VALUE,
+    private val weigh: (T) -> Int = { 1 },
 ) {
-    private val pending = mutableMapOf<Long, ArrayDeque<T>>()
+    private val pending = mutableMapOf<Long, Pending<T>>()
     private val rejected = mutableSetOf<Long>()
     private var totalItems = 0
+    private var totalOptionalItems = 0
+    private var totalWeight = 0L
 
     init {
         require(maxItemsPerFlow > 0)
@@ -20,21 +28,49 @@ internal class BoundedFlowPayloadBuffer<T>(
     @Synchronized
     fun offer(flowId: Long, item: T): OfferResult {
         if (flowId in rejected) return OfferResult.REJECTED
-        val items = pending.getOrPut(flowId, ::ArrayDeque)
-        if (items.size >= maxItemsPerFlow || totalItems >= maxTotalItems) {
+        val items = pending.getOrPut(flowId, ::Pending)
+        val weight = weightOf(item)
+        if (
+            items.required >= maxItemsPerFlow ||
+            totalItems >= maxTotalItems ||
+            weight > maxTotalWeight - totalWeight
+        ) {
             reject(flowId)
             return OfferResult.OVERFLOW
         }
-        items.addLast(item)
+        items.items.addLast(item)
+        items.required += 1
+        items.weight += weight
         totalItems += 1
+        totalWeight += weight
+        return OfferResult.ACCEPTED
+    }
+
+    /** Holds [item] in captured order when there is room, without ever rejecting the flow. */
+    @Synchronized
+    fun offerOptional(flowId: Long, item: T): OfferResult {
+        if (flowId in rejected) return OfferResult.REJECTED
+        val optional = pending[flowId]?.optional ?: 0
+        val weight = weightOf(item)
+        if (
+            optional >= maxItemsPerFlow ||
+            totalOptionalItems >= maxTotalItems ||
+            weight > maxTotalWeight - totalWeight
+        ) {
+            return OfferResult.DROPPED
+        }
+        val items = pending.getOrPut(flowId, ::Pending)
+        items.items.addLast(item)
+        items.weight += weight
+        totalOptionalItems += 1
+        totalWeight += weight
         return OfferResult.ACCEPTED
     }
 
     @Synchronized
     fun take(flowId: Long): List<T> {
-        val items = pending.remove(flowId) ?: return emptyList()
-        totalItems -= items.size
-        return items.toList()
+        val items = pending.remove(flowId)?.also(::release) ?: return emptyList()
+        return items.items.toList()
     }
 
     @Synchronized
@@ -42,13 +78,13 @@ internal class BoundedFlowPayloadBuffer<T>(
 
     @Synchronized
     fun reject(flowId: Long) {
-        totalItems -= pending.remove(flowId)?.size ?: 0
+        pending.remove(flowId)?.let(::release)
         rejected += flowId
     }
 
     @Synchronized
     fun remove(flowId: Long) {
-        totalItems -= pending.remove(flowId)?.size ?: 0
+        pending.remove(flowId)?.let(::release)
         rejected.remove(flowId)
     }
 
@@ -57,7 +93,28 @@ internal class BoundedFlowPayloadBuffer<T>(
         pending.clear()
         rejected.clear()
         totalItems = 0
+        totalOptionalItems = 0
+        totalWeight = 0
     }
 
-    enum class OfferResult { ACCEPTED, OVERFLOW, REJECTED }
+    /** Items currently held across every flow, required and optional. */
+    @Synchronized
+    fun size(): Int = totalItems + totalOptionalItems
+
+    private fun weightOf(item: T): Long = weigh(item).toLong().coerceAtLeast(1)
+
+    private fun release(items: Pending<T>) {
+        totalItems -= items.required
+        totalOptionalItems -= items.optional
+        totalWeight -= items.weight
+    }
+
+    private class Pending<T> {
+        val items = ArrayDeque<T>()
+        var required = 0
+        var weight = 0L
+        val optional: Int get() = items.size - required
+    }
+
+    enum class OfferResult { ACCEPTED, OVERFLOW, REJECTED, DROPPED }
 }

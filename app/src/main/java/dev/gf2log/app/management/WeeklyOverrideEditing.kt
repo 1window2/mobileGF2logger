@@ -51,14 +51,21 @@ object WeeklyOverrideEditing {
         existing: Collection<WeeklyCellOverride>,
         edits: Collection<CellEdit>,
     ): Result {
-        val existingByCell = existing.associateBy { it.uid to it.gameDay }
+        // A stored value outside the week's domain is dropped, so saving any cell cleans the row.
+        val existingByCell = existing
+            .mapNotNull { withinDailyDomain(it, isGunsmokeWeek) }
+            .associateBy { it.uid to it.gameDay }
         val editsByCell = edits.filterNot(CellEdit::isEmpty).associateBy { it.uid to it.gameDay }
         val merged = (existingByCell.keys + editsByCell.keys).mapNotNull { cell ->
             val stored = existingByCell[cell]
             val edit = editsByCell[cell]
             fun invalid(field: Field) = Result.Invalid(cell.first, cell.second, field)
-            val merit = edit?.merit?.let { parseCounter(it) ?: return invalid(Field.MERIT) }
-            val score = edit?.score?.let { parseCounter(it) ?: return invalid(Field.SCORE) }
+            val merit = edit?.merit?.let {
+                parseCounter(it, maximumDailyMerit(isGunsmokeWeek)) ?: return invalid(Field.MERIT)
+            }
+            val score = edit?.score?.let {
+                parseCounter(it, MAX_DAILY_SCORE) ?: return invalid(Field.SCORE)
+            }
             val attempts = edit?.attempts?.let { parseAttempts(it) ?: return invalid(Field.ATTEMPTS) }
             if (edit?.attended == Choice.NO && edit.dailyPatrol == Choice.YES) {
                 return invalid(Field.ACTIVITY)
@@ -97,14 +104,59 @@ object WeeklyOverrideEditing {
         return Result.Valid(merged.sortedWith(compareBy({ it.gameDay }, { it.uid })))
     }
 
+    /**
+     * Whether [edit] sets Login or Daily Patrol to "no" although [cell]'s evidence proves it: a
+     * Daily Patrol event, a login time on the day, or a positive score or attempt count. The cell
+     * would keep showing "yes", so the editor refuses such an edit instead of storing it.
+     */
+    fun contradictsEvidence(cell: WeeklyReportBuilder.DayCell, edit: CellEdit): Boolean {
+        fun positive(edited: String?, shown: Long?): Boolean =
+            (if (edited != null) edited.trim().toLongOrNull() else shown)?.let { it > 0L } == true
+        val loginProven = cell.hasDailyPatrolFact || cell.hasLoginFact ||
+            positive(edit.score, cell.scoreDelta) ||
+            positive(edit.attempts, cell.attempts?.toLong())
+        return (edit.dailyPatrol == Choice.NO && cell.hasDailyPatrolFact) ||
+            (edit.attended == Choice.NO && loginProven)
+    }
+
+    /**
+     * [override] without a merit, score or attempt count outside one day's domain; null once no
+     * value remains. The editor never stores such values, but 2.7.1 did and a backup may carry them.
+     */
+    internal fun withinDailyDomain(override: WeeklyCellOverride, isGunsmokeWeek: Boolean): WeeklyCellOverride? {
+        val merit = override.meritDelta?.takeIf { it in 0..maximumDailyMerit(isGunsmokeWeek) }
+        val score = override.scoreDelta?.takeIf { it in 0..MAX_DAILY_SCORE }
+        val attempts = override.attempts?.takeIf { it in 0..ActivityInference.MAX_DAILY_ATTEMPTS }
+        if (merit == override.meritDelta && score == override.scoreDelta && attempts == override.attempts) {
+            return override
+        }
+        return override.copy(meritDelta = merit, scoreDelta = score, attempts = attempts)
+            .takeIf { it.hasAnyValue() }
+    }
+
     private class Parsed<T>(val value: T?)
 
-    /** Blank clears the field; otherwise a non-negative integer is required. */
-    private fun parseCounter(text: String): Parsed<Long>? {
+    /** Blank clears the field; otherwise an integer from 0 to [maximum] is required. */
+    private fun parseCounter(text: String, maximum: Long): Parsed<Long>? {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return Parsed(null)
-        return trimmed.toLongOrNull()?.takeIf { it >= 0 }?.let { Parsed(it) }
+        return trimmed.toLongOrNull()?.takeIf { it in 0..maximum }?.let { Parsed(it) }
     }
+
+    /**
+     * A Standard day never earns more than its login and Daily Patrol. A Gunsmoke day adds its
+     * attempts and the merit of at most [MAX_DAILY_SCORE] points.
+     */
+    internal fun maximumDailyMerit(isGunsmokeWeek: Boolean): Long = if (isGunsmokeWeek) {
+        ActivityInference.LOGIN_AND_PATROL_MERIT +
+            ActivityInference.MAX_DAILY_ATTEMPTS * ActivityInference.MERIT_PER_ATTEMPT +
+            MAX_DAILY_SCORE / ActivityInference.SCORE_POINTS_PER_MERIT
+    } else {
+        ActivityInference.LOGIN_AND_PATROL_MERIT
+    }
+
+    /** A generous ceiling for one day's Gunsmoke score that keeps every weekly sum exact. */
+    internal const val MAX_DAILY_SCORE = 1_000_000_000L
 
     private fun parseAttempts(text: String): Parsed<Int>? {
         val trimmed = text.trim()

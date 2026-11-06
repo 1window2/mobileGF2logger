@@ -40,13 +40,18 @@ never stored.
 - Provides profile management for correcting server metadata without moving data and for deleting one isolated Platoon behind two confirmations and an exact-name check.
 - Guides first-time users through Main, Settings, Platoon management, weekly controls, and parsed-packet pages, with a persistent English/Korean selector and Skip action; the guide can be replayed from Settings.
 - Offers an overnight standby mode from Home's moon button: an all-black,
-  minimum-brightness screen that keeps the phone awake. With the optional
-  GF2logger accessibility service turned on, standby records members by itself
-  five minutes before each chosen server's daily reset: it starts capture, opens
-  the game, taps Start on the title screen, waits for the roster, closes the game
-  from Recents, and locks the phone after the last server. The service only taps
-  while the game is in front and reads nothing on screen except the foreground
-  app and the app names on Recents cards.
+  minimum-brightness screen that keeps the phone awake and unlocked until
+  standby ends; on a phone with a PIN, pattern, or password it says so and asks
+  once before the first use. With the optional GF2logger accessibility service
+  turned on, standby records members by itself five minutes before each chosen
+  server's daily reset: it starts capture, opens the game, taps where Start sits
+  on the title screen (every few seconds, until the game reports a login, and
+  for two minutes at most), waits for the roster, closes the game from Recents,
+  and locks the phone after the last server. Android 8 offers no lock action, so
+  there the phone is left to its own screen timeout. Tapping the standby screen
+  or switching to another app leaves standby without locking the phone. The
+  service only taps while the game is in front and reads nothing on screen
+  except the foreground app and the app names on Recents cards.
 - On a phone without a PIN, pattern, or password, can instead record every day
   on a schedule from Settings: an alarm wakes the phone before each chosen
   server's reset, records members the same way, and turns the screen off again.
@@ -56,6 +61,9 @@ never stored.
   Selecting a detected Platoon automatically follows that profile's saved region.
 - Registers the HaoPlay (`com.haoplay.game.and.exilium`) and Darkwinter
   (`com.Sunborn.SnqxExilium.Glo`) Android clients as separate VPN targets.
+  The signing certificate first seen for each client is trusted; a client
+  reinstalled under another signer is neither captured nor opened until you
+  trust it again in Settings.
 - Creates UTF-8 Platoon-member CSV files with this column order:
 
 ```text

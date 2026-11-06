@@ -887,7 +887,8 @@ class PlatoonDatabaseIntegrationTest {
         val writable = database.writableDatabase
         writable.beginTransaction()
         try {
-            repeat(PlatoonDatabase.MAX_STORED_ACTIVITY_OBSERVATIONS) { index ->
+            // One 21935 fact over the cap; the exact Daily Patrol fact never counts toward it.
+            repeat(PlatoonDatabase.MAX_STORED_ACTIVITY_OBSERVATIONS + 1) { index ->
                 writable.insertOrThrow(
                     "platoon_activity",
                     null,
@@ -920,7 +921,7 @@ class PlatoonDatabaseIntegrationTest {
 
         assertEquals(1, result.patrolFacts)
         assertEquals(
-            PlatoonDatabase.MAX_STORED_ACTIVITY_OBSERVATIONS.toLong(),
+            PlatoonDatabase.MAX_STORED_ACTIVITY_OBSERVATIONS.toLong() + 1,
             count("platoon_activity", "id > ?", 0),
         )
         assertEquals(0L, count("platoon_activity", "action_id = ?", 1))
@@ -1418,6 +1419,23 @@ class PlatoonDatabaseIntegrationTest {
 
         assertTrue(database.listWeeklyNotes(periodStart.toEpochDay()).isEmpty())
         assertEquals(listOf(override), database.listWeeklyOverrides(periodStart.toEpochDay()))
+    }
+
+    @Test
+    fun snapshotWithUidZeroIsRejectedBeforeAnythingIsStored() {
+        assertThrows(IllegalArgumentException::class.java) {
+            database.ingestSnapshot(
+                PlatoonSnapshot(
+                    id = 0,
+                    capturedAt = Instant.parse("2026-08-10T00:00:00Z"),
+                    sourceFile = "gf2log_platoonmembers_20260810T000000Z.csv",
+                    members = listOf(member(0, "Ghost"), member(TARGET_UID, "Target")),
+                ),
+                EvidenceSource.SNAPSHOT,
+            )
+        }
+
+        assertTrue(database.listMemberStatuses().isEmpty())
     }
 
     @Test

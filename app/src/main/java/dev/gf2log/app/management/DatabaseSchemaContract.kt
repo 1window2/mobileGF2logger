@@ -55,18 +55,8 @@ internal data class DatabaseSchemaContract(
 
     companion object {
         fun read(database: SQLiteDatabase): DatabaseSchemaContract {
-            val tableSql = database.rawQuery(
-                "SELECT name, sql FROM sqlite_master " +
-                    "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' " +
-                    "AND name != 'android_metadata' ORDER BY name",
-                null,
-            ).use { cursor ->
-                buildMap {
-                    while (cursor.moveToNext()) put(cursor.getString(0), cursor.getString(1))
-                }
-            }
             return DatabaseSchemaContract(
-                tableSql.mapValues { (table, sql) ->
+                appTableSql(database).mapValues { (table, sql) ->
                     TableContract(
                         columns = readColumns(database, table),
                         foreignKeys = readForeignKeys(database, table),
@@ -76,6 +66,24 @@ internal data class DatabaseSchemaContract(
                 },
                 auxiliaryObjects = readAuxiliaryObjects(database),
             )
+        }
+
+        /**
+         * Each app table's normalized CREATE statement. Structural metadata cannot report CHECK,
+         * ON CONFLICT, column COLLATE, STRICT or WITHOUT ROWID clauses; comparing the statement
+         * itself proves a database was created by the current schema code. Databases upgraded in
+         * place carry ALTER-appended text, so only rebuilt and freshly created files compare equal.
+         */
+        fun readTableSql(database: SQLiteDatabase): Map<String, String> =
+            appTableSql(database).mapValues { (_, sql) -> normalizeSql(sql.orEmpty()) }
+
+        private fun appTableSql(database: SQLiteDatabase): Map<String, String?> = database.rawQuery(
+            "SELECT name, sql FROM sqlite_master WHERE $APP_TABLES_FILTER ORDER BY name",
+            null,
+        ).use { cursor ->
+            buildMap {
+                while (cursor.moveToNext()) put(cursor.getString(0), cursor.getStringOrNull(1))
+            }
         }
 
         private fun readAuxiliaryObjects(database: SQLiteDatabase): Set<SchemaObjectContract> =
@@ -104,7 +112,7 @@ internal data class DatabaseSchemaContract(
         ): Map<String, ColumnContract> {
             val extended = runCatching {
                 database.rawQuery(
-                    "PRAGMA table_xinfo(${identifier(table)})",
+                    "PRAGMA table_xinfo(${sqlIdentifier(table)})",
                     null,
                 ).use { cursor ->
                     if (cursor.columnCount < 7) return@use null
@@ -116,7 +124,7 @@ internal data class DatabaseSchemaContract(
             // Android API 26 ships SQLite 3.18, predating table_xinfo. The app
             // schema uses only ordinary columns, so table_info is equivalent.
             return database.rawQuery(
-                "PRAGMA table_info(${identifier(table)})",
+                "PRAGMA table_info(${sqlIdentifier(table)})",
                 null,
             ).use { cursor -> readColumns(cursor, hiddenColumn = null) }
         }
@@ -145,7 +153,7 @@ internal data class DatabaseSchemaContract(
             database: SQLiteDatabase,
             table: String,
         ): Set<ForeignKeyContract> = database.rawQuery(
-            "PRAGMA foreign_key_list(${identifier(table)})",
+            "PRAGMA foreign_key_list(${sqlIdentifier(table)})",
             null,
         ).use { cursor ->
             buildSet {
@@ -169,7 +177,7 @@ internal data class DatabaseSchemaContract(
             database: SQLiteDatabase,
             table: String,
         ): Map<String, IndexContract> = database.rawQuery(
-            "PRAGMA index_list(${identifier(table)})",
+            "PRAGMA index_list(${sqlIdentifier(table)})",
             null,
         ).use { cursor ->
             buildMap {
@@ -192,7 +200,7 @@ internal data class DatabaseSchemaContract(
             database: SQLiteDatabase,
             index: String,
         ): List<IndexColumnContract> = database.rawQuery(
-            "PRAGMA index_xinfo(${identifier(index)})",
+            "PRAGMA index_xinfo(${sqlIdentifier(index)})",
             null,
         ).use { cursor ->
             buildList {
@@ -222,9 +230,6 @@ internal data class DatabaseSchemaContract(
                     ?.replace(WHITESPACE, " ")
                     ?.uppercase()
             }
-
-        private fun identifier(value: String): String =
-            "\"${value.replace("\"", "\"\"")}\""
 
         private fun normalizeSql(value: String): String =
             value.trim().replace(WHITESPACE, " ").uppercase()

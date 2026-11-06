@@ -101,7 +101,10 @@ transitions.
 ## Snapshots and weekly tables
 
 - Every Platoon Members payload is stored as a structured snapshot keyed by its
-  capture instant.
+  capture instant. Home's latest-roster row and Snapshot Comparison compare the
+  latest roster with the newest earlier roster whose members differ, so an
+  unchanged roster resent when the Platoon page reopens never hides the change
+  the session captured.
 - Every supplied Platoon Activity entry is stored as an immutable timestamped
   fact. Only UID-safe Updates kind `8` / action `802001` supplies exact Daily
   Patrol evidence; a missing event never proves that Daily Patrol was skipped.
@@ -111,9 +114,11 @@ transitions.
   captured Weekly Merit checkpoints. A 21917 recent-login time proves the
   member logged in on its 05:00-based game day and narrows that day to 50 or
   90; an exact Daily Patrol event fixes it at 90. A Standard day never shows
-  more than 90: a delta above the cap after a near-reset baseline contains the
-  previous day's login or patrol tail, so the day keeps a value only when a
-  single split of that delta remains.
+  more than 90: any delta after a near-reset baseline can contain the previous
+  day's login or patrol tail, so the day keeps a value only when a single split
+  of that delta remains. Login times and Daily Patrol events at the baseline
+  and at the day's latest capture narrow the split, and a capture after the day
+  whose login time is still before it makes the day, Sunday included, 0.
 - Values shared by every compatible allocation are exact. Ambiguous completed
   days remain unknown instead of displaying an arbitrary allocation, while an
   unfinished day displays only its confirmed positive lower bound until it
@@ -167,7 +172,12 @@ transitions.
 
 - UID is the stable member identity; a display name can change over time.
 - A custom nickname is editable and immediately becomes the display name in
-  Platoon management; the personal note remains private to member details.
+  Platoon management; the personal note remains private to member details. A
+  blank nickname, or one equal to the in-game name, stores no nickname, so the
+  member keeps following later in-game renames; saving only the note never
+  turns the current in-game name into a nickname.
+- Member search matches the display name, the in-game name behind a nickname,
+  and the UID, with or without its leading `#`.
 - Manual text is bounded where it is stored, not only by input fields. After
   trimming, a custom nickname or manually added member name holds at most 256
   characters (the roster name limit), and a private member note, membership-period
@@ -179,11 +189,16 @@ transitions.
   join time unless the user supplies one.
 - A UID added between consecutive snapshots opens a join or rejoin membership period.
 - A UID removed between consecutive snapshots closes the active membership period but
-  never deletes the member or prior snapshots.
+  never deletes the member or prior snapshots. Any other period still open for
+  that UID is closed at the same observation, after a duplicate open period that
+  only roster or activity evidence supports has been folded into the stronger
+  one, so the UID keeps no open period.
 - A returning UID opens a new membership period. All previous join/withdraw periods remain
   available.
 - Manual edits are accepted only when every period ends after it starts, no two
-  fully dated periods overlap, and at most one period remains open. An absent
+  fully dated periods overlap, at most one period remains open, and no entered
+  join or withdrawal lies in the future (one hour of device clock skew is
+  allowed, and the date picker stops at today). An absent
   snapshot-derived start remains unknown rather than being treated as an
   infinitely old boundary. Snapshot and exact boundaries are dated in the
   Platoon's game timezone for this check, the same calendar manual dates use,
@@ -192,7 +207,10 @@ transitions.
   periods inside the same transaction with one rule: a member is active while an
   open period remains effective. An open period started by an exact Updates join
   is superseded by a later recorded exit or by a newer roster that omits the
-  member. Schema-v13 upgrade repairs any stale derived flag with the same rule.
+  member. Opening a database re-derives every stale flag once whenever this
+  rule's version changes (platoon_maintenance_state key `active_state_rule`),
+  including databases already at schema v13; a restore derives every flag
+  again while it rebuilds the backup's rows.
 - A roster CSV imported after newer captures still contributes historical
   presence spans. The replay creates missing inactive members and inferred
   withdrawal/rejoin periods without replacing manual or exact Updates evidence.
@@ -209,15 +227,29 @@ transitions.
   activity can date an inferred join or withdrawal only when it lies after the
   previous roster and no later than the roster that revealed the change, at
   most 12 hours before it; an activity after that roster, which already showed
-  the change, never becomes the boundary. Exact in-game Updates
+  the change, never becomes the boundary. Both the roster-time and the later
+  activity-time correlation apply this window. At roster time the change's
+  name-matched facts must share one instant; later, a UID-resolved join is
+  dated by the earliest admitted fact and a withdrawal by the latest, the
+  tightest bound each proves. A fact already resolved to another UID never
+  dates a boundary. Such a boundary is stored and labelled as dated by activity
+  (source `ACTIVITY`, schema v14), not as exact Updates evidence, and it stays
+  editable. Exact in-game Updates
   events can replace an inferred boundary only when a unique 21917 UID can be
-  correlated safely; 21935 contains names but no UID.
+  correlated safely; 21935 contains names but no UID. A 21960 boundary replaces
+  the roster-inferred or activity-dated boundary of the same change, within 48
+  hours or however late the Updates feed arrives as long as no roster was
+  captured between the two, so one change keeps one period and one event.
 - Exact packet-linked boundary fields are immutable while editing. Users can
   add or edit manual membership periods, including historical withdrawn members
   not present in the incremental activity response; deleting an entire period
   requires the separate confirmation flow described below.
-- Membership-period numbers are assigned by join date from oldest to newest and are
-  recalculated after manual additions or edits.
+- Membership-period numbers are assigned by join date from oldest to newest, using the
+  withdrawal date when the join is unknown, and are recalculated after manual additions or
+  edits.
+- A manually added withdrawn member needs a game UID from 1 to 4294967295.
+- Deleting a member also removes unresolved activity facts under a name that no
+  other member ever held, so they cannot reattach to a member re-added later.
 
 ## Weekly history consistency
 
@@ -232,6 +264,10 @@ transitions.
   dates and report mode, in-period notes, and valid contextual identities.
 - Changing the configured game timezone clears incompatible derived history
   and rebuilds it from the unchanged UTC evidence using the new 05:00 boundary.
+  The database records the zone its history is bucketed in, so a committed
+  restore whose history was recorded under another effective zone, or before
+  the zone was recorded, rebuilds it the same way; one in the same zone keeps
+  its revisions and selection.
 - Captured evidence refreshes every listed week that reads it, not only the
   week of its game day. A roster captured exactly at Sunday 05:00 is the
   closing Saturday capture of the week it ends, so that week is re-recorded
@@ -260,6 +296,16 @@ transitions.
 - A captured roster older than the latest stored one, from a late packet or a
   clock moved backwards, is replayed into history instead of being treated as
   the current roster, so it never withdraws members of a newer roster.
+- A roster captured with the phone clock set ahead is set aside at the next
+  roster whose clock reading, or a newer login or activity time from the game
+  server, shows that its date had not yet come (one hour of skew is allowed).
+  It is kept, not deleted, but is no longer the current roster, the comparison
+  baseline, a weekly input, or a week of its own; the renames and withdrawals
+  it inferred are withdrawn and the remaining roster history is replayed. Home's
+  latest-roster row counts the rosters set aside. A real roster set aside
+  because a later capture ran on a clock set behind returns once the clock
+  reaches its date again; one whose own login times are older than a roster
+  dated before it stays aside for good.
 - A consumed CSV import checkpoint is retired by an atomic rename to
   `csv-import-checkpoint.discarded` before deletion, so a crash mid-cleanup can
   never block later imports or undo.
@@ -271,10 +317,31 @@ weekly notes, and manual corrections are stored in the app's private on-device
 database. Raw network traffic is never stored. Export and backup contain only
 parsed management data and must be explicitly initiated by the user.
 
+A damaged Platoon database is never silently replaced. Its screens and Home
+say so and offer Restore backup or Rebuild; rebuilding keeps the damaged copy
+and repopulates only what the retained roster CSVs hold, so Daily Patrol,
+activity, manual edits, notes, and saved weekly tables start empty. Capture
+does not start while any Platoon's database is set aside as damaged, nor while
+a CSV import or undo is running; the screens of a Platoon being imported wait
+for it with Retry.
+
 CSV files created for spreadsheet use neutralize string cells beginning with
 `=`, `+`, `-`, or `@` (including after leading whitespace), preventing a member
 name or note from executing as a spreadsheet formula. Internal retained roster
 evidence remains lossless and is not rewritten with that export-only prefix.
+Text that is formula-like after its leading apostrophes also gets one, so the
+prefix is reversible: importing the app's own roster export removes exactly one
+apostrophe and restores every name, and such an import is retained in the
+lossless form. The one residue is a lossless file whose real name is an
+apostrophe followed by a formula character, which loses that apostrophe on
+import. A roster import ignores one leading UTF-8 byte order mark, and a row
+with UID 0, the protobuf default of a missing UID, is rejected; captured
+rosters drop such a member instead. A database written by an earlier version
+loses every row of such a member when it upgrades to schema v14, and every
+restored backup is repaired the same way: its roster rows, membership periods,
+events, weekly overrides, and the weekly revisions that showed it go, a
+name-resolved activity fact becomes unresolved again, and a roster left with
+no member is removed. Weekly tables also ignore any such identity they read.
 The same neutralization is applied to captured roster, activity, Updates, and
 formation packet tables before they can be copied or opened in spreadsheet
 software.
@@ -282,7 +349,8 @@ software.
 Untrusted evidence is bounded at every persistence boundary. A 21960 Updates entry is dropped whole when any name exceeds 256 characters or it lists more than 256 members. A roster import
 must contain no more than 256 unique UIDs, an activity payload contributes at
 most 250 distinct observations, and the database keeps the newest 10,000
-activity facts. If a newly selected roster CSV fails parsing, duplicate-UID
+21935 activity facts. Exact 21960 Daily Patrol facts do not count toward that
+cap, so newer activity never evicts a week's only Daily Patrol evidence. If a newly selected roster CSV fails parsing, duplicate-UID
 validation, ingestion, or chronological reconciliation, its newly retained file
 is deleted so a failed import cannot poison every later reconciliation. The
 entire selected-file reconciliation runs under one outer SQLite transaction, so

@@ -30,6 +30,7 @@ import dev.gf2log.app.settings.WeeklyCutlines
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.BarAction
+import dev.gf2log.app.ui.DialogDraft
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
@@ -94,7 +95,7 @@ class WeeklyReportActivity : BaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        profileBinding = ActivePlatoonScopeBinding(this)
+        profileBinding = ActivePlatoonScopeBinding(this, pinnedStorage(savedInstanceState))
         scope = profileBinding.scope ?: run {
             Feedback.show(this, R.string.no_platoon_detected_detail, long = true)
             finish()
@@ -123,10 +124,30 @@ class WeeklyReportActivity : BaseActivity() {
 
     override fun onScreenResumed() {
         if (!profileBinding.isCurrent(this)) {
-            recreate()
+            // Edits belong to the bound Platoon; they are saved or discarded before the switch.
+            if (!profileBinding.isSameStorage(this) && hasUnsavedEdits()) {
+                // A recreated screen has no table yet; Save needs the bound Platoon's table.
+                if (model == null) requestRender()
+                confirmDraftBeforeScopeChange(R.string.save_weekly_edits, ::saveEditsWhenLoaded, ::finishEditing)
+            } else {
+                recreate()
+            }
             return
         }
         requestRender(reconcileRetainedCsv = true)
+    }
+
+    private fun hasUnsavedEdits(): Boolean = edits.period != null && !edits.isEmpty()
+
+    override fun boundStorageId(): String? = if (::scope.isInitialized) scope.storageId else null
+
+    override fun hasUnsavedDraft(): Boolean = ::scope.isInitialized && hasUnsavedEdits()
+
+    /** Set when Save was chosen before the bound Platoon's table loaded; [render] saves then. */
+    private var saveWhenLoaded = false
+
+    private fun saveEditsWhenLoaded() {
+        if (model == null) saveWhenLoaded = true else saveEdits()
     }
 
     /** A roster captured while this screen is showing updates the table; edits in progress stay. */
@@ -181,16 +202,22 @@ class WeeklyReportActivity : BaseActivity() {
         ) { result ->
             result.fold(
                 onSuccess = ::render,
-                onFailure = {
+                onFailure = { error ->
+                    // Without a model the edit, share and export actions are disabled; an edit
+                    // draft in progress is kept and comes back once the table loads again.
                     model = null
                     topAdapter.view = null
                     headerAdapter.view = null
                     stickyHeader.visibility = View.GONE
                     rowsAdapter.submit(emptyList())
                     journal.clear()
-                    stateAdapter.view = StateViews.failure(this, getString(R.string.weekly_report_load_failed)) {
-                        requestRender()
-                    }
+                    stateAdapter.view = PlatoonDataStates.failure(
+                        this,
+                        work,
+                        scope,
+                        error,
+                        getString(R.string.weekly_report_load_failed),
+                    ) { requestRender() }
                     updateTopBar()
                 },
             )
@@ -225,6 +252,10 @@ class WeeklyReportActivity : BaseActivity() {
         val report = next.report
         edits.retainFor(report.periodStart)
         model = next
+        if (saveWhenLoaded) {
+            saveWhenLoaded = false
+            saveEdits()
+        }
         val weeklyTable = tables.getOrPut(report.isGunsmokeWeek) {
             WeeklyTable(this, report.isGunsmokeWeek, next.zone, next.cutlines, horizontalSync)
         }.apply {
@@ -256,6 +287,7 @@ class WeeklyReportActivity : BaseActivity() {
         }
         updateTopBar()
         list.post(::updateStickyHeader)
+        reopenCellEditor(next)
     }
 
     private fun updateStickyHeader() {
@@ -468,7 +500,26 @@ class WeeklyReportActivity : BaseActivity() {
         )
     }
 
-    private fun onCellTapped(member: WeeklyReportBuilder.MemberRow, cell: WeeklyReportBuilder.DayCell?) {
+    @androidx.annotation.VisibleForTesting
+    internal var cellEditor: android.app.Dialog? = null
+        private set
+
+    /** A cell editor that was open before recreation comes back, with what was typed, once its table shows. */
+    private fun reopenCellEditor(next: RenderModel) {
+        if (!edits.isEditing(next.report.periodStart)) return
+        val draft = takeDialogDraft(WeeklyDialogs.CELL_EDIT_KEY) ?: return
+        val member = next.displayedMembers.firstOrNull { it.uid == draft.arguments.getLong(WeeklyDialogs.ARG_UID) } ?: return
+        val day = LocalDate.ofEpochDay(draft.arguments.getLong(WeeklyDialogs.ARG_GAME_DAY))
+        val cell = member.days.firstOrNull { it.gameDay == day } ?: return
+        onCellTapped(member, cell, draft)
+    }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun onCellTapped(
+        member: WeeklyReportBuilder.MemberRow,
+        cell: WeeklyReportBuilder.DayCell?,
+        restored: DialogDraft? = null,
+    ) {
         val current = model ?: return
         val weeklyTable = table ?: return
         val dayLabel = cell?.let { Labels.dayHeader(this, it.gameDay) } ?: getString(R.string.total)
@@ -482,7 +533,16 @@ class WeeklyReportActivity : BaseActivity() {
             if (work.isBusy(SAVE)) return
             val nextCell = member.days.getOrNull(member.days.indexOf(cell) + 1)
             val next = nextCell?.let { { onCellTapped(member, it) } }
-            WeeklyDialogs.showEdit(this, title, current.report.isGunsmokeWeek, member.uid, cell, edits[member.uid, cell.gameDay], next) { edit ->
+            cellEditor = WeeklyDialogs.showEdit(
+                this,
+                title,
+                current.report.isGunsmokeWeek,
+                member.uid,
+                cell,
+                edits[member.uid, cell.gameDay],
+                next,
+                restored,
+            ) { edit ->
                 if (!edits.isEditing(current.report.periodStart) || !edits.put(edit)) return@showEdit
                 // Rows are addressed in the list the adapter currently shows, not the tapped model.
                 rowsAdapter.notifyMemberChanged(member.uid)
@@ -534,6 +594,11 @@ class WeeklyReportActivity : BaseActivity() {
 
     private fun finishEditing() {
         edits.finish()
+        // A Platoon selected while editing is followed once the draft is gone.
+        if (!profileBinding.isCurrent(this)) {
+            recreate()
+            return
+        }
         model?.let(::render) ?: updateTopBar()
     }
 
@@ -547,7 +612,7 @@ class WeeklyReportActivity : BaseActivity() {
         // missing from the roster would otherwise drop overrides the user never touched.
         work.run(key = SAVE, task = { repository.listWeeklyOverrides(report.periodStart.toEpochDay()) }) { stored ->
             stored.onFailure {
-                Feedback.show(this, R.string.save_failed)
+                Feedback.show(this, platoonDataFailureMessage(it, R.string.save_failed), long = true)
                 updateTopBar()
             }
             stored.onSuccess { saveMerged(current, it, saving) }
@@ -575,9 +640,9 @@ class WeeklyReportActivity : BaseActivity() {
                     if (result.isSuccess) {
                         if (edits.isEditing(report.periodStart)) edits.finish()
                         Feedback.show(this, R.string.weekly_edits_saved)
-                        requestRender()
+                        if (profileBinding.isCurrent(this)) requestRender() else recreate()
                     } else {
-                        Feedback.show(this, R.string.save_failed)
+                        Feedback.show(this, platoonDataFailureMessage(result.exceptionOrNull(), R.string.save_failed), long = true)
                     }
                     updateTopBar()
                 }

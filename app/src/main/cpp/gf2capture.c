@@ -360,6 +360,15 @@ static void connection_close_callback(zdtun_t *tunnel, const zdtun_conn_t *conne
     free(flow);
 }
 
+// When the socket cap forces zdtun to purge, flows that may still carry game frames go only after
+// every UDP, ICMP and web flow, so a burst of other traffic in the VPN cannot RST the game's
+// connection and end its capture early.
+static int purge_priority_callback(zdtun_t *tunnel, const zdtun_conn_t *connection) {
+    (void) tunnel;
+    const flow_state_t *flow = get_flow_state(connection);
+    return flow != NULL && flow->inspect_payload ? 1 : 0;
+}
+
 static void process_outgoing_packet(
         capture_context_t *context,
         zdtun_t *tunnel,
@@ -452,6 +461,7 @@ static void *capture_thread_main(void *argument) {
             .on_socket_open = protect_socket_callback,
             .on_connection_open = connection_open_callback,
             .on_connection_close = connection_close_callback,
+            .on_purge_priority = purge_priority_callback,
     };
     zdtun_t *tunnel = zdtun_init(&callbacks, context);
     if (tunnel == NULL) {

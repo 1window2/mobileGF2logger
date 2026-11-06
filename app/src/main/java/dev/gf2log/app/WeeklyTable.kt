@@ -97,7 +97,19 @@ internal data class CellDisplay(
     val patrol: Mark,
     val edited: Boolean,
 ) {
-    data class Mark(val symbol: String, @ColorRes val color: Int, val spoken: Int? = null)
+    /** [warn] marks a weekly count below its cutline; it is drawn underlined and spoken, not only colored. */
+    data class Mark(val symbol: String, @ColorRes val color: Int, val spoken: Int? = null, val warn: Boolean = false)
+}
+
+/** How TalkBack reads a displayed weekly value; shared by the grid and the evidence sheet. */
+internal object CellSpeech {
+    fun mark(context: Context, mark: CellDisplay.Mark): String = mark.spoken?.let(context::getString) ?: value(context, mark.symbol)
+
+    fun value(context: Context, value: String): String = when {
+        value == "?" -> context.getString(R.string.evidence_unknown_short)
+        value.startsWith("≥") -> context.getString(R.string.at_least, value.drop(1))
+        else -> value
+    }
 }
 
 /**
@@ -148,7 +160,10 @@ internal class WeeklyTable(
             maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
         }
-        private val detail = context.text(null, TextRole.CAPTION) { maxLines = 1 }
+        private val detail = context.text(null, TextRole.CAPTION) {
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
         private val rankChip = GradientDrawable().apply { cornerRadius = context.dpf(8f) }
         private val rank = context.text(null, TextRole.LABEL) {
             gravity = Gravity.CENTER
@@ -208,14 +223,18 @@ internal class WeeklyTable(
             gravity = Gravity.CENTER
             maxLines = 1
         }
+        // Widths stop growing at 1.5x font while text keeps scaling, so "score · attempts" may
+        // wrap; the row height grows with the full font scale and has room for the second line.
         private val gunsmoke = context.text(null, TextRole.CAPTION) {
             gravity = Gravity.CENTER
-            maxLines = 1
+            maxLines = GUNSMOKE_LINES
+            ellipsize = TextUtils.TruncateAt.END
             visibility = if (isGunsmokeWeek) View.VISIBLE else View.GONE
         }
         private val activity = context.text(null, TextRole.CAPTION) {
             gravity = Gravity.CENTER
             maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
         }
         val view: LinearLayout = context.column {
             gravity = Gravity.CENTER
@@ -244,10 +263,12 @@ internal class WeeklyTable(
             merit.paintFlags = if (display.meritWarn) merit.paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG
             else merit.paintFlags and android.graphics.Paint.UNDERLINE_TEXT_FLAG.inv()
             if (isGunsmokeWeek) {
-                gunsmoke.text = "${display.score ?: "-"} · ${display.attempts ?: "-"}"
-                gunsmoke.setTextColor(
-                    context.getColor(if (display.scoreWarn || display.attemptsWarn) R.color.cutline_mark else R.color.text_secondary),
-                )
+                // Each value below its cutline is colored and underlined on its own, like merit.
+                gunsmoke.text = android.text.SpannableStringBuilder().apply {
+                    appendValue(display.score ?: "-", display.scoreWarn)
+                    append(" · ")
+                    appendValue(display.attempts ?: "-", display.attemptsWarn)
+                }
             }
             activity.text = android.text.SpannableStringBuilder().apply {
                 appendMark(context.getString(R.string.login_initial), display.login)
@@ -258,7 +279,8 @@ internal class WeeklyTable(
             fill.color = context.getColor(
                 when {
                     display.edited -> R.color.accent_surface
-                    display.meritWarn || display.scoreWarn || display.attemptsWarn -> R.color.warning_surface
+                    display.meritWarn || display.scoreWarn || display.attemptsWarn ||
+                        display.login.warn || display.patrol.warn -> R.color.warning_surface
                     total -> R.color.table_header
                     else -> R.color.table_cell
                 },
@@ -270,35 +292,56 @@ internal class WeeklyTable(
                 if (display.meritWarn) append(", ").append(context.getString(R.string.below_cutline))
                 if (isGunsmokeWeek) {
                     append(". ").append(context.getString(R.string.point_short)).append(' ').append(spoken(display.score ?: "-"))
+                    if (display.scoreWarn) append(", ").append(context.getString(R.string.below_cutline))
                     append(". ").append(context.getString(R.string.attempt_short)).append(' ').append(spoken(display.attempts ?: "-"))
+                    if (display.attemptsWarn) append(", ").append(context.getString(R.string.below_cutline))
                 }
                 append(". ").append(context.getString(R.string.login_short)).append(' ').append(spoken(display.login))
+                if (display.login.warn) append(", ").append(context.getString(R.string.below_cutline))
                 append(". ").append(context.getString(R.string.patrol_short)).append(' ').append(spoken(display.patrol))
+                if (display.patrol.warn) append(", ").append(context.getString(R.string.below_cutline))
                 if (display.edited) append(". ").append(context.getString(R.string.edited))
             }
             view.setOnClickListener { onClick() }
+        }
+
+        private fun android.text.SpannableStringBuilder.appendValue(value: String, warn: Boolean) {
+            val start = length
+            append(value)
+            if (warn) underline(start, R.color.cutline_mark)
         }
 
         private fun android.text.SpannableStringBuilder.appendMark(label: String, mark: CellDisplay.Mark) {
             append(label)
             val start = length
             append(mark.symbol)
+            if (mark.warn) {
+                underline(start, mark.color)
+            } else {
+                setSpan(
+                    android.text.style.ForegroundColorSpan(context.getColor(mark.color)),
+                    start,
+                    length,
+                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+                )
+            }
+        }
+
+        /** Colors and underlines from [start] to the end, so a warning never relies on color alone. */
+        private fun android.text.SpannableStringBuilder.underline(start: Int, @ColorRes color: Int) {
             setSpan(
-                android.text.style.ForegroundColorSpan(context.getColor(mark.color)),
+                android.text.style.ForegroundColorSpan(context.getColor(color)),
                 start,
                 length,
                 android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
             )
+            setSpan(android.text.style.UnderlineSpan(), start, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
     }
 
-    private fun spoken(mark: CellDisplay.Mark): String = mark.spoken?.let(context::getString) ?: spoken(mark.symbol)
+    private fun spoken(mark: CellDisplay.Mark): String = CellSpeech.mark(context, mark)
 
-    private fun spoken(value: String): String = when {
-        value == "?" -> context.getString(R.string.evidence_unknown_short)
-        value.startsWith("≥") -> context.getString(R.string.at_least, value.drop(1))
-        else -> value
-    }
+    private fun spoken(value: String): String = CellSpeech.value(context, value)
 
     fun daily(cell: WeeklyReportBuilder.DayCell, edit: WeeklyOverrideEditing.CellEdit? = null): CellDisplay {
         val dayClosed = !PlatoonPeriods.periodStartInstant(cell.gameDay.plusDays(1), zone).isAfter(now)
@@ -357,11 +400,6 @@ internal class WeeklyTable(
         login = countMark(member.loginDays, member.loginDaysCertainty, cutlines::belowWeeklyLoginDays),
         patrol = countMark(member.patrolDays, member.patrolDaysCertainty, cutlines::belowWeeklyPatrolDays),
         edited = false,
-    )
-
-    private fun countMark(value: Int?, certainty: MetricCertainty, below: (Int) -> Boolean) = CellDisplay.Mark(
-        WeeklyMetricPresentation.format(value, certainty),
-        if (WeeklyMetricPresentation.warnsBelowCutline(value, certainty, below)) R.color.cutline_mark else R.color.text_secondary,
     )
 
     private fun activityMark(value: Boolean?, observed: Boolean, dayClosed: Boolean): CellDisplay.Mark = when {
@@ -428,6 +466,17 @@ internal class WeeklyTable(
         const val STANDARD_ROW_HEIGHT = 64
         const val GUNSMOKE_ROW_HEIGHT = 80
         const val PODIUM = 3
+        const val GUNSMOKE_LINES = 2
+
+        /** A weekly login or patrol count; [CellDisplay.Mark.warn] is set while it is below its cutline. */
+        fun countMark(value: Int?, certainty: MetricCertainty, below: (Int) -> Boolean): CellDisplay.Mark {
+            val warn = WeeklyMetricPresentation.warnsBelowCutline(value, certainty, below)
+            return CellDisplay.Mark(
+                WeeklyMetricPresentation.format(value, certainty),
+                if (warn) R.color.cutline_mark else R.color.text_secondary,
+                warn = warn,
+            )
+        }
 
         private val YES_MARK = CellDisplay.Mark("✓", R.color.success_mark, R.string.yes)
         private val NO_MARK = CellDisplay.Mark("×", R.color.failure_mark, R.string.no)

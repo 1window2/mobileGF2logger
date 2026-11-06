@@ -36,6 +36,8 @@ internal class TopBar(context: Context) : LinearLayout(context) {
         maxLines = 1
         ellipsize = TextUtils.TruncateAt.END
         accessibilityHeading()
+        // A title that changes on a showing screen is state, such as "3 selected"; it is spoken.
+        accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
     }
     private val subtitleView = context.text(null, TextRole.CAPTION) {
         maxLines = 1
@@ -43,6 +45,8 @@ internal class TopBar(context: Context) : LinearLayout(context) {
         visibility = View.GONE
     }
     private val actions = context.row()
+    private var shownActions = emptyList<BarAction>()
+    private var shownOverflow = emptyList<MenuEntry>()
 
     init {
         orientation = HORIZONTAL
@@ -63,7 +67,8 @@ internal class TopBar(context: Context) : LinearLayout(context) {
     }
 
     fun setTitle(value: CharSequence?, subtitle: CharSequence? = null): TopBar = apply {
-        titleView.text = value
+        // Re-applying the same title must not announce it again.
+        if (!TextUtils.equals(titleView.text, value)) titleView.text = value
         subtitleView.text = subtitle
         subtitleView.visibility = if (subtitle.isNullOrBlank()) View.GONE else View.VISIBLE
     }
@@ -76,6 +81,7 @@ internal class TopBar(context: Context) : LinearLayout(context) {
     fun setNavigationIcon(@DrawableRes icon: Int, description: CharSequence): TopBar = apply {
         navigation.setImageResource(icon)
         navigation.contentDescription = description
+        navigation.tooltipText = description
     }
 
     fun setLeading(view: View?): TopBar = apply {
@@ -84,7 +90,24 @@ internal class TopBar(context: Context) : LinearLayout(context) {
         view?.let { leading.addView(it) }
     }
 
+    /**
+     * Shows [items] and the [overflow] menu. Re-applying the same controls, such as after Select
+     * all, updates the existing buttons in place, so the button a screen reader is focused on
+     * stays in the bar instead of being replaced.
+     */
     fun setActions(items: List<BarAction>, overflow: List<MenuEntry> = emptyList()): TopBar = apply {
+        val reuse = sameControls(shownActions, items) && shownOverflow.isEmpty() == overflow.isEmpty()
+        shownActions = items
+        shownOverflow = overflow
+        if (reuse) {
+            items.forEachIndexed { index, action ->
+                actions.getChildAt(index).apply {
+                    isEnabled = action.enabled
+                    setOnClickListener(action.onClick)
+                }
+            }
+            return@apply
+        }
         actions.removeAllViews()
         items.forEach { action ->
             actions.addView(context.iconButton(action.icon, action.label, onClick = action.onClick).apply {
@@ -93,8 +116,9 @@ internal class TopBar(context: Context) : LinearLayout(context) {
         }
         if (overflow.isNotEmpty()) {
             actions.addView(
+                // Reads the latest entries, so an in-place update also refreshes the menu.
                 context.iconButton(R.drawable.ic_more_vert, context.getString(R.string.more_options)) { anchor ->
-                    showMenu(anchor, overflow)
+                    showMenu(anchor, shownOverflow)
                 },
                 context.lp(48, 48),
             )
@@ -113,3 +137,9 @@ internal class TopBar(context: Context) : LinearLayout(context) {
         }.show()
     }
 }
+
+/** Whether [next] shows the same buttons as [current]: same icons and labels, in order. */
+internal fun sameControls(current: List<BarAction>, next: List<BarAction>): Boolean =
+    current.size == next.size && current.zip(next).all { (shown, wanted) ->
+        shown.icon == wanted.icon && shown.label.toString() == wanted.label.toString()
+    }

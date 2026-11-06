@@ -30,6 +30,12 @@ object GuildMembersCsv {
         logTime,
     ).joinToString(",") { CsvCell.escape(it) }
 
+    /** Formats [snapshot] in the lossless retained form that every roster reader accepts. */
+    fun format(snapshot: Snapshot): String = buildString {
+        appendLine(HEADER)
+        snapshot.members.forEach { member -> appendLine(row(member, snapshot.logTime)) }
+    }
+
     // Function Name: formatForSpreadsheet
     // Description:
     // - Formats a parsed roster for explicit export without allowing names to execute formulas.
@@ -49,23 +55,30 @@ object GuildMembersCsv {
         members.size <= MAX_ROSTER_MEMBERS &&
             members.all { it.name.length <= MAX_MEMBER_NAME_CHARS }
 
+    /** UID 0 is the protobuf default of an omitted field, never a real member identity. */
     fun isValidRoster(members: List<GuildMember>): Boolean =
         members.isNotEmpty() &&
             hasValidMemberBounds(members) &&
+            members.none { it.uid == 0u } &&
             members.map(GuildMember::uid).distinct().size == members.size
 
     // Function Name: parse
     // Description:
     // - Parses a complete roster snapshot while preserving member names exactly.
     // - Tolerates surrounding whitespace in scalar fields introduced by spreadsheet copies.
+    // - Ignores one leading UTF-8 byte order mark, as spreadsheet "CSV UTF-8" saves write one.
     // Parameters:
     // - content: CSV text containing one roster snapshot.
+    // - unescapeSpreadsheet: Whether the file may be a [formatForSpreadsheet] export, whose name
+    //   prefix is removed. Only user-selected files use it; retained files are always lossless.
+    //   A real name made of an apostrophe and a formula character loses that apostrophe.
     // Returns:
     // - Returns the parsed snapshot when the schema and rows are valid.
     // - Returns null when any required field is malformed or capture times disagree.
-    fun parse(content: String): Snapshot? {
+    fun parse(content: String, unescapeSpreadsheet: Boolean = false): Snapshot? {
         if (content.length > MAX_CONTENT_CHARS) return null
-        val records = CsvRecords.parse(content, MAX_COLUMNS, MAX_RECORDS, MAX_FIELD_CHARS)
+        val csv = content.removePrefix(BYTE_ORDER_MARK)
+        val records = CsvRecords.parse(csv, COLUMN_COUNT, MAX_RECORDS, MAX_FIELD_CHARS)
             ?: return null
         val header = records.firstOrNull() ?: return null
         if (header != HEADER.split(',')) return null
@@ -79,12 +92,13 @@ object GuildMembersCsv {
                 val rowLogTime = row[8].trim().takeIf(String::isNotBlank) ?: return null
                 if (logTime == null) logTime = rowLogTime
                 if (rowLogTime != logTime) return null
-                val uid = row[0].trim().toUIntOrNull() ?: return null
+                val uid = row[0].trim().toUIntOrNull()?.takeIf { it != 0u } ?: return null
                 if (!seenUids.add(uid)) return null
-                if (row[1].length > MAX_MEMBER_NAME_CHARS) return null
+                val name = if (unescapeSpreadsheet) CsvCell.unescapeSpreadsheet(row[1]) else row[1]
+                if (name.length > MAX_MEMBER_NAME_CHARS) return null
                 GuildMember(
                     uid = uid,
-                    name = row[1],
+                    name = name,
                     level = row[2].trim().toUIntOrNull() ?: return null,
                     weeklyMerit = parseOptionalCounter(row[3]) ?: return null,
                     totalMerit = parseOptionalCounter(row[4]) ?: return null,
@@ -119,7 +133,9 @@ object GuildMembersCsv {
     private const val MAX_CONTENT_CHARS = 2 * 1024 * 1024
     const val MAX_ROSTER_MEMBERS = 256
     const val MAX_MEMBER_NAME_CHARS = 256
-    private const val MAX_COLUMNS = 9
+    /** The number of columns in [HEADER]. */
+    const val COLUMN_COUNT = 9
+    private const val BYTE_ORDER_MARK = "\uFEFF"
     private const val MAX_RECORDS = MAX_ROSTER_MEMBERS + 2
     private const val MAX_FIELD_CHARS = 512
 }

@@ -1,9 +1,12 @@
 package dev.gf2log.app.management
 
+import dev.gf2log.protocol.GuildMembersCsv
+import dev.gf2log.protocol.model.GuildMember
 import java.io.ByteArrayInputStream
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -42,6 +45,41 @@ class PlatoonCsvImportStoreTest {
         assertFalse(retained.duplicate)
     }
 
+
+    @Test
+    fun spreadsheetExportImportsWithItsNamesAndIsRetainedLossless() {
+        val snapshot = GuildMembersCsv.Snapshot(
+            logTime = "2026-07-19T19:29:33Z",
+            members = listOf(
+                GuildMember(1u, "-Kai-", 60u, 1u, 2u, 3u, 4u, 5u),
+                GuildMember(2u, "'=x", 60u, 1u, 2u, 3u, 4u, 5u),
+                GuildMember(3u, "Plain", 60u, 1u, 2u, 3u, 4u, 5u),
+            ),
+        )
+        val store = PlatoonCsvImportStore(temporary.newFolder("spreadsheet"))
+        val exported = GuildMembersCsv.formatForSpreadsheet(snapshot).toByteArray()
+
+        val prepared = store.prepare(ByteArrayInputStream(exported))
+        val retained = store.retain(prepared)
+
+        assertEquals(snapshot, prepared.snapshot)
+        assertEquals(GuildMembersCsv.format(snapshot), retained.file.readText())
+        assertEquals(snapshot, GuildMembersCsv.parse(retained.file.readText()))
+    }
+
+    @Test
+    fun aCsvSavedWithAByteOrderMarkImportsAndKeepsItsBytes() {
+        val store = PlatoonCsvImportStore(temporary.newFolder("bom"))
+        val bytes = ("﻿" + VALID_CSV).toByteArray()
+
+        val retained = store.retain(ByteArrayInputStream(bytes))
+
+        assertTrue(retained.file.readBytes().contentEquals(bytes))
+        assertEquals(
+            GuildMembersCsv.parse(VALID_CSV),
+            GuildMembersCsv.parse(retained.file.readText()),
+        )
+    }
 
     @Test(expected = IllegalArgumentException::class)
     fun malformedCsvIsRejectedBeforeAnythingIsRetained() {
@@ -98,21 +136,48 @@ class PlatoonCsvImportStoreTest {
     }
 
     @Test
-    fun latestRetainedFileBreaksEqualCaptureTimesBySourceFilename() {
-        val directory = temporary.newFolder("capture-time-tie")
-        val lower = java.io.File(directory, "import-same-a.csv").apply { writeText("lower") }
-        val higher = java.io.File(directory, "import-same-b.csv").apply { writeText("higher") }
-        val capturedAt = Instant.parse("2026-07-19T19:29:33Z").toEpochMilli()
-        assertTrue(lower.setLastModified(capturedAt))
-        assertTrue(higher.setLastModified(capturedAt))
+    fun byteDifferentCopiesOfOneRosterShareOneIdentity() {
+        val directory = temporary.newFolder("canonical")
+        val store = PlatoonCsvImportStore(directory)
+        val lf = TWO_MEMBER_CSV
+        val crlfReordered = """
+            uid,name,level,weeklyMerit,totalMerit,highScore,totalScore,lastLogin,logTime
+            2,"Second",61,0,5,0,0,1784489372,2026-07-19T19:29:33Z
+            1,Member,60,90,1000,100,200,1784489372,2026-07-19T19:29:33Z
+        """.trimIndent().replace("\n", "\r\n") + "\r\n"
 
-        assertEquals(higher, PlatoonCsvImportStore.latestRetainedFile(directory))
+        val first = store.prepare(ByteArrayInputStream(lf.toByteArray()))
+        val second = store.prepare(ByteArrayInputStream(crlfReordered.toByteArray()))
+
+        assertEquals(first.fileName, second.fileName)
+        assertFalse(store.retain(first).duplicate)
+        val again = store.retain(second)
+        assertTrue(again.duplicate)
+        // The first retained bytes stay the evidence; the copy is only recognized.
+        assertEquals(lf, again.file.readText())
+    }
+
+    @Test
+    fun aChangedRosterGetsADifferentIdentity() {
+        val store = PlatoonCsvImportStore(temporary.newFolder("changed"))
+        val original = store.prepare(ByteArrayInputStream(TWO_MEMBER_CSV.toByteArray()))
+        val changed = store.prepare(
+            ByteArrayInputStream(TWO_MEMBER_CSV.replace("Second", "Renamed").toByteArray()),
+        )
+
+        assertNotEquals(original.fileName, changed.fileName)
     }
 
     private companion object {
         val VALID_CSV = """
             uid,name,level,weeklyMerit,totalMerit,highScore,totalScore,lastLogin,logTime
             1,Member,60,90,1000,100,200,1784489372,2026-07-19T19:29:33Z
+        """.trimIndent()
+
+        val TWO_MEMBER_CSV = """
+            uid,name,level,weeklyMerit,totalMerit,highScore,totalScore,lastLogin,logTime
+            1,Member,60,90,1000,100,200,1784489372,2026-07-19T19:29:33Z
+            2,Second,61,0,5,0,0,1784489372,2026-07-19T19:29:33Z
         """.trimIndent()
     }
 }

@@ -11,13 +11,14 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import dev.gf2log.app.StandbyActivity
-import dev.gf2log.app.capture.CaptureNotice
+import dev.gf2log.app.SupportedClientSigners
 import dev.gf2log.app.capture.CapturePhase
 import dev.gf2log.app.capture.CaptureSnapshot
 import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.capture.CaptureVpnService
 import dev.gf2log.app.capture.RosterEvents
 import dev.gf2log.app.management.PlatoonProfileRegistry
+import dev.gf2log.app.ui.CaptureGuard
 import java.lang.ref.WeakReference
 import java.time.Instant
 import java.util.concurrent.Executors
@@ -95,6 +96,7 @@ internal object StandbyAutomation {
     fun arm(context: Context, plan: List<StandbyRun>, profilePackages: Map<String, String>, lockWhenDone: Boolean = true) {
         if (isArmed) cancel()
         if (plan.isEmpty()) return
+        StandbyAttendance.attended()
         appContext = context.applicationContext
         runs = plan
         index = 0
@@ -160,11 +162,17 @@ internal object StandbyAutomation {
                 // without closing anything or locking the phone in their hand.
                 userLeftGame(now) -> cancel()
                 CaptureStatus.snapshot().phase.let { it == CapturePhase.STOPPING || it == CapturePhase.STOPPED } ->
-                    endRun(StandbyOutcome.CAPTURE_FAILED)
+                    endRun(
+                        if (CaptureStatus.snapshot().endedByVpnRevoke) {
+                            StandbyOutcome.NO_VPN_CONSENT
+                        } else {
+                            StandbyOutcome.CAPTURE_FAILED
+                        },
+                    )
                 now >= runTimeoutAt -> endRun(StandbyOutcome.TIMED_OUT)
-                // Taps only reach the title screen: they stop at login, and in any case after the
-                // window, so nothing inside the game is ever pressed.
-                now >= nextTapAt && now < tapsUntil && !loggedIn -> {
+                // Taps repeat at the title screen's Start position until the first capture notice
+                // that only a logged-in game produces, and never after the window.
+                StandbyTapPolicy.tapDue(now, nextTapAt, tapsUntil, loggedIn) -> {
                     nextTapAt = now + TAP_INTERVAL_MS
                     val (x, y) = startButton(runs[index].server.packageName)
                     StandbyAutomationService.instance?.tapIfFront(runs[index].server.packageName, x, y)
@@ -208,6 +216,7 @@ internal object StandbyAutomation {
         if (appContext.packageManager.getLaunchIntentForPackage(run.server.packageName) == null) {
             return skip(StandbyOutcome.NOT_INSTALLED)
         }
+        clientRefusal(run.server.packageName)?.let { return skip(it) }
         service.holdScreenOn(minOf(run.deadline.toEpochMilli(), deadlineMillis))
         enter(Phase.STARTING_CAPTURE)
         val target = run.server.storageIds.first()
@@ -236,6 +245,12 @@ internal object StandbyAutomation {
         // previous run just asked to stop, restarts once its teardown ends, then reaches RUNNING.
         val active = capture.phase == CapturePhase.STARTING || capture.phase == CapturePhase.RUNNING
         if (active && !ownStopPending(capture)) return
+        // A Platoon is being deleted, moved to another server, or restored: its storage must not
+        // be written meanwhile.
+        if (!CaptureGuard.beginCaptureStart()) {
+            Log.w(TAG, "Capture not started: Platoon maintenance is running")
+            return endRun(StandbyOutcome.CAPTURE_FAILED)
+        }
         val started = runCatching {
             appContext.startForegroundService(
                 Intent(appContext, CaptureVpnService::class.java)
@@ -247,6 +262,7 @@ internal object StandbyAutomation {
             startedCapture = true
         } else {
             Log.w(TAG, "Capture could not start", started.exceptionOrNull())
+            if (capture.phase == CapturePhase.STOPPED) CaptureGuard.abandonCaptureStart()
             endRun(StandbyOutcome.CAPTURE_FAILED)
         }
     }
@@ -290,6 +306,8 @@ internal object StandbyAutomation {
         val run = runs[index]
         val launch = appContext.packageManager.getLaunchIntentForPackage(run.server.packageName)
             ?: return endRun(StandbyOutcome.NOT_INSTALLED)
+        // Checked again here: the client may have been replaced since the run began.
+        clientRefusal(run.server.packageName)?.let { return endRun(it) }
         // A game left running from earlier would skip its login, and the roster comes with login.
         killInBackground(run.server.packageName)
         val opener = standby.get()?.takeUnless { it.isFinishing } ?: StandbyAutomationService.instance
@@ -311,13 +329,16 @@ internal object StandbyAutomation {
         enter(Phase.IN_GAME)
     }
 
-    /** Platoon notices only follow a login, so the title screen is gone once one arrives. */
+    /**
+     * Platoon notices only follow a login, so the title screen is gone once one arrives, even one
+     * saying the data could not be used.
+     */
     private fun onCaptureChanged(snapshot: CaptureSnapshot) {
         ownStopPending(snapshot)
         val notice = snapshot.notice ?: return
-        if (phase == Phase.IN_GAME && notice.notice in LOGIN_NOTICES && notice.atMillis >= phaseStartedAt) {
-            loggedIn = true
-        }
+        if (phase != Phase.IN_GAME || notice.atMillis < phaseStartedAt) return
+        if (StandbyTapPolicy.stopsTaps(notice.notice)) loggedIn = true
+        StandbyTapPolicy.endsRun(notice.notice)?.let(::endRun)
     }
 
     private fun onRosterPersisted(storageId: String) {
@@ -364,6 +385,8 @@ internal object StandbyAutomation {
     /** Ends standby with the phone locked; also used by the watchdog deadline. */
     private fun finish() {
         if (phase == Phase.IDLE) return
+        // Before the standby screen closes: Home resumes under it with nobody present.
+        StandbyAttendance.automationEnded()
         val games = runs.map { it.server.packageName }.distinct()
         if (phase == Phase.STARTING_CAPTURE || phase == Phase.IN_GAME) {
             record(StandbyOutcome.TIMED_OUT)
@@ -404,9 +427,14 @@ internal object StandbyAutomation {
         }
     }
 
-    /** The user is back (left standby or turned the screen off): stop without locking. */
-    fun cancel() {
+    /**
+     * The user is back (left standby or turned the screen off): stop without locking. Only a tap
+     * on the standby screen ([byUser]) proves someone is looking; the screen turning off, or
+     * standby being replaced, does not.
+     */
+    fun cancel(byUser: Boolean = false) {
         if (phase == Phase.IDLE) return
+        if (byUser) StandbyAttendance.attended() else StandbyAttendance.automationEnded()
         while (index < runs.size) {
             record(StandbyOutcome.CANCELLED)
             index++
@@ -456,6 +484,14 @@ internal object StandbyAutomation {
         phaseStartedAt = System.currentTimeMillis()
     }
 
+    /**
+     * Why [packageName] must not be opened, or null when its signer is the trusted one. Standby
+     * never pins: an app installed under a client's package name while nobody uses GF2logger is
+     * not trusted by being launched.
+     */
+    private fun clientRefusal(packageName: String): StandbyOutcome? =
+        StandbyOutcome.forClient(SupportedClientSigners.of(appContext).trust(packageName))
+
     private fun isLocked(): Boolean =
         appContext.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
 
@@ -483,14 +519,4 @@ internal object StandbyAutomation {
     private const val CLOSE_GAME_DELAY_MS = 1_500L
     private const val START_X = 0.5f
     private const val START_Y = 0.85f
-    private val LOGIN_NOTICES = setOf(
-        CaptureNotice.PLATOON_DETECTED,
-        CaptureNotice.PENDING_DETECTED,
-        CaptureNotice.PLATOON_CONFIRMED,
-        CaptureNotice.IDENTITY_CHANGED,
-        CaptureNotice.PENDING_IDENTITY_CHANGED,
-        CaptureNotice.ROSTER_SAVED,
-        CaptureNotice.ROSTER_UPDATED,
-        CaptureNotice.ROSTER_RECOVERED,
-    )
 }

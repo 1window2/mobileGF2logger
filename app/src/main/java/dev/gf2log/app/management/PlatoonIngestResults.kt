@@ -10,6 +10,11 @@ data class SnapshotIngestResult(
     val renamed: Int,
     /** True when the roster predated current data and was replayed into history instead. */
     val historical: Boolean = false,
+    /**
+     * True when a stored roster dated ahead of the clock was set aside, or one set aside in error
+     * returned, before this roster was placed; the whole roster history was replayed.
+     */
+    val clockReviewChanged: Boolean = false,
 ) {
     companion object {
         fun duplicate() = SnapshotIngestResult(null, true, false, 0, 0, 0, 0)

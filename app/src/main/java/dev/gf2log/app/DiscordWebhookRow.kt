@@ -3,6 +3,7 @@ package dev.gf2log.app
 import android.app.Activity
 import android.app.AlertDialog
 import android.text.InputType
+import dev.gf2log.app.discord.DiscordWebhookPolicy
 import dev.gf2log.app.discord.DiscordWebhookSecretStore
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Dialogs
@@ -61,13 +62,17 @@ internal class DiscordWebhookRow(private val activity: Activity, private val wor
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val value = input.text.toString()
                 if (work.isBusy(WRITE)) return@setOnClickListener
-                work.run(key = WRITE, task = { DiscordWebhookSecretStore(this).save(value) }) { result ->
-                    if (result.isSuccess) {
+                work.run(
+                    key = WRITE,
+                    task = { discordWebhookSaveFailure(value) { DiscordWebhookSecretStore(this).save(it) } },
+                ) { result ->
+                    val failure = result.getOrElse { R.string.discord_webhook_store_failed }
+                    if (failure == null) {
                         dialog.dismiss()
                         Feedback.show(this, R.string.discord_webhook_saved)
                         refresh()
                     } else {
-                        error.showMessage(getString(R.string.discord_webhook_invalid))
+                        error.showMessage(getString(failure))
                     }
                 }
             }
@@ -101,4 +106,15 @@ internal class DiscordWebhookRow(private val activity: Activity, private val wor
     private companion object {
         const val WRITE = "webhook"
     }
+}
+
+/**
+ * Saves [value] through [store] and returns the message for a failure, or null once it is stored.
+ * The address is validated on its own first, so only an address the policy rejects is reported as
+ * invalid; a Keystore or storage failure never sends the user to re-paste a correct URL.
+ */
+internal fun discordWebhookSaveFailure(value: String, store: (String) -> Unit): Int? {
+    val canonical = runCatching { DiscordWebhookPolicy.requireValid(value).toASCIIString() }
+        .getOrElse { return R.string.discord_webhook_invalid }
+    return runCatching { store(canonical) }.fold(onSuccess = { null }, onFailure = { R.string.discord_webhook_store_failed })
 }

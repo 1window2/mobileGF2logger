@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import dev.gf2log.app.management.BackupFileName
 import dev.gf2log.app.management.InvalidBackupException
+import dev.gf2log.app.management.PlatoonAccessFailure
 import dev.gf2log.app.management.PlatoonBackupManager
 import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.management.RestoredBackupKind
@@ -34,14 +35,20 @@ internal class BackupFlow(
         ActivityResultContracts.CreateDocument(PlatoonBackupManager.MIME_TYPE),
     ) { uri ->
         val target = scope()
-        if (uri == null || target == null) return@registerForActivityResult
+        if (uri == null) return@registerForActivityResult
+        if (target == null) {
+            work.run(task = { DocumentAccess.discard(activity.contentResolver, uri) })
+            return@registerForActivityResult
+        }
         val complete = pendingExportComplete
         run(
             progress = R.string.backup_exporting,
             success = if (complete) R.string.full_backup_exported else R.string.status_backup_exported,
-            failure = { backupExportFailureMessage(complete) },
+            failure = {
+                platoonExportFailureMessage(it, backupExportFailureMessage(complete))
+            },
         ) {
-            DocumentAccess.openOutput(activity.contentResolver, uri).use { output ->
+            DocumentAccess.writeExport(activity.contentResolver, uri) { output ->
                 val manager = PlatoonBackupManager(activity, target)
                 if (complete) manager.exportFull(output) else manager.export(output)
             }
@@ -82,43 +89,96 @@ internal class BackupFlow(
         work.run(
             key = maintenanceKey,
             task = {
-                DocumentAccess.openInput(activity.contentResolver, uri).use { input ->
-                    PlatoonBackupManager.restoreSelected(activity, input)
-                }
+                // Checked again where it runs: standby or an alarm may have started capture while
+                // the file was being chosen.
+                CaptureGuard.whileStopped {
+                    DocumentAccess.openInput(activity.contentResolver, uri).use { input ->
+                        PlatoonBackupManager.restoreSelected(activity, input)
+                    }
+                } ?: throw CaptureGuard.CaptureActiveException()
             },
-        ) { result ->
-            result.fold(
-                onSuccess = { kind ->
-                    Feedback.show(
-                        activity,
-                        if (kind == RestoredBackupKind.COMPLETE) R.string.full_backup_restored else R.string.status_backup_restored,
-                        long = true,
-                    )
-                    activity.recreate()
-                },
-                onFailure = { Feedback.show(activity, fullBackupRestoreFailureMessage(it), long = true) },
-            )
-        }
+            // Runs even if this screen was recreated meanwhile; the showing screen reloads the data.
+            always = { result ->
+                result.fold(
+                    onSuccess = { kind ->
+                        Feedback.show(
+                            activity,
+                            if (kind == RestoredBackupKind.COMPLETE) R.string.full_backup_restored else R.string.status_backup_restored,
+                            long = true,
+                        )
+                        (activity.takeUnless { it.isFinishing || it.isDestroyed } ?: BaseActivity.foregroundScreen())
+                            ?.recreate()
+                    },
+                    onFailure = {
+                        val message = if (it is CaptureGuard.CaptureActiveException) {
+                            R.string.stop_capture_before_backup
+                        } else {
+                            fullBackupRestoreFailureMessage(it)
+                        }
+                        Feedback.show(activity, message, long = true)
+                    },
+                )
+            },
+        )
     }
 
     private fun run(progress: Int, success: Int, failure: (Throwable) -> Int, operation: () -> Unit) {
         if (work.isBusy(maintenanceKey)) return
         Feedback.show(activity, progress)
-        work.run(key = maintenanceKey, task = operation) { result ->
-            Feedback.show(activity, result.fold(onSuccess = { success }, onFailure = failure), long = true)
-        }
+        work.run(key = maintenanceKey, task = operation, always = { result ->
+            val damagedScope = scope()?.takeIf {
+                PlatoonAccessFailure.of(result.exceptionOrNull()) == PlatoonAccessFailure.DATABASE_DAMAGED
+            }
+            when (backupOutcomeDelivery(damagedScope != null, activity.isFinishing || activity.isDestroyed)) {
+                BackupOutcomeDelivery.OFFER_REBUILD -> offerRebuild(checkNotNull(damagedScope))
+                BackupOutcomeDelivery.DAMAGED_NOTICE ->
+                    Feedback.show(activity, R.string.platoon_database_damaged_short, long = true)
+                BackupOutcomeDelivery.RESULT_NOTICE ->
+                    Feedback.show(activity, result.fold(onSuccess = { success }, onFailure = failure), long = true)
+            }
+        })
     }
+
+    /**
+     * No backup is written from a damaged database. The user may restore an earlier backup, or
+     * continue with a database rebuilt from the retained roster CSVs; the damaged copy is kept.
+     */
+    private fun offerRebuild(target: PlatoonStorageScope) = PlatoonDataStates.confirmRebuild(
+        activity,
+        work,
+        maintenanceKey,
+        target,
+        R.string.platoon_database_damaged_message,
+    )
 
     private companion object {
         const val STATE_EXPORT_COMPLETE = "settings.export_complete"
     }
 }
 
-/** Known validation failures blame the selected file; anything else is an operational failure. */
-internal fun fullBackupRestoreFailureMessage(error: Throwable): Int =
-    if (error is InvalidBackupException) R.string.invalid_full_backup else R.string.full_backup_restore_failed
+internal enum class BackupOutcomeDelivery { OFFER_REBUILD, DAMAGED_NOTICE, RESULT_NOTICE }
+
+/**
+ * How a finished backup export or restore reports itself. The rebuild prompt needs the screen that
+ * started the work; once that screen was recreated or closed, a damaged database is still reported
+ * as a toast, and the Platoon screens' blocked state offers Restore or Rebuild.
+ */
+internal fun backupOutcomeDelivery(damaged: Boolean, ownerGone: Boolean): BackupOutcomeDelivery = when {
+    !damaged -> BackupOutcomeDelivery.RESULT_NOTICE
+    ownerGone -> BackupOutcomeDelivery.DAMAGED_NOTICE
+    else -> BackupOutcomeDelivery.OFFER_REBUILD
+}
+
+/**
+ * Known validation failures blame the selected file, and a CSV import holding the Platoon asks to
+ * try again shortly; anything else is an operational failure.
+ */
+internal fun fullBackupRestoreFailureMessage(error: Throwable): Int = when {
+    error is InvalidBackupException -> R.string.invalid_full_backup
+    PlatoonAccessFailure.of(error) == PlatoonAccessFailure.IMPORT_IN_PROGRESS -> R.string.platoon_csv_import_in_progress
+    else -> R.string.full_backup_restore_failed
+}
 
 /** A Platoon-only export failure must not claim that the complete backup failed. */
 internal fun backupExportFailureMessage(complete: Boolean): Int =
     if (complete) R.string.full_backup_export_failed else R.string.status_backup_export_failed
-

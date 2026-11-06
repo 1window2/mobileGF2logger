@@ -2,6 +2,8 @@ package dev.gf2log.app.management
 
 import android.content.Context
 import android.util.Log
+import androidx.annotation.VisibleForTesting
+import dev.gf2log.app.WeeklyPngExport
 import dev.gf2log.app.settings.GameTimeZonePreferences
 import dev.gf2log.app.settings.MemberOrderPreferences
 import dev.gf2log.protocol.GuildMembersCsv
@@ -22,17 +24,22 @@ internal class PlatoonRepository(
 ) {
     private val appContext = context.applicationContext
 
-    init {
-        PlatoonBackupManager.recoverInterruptedFullRestore(appContext, storageScope)
-    }
+    /**
+     * Recovery waits for the exclusive gate, so it runs on the first access, always a worker
+     * thread, rather than when a screen constructs the repository on the main thread.
+     */
+    @Volatile
+    private var accessPrepared = false
 
     /** The 05:00 reset zone of this repository's own Platoon, never the currently active one. */
     fun gameZone(): ZoneId = GameTimeZonePreferences.get(appContext, storageScope.storageId)
 
+    /** [now] is the phone clock reading this roster's stored rosters are checked against. */
     fun ingest(
         capturedAt: Instant,
         members: List<GuildMember>,
         sourceFile: String?,
+        now: Instant = Instant.now(),
     ): SnapshotIngestResult {
         require(GuildMembersCsv.isValidRoster(members)) {
             "A Platoon roster must stay within the member and name limits with unique UIDs"
@@ -46,12 +53,14 @@ internal class PlatoonRepository(
                     sourceFile = sourceFile,
                 ),
                 source = EvidenceSource.SNAPSHOT,
+                now = now,
             )
         }
         when {
             result.duplicate -> Unit
-            // A replayed older roster can rebuild membership periods across every week.
-            result.historical -> recordAllLiveWeeklyReports()
+            // A replayed older roster, or a replay around a roster set aside, can rebuild
+            // membership periods across every week.
+            result.historical || result.clockReviewChanged -> recordAllLiveWeeklyReports()
             else -> recordChangedWeeks(sequenceOf(capturedAt) + rosterBoundaryInstants(result, capturedAt))
         }
         return result
@@ -188,6 +197,12 @@ internal class PlatoonRepository(
     fun listSnapshots(limit: Int = 100): List<PlatoonSnapshot> =
         access { it.listSnapshots(limit) }
 
+    /** The current roster: the newest one kept in the history, never one set aside. */
+    fun latestSnapshot(): PlatoonSnapshot? = listSnapshots(limit = 1).firstOrNull()
+
+    /** Rosters kept but left out of every roster read because they were dated ahead of the clock. */
+    fun setAsideSnapshotCount(): Int = access(PlatoonDatabase::setAsideSnapshotCount)
+
     fun representedSnapshotSources(): Set<String> =
         access(PlatoonDatabase::snapshotSourceFiles)
 
@@ -199,6 +214,13 @@ internal class PlatoonRepository(
 
     fun listMemberStatuses(activeOnly: Boolean = false): List<MemberStatus> =
         access { it.listMemberStatuses(activeOnly) }
+
+    fun memberCurrentNames(): Map<Long, String> = access(PlatoonDatabase::memberCurrentNames)
+
+    /** Stored rosters captured at exactly [capturedAt], to recognize a re-imported copy. */
+    fun snapshotsCapturedAt(capturedAt: Instant): List<PlatoonSnapshot> =
+        access { it.listSnapshotsForPeriod(capturedAt, capturedAt.plusMillis(1)) }
+            .filter { it.capturedAt == capturedAt }
 
     fun listEvents(
         from: Instant,
@@ -220,6 +242,7 @@ internal class PlatoonRepository(
         WeeklyHistoryWorkPolicy.MemberEdit.REMOVAL,
     ) {
         withExclusiveDatabase(storageScope) {
+            CsvImportCheckpointManager.requireAccessAllowed(storageScope)
             val order = MemberOrderPreferences(appContext, storageScope.storageId)
             val previousOrder = order.read()
             val updatedOrder = previousOrder.filterNot { it == uid }
@@ -245,6 +268,17 @@ internal class PlatoonRepository(
                 throw error
             }
         }
+    }.also { deleted -> if (deleted) removeCopiesOfDeletedMember() }
+
+    /**
+     * The CSV undo checkpoint is a full pre-import copy that still holds the deleted member, and
+     * the last shared weekly PNG can show them. The deletion has committed, so failures only log.
+     */
+    private fun removeCopiesOfDeletedMember() {
+        runCatching { CsvImportCheckpointManager(appContext, storageScope).discardCheckpoint() }
+            .onFailure { Log.e(TAG, "Unable to discard the CSV import checkpoint", it) }
+        runCatching { WeeklyPngExport.clearShareCache(appContext) }
+            .onFailure { Log.e(TAG, "Unable to clear the weekly share cache", it) }
     }
 
     fun updateMembershipPeriod(
@@ -318,7 +352,7 @@ internal class PlatoonRepository(
     ): WeeklyTableRevision {
         val live = buildLiveWeeklyRevision(referenceDay, zoneId, asOf)
         try {
-            recordHistory(live, Instant.now(), clearActiveOnChange = false)
+            recordHistory(live, zoneId, Instant.now(), clearActiveOnChange = false)
         } catch (error: Exception) {
             Log.e(TAG, "Unable to record weekly history for ${live.report.periodStart}", error)
         }
@@ -339,15 +373,19 @@ internal class PlatoonRepository(
         return activeRevision(live) ?: live
     }
 
-    /** The selected historical revision, [live] when none is selected, or null if undecodable. */
-    private fun activeRevision(live: WeeklyTableRevision): WeeklyTableRevision? {
+    /**
+     * The selected historical revision, [live] when none is selected, or null when the selection
+     * cannot be read or decoded, so the caller falls back to [live].
+     */
+    private fun activeRevision(live: WeeklyTableRevision): WeeklyTableRevision? = runCatching {
         val payload = access {
             it.activeWeeklyReportHistoryPayload(live.report.periodStart.toEpochDay())
         } ?: return live
-        return runCatching { WeeklyReportHistoryCodec.decodeRevision(payload) }.getOrNull()
-    }
+        WeeklyReportHistoryCodec.decodeRevision(payload)
+    }.getOrNull()
 
-    private fun buildLiveWeeklyRevision(
+    @VisibleForTesting
+    internal fun buildLiveWeeklyRevision(
         referenceDay: LocalDate,
         zoneId: ZoneId,
         asOf: Instant,
@@ -385,7 +423,11 @@ internal class PlatoonRepository(
         ))
     }
 
-    /** Every input of one weekly revision, read under a single consistent database state. */
+    /**
+     * Every input of one weekly revision, read under a single consistent database state. Only
+     * real UIDs pass: a stored UID 0 or below, which ingestion and the v14 repair both reject,
+     * must never fail a whole week's consistency check.
+     */
     private fun readRevisionInputs(
         periodStart: LocalDate,
         zoneId: ZoneId,
@@ -395,15 +437,16 @@ internal class PlatoonRepository(
             val roster = readRosterInputs(database, periodStart, zoneId, asOf)
             RevisionInputs(
                 snapshots = roster.snapshots,
-                reportEvents = roster.reportEvents,
-                revisionEvents = roster.revisionEvents,
-                overrides = database.listWeeklyOverrides(periodStart.toEpochDay()),
+                reportEvents = roster.reportEvents.filter { it.uid > 0L },
+                revisionEvents = roster.revisionEvents.filter { it.uid > 0L },
+                overrides = database.listWeeklyOverrides(periodStart.toEpochDay()).filter { it.uid > 0L },
+                // From the day before the week: its Daily Patrol bounds a near-reset tail.
                 dailyPatrolFacts = database.listDailyPatrolFacts(
-                    PlatoonPeriods.periodStartInstant(periodStart, zoneId),
+                    PlatoonPeriods.periodStartInstant(periodStart.minusDays(1), zoneId),
                     PlatoonPeriods.periodStartInstant(periodStart.plusDays(7), zoneId),
                 ),
                 notes = database.listWeeklyNotes(periodStart.toEpochDay()),
-                statuses = database.listMemberStatuses(),
+                statuses = database.listMemberStatuses().filter { it.uid > 0L },
             )
         }
     }
@@ -464,8 +507,10 @@ internal class PlatoonRepository(
         access { it.listWeeklyReportHistory(periodStart.toEpochDay()) }
 
     fun weeklyReportHistory(id: Long, periodStart: LocalDate): WeeklyReportBuilder.Report? =
-        access { it.weeklyReportHistoryPayload(id, periodStart.toEpochDay()) }
-            ?.let { payload -> runCatching { WeeklyReportHistoryCodec.decode(payload) }.getOrNull() }
+        runCatching {
+            access { it.weeklyReportHistoryPayload(id, periodStart.toEpochDay()) }
+                ?.let(WeeklyReportHistoryCodec::decode)
+        }.getOrNull()
 
     fun restoreWeeklyReportHistory(id: Long, periodStart: LocalDate): Boolean =
         access { it.activateWeeklyReportHistory(id, periodStart.toEpochDay()) }
@@ -474,6 +519,8 @@ internal class PlatoonRepository(
         access { it.clearActiveWeeklyReportHistory(periodStart.toEpochDay()) }
 
     fun rebuildWeeklyHistoryForTimeZoneChange(zoneId: ZoneId) {
+        // Its accesses run under the exclusive gate, where recovery cannot start.
+        prepareAccess()
         withExclusiveDatabase(storageScope) {
             val recordedAt = Instant.now()
             val replacements = WeeklyReportRange
@@ -489,7 +536,30 @@ internal class PlatoonRepository(
                         payload = encoded.payload,
                     )
                 }
-            access { it.replaceWeeklyReportHistory(replacements) }
+            access { it.replaceWeeklyReportHistory(replacements, zoneId) }
+        }
+    }
+
+    /**
+     * Rebuilds the derived weekly history unless it is known to be bucketed in this Platoon's
+     * reset zone, as after restoring an archive made under another zone or before the zone was
+     * kept. History is a derived audit trail, so a rebuild that fails clears it instead; live
+     * revisions are always recomputed from evidence. Never throws. Returns whether it rebuilt.
+     */
+    fun reconcileWeeklyHistoryZone(): Boolean = withExclusiveDatabase(storageScope) {
+        try {
+            val zone = gameZone()
+            if (access { it.isWeeklyHistoryBucketedIn(zone) }) return@withExclusiveDatabase false
+            try {
+                rebuildWeeklyHistoryForTimeZoneChange(zone)
+            } catch (error: Exception) {
+                Log.e(TAG, "Unable to rebuild weekly history for $zone; clearing it", error)
+                access { it.replaceWeeklyReportHistory(emptyList(), zone) }
+            }
+            true
+        } catch (error: Exception) {
+            Log.e(TAG, "Unable to reconcile weekly history with its reset zone", error)
+            false
         }
     }
 
@@ -592,21 +662,46 @@ internal class PlatoonRepository(
                 )
         }
 
-    private fun recordHistory(
+    /**
+     * Stores [revision] only while [zone] is still the scope's reset zone. A revision built
+     * before a reset-region change would otherwise land after that change's history rebuild;
+     * rebuilding replaces every row, so checking inside the inserting access closes the race.
+     *
+     * Likewise it is stored only while every member it names still exists. A revision built
+     * before a member delete would otherwise bring the deleted member's name and private note
+     * back after the delete purged them; the access holds the read lock, which the delete's
+     * exclusive section excludes, so no delete can commit between the check and the insert.
+     */
+    @VisibleForTesting
+    internal fun recordHistory(
         revision: WeeklyTableRevision,
+        zone: ZoneId,
         recordedAt: Instant,
         clearActiveOnChange: Boolean,
     ) {
         val encoded = WeeklyReportHistoryCodec.encode(revision)
+        val referenced = revision.referencedUids()
         access { database ->
-            database.recordWeeklyReportHistory(
-                periodStartEpochDay = revision.report.periodStart.toEpochDay(),
-                recordedAt = recordedAt,
-                fingerprint = encoded.fingerprint,
-                payload = encoded.payload,
-                clearActiveOnChange = clearActiveOnChange,
-            )
+            if (gameZone().normalized() != zone.normalized()) return@access
+            database.runInTransaction {
+                if (database.missingMemberUids(referenced).isNotEmpty()) return@runInTransaction
+                database.recordWeeklyReportHistory(
+                    periodStartEpochDay = revision.report.periodStart.toEpochDay(),
+                    recordedAt = recordedAt,
+                    fingerprint = encoded.fingerprint,
+                    payload = encoded.payload,
+                    clearActiveOnChange = clearActiveOnChange,
+                    zoneId = zone,
+                )
+            }
         }
+    }
+
+    private fun WeeklyTableRevision.referencedUids(): Set<Long> = buildSet {
+        report.members.mapTo(this) { it.uid }
+        membershipEvents.mapTo(this) { it.uid }
+        addAll(memberNamesByUid.keys)
+        addAll(memberPrivateNotesByUid.keys)
     }
 
     private fun recordLiveWeeklyRevision(periodStart: LocalDate) {
@@ -623,6 +718,7 @@ internal class PlatoonRepository(
             val now = Instant.now()
             recordHistory(
                 buildLiveWeeklyRevision(periodStart, zone, now),
+                zone,
                 now,
                 clearActiveOnChange = true,
             )
@@ -642,8 +738,25 @@ internal class PlatoonRepository(
         }
     }
 
-    private fun <T> access(block: (PlatoonDatabase) -> T): T =
-        withDatabase(appContext, storageScope, block)
+    private fun <T> access(block: (PlatoonDatabase) -> T): T {
+        prepareAccess()
+        return withDatabase(appContext, storageScope, block)
+    }
+
+    /**
+     * Finishes this scope's interrupted backup restore and CSV import or undo before the first
+     * read or write, so no edit can commit ahead of a rollback that would replace it. Skipped,
+     * and retried by a later access, while this thread already holds the maintenance lock: the
+     * read lock cannot be upgraded, and recovery must take a CSV claim before that lock.
+     */
+    private fun prepareAccess() {
+        if (accessPrepared || holdsMaintenanceLock()) return
+        PlatoonBackupManager.recoverInterruptedFullRestore(appContext, storageScope)
+        CsvImportCheckpointManager.recoverOnce(appContext, storageScope)
+        // A profile restored before 2.7.2 may still carry the selected file's table DDL.
+        PlatoonBackupManager.sanitizeLiveSchemaOnce(appContext, storageScope)
+        accessPrepared = true
+    }
 
     data class ImportResult(
         val imported: Int,
@@ -699,6 +812,9 @@ internal class PlatoonRepository(
 
         internal fun holdsSharedDatabaseAccess(): Boolean = maintenanceLock.readHoldCount > 0
 
+        private fun holdsMaintenanceLock(): Boolean =
+            maintenanceLock.readHoldCount > 0 || maintenanceLock.isWriteLockedByCurrentThread
+
         private val databaseInstances = mutableMapOf<String, PlatoonDatabase>()
 
         private fun database(context: Context, scope: PlatoonStorageScope): PlatoonDatabase =
@@ -714,6 +830,8 @@ internal class PlatoonRepository(
             scope: PlatoonStorageScope,
             block: (PlatoonDatabase) -> T,
         ): T = maintenanceLock.readLock().withLock {
+            // While a CSV import or undo holds the scope, only its own thread may write there.
+            CsvImportCheckpointManager.requireAccessAllowed(scope)
             block(database(context, scope))
         }
 

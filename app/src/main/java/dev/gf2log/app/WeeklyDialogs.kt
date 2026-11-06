@@ -8,11 +8,13 @@ import android.view.View
 import dev.gf2log.app.management.MetricCertainty
 import dev.gf2log.app.management.WeeklyEvidenceAnalyzer
 import dev.gf2log.app.management.WeeklyEvidenceAnalyzer.Metric
+import dev.gf2log.app.management.WeeklyMetricPresentation
 import dev.gf2log.app.management.WeeklyOverrideEditing
 import dev.gf2log.app.management.WeeklyOverrideEditing.Choice
 import dev.gf2log.app.management.WeeklyReportBuilder
 import dev.gf2log.app.management.WeeklyShareProjection
 import dev.gf2log.app.ui.Controls
+import dev.gf2log.app.ui.DialogDraft
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.LabeledField
 import dev.gf2log.app.ui.TextRole
@@ -40,22 +42,28 @@ internal object WeeklyDialogs {
         display: CellDisplay,
         explanations: Map<Metric, WeeklyEvidenceAnalyzer.Explanation>,
     ) {
+        // Each value carries the words the table cell speaks for it, never the glyph's name.
         val metrics = buildList {
-            add(Metric.MERIT to display.merit)
+            add(Triple(Metric.MERIT, display.merit, CellSpeech.value(activity, display.merit)))
             if (isGunsmokeWeek) {
-                add(Metric.SCORE to (display.score ?: "-"))
-                add(Metric.ATTEMPTS to (display.attempts ?: "-"))
+                val score = display.score ?: "-"
+                val attempts = display.attempts ?: "-"
+                add(Triple(Metric.SCORE, score, CellSpeech.value(activity, score)))
+                add(Triple(Metric.ATTEMPTS, attempts, CellSpeech.value(activity, attempts)))
             }
-            add(Metric.LOGIN to display.login.symbol)
-            add(Metric.DAILY_PATROL to display.patrol.symbol)
+            add(Triple(Metric.LOGIN, display.login.symbol, CellSpeech.mark(activity, display.login)))
+            add(Triple(Metric.DAILY_PATROL, display.patrol.symbol, CellSpeech.mark(activity, display.patrol)))
         }
         val content = Dialogs.content(activity) {
-            metrics.forEachIndexed { index, (metric, value) ->
+            metrics.forEachIndexed { index, (metric, value, spoken) ->
                 val explanation = explanations[metric] ?: return@forEachIndexed
                 if (index > 0) addView(activity.divider(), activity.lp(top = 12, bottom = 12))
                 addView(activity.row {
                     addView(activity.text(metricLabel(activity, metric), TextRole.SUBTITLE), activity.lp(width = 0, weight = 1f))
-                    addView(activity.text(value, TextRole.TITLE) { gravity = Gravity.END }, activity.lp(WRAP, WRAP, start = 8))
+                    addView(activity.text(value, TextRole.TITLE) {
+                        gravity = Gravity.END
+                        contentDescription = spoken
+                    }, activity.lp(WRAP, WRAP, start = 8))
                 }, activity.lp())
                 addView(certaintyBadge(activity, explanation.certainty), activity.lp(WRAP, WRAP, top = 4))
                 explanation.facts.ifEmpty { listOf(WeeklyEvidenceAnalyzer.Fact.NO_OBSERVATION) }.forEach { fact ->
@@ -72,8 +80,20 @@ internal object WeeklyDialogs {
     }
 
     /**
-     * Edits one member-day. Fields start from the displayed values; only fields the user changes
-     * become edits, so untouched derived values keep their certainty.
+     * Edits one member-day. Exact values start filled in; only fields the user changes become
+     * edits, so untouched derived values keep their certainty.
+     */
+    /** Names the cell editor's draft for [BaseActivity.takeDialogDraft]. */
+    const val CELL_EDIT_KEY = "weekly_cell_edit"
+    const val ARG_UID = "uid"
+    const val ARG_GAME_DAY = "game_day"
+    private const val ARG_LOGIN = "login"
+    private const val ARG_PATROL = "patrol"
+
+    /**
+     * Edits one member-day. Exact values start filled in; only fields the user changes become
+     * edits, so untouched derived values keep their certainty. The editor reopens with what was
+     * typed after its screen is recreated: the screen passes back the [restored] draft.
      */
     fun showEdit(
         activity: Activity,
@@ -83,27 +103,41 @@ internal object WeeklyDialogs {
         cell: WeeklyReportBuilder.DayCell,
         current: WeeklyOverrideEditing.CellEdit?,
         next: (() -> Unit)? = null,
+        restored: DialogDraft? = null,
         onDone: (WeeklyOverrideEditing.CellEdit) -> Unit,
-    ) {
-        fun numberField(label: Int, initial: String, hint: Int): Pair<LabeledField, String> {
-            val field = activity.textField(activity.getString(hint), inputType = InputType.TYPE_CLASS_NUMBER).apply { setText(initial) }
-            return LabeledField(activity, activity.getString(label), field) to initial
+    ): AlertDialog {
+        // A minimum or unknown value starts empty with its notation as the hint, so typing the
+        // shown number confirms it instead of reading as "unchanged".
+        fun numberField(label: Int, field: WeeklyCellEditor.Field, hint: Int, id: Int): Pair<LabeledField, String> {
+            val start = WeeklyCellEditor.start(cell, current, field)
+            val hintText = start.notation?.let { activity.getString(R.string.captured_value_hint, it) } ?: activity.getString(hint)
+            val input = activity.textField(hintText, id = id, inputType = InputType.TYPE_CLASS_NUMBER).apply { setText(start.text) }
+            return LabeledField(activity, activity.getString(label), input) to start.text
         }
-        val (merit, meritInitial) = numberField(R.string.merit_short, current?.merit ?: cell.meritDelta?.toString().orEmpty(), R.string.blank_clears)
+        val (merit, meritInitial) = numberField(R.string.merit_short, WeeklyCellEditor.Field.MERIT, R.string.blank_clears, R.id.weekly_cell_merit)
         val score = if (isGunsmokeWeek) {
-            numberField(R.string.point_short, current?.score ?: cell.scoreDelta?.toString().orEmpty(), R.string.blank_clears)
+            numberField(R.string.point_short, WeeklyCellEditor.Field.SCORE, R.string.blank_clears, R.id.weekly_cell_score)
         } else {
             null
         }
         val attempts = if (isGunsmokeWeek) {
-            numberField(R.string.attempt_short, current?.attempts ?: cell.attempts?.toString().orEmpty(), R.string.attempts_range)
+            numberField(R.string.attempt_short, WeeklyCellEditor.Field.ATTEMPTS, R.string.attempts_range, R.id.weekly_cell_attempts)
         } else {
             null
         }
         val loginInitial = current?.attended ?: Choice.of(cell.attended)
         val patrolInitial = current?.dailyPatrol ?: Choice.of(cell.dailyPatrol)
-        var login = loginInitial
-        var patrol = patrolInitial
+        // The choices live in the draft's arguments, which the saved draft reads when it is taken.
+        val arguments = android.os.Bundle().apply {
+            putLong(ARG_UID, uid)
+            putLong(ARG_GAME_DAY, cell.gameDay.toEpochDay())
+        }
+        fun restoredChoice(key: String, initial: Choice): Choice =
+            restored?.arguments?.getString(key)?.let { name -> Choice.entries.firstOrNull { it.name == name } } ?: initial
+        var login = restoredChoice(ARG_LOGIN, loginInitial)
+        var patrol = restoredChoice(ARG_PATROL, patrolInitial)
+        arguments.putString(ARG_LOGIN, login.name)
+        arguments.putString(ARG_PATROL, patrol.name)
         val error = activity.errorLine()
         val clear = activity.button(activity.getString(R.string.clear_manual_values), Controls.Role.DESTRUCTIVE_TEXT) {}
         val content = Dialogs.content(activity) {
@@ -115,8 +149,14 @@ internal object WeeklyDialogs {
                     addView(attempts.first, activity.lp(width = 0, weight = 1f, start = 12))
                 }, activity.lp(top = 12))
             }
-            addView(choiceRow(activity, R.string.login_short, loginInitial) { login = it }, activity.lp(top = 12))
-            addView(choiceRow(activity, R.string.patrol_short, patrolInitial) { patrol = it }, activity.lp(top = 12))
+            addView(choiceRow(activity, R.string.login_short, login) {
+                login = it
+                arguments.putString(ARG_LOGIN, it.name)
+            }, activity.lp(top = 12))
+            addView(choiceRow(activity, R.string.patrol_short, patrol) {
+                patrol = it
+                arguments.putString(ARG_PATROL, it.name)
+            }, activity.lp(top = 12))
             addView(error, activity.lp(top = 8))
             if (cell.manualOverride != null) addView(clear, activity.lp(WRAP, WRAP, top = 4))
         }
@@ -127,9 +167,9 @@ internal object WeeklyDialogs {
             .setNegativeButton(R.string.cancel, null)
             .setPositiveButton(R.string.apply, null)
         if (next != null) builder.setNeutralButton(R.string.apply_and_next_day, null)
-        Dialogs.show(builder) { dialog ->
+        return Dialogs.showRestorable(builder, CELL_EDIT_KEY, content, arguments, restored) { dialog ->
             fun changed(field: Pair<LabeledField, String>?): String? =
-                field?.let { (view, initial) -> view.input.text.toString().takeIf { it != initial } }
+                field?.let { (view, initial) -> WeeklyCellEditor.changed(view.input.text.toString(), initial) }
             fun finish(edit: WeeklyOverrideEditing.CellEdit, then: (() -> Unit)? = null) {
                 val probe = WeeklyOverrideEditing.merge(
                     cell.manualOverride?.periodStart ?: cell.gameDay,
@@ -138,13 +178,25 @@ internal object WeeklyDialogs {
                     listOf(edit),
                 )
                 if (probe is WeeklyOverrideEditing.Result.Invalid) {
-                    error.showMessage(activity.getString(
+                    error.showMessage(
                         when (probe.field) {
-                            WeeklyOverrideEditing.Field.ATTEMPTS -> R.string.invalid_attempts
-                            WeeklyOverrideEditing.Field.ACTIVITY -> R.string.invalid_activity_choice
-                            else -> R.string.invalid_counter
+                            WeeklyOverrideEditing.Field.ATTEMPTS -> activity.getString(R.string.invalid_attempts)
+                            WeeklyOverrideEditing.Field.ACTIVITY -> activity.getString(R.string.invalid_activity_choice)
+                            WeeklyOverrideEditing.Field.MERIT -> if (isGunsmokeWeek) {
+                                activity.getString(R.string.invalid_counter)
+                            } else {
+                                activity.getString(
+                                    R.string.invalid_standard_merit,
+                                    WeeklyOverrideEditing.maximumDailyMerit(isGunsmokeWeek = false),
+                                )
+                            }
+                            else -> activity.getString(R.string.invalid_counter)
                         },
-                    ))
+                    )
+                    return
+                }
+                if (WeeklyOverrideEditing.contradictsEvidence(cell, edit)) {
+                    error.showMessage(activity.getString(R.string.invalid_activity_evidence))
                     return
                 }
                 dialog.dismiss()
@@ -287,4 +339,41 @@ internal object WeeklyDialogs {
         WeeklyEvidenceAnalyzer.Fact.SPARSE_INFERENCE -> R.string.evidence_fact_sparse
         WeeklyEvidenceAnalyzer.Fact.AMBIGUOUS_ALLOCATION -> R.string.evidence_fact_ambiguous
     }
+}
+
+/** The pure part of the cell editor: what each number field starts with and what counts as a change. */
+internal object WeeklyCellEditor {
+    enum class Field { MERIT, SCORE, ATTEMPTS }
+
+    /**
+     * [text] fills the field; [notation] is the displayed value (`≥90`, `?`) shown as a hint when
+     * the field starts empty because that value is not exact.
+     */
+    data class Start(val text: String, val notation: String? = null)
+
+    /**
+     * A field is filled in only with an unsaved draft value or an exact value (a manual override
+     * is exact). Prefilling a minimum or an unknown would make the confirmed number impossible to
+     * enter, because typing the same digits leaves the field "unchanged".
+     */
+    fun start(cell: WeeklyReportBuilder.DayCell, current: WeeklyOverrideEditing.CellEdit?, field: Field): Start {
+        val draft = when (field) {
+            Field.MERIT -> current?.merit
+            Field.SCORE -> current?.score
+            Field.ATTEMPTS -> current?.attempts
+        }
+        if (draft != null) return Start(draft)
+        val (value, certainty) = when (field) {
+            Field.MERIT -> cell.meritDelta to cell.meritCertainty
+            Field.SCORE -> cell.scoreDelta to cell.scoreCertainty
+            Field.ATTEMPTS -> cell.attempts to cell.attemptsCertainty
+        }
+        if (value != null && certainty == MetricCertainty.EXACT) return Start(value.toString())
+        // Same notation as the table cell, including its "-" for attempts on a manual cell.
+        val missing = if (field == Field.ATTEMPTS && cell.manualOverride != null) "-" else "?"
+        return Start("", WeeklyMetricPresentation.format(value, certainty, missing))
+    }
+
+    /** The typed text when it differs from what the field started with, otherwise null. */
+    fun changed(input: String, start: String): String? = input.takeIf { it != start }
 }

@@ -13,23 +13,29 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
 
 class PlatoonPayloadDispatcherTest {
     @Test
     fun routesEachRequiredPayloadOnlyToItsHandler() {
         val routed = mutableListOf<String>()
         val dispatcher = PlatoonPayloadDispatcher(
-            onMembers = { _ -> routed += "members"; null },
-            onActivity = { routed += "activity"; true },
-            onUpdates = { routed += "updates"; true },
+            onMembers = { _, at -> routed += "members@$at"; null },
+            onActivity = { _, at -> routed += "activity@$at"; true },
+            onUpdates = { _, at -> routed += "updates@$at"; true },
         )
 
-        val members = dispatcher.dispatch(membersPayload())
-        val activity = dispatcher.dispatch(activityPayload())
-        val updates = dispatcher.dispatch(updatesPayload())
+        // Each handler dates its record by when the payload arrived, however late it is routed.
+        val members = dispatcher.dispatch(membersPayload(), Instant.parse("2026-07-22T04:50:00Z"))
+        val activity = dispatcher.dispatch(activityPayload(), Instant.parse("2026-07-22T04:51:00Z"))
+        val updates = dispatcher.dispatch(updatesPayload(), Instant.parse("2026-07-22T04:52:00Z"))
 
         assertEquals(
-            listOf("members", "activity", "updates"),
+            listOf(
+                "members@2026-07-22T04:50:00Z",
+                "activity@2026-07-22T04:51:00Z",
+                "updates@2026-07-22T04:52:00Z",
+            ),
             routed,
         )
         assertTrue(members.members?.getOrThrow() == null)
@@ -45,12 +51,12 @@ class PlatoonPayloadDispatcherTest {
     fun handlerFailureIsReturnedInsteadOfThrown() {
         val routed = mutableListOf<String>()
         val dispatcher = PlatoonPayloadDispatcher(
-            onMembers = { _ -> routed += "members"; null },
-            onActivity = { routed += "activity"; error("database unavailable") },
-            onUpdates = { routed += "updates"; true },
+            onMembers = { _, _ -> routed += "members"; null },
+            onActivity = { _, _ -> routed += "activity"; error("database unavailable") },
+            onUpdates = { _, _ -> routed += "updates"; true },
         )
 
-        val result = dispatcher.dispatch(activityPayload())
+        val result = dispatcher.dispatch(activityPayload(), Instant.EPOCH)
 
         assertEquals(listOf("activity"), routed)
         assertTrue(result.activity?.isFailure == true)

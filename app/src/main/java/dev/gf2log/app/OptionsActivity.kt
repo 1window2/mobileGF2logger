@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.LinearLayout
 import dev.gf2log.app.capture.CaptureDiagnosticsStore
+import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.settings.CapturePreferences
@@ -16,6 +17,7 @@ import dev.gf2log.app.settings.PayloadHistoryPreferences
 import dev.gf2log.app.standby.ScheduledRecording
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
+import dev.gf2log.app.ui.CaptureGuard
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
@@ -48,6 +50,10 @@ class OptionsActivity : BaseActivity() {
         val screen = Screen(this)
         screen.topBar.setNavigation(::finish).setTitle(getString(R.string.payload_options))
         screen.setBody(Screen.scrollingBody(this, buildContent()))
+        // Opened from a damaged Platoon's Restore backup action; only once, not after recreation.
+        if (savedInstanceState == null && intent.getBooleanExtra(EXTRA_RESTORE_BACKUP, false)) {
+            backup.confirmRestore()
+        }
     }
 
     override fun onScreenResumed() {
@@ -126,6 +132,8 @@ class OptionsActivity : BaseActivity() {
                 R.drawable.ic_shield,
             ) { chooseCaptureRegion(packageName) }
         }), lp())
+        addView(caption(getString(R.string.settings_client_signers_detail)), lp(top = 12))
+        addView(ClientSignerRows(this@OptionsActivity).view(), lp())
         val capturePreferences = CapturePreferences(this@OptionsActivity)
         val payloads = PayloadHistoryPreferences(this@OptionsActivity)
         addView(panel(padding = 8) {
@@ -188,7 +196,7 @@ class OptionsActivity : BaseActivity() {
                     Intent(this@OptionsActivity, OnboardingActivity::class.java).putExtra(OnboardingActivity.EXTRA_REPLAY, true),
                 )
             },
-            navigationRow(getString(R.string.app_version), versionName(), R.drawable.ic_code, showChevron = false) {},
+            navigationRow(getString(R.string.app_version), versionName(), R.drawable.ic_code, showChevron = false),
         )), lp())
     }
 
@@ -219,7 +227,7 @@ class OptionsActivity : BaseActivity() {
     }
 
     private fun chooseResetRegion(scope: PlatoonStorageScope) {
-        val regions = GameServerRegion.entries.filterNot { it == GameServerRegion.MANUAL }
+        val regions = resetRegionChoices(PlatoonProfileRegistry(this).find(scope.storageId)?.client?.packageName)
         val automatic = GameTimeZonePreferences.isAutomatic(this, scope.storageId)
         val current = GameTimeZonePreferences.region(this, scope.storageId)
         val checked = if (automatic) 0 else regions.indexOf(current).takeIf { it >= 0 }?.plus(1) ?: -1
@@ -231,7 +239,8 @@ class OptionsActivity : BaseActivity() {
         ) { which ->
             val selected = if (which == 0) null else regions[which - 1]
             val changed = if (selected == null) !automatic else automatic || selected != current
-            if (changed) updateResetRegion(scope, selected)
+            // A capture ingesting while history is rebuilt would record old-zone revisions after it.
+            if (changed) CaptureGuard.whenStopped(this, R.string.stop_capture_before_profile_change) { updateResetRegion(scope, selected) }
         }
     }
 
@@ -263,7 +272,14 @@ class OptionsActivity : BaseActivity() {
                 }
             },
         ) { result ->
-            Feedback.show(this, if (result.isSuccess) R.string.game_timezone_updated else R.string.game_timezone_update_failed)
+            Feedback.show(
+                this,
+                if (result.isSuccess) {
+                    R.string.game_timezone_updated
+                } else {
+                    platoonDataFailureMessage(result.exceptionOrNull(), R.string.game_timezone_update_failed)
+                },
+            )
             recreate()
         }
     }
@@ -327,7 +343,17 @@ class OptionsActivity : BaseActivity() {
 
     // endregion
 
-    private companion object {
-        const val MAINTENANCE = "maintenance"
+    companion object {
+        /** Shows the backup restore confirmation as soon as Settings opens. */
+        internal const val EXTRA_RESTORE_BACKUP = "dev.gf2log.extra.RESTORE_BACKUP"
+        private const val MAINTENANCE = "maintenance"
     }
 }
+
+/**
+ * Reset regions offered for a Platoon of [packageName]'s publisher, after Automatic. Another
+ * publisher's servers use offsets this Platoon's server never does, so they are not offered.
+ */
+internal fun resetRegionChoices(packageName: String?): List<GameServerRegion> =
+    packageName?.let(ClientServerRegionPreferences::allowedFor)
+        ?: GameServerRegion.entries.filterNot { it == GameServerRegion.MANUAL }

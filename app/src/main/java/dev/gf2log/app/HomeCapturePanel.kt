@@ -1,19 +1,23 @@
 package dev.gf2log.app
 
 import android.content.Context
-import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.os.Build
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
+import androidx.annotation.StringRes
+import androidx.annotation.VisibleForTesting
 import dev.gf2log.app.capture.CaptureNotice
+import dev.gf2log.app.capture.CaptureNoticeEvent
 import dev.gf2log.app.capture.CapturePhase
+import dev.gf2log.app.capture.CaptureRunTracker
 import dev.gf2log.app.capture.CaptureSnapshot
 import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.capture.format
+import dev.gf2log.app.capture.isNewAlert
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.TextRole
 import dev.gf2log.app.ui.WRAP
@@ -26,7 +30,6 @@ import dev.gf2log.app.ui.lp
 import dev.gf2log.app.ui.panel
 import dev.gf2log.app.ui.row
 import dev.gf2log.app.ui.text
-import dev.gf2log.protocol.Gfl2PayloadDecoder
 
 /**
  * Home's capture panel: the capture phase and its latest notice, the guided checklist, installed
@@ -45,15 +48,32 @@ internal class HomeCapturePanel(
     private val stateTitle = context.text(null, TextRole.HEADLINE) {
         accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
     }
-    private val stateDetail = context.text(null, TextRole.SECONDARY) {
-        maxLines = 4
-        // Large font sizes would otherwise cut a notice off mid-word with no sign of it.
-        ellipsize = android.text.TextUtils.TruncateAt.END
-    }
+    /**
+     * Wraps in full: a warning or error notice ends with its recovery step, which a line cap
+     * would hide at large font sizes.
+     */
+    @VisibleForTesting
+    internal val stateDetail = context.text(null, TextRole.SECONDARY)
     private val checklist = context.column { visibility = View.GONE }
+    // Built once and updated in place, so frequent renders never detach a row TalkBack is on.
+    private val checklistRows = CaptureRunTracker.CHECKLIST_LABELS.map { (type, label) ->
+        ChecklistRow(context, type, label).also { checklist.addView(it.row, context.lp()) }
+    }
     private val captureActions = context.row(Gravity.TOP)
     private val clients = context.column()
     private var lastPhase: CapturePhase? = null
+    private var lastAnnounced: CaptureNoticeEvent? = null
+    private val startButtons = mutableListOf<View>()
+
+    /**
+     * Disables both start actions while this screen's CSV import or undo runs: a capture started
+     * meanwhile would be refused, or would make the import roll back.
+     */
+    var startBlocked: Boolean = false
+        set(value) {
+            field = value
+            startButtons.forEach { it.isEnabled = !value }
+        }
 
     val view: LinearLayout = context.panel(outlined = true) {
         addView(context.row {
@@ -71,13 +91,26 @@ internal class HomeCapturePanel(
         renderClients()
     }
 
-    /** Rebuilt on every resume so installing or removing a client shows up immediately. */
+    /**
+     * Rebuilt on every resume so installing or removing a client shows up immediately. A client
+     * whose signer is not the trusted one is marked, since capture leaves it out.
+     */
     fun renderClients() = with(context) {
         clients.removeAllViews()
+        val signers = SupportedClientSigners.of(this)
         SupportedGamePackages.all.forEachIndexed { index, packageName ->
-            val installed = isInstalled(packageName)
+            val trust = signers.trust(packageName)
+            val installed = trust == SupportedClientTrust.VERIFIED
             val client = clientName(packageName)
-            val status = getString(if (installed) R.string.client_installed else R.string.client_not_installed)
+            val status = getString(
+                when (trust) {
+                    SupportedClientTrust.VERIFIED -> R.string.client_installed
+                    SupportedClientTrust.NOT_INSTALLED -> R.string.client_not_installed
+                    SupportedClientTrust.MISMATCH -> R.string.client_signer_changed_badge
+                    SupportedClientTrust.UNPINNED -> R.string.client_signer_untrusted_badge
+                },
+            )
+            val untrusted = trust == SupportedClientTrust.MISMATCH || trust == SupportedClientTrust.UNPINNED
             clients.addView(row {
                 minimumHeight = dp(40)
                 isFocusable = true
@@ -95,8 +128,16 @@ internal class HomeCapturePanel(
                 addView(badge(
                     status,
                     // Page-colored fill keeps the badge legible on the green running panel too.
-                    if (installed) R.color.app_background else R.color.surface_variant,
-                    if (installed) R.color.success_text else R.color.text_secondary,
+                    when {
+                        installed -> R.color.app_background
+                        untrusted -> R.color.warning_surface
+                        else -> R.color.surface_variant
+                    },
+                    when {
+                        installed -> R.color.success_text
+                        untrusted -> R.color.warning_text
+                        else -> R.color.text_secondary
+                    },
                 ).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, lp(WRAP, WRAP, start = 8))
             }, lp(top = if (index == 0) 0 else 6))
         }
@@ -127,12 +168,20 @@ internal class HomeCapturePanel(
             ),
         )
         val notice = snapshot.notice
-        stateDetail.text = when {
+        val detail = when {
             notice?.notice == CaptureNotice.CAPTURING -> getString(R.string.capturing_clients, clientNames(snapshot.capturedTargets))
             notice != null && notice.notice != CaptureNotice.PREPARING -> notice.format(this)
             phase == CapturePhase.STOPPED -> getString(R.string.capture_ready_detail)
             phase == CapturePhase.STOPPING -> getString(R.string.capture_stopping_detail)
             else -> getString(R.string.capture_preparing_detail)
+        }
+        if (detail != stateDetail.text.toString()) {
+            // Only a new warning or error is announced; routine progress such as traffic is not.
+            val announce = notice.isNewAlert(lastAnnounced)
+            if (announce) lastAnnounced = notice
+            stateDetail.accessibilityLiveRegion =
+                if (announce) View.ACCESSIBILITY_LIVE_REGION_POLITE else View.ACCESSIBILITY_LIVE_REGION_NONE
+            stateDetail.text = detail
         }
         stateDetail.setTextColor(
             getColor(
@@ -143,7 +192,7 @@ internal class HomeCapturePanel(
                 },
             ),
         )
-        renderChecklist(snapshot.guided)
+        renderChecklist(snapshot.visibleGuided)
         if (phase != lastPhase) {
             lastPhase = phase
             renderActions(phase)
@@ -165,45 +214,49 @@ internal class HomeCapturePanel(
         else -> packageName
     }
 
-    private fun renderChecklist(guided: CaptureStatus.GuidedProgress?) = with(context) {
-        checklist.removeAllViews()
+    private fun renderChecklist(guided: CaptureStatus.GuidedProgress?) {
         checklist.visibility = if (guided == null) View.GONE else View.VISIBLE
-        guided ?: return@with
-        listOf(
-            Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE to R.string.checklist_identity,
-            Gfl2PayloadDecoder.TYPE_GUILD_MEMBERS to R.string.checklist_roster,
-            Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY to R.string.checklist_activity,
-            Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES to R.string.checklist_updates,
-        ).forEach { (type, label) ->
-            val done = type in guided.capturedPayloadTypes
-            checklist.addView(row {
-                minimumHeight = dp(32)
-                isFocusable = true
-                contentDescription = getString(label) + ". " + getString(if (done) R.string.captured else R.string.waiting)
-                addView(icon(
-                    if (done) R.drawable.ic_check_circle else R.drawable.ic_circle_outline,
-                    if (done) R.color.success_mark else R.color.outline_strong,
-                    sizeDp = 20,
-                ), lp(20, 20, end = 10))
-                addView(text(getString(label), TextRole.BODY) {
-                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                    if (!done) setTextColor(getColor(R.color.text_secondary))
-                }, lp(width = 0, weight = 1f))
-            }, lp())
+        guided ?: return
+        checklistRows.forEach { it.render(it.type in guided.capturedPayloadTypes) }
+    }
+
+    /** One checklist row; [render] touches its views only when its state changes. */
+    private class ChecklistRow(private val context: Context, val type: Int, @StringRes private val label: Int) {
+        private val mark = context.icon(R.drawable.ic_circle_outline, R.color.outline_strong, sizeDp = 20)
+        private val name = context.text(context.getString(label), TextRole.BODY) {
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        private var done: Boolean? = null
+        val row: LinearLayout = context.row {
+            minimumHeight = context.dp(32)
+            isFocusable = true
+            addView(mark, context.lp(20, 20, end = 10))
+            addView(name, context.lp(width = 0, weight = 1f))
+        }
+
+        fun render(done: Boolean) = with(context) {
+            if (this@ChecklistRow.done == done) return@with
+            this@ChecklistRow.done = done
+            row.contentDescription = getString(label) + ". " + getString(if (done) R.string.captured else R.string.waiting)
+            mark.setImageResource(if (done) R.drawable.ic_check_circle else R.drawable.ic_circle_outline)
+            mark.imageTintList = ColorStateList.valueOf(getColor(if (done) R.color.success_mark else R.color.outline_strong))
+            name.setTextColor(getColor(if (done) TextRole.BODY.color else R.color.text_secondary))
         }
     }
 
     private fun renderActions(phase: CapturePhase) = with(context) {
         captureActions.removeAllViews()
+        startButtons.clear()
         if (phase == CapturePhase.STOPPED) {
-            captureActions.addView(
-                button(getString(R.string.capture_one_roster), Controls.Role.PRIMARY, R.drawable.ic_bolt) { onStart(true) },
-                lp(width = 0, weight = 1f, end = 4),
-            )
-            captureActions.addView(
-                button(getString(R.string.prepare_capture), Controls.Role.CAPTURE, R.drawable.ic_play) { onStart(false) },
-                lp(width = 0, weight = 1f, start = 4),
-            )
+            startButtons += button(getString(R.string.capture_one_roster), Controls.Role.PRIMARY, R.drawable.ic_bolt) {
+                onStart(true)
+            }
+            startButtons += button(getString(R.string.prepare_capture), Controls.Role.CAPTURE, R.drawable.ic_play) {
+                onStart(false)
+            }
+            startButtons.forEach { it.isEnabled = !startBlocked }
+            captureActions.addView(startButtons[0], lp(width = 0, weight = 1f, end = 4))
+            captureActions.addView(startButtons[1], lp(width = 0, weight = 1f, start = 4))
         } else {
             captureActions.addView(
                 button(getString(R.string.stop_capture), Controls.Role.DESTRUCTIVE, R.drawable.ic_stop) { onStop() }.apply {
@@ -214,14 +267,4 @@ internal class HomeCapturePanel(
             )
         }
     }
-
-    private fun isInstalled(packageName: String): Boolean = runCatching {
-        val packages = context.packageManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            packages.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
-        } else {
-            @Suppress("DEPRECATION")
-            packages.getPackageInfo(packageName, 0)
-        }
-    }.isSuccess
 }

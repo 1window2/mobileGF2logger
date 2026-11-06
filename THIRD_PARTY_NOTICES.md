@@ -10,6 +10,16 @@
 
 zdtun is dynamically packaged as `libzdtun.so`; mobileGF2logger's JNI integration is packaged separately as `libgf2capture.so`.
 
+Local modifications to the bundled zdtun (under the same LGPL-3.0 terms):
+
+- The open-socket counter cannot underflow.
+- A TCP or ICMP connection whose socket cannot be opened is closed through `zdtun_conn_close`, so `on_connection_close` runs and the TCP client gets an RST for its SYN.
+- When the socket cap forces a purge, connections without a socket are not counted, and the rest go in the order UDP/ICMP, TCP, then connections an optional `on_purge_priority` callback asks to keep.
+- DNS flags are converted to host byte order before the QR bit is tested.
+- A client FIN is forwarded to the server and ACKed only after every byte before it, including the FIN segment's own payload, has been sent.
+
+Host regression tests for these changes are in `app/src/test/cpp` (`run-zdtun-host-test.sh`).
+
 ## gfl2logger protocol reference
 
 - Project: [blead/gfl2logger](https://github.com/blead/gfl2logger)

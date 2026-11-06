@@ -9,10 +9,13 @@ import android.view.Gravity
 import android.view.View
 import android.widget.ImageView
 import android.widget.LinearLayout
+import dev.gf2log.app.management.CsvImportCheckpointManager
+import dev.gf2log.app.management.CsvImportInProgressException
 import dev.gf2log.app.management.PlatoonProfile
 import dev.gf2log.app.management.PlatoonProfileAdministration
 import dev.gf2log.app.management.PlatoonProfileRegistry
 import dev.gf2log.app.settings.ClientServerRegionPreferences
+import dev.gf2log.app.standby.ScheduledRecording
 import dev.gf2log.app.ui.onTextChanged
 import dev.gf2log.app.ui.AccessibleRow
 import dev.gf2log.app.ui.Dialogs
@@ -238,10 +241,23 @@ internal object PlatoonProfileSelector {
     }
 
     private fun confirmDeleteByName(activity: Activity, profile: PlatoonProfile) {
-        val input = activity.textField(activity.getString(R.string.type_platoon_name), inputType = InputType.TYPE_CLASS_TEXT)
+        val typeable = PlatoonNameConfirmation.typeable(profile.platoonName)
+        val input = activity.textField(
+            activity.getString(if (typeable.isEmpty()) R.string.type_platoon_id else R.string.type_platoon_name),
+            // Suggestions would append a space or swap the spelling of a name that must match exactly.
+            inputType = if (typeable.isEmpty()) {
+                InputType.TYPE_CLASS_NUMBER
+            } else {
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            },
+        )
         val content = Dialogs.content(activity) {
             addView(activity.text(
-                activity.getString(R.string.delete_platoon_name_warning, profile.platoonName),
+                if (typeable.isEmpty()) {
+                    activity.getString(R.string.delete_platoon_id_warning, profile.platoonId)
+                } else {
+                    activity.getString(R.string.delete_platoon_name_warning, typeable)
+                },
                 TextRole.SECONDARY,
             ), activity.lp())
             addView(input, activity.lp(top = 12))
@@ -257,15 +273,21 @@ internal object PlatoonProfileSelector {
             val delete = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
             delete.isEnabled = false
             delete.setOnClickListener {
-                if (input.text.toString() != profile.platoonName) return@setOnClickListener
+                if (!PlatoonNameConfirmation.matches(input.text.toString(), profile.platoonName, profile.platoonId)) {
+                    return@setOnClickListener
+                }
                 dialog.dismiss()
                 runMaintenance(activity, R.string.platoon_delete_failed) {
+                    // Deletion refuses a Platoon whose import is running; say to wait, not that it failed.
+                    if (CsvImportCheckpointManager.isBusy(profile.storageId)) throw CsvImportInProgressException()
                     check(PlatoonProfileAdministration(activity).deleteProfile(profile.storageId)) {
                         "Unable to delete the Platoon profile"
                     }
                 }
             }
-            input.onTextChanged { delete.isEnabled = it == profile.platoonName }
+            input.onTextChanged {
+                delete.isEnabled = PlatoonNameConfirmation.matches(it, profile.platoonName, profile.platoonId)
+            }
         }
     }
 
@@ -277,17 +299,26 @@ internal object PlatoonProfileSelector {
         val screen = WeakReference(activity)
         val appContext = activity.applicationContext
         maintenanceExecutor.execute {
-            val result = runCatching(operation)
+            // Checked again where it runs: standby or an alarm may have started capture meanwhile.
+            val result = CaptureGuard.whileStopped { runCatching(operation) }
+                ?: Result.failure(CaptureGuard.CaptureActiveException())
+            // The next scheduled wake-up must not be for a Platoon that is gone or has moved.
+            if (result.isSuccess && ScheduledRecording.isEnabled(appContext)) ScheduledRecording.reschedule(appContext)
+            val message = if (result.exceptionOrNull() is CaptureGuard.CaptureActiveException) {
+                R.string.stop_capture_before_profile_change
+            } else {
+                platoonDataFailureMessage(result.exceptionOrNull(), failureMessage)
+            }
             // A rotation may have replaced the caller; refresh whichever screen is showing now.
             val current = screen.get()?.takeUnless { it.isFinishing || it.isDestroyed }
                 ?: BaseActivity.foregroundScreen()
             if (current == null) {
-                if (result.isFailure) Feedback.show(appContext, failureMessage, long = true)
+                if (result.isFailure) Feedback.show(appContext, message, long = true)
                 return@execute
             }
             current.runOnUiThread {
                 if (current.isFinishing || current.isDestroyed) return@runOnUiThread
-                if (result.isSuccess) current.recreate() else Feedback.show(current, failureMessage, long = true)
+                if (result.isSuccess) current.recreate() else Feedback.show(current, message, long = true)
             }
         }
     }
@@ -325,4 +356,41 @@ internal object PlatoonProfileSelector {
     private val maintenanceExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "GF2ProfileMaintenance")
     }
+}
+
+/**
+ * The type-the-name delete confirmation compares the visible, typeable form of both sides, so a
+ * keyboard's trailing space, a decomposed Hangul spelling, or an invisible format or bidi control
+ * in a captured name can never make the confirmation impossible to satisfy.
+ */
+internal object PlatoonNameConfirmation {
+    /**
+     * NFC text with whitespace runs collapsed, controls, format characters (zero-width and bidi
+     * marks), and unpaired surrogates removed, and the ends trimmed; empty when nothing is typeable.
+     */
+    fun typeable(value: String): String {
+        val text = java.text.Normalizer.normalize(value.replace(WHITESPACE, " "), java.text.Normalizer.Form.NFC)
+        val kept = StringBuilder(text.length)
+        var index = 0
+        while (index < text.length) {
+            val codePoint = text.codePointAt(index)
+            val width = Character.charCount(codePoint)
+            val unpaired = width == 1 && Character.isSurrogate(text[index])
+            val type = Character.getType(codePoint)
+            if (!unpaired && type != Character.FORMAT.toInt() && type != Character.CONTROL.toInt()) {
+                kept.appendCodePoint(codePoint)
+            }
+            index += width
+        }
+        return kept.toString().replace(WHITESPACE, " ").trim()
+    }
+
+    /** A name with no typeable characters is confirmed by its Platoon ID instead. */
+    fun matches(typed: String, platoonName: String, platoonId: Long): Boolean {
+        val expected = typeable(platoonName)
+        if (expected.isEmpty()) return typed.trim() == platoonId.toString()
+        return typeable(typed) == expected
+    }
+
+    private val WHITESPACE = Regex("\\s+")
 }

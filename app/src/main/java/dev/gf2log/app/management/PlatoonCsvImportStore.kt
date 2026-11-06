@@ -11,10 +11,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.time.Duration
 import java.time.Instant
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
 
 /** Validates and durably retains user-selected Platoon roster CSV evidence. */
 class PlatoonCsvImportStore(
@@ -22,9 +19,12 @@ class PlatoonCsvImportStore(
     private val now: () -> Instant = Instant::now,
 ) {
     /**
-     * Reads a bounded UTF-8 roster CSV, validates its complete schema, and hashes its bytes. Does
-     * not create files, allowing callers to preview a whole selection before confirmation. Returns
-     * an immutable prepared import containing only validated data and its stable identity.
+     * Reads a bounded UTF-8 roster CSV, validates its complete schema, and hashes its parsed
+     * roster. Does not create files, allowing callers to preview a whole selection before
+     * confirmation. Returns an immutable prepared import containing only validated data and its
+     * stable identity, which line endings, quoting or row order do not change. The retained
+     * bytes are the user's own unless undoing the spreadsheet prefix changed a name; those get
+     * the lossless form instead.
      */
     fun prepare(input: InputStream): PreparedImport {
         val bytes = readBounded(input)
@@ -33,18 +33,28 @@ class PlatoonCsvImportStore(
             .onUnmappableCharacter(CodingErrorAction.REPORT)
             .decode(ByteBuffer.wrap(bytes))
             .toString()
-        val parsed = requireNotNull(GuildMembersCsv.parse(text)) { "Invalid Platoon CSV" }
+        // The file may be this app's own spreadsheet export, whose formula-safe name prefix is
+        // removed here. Retained files are always lossless, so a file whose names changed is
+        // retained in that form instead of as the selected bytes.
+        val parsed = requireNotNull(GuildMembersCsv.parse(text, unescapeSpreadsheet = true)) {
+            "Invalid Platoon CSV"
+        }
         require(parsed.members.isNotEmpty()) { "Platoon CSV contains no roster members" }
         val capturedAt = Instant.parse(parsed.logTime)
         // A roster from the future would stay the "current" roster and hide every real capture
         // after it; a mistyped year is the usual cause.
-        require(!capturedAt.isAfter(now().plus(MAX_CLOCK_SKEW))) { "Platoon CSV is dated in the future" }
-        val hash = bytes.sha256().copyOf(HASH_BYTES).toHex()
+        require(!SnapshotClockPolicy.isAhead(capturedAt, now())) { "Platoon CSV is dated in the future" }
+        val encoded = if (GuildMembersCsv.parse(text) == parsed) {
+            bytes
+        } else {
+            GuildMembersCsv.format(parsed).toByteArray(StandardCharsets.UTF_8)
+        }
+        val hash = canonicalRoster(parsed, capturedAt).sha256().copyOf(HASH_BYTES).toHex()
         return PreparedImport(
-            encoded = bytes,
+            encoded = encoded,
             snapshot = parsed,
             capturedAt = capturedAt,
-            fileName = "import-" + FILE_TIME.format(capturedAt) + "-" + hash + ".csv",
+            fileName = "import-" + RosterFileNames.CAPTURE_TIME.format(capturedAt) + "-" + hash + ".csv",
         )
     }
 
@@ -53,7 +63,7 @@ class PlatoonCsvImportStore(
     /**
      * Publishes a previously validated import under its deterministic identity. Uses a durable
      * temporary write and rejects a content-hash identity collision. Returns stable retained file
-     * identity and whether identical bytes already existed.
+     * identity and whether the same roster, in any byte form, already existed.
      */
     fun retain(prepared: PreparedImport): RetainResult {
         val bytes = prepared.encoded
@@ -62,7 +72,7 @@ class PlatoonCsvImportStore(
         directory.mkdirs()
         require(directory.isDirectory) { "Unable to create the Platoon CSV directory" }
         if (file.isFile) {
-            require(file.readBytes().contentEquals(bytes)) { "CSV identity collision" }
+            require(isSameRoster(file.readBytes(), prepared)) { "CSV identity collision" }
             require(file.setLastModified(capturedAt.toEpochMilli())) {
                 "Unable to preserve the imported Platoon CSV capture time"
             }
@@ -94,6 +104,14 @@ class PlatoonCsvImportStore(
         return RetainResult(file, duplicate = false)
     }
 
+    private fun isSameRoster(existing: ByteArray, prepared: PreparedImport): Boolean {
+        if (existing.contentEquals(prepared.encoded)) return true
+        val parsed = GuildMembersCsv.parse(existing.toString(Charsets.UTF_8)) ?: return false
+        val capturedAt = runCatching { Instant.parse(parsed.logTime) }.getOrNull() ?: return false
+        return canonicalRoster(parsed, capturedAt)
+            .contentEquals(canonicalRoster(prepared.snapshot, prepared.capturedAt))
+    }
+
     private fun readBounded(input: InputStream): ByteArray {
         val output = ByteArrayOutputStream()
         val buffer = ByteArray(READ_BUFFER_BYTES)
@@ -121,19 +139,20 @@ class PlatoonCsvImportStore(
     }
 
     companion object {
-        /** Allows a phone clock a little behind the PC that wrote the CSV. */
-        private val MAX_CLOCK_SKEW: Duration = Duration.ofHours(1)
-
-        internal fun latestRetainedFile(directory: File): File? = directory.listFiles()
-            .orEmpty()
-            .filter { it.isFile && it.extension.equals("csv", ignoreCase = true) }
-            .maxWithOrNull(compareBy<File>(File::lastModified).thenBy(File::getName))
+        /**
+         * The roster as data: its capture instant and members in UID order, written in the
+         * retained (not spreadsheet-escaped) representation.
+         */
+        internal fun canonicalRoster(snapshot: GuildMembersCsv.Snapshot, capturedAt: Instant): ByteArray =
+            buildString {
+                appendLine(GuildMembersCsv.HEADER)
+                snapshot.members.sortedBy { it.uid }.forEach { member ->
+                    appendLine(GuildMembersCsv.row(member, capturedAt.toString()))
+                }
+            }.toByteArray(Charsets.UTF_8)
 
         private const val MAX_BYTES = 2 * 1024 * 1024
         private const val READ_BUFFER_BYTES = 8 * 1024
         private const val HASH_BYTES = 10
-        private val FILE_TIME: DateTimeFormatter = DateTimeFormatter
-            .ofPattern("yyyyMMdd'T'HHmmss'Z'")
-            .withZone(ZoneOffset.UTC)
     }
 }

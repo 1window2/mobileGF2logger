@@ -19,15 +19,18 @@ import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import dev.gf2log.app.capture.RosterEvents
 import dev.gf2log.app.management.MemberStatus
+import dev.gf2log.app.management.matchesSearch
 import dev.gf2log.app.management.PlatoonMemberCsv
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonSnapshot
+import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.ui.searchField
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.BarAction
 import dev.gf2log.app.ui.Dialogs
+import dev.gf2log.app.ui.DialogDraft
 import dev.gf2log.app.ui.DocumentAccess
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
@@ -52,6 +55,7 @@ import java.time.ZoneId
 class PlatoonActivity : BaseActivity() {
 
     private lateinit var profileBinding: ActivePlatoonScopeBinding
+    private lateinit var scope: PlatoonStorageScope
     private lateinit var repository: PlatoonRepository
     private lateinit var screen: Screen
     private val work = BackgroundWork(this, "GF2Platoon")
@@ -64,6 +68,7 @@ class PlatoonActivity : BaseActivity() {
     private lateinit var searchInput: EditText
     private lateinit var sortButton: TextView
     private lateinit var resultCount: TextView
+    private lateinit var zoneCaption: TextView
 
     private var model: Model? = null
     private var filter = Filter.ACTIVE
@@ -77,16 +82,29 @@ class PlatoonActivity : BaseActivity() {
     ) { uri ->
         val uids = pendingExport?.toSet()
         pendingExport = null
-        if (uri == null || uids.isNullOrEmpty()) return@registerForActivityResult
+        if (uri == null) return@registerForActivityResult
+        if (uids.isNullOrEmpty()) {
+            work.run(task = { DocumentAccess.discard(contentResolver, uri) })
+            return@registerForActivityResult
+        }
         work.run(
             task = {
                 val statuses = repository.listMemberStatuses().filter { it.uid in uids }
-                val latest = latestMembers(repository.listSnapshots(1).firstOrNull())
+                val latest = latestMembers(repository.latestSnapshot())
                 val csv = PlatoonMemberCsv.format(statuses, latest, repository.gameZone())
-                DocumentAccess.openOutput(contentResolver, uri).writer(Charsets.UTF_8).use { it.write(csv) }
+                DocumentAccess.writeExport(contentResolver, uri) { output ->
+                    output.writer(Charsets.UTF_8).use { it.write(csv) }
+                }
+            },
+            always = { result ->
+                Feedback.show(
+                    this,
+                    result.fold({ R.string.members_exported }) {
+                        platoonExportFailureMessage(it, R.string.status_export_failed)
+                    },
+                )
             },
         ) { result ->
-            Feedback.show(this, if (result.isSuccess) R.string.members_exported else R.string.status_export_failed)
             if (result.isSuccess) setSelecting(false)
         }
     }
@@ -97,8 +115,8 @@ class PlatoonActivity : BaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        profileBinding = ActivePlatoonScopeBinding(this)
-        val scope = profileBinding.scope ?: run {
+        profileBinding = ActivePlatoonScopeBinding(this, pinnedStorage(savedInstanceState))
+        scope = profileBinding.scope ?: run {
             Feedback.show(this, R.string.no_platoon_detected_detail, long = true)
             finish()
             return
@@ -122,15 +140,27 @@ class PlatoonActivity : BaseActivity() {
             setPadding(dp(16), 0, dp(16), dp(24))
         })
         setSelecting(selecting)
+        // A draft typed for a Platoon that is gone is never reopened against another one.
+        takeDialogDraft(WithdrawnMemberDialog.KEY)
+            ?.takeUnless { profileBinding.lostPinnedStorage }
+            ?.let(::addWithdrawnMember)
     }
 
     override fun onScreenResumed() {
         if (!profileBinding.isCurrent(this)) {
+            // An open withdrawn-member draft stays on the Platoon it was typed for; this screen
+            // follows the newly selected one once that dialog closes.
+            if (!profileBinding.isSameStorage(this) && withdrawnDialog?.isShowing == true) return
             recreate()
             return
         }
         load()
     }
+
+    override fun boundStorageId(): String? =
+        if (::profileBinding.isInitialized) profileBinding.scope?.storageId else null
+
+    override fun hasUnsavedDraft(): Boolean = withdrawnDialog?.isShowing == true
 
     /** A roster captured while this screen is showing appears without leaving it. */
     private val rosterSaved: (String) -> Unit = { storageId ->
@@ -163,7 +193,7 @@ class PlatoonActivity : BaseActivity() {
             key = LOAD,
             task = {
                 repository.reconcileRetainedCsvFiles()
-                val latest = repository.listSnapshots(1).firstOrNull()
+                val latest = repository.latestSnapshot()
                 Model(
                     latest = latest,
                     statuses = repository.listMemberStatuses(),
@@ -178,16 +208,24 @@ class PlatoonActivity : BaseActivity() {
                     val rebind = model?.let { it.latest != loaded.latest || it.zone != loaded.zone } == true
                     model = loaded
                     selected.retainAll(loaded.statuses.mapTo(mutableSetOf(), MemberStatus::uid))
-                    if (selecting) setSelecting(true)
+                    if (selecting) setSelecting(true) else updateTopBar()
                     renderSummary(loaded)
                     renderMembers()
                     if (rebind) memberAdapter.notifyItemRangeChanged(0, memberAdapter.itemCount)
                 },
-                onFailure = {
+                onFailure = { error ->
                     // Search or filter changes must not bring back rows from before the failure.
                     model = null
                     memberAdapter.submitList(emptyList())
-                    stateAdapter.view = StateViews.failure(this, getString(R.string.platoon_load_failed)) { load() }
+                    // Edits wait for data again, whether it is damaged or held by an import.
+                    setSelecting(false)
+                    stateAdapter.view = PlatoonDataStates.failure(
+                        this,
+                        work,
+                        scope,
+                        error,
+                        getString(R.string.platoon_load_failed),
+                    ) { load() }
                 },
             )
         }
@@ -210,6 +248,7 @@ class PlatoonActivity : BaseActivity() {
         resultCount = text(null, TextRole.LABEL) {
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
+        zoneCaption = text(null, TextRole.CAPTION) { visibility = View.GONE }
         summary = row(Gravity.TOP)
         updateSortLabel()
         return column {
@@ -228,11 +267,15 @@ class PlatoonActivity : BaseActivity() {
                 addView(resultCount, lp(width = 0, weight = 1f, start = 4))
                 addView(sortButton, lp(WRAP, WRAP))
             }, lp(top = 4, bottom = 4))
+            addView(zoneCaption, lp(start = 4, end = 4, bottom = 4))
         }
     }
 
     private fun renderSummary(loaded: Model) {
         summary.removeAllViews()
+        val caption = Labels.zoneCaption(this, loaded.zone)
+        zoneCaption.text = caption
+        zoneCaption.visibility = if (caption == null) View.GONE else View.VISIBLE
         val active = loaded.statuses.count(MemberStatus::isActive)
         val tiles = listOf(
             getString(R.string.stat_active) to active.toString(),
@@ -269,7 +312,7 @@ class PlatoonActivity : BaseActivity() {
                     Filter.ALL -> true
                 }
             }
-            .filter { query.isEmpty() || it.name.contains(query, ignoreCase = true) || it.uid.toString().contains(query) }
+            .filter { it.matchesSearch(query) }
             .let { sorted(it, loaded) }
         resultCount.text = resources.getQuantityString(R.plurals.member_count, visible.size, visible.size)
         stateAdapter.view = when {
@@ -312,8 +355,18 @@ class PlatoonActivity : BaseActivity() {
         selecting = enabled
         if (!enabled) selected.clear()
         exitSelection.isEnabled = enabled
+        updateTopBar()
+        memberAdapter.notifyItemRangeChanged(0, memberAdapter.itemCount)
+    }
+
+    /**
+     * Without loaded data, as while the database is damaged or a CSV import holds the Platoon,
+     * the entries that edit members are disabled; they would only be refused.
+     */
+    private fun updateTopBar() {
         val bar = screen.topBar
-        if (enabled) {
+        val loaded = model != null
+        if (selecting) {
             bar.setNavigationIcon(R.drawable.ic_close, getString(R.string.cancel_selection))
                 .setNavigation { setSelecting(false) }
                 .setTitle(resources.getQuantityString(R.plurals.selected_count, selected.size, selected.size))
@@ -333,19 +386,32 @@ class PlatoonActivity : BaseActivity() {
                         startActivity(Intent(this, SnapshotComparisonActivity::class.java))
                     }),
                     overflow = listOf(
-                        MenuEntry(getString(R.string.select_members)) { setSelecting(true) },
-                        MenuEntry(getString(R.string.add_withdrawn_member)) {
-                            WithdrawnMemberDialog.show(this, work, repository, { uid ->
-                                model?.statuses?.any { it.uid == uid } == true
-                            }, ::load)
-                        },
-                        MenuEntry(getString(R.string.edit_member_order)) {
+                        MenuEntry(getString(R.string.select_members), loaded) { setSelecting(true) },
+                        MenuEntry(getString(R.string.add_withdrawn_member), loaded) { addWithdrawnMember() },
+                        MenuEntry(getString(R.string.edit_member_order), loaded) {
                             startActivity(Intent(this, MemberOrderActivity::class.java))
                         },
                     ),
                 )
         }
-        memberAdapter.notifyItemRangeChanged(0, memberAdapter.itemCount)
+    }
+
+    @androidx.annotation.VisibleForTesting
+    internal var withdrawnDialog: android.app.Dialog? = null
+        private set
+
+    @androidx.annotation.VisibleForTesting
+    internal fun addWithdrawnMember(restored: DialogDraft? = null) {
+        withdrawnDialog = WithdrawnMemberDialog.show(this, work, repository, { uid ->
+            model?.statuses?.any { it.uid == uid } == true
+        }, ::load, restored).apply {
+            setOnDismissListener {
+                withdrawnDialog = null
+                // Closing the dialog of a recreated or leaving screen follows nothing.
+                if (isFinishing || isDestroyed || isChangingConfigurations) return@setOnDismissListener
+                if (!profileBinding.isCurrent(this@PlatoonActivity)) recreate()
+            }
+        }
     }
 
     private fun toggle(uid: Long) {

@@ -40,17 +40,51 @@ class CaptureRunTrackerTest {
 
         tracker.rosterCaptured("first")
         assertEquals(1, rosters)
-        assertEquals(listOf("ACTIVITY", "UPDATES"), tracker.missingAfterRoster())
+        assertEquals(
+            listOf(Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY, Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES),
+            tracker.missingAfterRoster(),
+        )
         assertEquals(0, completed)
 
         tracker.mark("first", Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY)
         tracker.mark("first", Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES)
         assertEquals(1, completed)
-        assertEquals(emptyList<String>(), tracker.missingAfterRoster())
+        assertEquals(emptyList<Int>(), tracker.missingAfterRoster())
         assertEquals(
             CaptureRunTracker.REQUIRED_TYPES,
             CaptureStatus.snapshot().guided?.capturedPayloadTypes,
         )
+    }
+
+    @Test
+    fun theGracePeriodReportsWhatIsMissingAsPayloadTypes() {
+        val tracker = CaptureRunTracker(captureOnce = true)
+        assertNull(tracker.graceOutcome())
+
+        tracker.rosterCaptured("first")
+        tracker.mark("first", Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY)
+
+        assertEquals(
+            CaptureNotice.CAPTURE_ONCE_PARTIAL to listOf(
+                Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE.toString(),
+                Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES.toString(),
+            ),
+            tracker.graceOutcome(),
+        )
+    }
+
+    @Test
+    fun aChecklistCompletedAtTheGraceDeadlineEndsAsComplete() {
+        val tracker = CaptureRunTracker(captureOnce = true)
+        tracker.rosterCaptured("first")
+        listOf(
+            Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE,
+            Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY,
+            Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES,
+        ).forEach { tracker.mark("first", it) }
+
+        // The grace stop can run before the completion it raced; it must not read as partial.
+        assertEquals(CaptureNotice.CAPTURE_ONCE_COMPLETE to emptyList<String>(), tracker.graceOutcome())
     }
 
     @Test

@@ -1,5 +1,6 @@
 package dev.gf2log.app.standby
 
+import android.app.Activity
 import android.app.AlarmManager
 import android.app.KeyguardManager
 import android.app.PendingIntent
@@ -12,7 +13,7 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.annotation.WorkerThread
 import androidx.core.content.edit
-import dev.gf2log.app.OptionsActivity
+import dev.gf2log.app.MainActivity
 import dev.gf2log.app.StandbyActivity
 import dev.gf2log.app.capture.MainThread
 import dev.gf2log.app.settings.GameServerRegion
@@ -27,9 +28,9 @@ import java.util.concurrent.Executors
  * on, gets past a swipe lock screen, runs the same recording as standby mode, and turns the screen
  * off again. Every day, with no standby screen kept on overnight.
  *
- * Only the on/off state and the chosen server keys are stored. Every wake-up is planned again from
- * the current Platoons, and the next one is set before the current one runs, so one failed night
- * never breaks the chain.
+ * Only the on/off state, the chosen server keys, and the Platoons they were chosen for are stored.
+ * Every wake-up is planned again from the current Platoons, and the next one is set before the
+ * current one runs, so one failed night never breaks the chain.
  */
 internal object ScheduledRecording {
 
@@ -42,13 +43,34 @@ internal object ScheduledRecording {
 
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "GF2Scheduled") }
 
+    /** Orders a new choice against the worker's rewrite of the stored one, so neither is lost. */
+    private val selectionLock = Any()
+
+    /**
+     * The screen the alarm clock's show intent opens. Android hands that intent to any app that
+     * asks for the next alarm clock, so it must be the exported launcher screen, with no extras.
+     */
+    internal val alarmShowScreen: Class<out Activity> get() = MainActivity::class.java
+
     fun isEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_ENABLED, false)
 
-    fun selectedKeys(context: Context): Set<String> = prefs(context).getStringSet(KEY_SERVERS, emptySet()).orEmpty()
+    fun selectedKeys(context: Context): Set<String> = storedKeys(context).mapTo(linkedSetOf(), StandbyPlanner::selectionKey)
+
+    /**
+     * The chosen servers that still had a saved Platoon when the next wake-up was last planned;
+     * before that first plan, every chosen server.
+     */
+    fun chosenKeys(context: Context): Set<String> =
+        prefs(context).getStringSet(KEY_MATCHED, null)?.toSet() ?: selectedKeys(context)
+
+    /** On, with servers chosen, none of which has a saved Platoon any more: nothing is recorded. */
+    fun isSelectionStale(context: Context): Boolean =
+        isEnabled(context) && selectedKeys(context).isNotEmpty() && chosenKeys(context).isEmpty()
+
+    private fun storedKeys(context: Context): Set<String> = prefs(context).getStringSet(KEY_SERVERS, emptySet()).orEmpty()
 
     /** A PIN, pattern, or password cannot be passed unattended, so it rules scheduling out. */
-    fun isBlockedByScreenLock(context: Context): Boolean =
-        context.getSystemService(KeyguardManager::class.java)?.isDeviceSecure != false
+    fun isBlockedByScreenLock(context: Context): Boolean = hasScreenLock(context)
 
     /** Android 12+ lets the user withhold exact alarms; without them a wake-up may come late. */
     fun canScheduleExactAlarms(context: Context): Boolean =
@@ -67,9 +89,13 @@ internal object ScheduledRecording {
 
     /** Turns scheduling on for [chosen]; [done] gets the first wake-up on the main thread. */
     fun enable(context: Context, chosen: List<StandbyServer>, done: (Next?) -> Unit) {
-        prefs(context).edit(commit = true) {
-            putBoolean(KEY_ENABLED, true)
-            putStringSet(KEY_SERVERS, chosen.mapTo(HashSet(), StandbyServer::key))
+        synchronized(selectionLock) {
+            prefs(context).edit(commit = true) {
+                putBoolean(KEY_ENABLED, true)
+                putStringSet(KEY_SERVERS, chosen.mapTo(HashSet(), StandbyServer::key))
+                putStringSet(KEY_MATCHED, chosen.mapTo(HashSet(), StandbyServer::key))
+                putStringSet(KEY_PLATOONS, chosen.flatMapTo(HashSet(), StandbyServer::storageIds))
+            }
         }
         reschedule(context, done)
     }
@@ -104,9 +130,14 @@ internal object ScheduledRecording {
             disable(context)
             return null
         }
-        val selected = selectedServers(context, StandbyProfiles.load(context), selectedKeys(context))
+        val selected = updateSelection(context, StandbyPlanner.servers(StandbyProfiles.load(context)))
         val now = Instant.now()
-        val from = StandbyPlanner.scheduleFrom(now, handledReset(context))
+        val handled = handledReset(context)
+        if (handled != null && StandbyPlanner.trustedHandledReset(now, handled) == null) {
+            // Stored under a clock set forward: forgotten, so the real next reset is not skipped.
+            prefs(context).edit(commit = true) { remove(KEY_HANDLED_RESET) }
+        }
+        val from = StandbyPlanner.scheduleFrom(now, handled)
         val rehearsal = rehearsalReset(context, now)?.takeIf { it.isAfter(from) }
         val runs = when {
             selected.isEmpty() -> emptyList()
@@ -135,16 +166,36 @@ internal object ScheduledRecording {
     }
 
     /**
-     * The alarm went off. The next wake-up is planned first; then, unless the phone is locked
-     * with a PIN or in use, the standby screen wakes it and takes over.
+     * The alarm went off. The next wake-up is planned first; then, for the chosen servers that
+     * still have a saved Platoon, and unless the phone is locked with a PIN or in use, the standby
+     * screen wakes it and takes over. [scheduled] runs on the main thread once all that is done.
      */
     fun onAlarm(context: Context, reset: Instant, keys: Set<String>, scheduled: () -> Unit) {
         // A second delivery for the same reset (two reschedules racing) must not run it twice.
-        val handled = handledReset(context)
+        val handled = StandbyPlanner.trustedHandledReset(Instant.now(), handledReset(context))
         if (handled != null && !reset.isAfter(handled)) return scheduled()
         prefs(context).edit(commit = true) { putLong(KEY_HANDLED_RESET, reset.toEpochMilli()) }
-        reschedule(context) { scheduled() }
-        if (!isEnabled(context) || keys.isEmpty()) return
+        val app = context.applicationContext
+        worker.execute {
+            // Decided on the state the alarm found, before planning can turn scheduling off.
+            val enabled = isEnabled(app)
+            runCatching { scheduleNext(app) }.onFailure { Log.w(TAG, "Could not schedule the next recording", it) }
+            // A server whose last Platoon was deleted since the alarm was set is neither woken
+            // for nor reported.
+            val live = runCatching { StandbyPlanner.selected(StandbyPlanner.servers(StandbyProfiles.load(app)), keys) }
+                .getOrDefault(emptyList())
+                .mapTo(linkedSetOf(), StandbyServer::key)
+            MainThread.post {
+                try {
+                    if (enabled && live.isNotEmpty()) wake(app, reset, live)
+                } finally {
+                    scheduled()
+                }
+            }
+        }
+    }
+
+    private fun wake(context: Context, reset: Instant, keys: Set<String>) {
         val outcome = when {
             // Too late to finish before the day ends (an inexact alarm can come hours late).
             !Instant.now().isBefore(reset.plus(StandbyPlanner.GRACE).minus(LATEST_START_MARGIN)) -> StandbyOutcome.MISSED
@@ -222,7 +273,7 @@ internal object ScheduledRecording {
             MainThread.post {
                 // The user tapped the screen meanwhile, or a recreated screen armed already.
                 if (activity.isGone() || StandbyAutomation.isArmed) return@post
-                val servers = selectedServers(app, profiles, keys)
+                val servers = StandbyPlanner.selected(StandbyPlanner.servers(profiles), keys)
                 if (servers.isEmpty()) return@post activity.standDown()
                 val plan = StandbyPlanner.plan(servers, Instant.now()) { reset }
                 StandbyAutomation.arm(activity, plan, profiles.associate { it.storageId to it.packageName })
@@ -233,9 +284,26 @@ internal object ScheduledRecording {
 
     private fun StandbyActivity.isGone(): Boolean = isFinishing || isDestroyed
 
-    /** The chosen servers that still exist, one per client. */
-    private fun selectedServers(context: Context, profiles: List<StandbyProfile>, keys: Set<String>): List<StandbyServer> =
-        StandbyPlanner.servers(profiles).filter { it.key in keys }.distinctBy(StandbyServer::packageName)
+    /**
+     * The chosen servers that still exist, one per client. A chosen server whose Platoons moved to
+     * another server region follows them, and a key stored before 2.7.2 loses its zone; what still
+     * matches is kept for Settings.
+     */
+    @WorkerThread
+    private fun updateSelection(context: Context, servers: List<StandbyServer>): List<StandbyServer> =
+        synchronized(selectionLock) {
+            val prefs = prefs(context)
+            val stored = storedKeys(context)
+            val keys = StandbyPlanner.followPlatoons(servers, stored, prefs.getStringSet(KEY_PLATOONS, emptySet()).orEmpty())
+            val selected = StandbyPlanner.selected(servers, keys)
+            prefs.edit(commit = true) {
+                if (keys != stored) putStringSet(KEY_SERVERS, HashSet(keys))
+                putStringSet(KEY_MATCHED, selected.mapTo(HashSet(), StandbyServer::key))
+                // Kept while nothing matches, so the choice can still follow its Platoons later.
+                if (selected.isNotEmpty()) putStringSet(KEY_PLATOONS, selected.flatMapTo(HashSet(), StandbyServer::storageIds))
+            }
+            selected
+        }
 
     /** Screen on or a call in progress: someone is using the phone. */
     private fun isInUse(context: Context): Boolean {
@@ -261,7 +329,7 @@ internal object ScheduledRecording {
             val show = PendingIntent.getActivity(
                 context,
                 REQUEST_SHOW,
-                Intent(context, OptionsActivity::class.java),
+                Intent(context, alarmShowScreen),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             alarms.setAlarmClock(AlarmManager.AlarmClockInfo(start.toEpochMilli(), show), fire)
@@ -313,6 +381,8 @@ internal object ScheduledRecording {
     private const val PREFS = "scheduled_recording"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_SERVERS = "servers"
+    private const val KEY_MATCHED = "matched_servers"
+    private const val KEY_PLATOONS = "server_platoons"
     private const val KEY_HANDLED_RESET = "handled_reset"
     private const val KEY_NEXT_START = "next_start"
     private const val KEY_NEXT_REGIONS = "next_regions"

@@ -5,9 +5,12 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.text.InputType
 import android.view.View
+import dev.gf2log.app.management.GAME_ID_RANGE
 import dev.gf2log.app.management.PlatoonRepository
+import dev.gf2log.app.management.isMembershipBoundaryWithinPresent
 import dev.gf2log.app.management.isValidMembershipRange
 import dev.gf2log.app.ui.BackgroundWork
+import dev.gf2log.app.ui.DialogDraft
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.LabeledField
@@ -18,22 +21,26 @@ import dev.gf2log.app.ui.textField
 
 /** Records a member who left before capture began, with a required join and withdrawal date. */
 internal object WithdrawnMemberDialog {
+    /** Names this dialog's draft for [BaseActivity.takeDialogDraft]. */
+    const val KEY = "withdrawn_member"
+
     fun show(
         activity: Activity,
         work: BackgroundWork,
         repository: PlatoonRepository,
         isKnownUid: (Long) -> Boolean,
         onAdded: () -> Unit,
+        restored: DialogDraft? = null,
     ) = with(activity) {
         val zone = repository.gameZone()
-        val uid = LabeledField(this, getString(R.string.uid), textField(getString(R.string.uid_hint), inputType = InputType.TYPE_CLASS_NUMBER))
-        val nickname = LabeledField(this, getString(R.string.member_nickname), textField(getString(R.string.member_nickname), maxLength = ManualTextPolicy.MAX_MEMBER_NAME_CHARS))
-        val joined = DateTimePickerInput(this, getString(R.string.join_label), dateRequired = true, zone = zone)
-        val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_label), dateRequired = true, zone = zone)
+        val uid = LabeledField(this, getString(R.string.uid), textField(getString(R.string.uid_hint), id = R.id.dialog_uid_input, inputType = InputType.TYPE_CLASS_NUMBER, maxLength = MAX_UID_DIGITS))
+        val nickname = LabeledField(this, getString(R.string.member_nickname), textField(getString(R.string.member_nickname), id = R.id.dialog_nickname_input, maxLength = ManualTextPolicy.MAX_MEMBER_NAME_CHARS))
+        val joined = DateTimePickerInput(this, getString(R.string.join_label), dateRequired = true, zone = zone, stateId = R.id.dialog_joined_input)
+        val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_label), dateRequired = true, zone = zone, stateId = R.id.dialog_left_input)
         val note = LabeledField(
             this,
             getString(R.string.membership_note_hint),
-            textField(getString(R.string.membership_note_hint), singleLine = false, maxLength = ManualTextPolicy.MAX_NOTE_CHARS),
+            textField(getString(R.string.membership_note_hint), id = R.id.dialog_note_input, singleLine = false, maxLength = ManualTextPolicy.MAX_NOTE_CHARS),
         )
         val error = errorLine()
         val content = Dialogs.content(this) {
@@ -41,15 +48,18 @@ internal object WithdrawnMemberDialog {
                 addView(view, lp(top = if (index == 0) 0 else 12))
             }
         }
-        Dialogs.show(
+        Dialogs.showRestorable(
             Dialogs.builder(this)
                 .setTitle(R.string.add_withdrawn_member)
                 .setView(content)
                 .setNegativeButton(R.string.cancel, null)
                 .setPositiveButton(R.string.add, null),
+            key = KEY,
+            content = content,
+            restored = restored,
         ) { dialog ->
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { button ->
-                val uidValue = uid.input.text.toString().trim().toLongOrNull()?.takeIf { it > 0 }
+                val uidValue = uid.input.text.toString().trim().toLongOrNull()?.takeIf { it in GAME_ID_RANGE }
                 val name = nickname.input.text.toString().trim()
                 val joinedBoundary = joined.boundary
                 val withdrewBoundary = withdrew.boundary
@@ -59,6 +69,8 @@ internal object WithdrawnMemberDialog {
                     name.isEmpty() -> R.string.invalid_nickname
                     joinedBoundary == null || withdrewBoundary == null -> R.string.invalid_dates_required
                     !isValidMembershipRange(joinedBoundary, withdrewBoundary) -> R.string.invalid_date_order
+                    !isMembershipBoundaryWithinPresent(joinedBoundary, zone) ||
+                        !isMembershipBoundaryWithinPresent(withdrewBoundary, zone) -> R.string.invalid_future_date
                     else -> null
                 }
                 if (problem != null || uidValue == null || joinedBoundary == null || withdrewBoundary == null) {
@@ -76,10 +88,15 @@ internal object WithdrawnMemberDialog {
                         Feedback.show(this, R.string.saved)
                         onAdded()
                     } else {
-                        error.showMessage(getString(R.string.invalid_withdrawn_member))
+                        error.showMessage(
+                            getString(platoonDataFailureMessage(result.exceptionOrNull(), R.string.invalid_withdrawn_member)),
+                        )
                     }
                 }
             }
         }
     }
+
+    /** UInt.MAX_VALUE has ten digits. */
+    private const val MAX_UID_DIGITS = 10
 }

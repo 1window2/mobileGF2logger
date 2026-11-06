@@ -4,14 +4,19 @@ import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
 import android.graphics.drawable.GradientDrawable
+import android.os.Bundle
+import android.os.Parcelable
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.os.BundleCompat
 import dev.gf2log.app.management.MembershipBoundaryValue
+import dev.gf2log.app.management.latestMembershipBoundaryDate
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.TextRole
+import dev.gf2log.app.ui.column
 import dev.gf2log.app.ui.dp
 import dev.gf2log.app.ui.dpf
 import dev.gf2log.app.ui.iconButton
@@ -39,6 +44,8 @@ internal class DateTimePickerInput(
     private val dateRequired: Boolean = false,
     private val editable: Boolean = true,
     private val zone: ZoneId = ZoneId.systemDefault(),
+    /** A stable id makes the picked value survive recreation of a restorable dialog. */
+    stateId: Int = View.NO_ID,
 ) : LinearLayout(context) {
     private val selection = MembershipBoundaryDraft(
         initialValue = initialValue,
@@ -58,13 +65,28 @@ internal class DateTimePickerInput(
     }
 
     init {
+        if (stateId != View.NO_ID) id = stateId
         orientation = VERTICAL
         addView(context.text(label, TextRole.LABEL) {
             setPadding(context.dp(4), 0, context.dp(4), context.dp(4))
         }, context.lp())
+        // The fields edit in the game reset zone; say so whenever the phone clock reads differently.
+        Labels.zoneCaption(context, zone)?.let { caption ->
+            addView(context.text(caption, TextRole.CAPTION) {
+                setPadding(context.dp(4), 0, context.dp(4), context.dp(4))
+            }, context.lp())
+        }
         addView(context.row {
-            addView(dateField, context.lp(width = 0, weight = 1.3f))
-            addView(timeField, context.lp(width = 0, weight = 1f, start = 8))
+            if (stacksPickerFields(context.resources.configuration.fontScale)) {
+                // Side by side, large digits would not fit a narrow dialog; each field gets the row.
+                addView(context.column {
+                    addView(dateField, context.lp())
+                    addView(timeField, context.lp(top = 8))
+                }, context.lp(width = 0, weight = 1f))
+            } else {
+                addView(dateField, context.lp(width = 0, weight = 1.3f))
+                addView(timeField, context.lp(width = 0, weight = 1f, start = 8))
+            }
             addView(clearButton, context.lp(48, 48, start = 4))
         }, context.lp())
         if (!editable) {
@@ -80,7 +102,6 @@ internal class DateTimePickerInput(
         // Grows with the font size instead of clipping; 48dp stays the minimum touch target.
         minHeight = context.dp(48)
         setPadding(context.dp(12), context.dp(6), context.dp(8), context.dp(6))
-        maxLines = 1
         background = GradientDrawable().apply {
             setColor(context.getColor(R.color.surface_variant))
             cornerRadius = context.dpf(12f)
@@ -97,19 +118,27 @@ internal class DateTimePickerInput(
     }
 
     private fun showDatePicker() {
-        val seed = selection.date ?: LocalDate.now(zone)
-        Dialogs.showTracked(
-            DatePickerDialog(
-                context,
-                { _, year, month, day ->
-                    selection.selectDate(LocalDate.of(year, month + 1, day))
-                    renderValue()
-                },
-                seed.year,
-                seed.monthValue - 1,
-                seed.dayOfMonth,
-            ),
+        val latest = latestMembershipBoundaryDate(zone)
+        val seed = minOf(selection.date ?: LocalDate.now(zone), latest)
+        val dialog = DatePickerDialog(
+            context,
+            { _, year, month, day -> selectDate(LocalDate.of(year, month + 1, day)) },
+            seed.year,
+            seed.monthValue - 1,
+            seed.dayOfMonth,
         )
+        // A membership boundary cannot lie in the future. DatePicker reads its bound in the
+        // device timezone, so the last allowed day ends there rather than in the game zone.
+        dialog.datePicker.maxDate = latest.atTime(LocalTime.MAX)
+            .atZone(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+        Dialogs.showTracked(dialog)
+    }
+
+    internal fun selectDate(value: LocalDate) {
+        selection.selectDate(value)
+        renderValue()
     }
 
     private fun showTimePicker() {
@@ -126,6 +155,27 @@ internal class DateTimePickerInput(
                 android.text.format.DateFormat.is24HourFormat(context),
             ),
         )
+    }
+
+    override fun onSaveInstanceState(): Parcelable = Bundle().apply {
+        putParcelable(STATE_SUPER, super.onSaveInstanceState())
+        // Only a changed value is saved: an untouched one is rebuilt exactly from its original.
+        if (selection.changed) {
+            putBoolean(STATE_CHANGED, true)
+            selection.date?.let { putLong(STATE_DATE, it.toEpochDay()) }
+            selection.time?.let { putInt(STATE_TIME, it.toSecondOfDay()) }
+        }
+    }
+
+    override fun onRestoreInstanceState(state: Parcelable?) {
+        val saved = state as? Bundle ?: return super.onRestoreInstanceState(state)
+        super.onRestoreInstanceState(BundleCompat.getParcelable(saved, STATE_SUPER, Parcelable::class.java))
+        if (!saved.getBoolean(STATE_CHANGED)) return
+        selection.restoreChanged(
+            date = saved.takeIf { it.containsKey(STATE_DATE) }?.getLong(STATE_DATE)?.let(LocalDate::ofEpochDay),
+            time = saved.takeIf { it.containsKey(STATE_TIME) }?.getInt(STATE_TIME)?.toLong()?.let(LocalTime::ofSecondOfDay),
+        )
+        renderValue()
     }
 
     private fun renderValue() {
@@ -146,5 +196,14 @@ internal class DateTimePickerInput(
         clearButton.contentDescription = context.getString(
             if (time != null) R.string.clear_time else R.string.clear_date,
         )
+        clearButton.tooltipText = clearButton.contentDescription
     }
 }
+
+private const val STATE_SUPER = "picker.super"
+private const val STATE_CHANGED = "picker.changed"
+private const val STATE_DATE = "picker.date"
+private const val STATE_TIME = "picker.time"
+
+/** Large text stacks the date and time fields so neither picked value is clipped. */
+internal fun stacksPickerFields(fontScale: Float): Boolean = fontScale >= 1.3f

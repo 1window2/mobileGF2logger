@@ -32,9 +32,9 @@ one-off drawables.
 | `TopBar` | 56dp bar with optional back/close navigation, title and subtitle, up to two icon actions, and an overflow menu for secondary utilities. |
 | `Controls` | Button roles, checkbox/switch tints, and the segmented rail. |
 | `Views` | Text roles, labeled fields, grouped navigation rows, switch rows, panels, badges. |
-| `StateViews` | One loading, empty, and failure composition for every screen. |
-| `Dialogs` / `Feedback` | Styled dialogs with a red treatment for destructive confirmations; a single replacing toast. |
-| `BackgroundWork` | Serialized off-main work bound to the screen lifecycle; keyed requests supersede stale ones. |
+| `StateViews` | One loading, empty, failure, and blocked composition for every screen; `PlatoonDataStates` picks the Platoon-specific one. |
+| `Dialogs` / `Feedback` | Styled dialogs with a red treatment for destructive confirmations; restorable input dialogs; a single replacing toast. |
+| `BackgroundWork` | Serialized off-main work bound to the screen lifecycle; keyed requests supersede stale ones, and `always` effects run even after recreation. |
 | `SingleViewAdapter` | Hosts headers, footers, and state views inside one `RecyclerView` without recycling them. |
 
 ## Control roles
@@ -65,13 +65,34 @@ when Android animations are disabled.
   bar becomes a contextual bar (close, count, actions) and Back exits selection.
 - Edit modes (the weekly table) replace the top bar with close and save actions,
   highlight changed cells, and confirm before discarding unsaved changes.
+- A screen holding an unsaved draft (weekly edits, member details, cutlines)
+  stays bound to the draft's Platoon when another Platoon becomes active, and
+  asks to save or discard before it follows the new one.
 - Every repository, file, and network call runs through `BackgroundWork`; the
   screen shows a loading, empty, or failure state instead of blocking input.
+  Feedback and cleanup that do not need the screen go in `always`, so a task
+  that finishes after recreation still reports its outcome once.
+- A Platoon whose database is damaged shows a blocked state instead of its
+  data, with Restore backup as the primary action and Rebuild as confirmed
+  destructive text. While a CSV import or undo holds the Platoon, its screens
+  show an import-in-progress state with Retry and disable their edit actions,
+  and a refused action says to try again shortly rather than that it failed.
 - Text fields carry stable view IDs and Activities save transient choices, so
   rotation, theme or language changes, and large-screen resizing keep drafts.
+  Only input dialogs shown with `Dialogs.showRestorable` reopen with their typed
+  values: the membership-period and withdrawn-member editors and the weekly
+  cell editor. The CSV import destination and new-Platoon prompts do not, since
+  they belong to a picked file the screen does not reopen, and the Discord
+  webhook dialog deliberately does not, because its token must never enter
+  saved instance state.
 - Document pickers use the Activity Result API. Exports regenerate their content
   from the repository when the destination returns rather than holding it in
-  memory across process death.
+  memory across process death. `DocumentAccess.writeExport` deletes the created
+  document when a write fails after it opened; a refused provider or a failed
+  open leaves the picked document as it was, since it may be an existing file
+  chosen for overwrite, and a refused provider names the supported locations.
+- Times shown or edited in a Platoon's game reset zone carry a "Server time"
+  caption whenever that zone's offset differs from the device's.
 
 ## Layout and accessibility
 
@@ -96,8 +117,12 @@ when Android animations are disabled.
 - Text wraps when it carries meaning; only short button labels may ellipsize.
 - Icon-only controls require an accessible name and show it as a tooltip.
   Decorative icons beside text are hidden from the accessibility tree.
-- Composite rows expose one button with a combined description; validation
-  errors and live status use polite accessibility live regions.
+- Composite rows expose one button with a combined description; a row without
+  an action is focusable information, never a button. Validation errors, live
+  status, a changed top-bar title, and every loading, empty, or failure state use
+  polite live regions; a state view sets its text just after it is attached so
+  the change is announced. Re-applied top-bar actions keep their buttons, so
+  screen-reader focus survives in-place updates such as Select all.
 - Pressed and disabled states are explicit. Destructive operations use a
   confirmation dialog, and async work disables duplicate submission.
 - Motion is limited to short transform/opacity transitions and is skipped when

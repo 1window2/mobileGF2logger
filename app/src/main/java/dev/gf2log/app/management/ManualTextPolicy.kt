@@ -23,6 +23,15 @@ internal object ManualTextPolicy {
         }
     }
 
+    /**
+     * The stored form of a custom nickname, or null when the member follows the in-game name.
+     * A blank value clears the override, and a value equal to [currentName] is no override at
+     * all, so a later in-game rename still shows instead of being frozen by a note-only save.
+     */
+    fun customName(value: String, currentName: String): String? = value.trim().let { trimmed ->
+        if (trimmed.isEmpty() || trimmed == currentName) null else memberName(trimmed)
+    }
+
     /** The stored form of a private member, membership-period, or weekly note. */
     fun note(value: String): String = value.trim().also {
         require(it.length <= MAX_NOTE_CHARS) { "A note cannot exceed $MAX_NOTE_CHARS characters" }

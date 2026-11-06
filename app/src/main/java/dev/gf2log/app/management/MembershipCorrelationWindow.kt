@@ -22,4 +22,15 @@ internal object MembershipCorrelationWindow {
             occurredAt.isAfter(previousRosterAt) &&
             !occurredAt.isAfter(inferredAt) &&
             !occurredAt.isBefore(inferredAt.minusMillis(MAX_LEAD_MILLIS))
+
+    /**
+     * The instant that dates [boundary] from the [admitted] activity instants: the earliest for a
+     * join, since the member acted only once joined, and the latest for a withdrawal, since the
+     * member acted only before leaving. Either is the tightest bound the facts prove.
+     */
+    fun datingInstant(boundary: MembershipBoundary, admitted: Collection<Instant>): Instant? =
+        when (boundary) {
+            MembershipBoundary.JOIN -> admitted.minOrNull()
+            MembershipBoundary.WITHDRAW -> admitted.maxOrNull()
+        }
 }

@@ -1,7 +1,9 @@
 package dev.gf2log.app.management
 
 import java.time.Instant
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -46,6 +48,24 @@ class MembershipCorrelationWindowTest {
     @Test
     fun `a boundary without a previous roster stays inferred`() {
         assertFalse(MembershipCorrelationWindow.admits(revealingRoster, revealingRoster, null))
+    }
+
+    @Test
+    fun `a join is dated by the earliest admitted fact and a withdrawal by the latest`() {
+        // Previous roster 06:00, actions at 10:00 and 18:00, revealing roster 21:00.
+        val donation = Instant.parse("2026-08-03T10:00:00Z")
+        val laterAction = Instant.parse("2026-08-03T18:00:00Z")
+        val admitted = listOf(laterAction, donation)
+
+        assertEquals(
+            donation,
+            MembershipCorrelationWindow.datingInstant(MembershipBoundary.JOIN, admitted),
+        )
+        assertEquals(
+            laterAction,
+            MembershipCorrelationWindow.datingInstant(MembershipBoundary.WITHDRAW, admitted),
+        )
+        assertNull(MembershipCorrelationWindow.datingInstant(MembershipBoundary.WITHDRAW, emptyList()))
     }
 
     private fun admits(occurredAt: Instant) =

@@ -2,7 +2,10 @@ package dev.gf2log.app.ui
 
 import android.content.ContentResolver
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import androidx.annotation.StringRes
+import dev.gf2log.app.R
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.file.Paths
@@ -38,6 +41,51 @@ internal object DocumentAccess {
         return output ?: error("Document provider did not open an output stream")
     }
 
+    /**
+     * Writes an export into a document the picker has already created. A write that fails after
+     * the document opened deletes it (best effort), so a truncated file never sits beside real
+     * exports looking like one. A refused or failed open leaves the picked document as it was:
+     * that may be a 0-byte file the picker created, which is the lesser harm, because the picker
+     * may also have handed over an existing file the user chose to overwrite.
+     */
+    fun writeExport(resolver: ContentResolver, destination: Uri, write: (OutputStream) -> Unit) =
+        writeOrDiscard(
+            open = { openOutput(resolver, destination) },
+            discard = { discard(resolver, destination) },
+            write = write,
+        )
+
+    /**
+     * Deletes a created document that will not receive its export; failures are ignored. A
+     * document from a provider [openOutput] refuses is never touched.
+     */
+    fun discard(resolver: ContentResolver, destination: Uri) =
+        discardTrusted(destination.scheme, destination.authority) {
+            DocumentsContract.deleteDocument(resolver, destination)
+        }
+
+    internal fun discardTrusted(scheme: String?, authority: String?, delete: () -> Unit) {
+        if (runCatching { requireTrusted(scheme, authority) }.isFailure) return
+        runCatching(delete)
+    }
+
+    internal fun writeOrDiscard(open: () -> OutputStream, discard: () -> Unit, write: (OutputStream) -> Unit) {
+        // Nothing has been truncated or written until open succeeds, so a refused open keeps the
+        // picked document; once open succeeded, its old content is already gone.
+        val output = open()
+        try {
+            output.use(write)
+        } catch (error: Throwable) {
+            runCatching(discard).exceptionOrNull()?.let(error::addSuppressed)
+            throw error
+        }
+    }
+
+    /** The failure message for an export: a refused provider names the locations that work. */
+    @StringRes
+    fun exportFailureMessage(error: Throwable?, @StringRes fallback: Int): Int =
+        if (error is UntrustedDocumentProviderException) R.string.export_location_unsupported else fallback
+
     fun openInput(resolver: ContentResolver, source: Uri): InputStream {
         requireTrusted(source)
         return resolver.openInputStream(source)
@@ -50,12 +98,14 @@ internal object DocumentAccess {
         }
     }.getOrNull()
 
-    private fun requireTrusted(uri: Uri) {
-        if (uri.scheme != ContentResolver.SCHEME_CONTENT) {
-            throw SecurityException("Unsupported document URI scheme")
-        }
-        if (uri.authority !in TRUSTED_AUTHORITIES) {
-            throw SecurityException("Untrusted document provider")
+    private fun requireTrusted(uri: Uri) = requireTrusted(uri.scheme, uri.authority)
+
+    internal fun requireTrusted(scheme: String?, authority: String?) {
+        if (scheme != ContentResolver.SCHEME_CONTENT || authority !in TRUSTED_AUTHORITIES) {
+            throw UntrustedDocumentProviderException()
         }
     }
 }
+
+/** A document outside the platform and Google providers; callers say which locations work. */
+internal class UntrustedDocumentProviderException : SecurityException("Untrusted document provider")

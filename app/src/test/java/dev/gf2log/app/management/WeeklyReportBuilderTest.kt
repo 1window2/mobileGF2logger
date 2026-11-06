@@ -1030,6 +1030,106 @@ class WeeklyReportBuilderTest {
     }
 
     @Test
+    fun nearResetTailAtOrBelowTheCapIsNotCreditedToASundayWithoutLogin() {
+        // A 04:55 Sunday baseline, then Saturday's last minutes earn [tail]; the Monday 04:55
+        // capture still shows a Saturday login, so Sunday itself earned nothing.
+        fun week(tail: Long, baselineLogin: String, tailLogin: String) = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 26),
+            zoneId = zone,
+            snapshots = listOf(
+                capture("2026-07-25T19:55:00Z", weekly = 450, total = 10_000, lastLogin = baselineLogin),
+                capture("2026-07-26T19:55:00Z", weekly = 450 + tail, total = 10_000 + tail, lastLogin = tailLogin),
+                // A full Monday-to-Saturday counter.
+                capture("2026-08-01T19:55:00Z", weekly = 540, total = 10_540 + tail, lastLogin = "2026-08-01T01:00:00Z"),
+            ),
+            asOf = Instant.parse("2026-08-02T00:00:00Z"),
+        ).members.single()
+
+        val friday = "2026-07-24T10:00:00Z"
+        val saturday = "2026-07-25T01:00:00Z"
+        val tailLogin = "2026-07-25T19:57:00Z"
+        listOf(
+            week(tail = 90, baselineLogin = friday, tailLogin = tailLogin),
+            week(tail = 50, baselineLogin = friday, tailLogin = tailLogin),
+            // Saturday had logged in already, so only its Daily Patrol is left for the tail.
+            week(tail = 40, baselineLogin = saturday, tailLogin = saturday),
+        ).forEach { row ->
+            val sunday = row.days.first()
+            assertEquals(0L, sunday.meritDelta)
+            assertEquals(MetricCertainty.EXACT, sunday.meritCertainty)
+            assertEquals(false, sunday.attended)
+            assertEquals(false, sunday.dailyPatrol)
+            assertEquals(540L, row.totalMerit)
+            assertEquals(MetricCertainty.EXACT, row.totalMeritCertainty)
+        }
+    }
+
+    @Test
+    fun nearResetBaselineStaysExactWhenThePreviousDayWasAlreadyComplete() {
+        fun sunday(facts: List<DailyPatrolFact>) = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 26),
+            zoneId = zone,
+            snapshots = listOf(
+                capture("2026-07-25T19:55:00Z", weekly = 450, total = 10_000, lastLogin = "2026-07-25T01:00:00Z"),
+                capture("2026-07-26T19:55:00Z", weekly = 540, total = 10_090, lastLogin = "2026-07-26T00:00:00Z"),
+            ),
+            dailyPatrolFacts = facts,
+            asOf = Instant.parse("2026-07-26T20:30:00Z"),
+        ).members.single().days.first()
+
+        // Saturday's Daily Patrol before the baseline leaves no tail: the 90 is Sunday's own.
+        val completed = sunday(listOf(DailyPatrolFact(1, Instant.parse("2026-07-25T03:00:00Z"))))
+        assertEquals(90L, completed.meritDelta)
+        assertTrue(completed.evidence != DailyEvidence.INCOMPLETE_BOUNDARY)
+        assertTrue(completed.meritCertainty != MetricCertainty.UNKNOWN)
+
+        // Otherwise Saturday's Daily Patrol can still be in it: 90 + 0 or 50 + 40, so only
+        // Sunday's own login remains certain.
+        val open = sunday(emptyList())
+        assertEquals(50L, open.meritDelta)
+        assertEquals(MetricCertainty.LOWER_BOUND, open.meritCertainty)
+    }
+
+    @Test
+    fun aLaterCaptureWithAnEarlierLoginMakesTheStandardSundayZero() {
+        val report = WeeklyReportBuilder.build(
+            referenceDay = LocalDate.of(2026, 7, 26),
+            zoneId = zone,
+            snapshots = listOf(
+                capture("2026-07-25T19:55:00Z", weekly = 450, total = 10_000, lastLogin = "2026-07-24T10:00:00Z"),
+                // Monday noon: still no login since Friday.
+                capture("2026-07-27T03:00:00Z", weekly = 0, total = 10_000, lastLogin = "2026-07-24T10:00:00Z"),
+            ),
+            asOf = Instant.parse("2026-07-27T04:00:00Z"),
+        )
+
+        val sunday = report.members.single().days.first()
+        assertEquals(0L, sunday.meritDelta)
+        assertEquals(MetricCertainty.EXACT, sunday.meritCertainty)
+        assertEquals(false, sunday.attended)
+    }
+
+    @Test
+    fun nearResetSplitUsesEveryStageBothDaysCanHaveReached() {
+        val all = setOf(0L, 50L, 90L)
+        // Without login or patrol times, 90 is either day's alone and 130 can only be 90 + 40.
+        assertNull(WeeklyReportBuilder.nearResetStandardPrefix(90, all, all, all))
+        assertEquals(90L, WeeklyReportBuilder.nearResetStandardPrefix(130, all, all, all))
+        // The previous day had logged in: only its 40-point Daily Patrol can remain.
+        assertEquals(50L, WeeklyReportBuilder.nearResetStandardPrefix(50, setOf(50L, 90L), all, all))
+        assertNull(WeeklyReportBuilder.nearResetStandardPrefix(90, setOf(50L, 90L), all, all))
+        // The new day has not logged in yet.
+        assertEquals(0L, WeeklyReportBuilder.nearResetStandardPrefix(90, all, all, setOf(0L)))
+        assertNull(WeeklyReportBuilder.nearResetStandardPrefix(40, setOf(0L), all, setOf(0L)))
+        // A Gunsmoke Saturday tail with attempts can hold any merit.
+        assertNull(WeeklyReportBuilder.nearResetStandardPrefix(130, all, all, all, previousDayHasAttempts = true))
+        assertEquals(
+            0L,
+            WeeklyReportBuilder.nearResetStandardPrefix(130, all, all, setOf(0L), previousDayHasAttempts = true),
+        )
+    }
+
+    @Test
     fun midWeekJoinerMeritIsNotCreditedToTheFirstObservedDay() {
         val present = member(uid = 1, name = "Present", weekly = 90, score = 0)
         val joiner = member(uid = 2, name = "Joiner", weekly = 90, score = 0)
@@ -1353,11 +1453,60 @@ class WeeklyReportBuilderTest {
         assertEquals(MetricCertainty.UNKNOWN, tuesday.attemptsCertainty)
     }
 
+    @Test
+    fun storedOverridesOutsideTheDaysDomainAreIgnored() {
+        // A Standard week (the Gunsmoke cycle never starts in the week before one that does).
+        val periodStart = (0L..3L).map { LocalDate.of(2026, 7, 5).plusWeeks(it) }
+            .first { !PlatoonPeriods.isGunsmokeWeek(it) }
+        fun override(day: Long, merit: Long?, attended: Boolean? = null) = WeeklyCellOverride(
+            uid = 1,
+            periodStart = periodStart,
+            gameDay = periodStart.plusDays(day),
+            meritDelta = merit,
+            scoreDelta = null,
+            attempts = null,
+            attended = attended,
+            dailyPatrol = null,
+        )
+        fun build(vararg overrides: WeeklyCellOverride) = WeeklyReportBuilder.build(
+            referenceDay = periodStart,
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-01T00:00:00Z", member(uid = 1, name = "Stored", weekly = 0, score = 0)),
+            ),
+            overrides = overrides.toList(),
+            asOf = periodStart.plusDays(7).atStartOfDay(zone).toInstant(),
+        ).members.single()
+        val derived = build(override(1, 90))
+
+        // 2.7.1 stored any non-negative number; summing it used to wrap the weekly total.
+        val overflowing = build(override(0, Long.MAX_VALUE), override(1, 90))
+
+        assertTrue(overflowing.totalMerit >= 0)
+        assertEquals(derived.totalMerit, overflowing.totalMerit)
+        assertEquals(derived.days.first().meritDelta, overflowing.days.first().meritDelta)
+
+        // A Standard day never earns 1000 merit, so it is not shown as an exact manual value.
+        val implausible = build(override(0, 1_000, attended = true)).days.first()
+        assertNull(implausible.manualOverride?.meritDelta)
+        assertEquals(true, implausible.manualOverride?.attended)
+        assertFalse(implausible.meritDelta == 1_000L)
+    }
+
     private fun snapshot(time: String, weekly: Long, score: Long) =
         PlatoonSnapshot(
             id = 0,
             capturedAt = Instant.parse(time),
             members = listOf(SnapshotMember(1, "One", 60, weekly, weekly, 0, score, 0)),
+        )
+
+    private fun capture(time: String, weekly: Long, total: Long, lastLogin: String) =
+        PlatoonSnapshot(
+            id = 0,
+            capturedAt = Instant.parse(time),
+            members = listOf(
+                SnapshotMember(1, "One", 60, weekly, total, 0, 0, Instant.parse(lastLogin).epochSecond),
+            ),
         )
 
     private fun snapshotWithMembers(time: String, vararg members: SnapshotMember) =

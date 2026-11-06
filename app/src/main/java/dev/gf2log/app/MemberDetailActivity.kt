@@ -9,16 +9,21 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import dev.gf2log.app.management.EvidenceSource
+import dev.gf2log.app.management.MemberProfileDraft
 import dev.gf2log.app.management.MemberStatus
 import dev.gf2log.app.management.MembershipPeriod
 import dev.gf2log.app.management.PlatoonRepository
+import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.management.isJoinedBoundaryEditable
+import dev.gf2log.app.management.isMembershipBoundaryWithinPresent
 import dev.gf2log.app.management.isLeftBoundaryEditable
 import dev.gf2log.app.management.isValidMembershipRange
+import dev.gf2log.app.management.member
 import dev.gf2log.app.ui.onTextChanged
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
+import dev.gf2log.app.ui.DialogDraft
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.LabeledField
@@ -49,12 +54,17 @@ import java.time.ZoneId
 class MemberDetailActivity : BaseActivity() {
 
     private lateinit var profileBinding: ActivePlatoonScopeBinding
+    private lateinit var scope: PlatoonStorageScope
     private lateinit var repository: PlatoonRepository
     private lateinit var screen: Screen
     private val work = BackgroundWork(this, "GF2MemberDetail")
     private var uid = -1L
     private var model: Model? = null
     private var inputsInitialized = false
+    private var finishAfterSave = false
+
+    /** False while the last load failed: edits wait, but a typed draft stays in its fields. */
+    private var available = true
 
     private lateinit var content: LinearLayout
     private lateinit var statusPanel: LinearLayout
@@ -66,12 +76,14 @@ class MemberDetailActivity : BaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         uid = intent.getLongExtra(EXTRA_UID, -1)
-        profileBinding = ActivePlatoonScopeBinding(this)
-        val scope = profileBinding.scope
-        if (uid <= 0 || scope == null) {
+        profileBinding = ActivePlatoonScopeBinding(this, pinnedStorage(savedInstanceState))
+        val bound = profileBinding.scope
+        // A draft typed for a Platoon that is gone never shows against another Platoon's member.
+        if (uid <= 0 || bound == null || profileBinding.lostPinnedStorage) {
             finish()
             return
         }
+        scope = bound
         repository = PlatoonRepository(this, scope)
         inputsInitialized = savedInstanceState?.getBoolean(STATE_INPUTS_INITIALIZED) == true
         screen = Screen(this)
@@ -91,12 +103,43 @@ class MemberDetailActivity : BaseActivity() {
 
     override fun onScreenResumed() {
         if (!profileBinding.isSameStorage(this)) {
-            // The member belongs to the previous Platoon scope.
-            finish()
+            onScopeChanged()
             return
         }
         load()
     }
+
+    /**
+     * The member belongs to the previous Platoon scope; unsaved edits are not dropped silently.
+     * A recreated screen first loads the member again, so its restored draft can be compared.
+     */
+    private fun onScopeChanged() {
+        if (work.isBusy(SAVE)) {
+            // The edits are already being saved; leave once that save lands.
+            finishAfterSave = true
+            return
+        }
+        if (model == null && inputsInitialized) {
+            if (!work.isBusy(LOAD)) load()
+            return
+        }
+        if (isDirty()) {
+            confirmDraftBeforeScopeChange(R.string.save_member, { saveProfile(thenFinish = true) }, ::finish)
+        } else {
+            finish()
+        }
+    }
+
+    override fun boundStorageId(): String? =
+        if (::profileBinding.isInitialized) profileBinding.scope?.storageId else null
+
+    /**
+     * Always kept: on a Platoon change this screen closes rather than follow it, and its fields
+     * restore their text by id, which must never land on another Platoon's member.
+     */
+    override fun pinsBoundStorage(): Boolean = true
+
+    override fun hasUnsavedDraft(): Boolean = ::saveButton.isInitialized && (isDirty() || work.isBusy(SAVE))
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean(STATE_INPUTS_INITIALIZED, inputsInitialized)
@@ -122,7 +165,7 @@ class MemberDetailActivity : BaseActivity() {
             addView(row {
                 addView(sectionHeader(getString(R.string.membership_history)), lp(width = 0, weight = 1f))
                 addView(button(getString(R.string.add_membership_history_short), Controls.Role.TERTIARY, R.drawable.ic_add) {
-                    addMembershipPeriod()
+                    if (available) addMembershipPeriod()
                 }, lp(WRAP, WRAP, top = 8))
             }, lp())
             addView(periods, lp())
@@ -139,7 +182,7 @@ class MemberDetailActivity : BaseActivity() {
                 status?.let {
                     Model(
                         status = it,
-                        latest = repository.listSnapshots(1).firstOrNull()?.members?.firstOrNull { member -> member.uid == uid },
+                        latest = repository.latestSnapshot()?.member(uid),
                         zone = repository.gameZone(),
                     )
                 }
@@ -147,24 +190,33 @@ class MemberDetailActivity : BaseActivity() {
         ) { result ->
             val loaded = result.getOrNull()
             if (loaded == null) {
-                if (result.isSuccess) finish() else render(null)
+                if (result.isSuccess) finish() else render(null, result.exceptionOrNull())
                 return@run
             }
+            available = true
             model = loaded
+            // A blank nickname follows the in-game name, which the hint shows.
+            nickname.hint = loaded.status.currentName
             if (!inputsInitialized) {
-                nickname.setText(loaded.status.name)
+                nickname.setText(MemberProfileDraft.nicknameInput(loaded.status))
                 note.setText(loaded.status.note)
                 inputsInitialized = true
             }
             render(loaded)
+            reopenMembershipDialog(loaded.status)
+            if (!profileBinding.isSameStorage(this)) onScopeChanged()
         }
     }
 
-    private fun render(loaded: Model?) {
+    private fun render(loaded: Model?, error: Throwable? = null) {
         statusPanel.removeAllViews()
         periods.removeAllViews()
         if (loaded == null) {
-            statusPanel.addView(StateViews.failure(this, getString(R.string.platoon_load_failed)) { load() })
+            available = false
+            updateSaveState()
+            statusPanel.addView(
+                PlatoonDataStates.failure(this, work, scope, error, getString(R.string.platoon_load_failed)) { load() },
+            )
             return
         }
         val status = loaded.status
@@ -198,6 +250,7 @@ class MemberDetailActivity : BaseActivity() {
                 }
             }, lp(top = 12))
         }
+        Labels.zoneCaption(this, loaded.zone)?.let { statusPanel.addView(text(it, TextRole.CAPTION), lp(top = 12)) }
         val rows = status.membershipPeriods.mapIndexed { index, period ->
             navigationRow(
                 title = getString(R.string.membership_period_title, index + 1) +
@@ -225,8 +278,13 @@ class MemberDetailActivity : BaseActivity() {
 
     /** Unsaved nickname or note edits are confirmed instead of silently discarded. */
     private fun leave() {
-        if (!::saveButton.isInitialized || !saveButton.isEnabled) {
+        if (!::saveButton.isInitialized || !isDirty()) {
             finish()
+            return
+        }
+        if (work.isBusy(SAVE)) {
+            // The edits are already being saved; leave once that save lands.
+            finishAfterSave = true
             return
         }
         Dialogs.show(
@@ -239,11 +297,14 @@ class MemberDetailActivity : BaseActivity() {
         )
     }
 
+    /** Whether the inputs differ from the stored profile, compared in their stored form. */
+    private fun isDirty(): Boolean {
+        val loaded = model?.status ?: return false
+        return MemberProfileDraft.isDirty(nickname.text.toString(), note.text.toString(), loaded)
+    }
+
     private fun updateSaveState() {
-        val loaded = model?.status
-        saveButton.isEnabled = loaded != null && !work.isBusy(SAVE) &&
-            (nickname.text.toString() != loaded.name || note.text.toString() != loaded.note) &&
-            nickname.text.isNotBlank()
+        saveButton.isEnabled = available && !work.isBusy(SAVE) && isDirty()
     }
 
     private fun saveProfile(thenFinish: Boolean = false) {
@@ -252,8 +313,17 @@ class MemberDetailActivity : BaseActivity() {
         val noteText = note.text.toString()
         work.run(key = SAVE, task = { repository.updateMember(uid, name, noteText) }) { result ->
             val saved = result.getOrDefault(false)
-            Feedback.show(this, if (saved) R.string.saved else R.string.save_failed)
-            if (saved && thenFinish) finish() else load()
+            Feedback.show(this, if (saved) R.string.saved else platoonDataFailureMessage(result.exceptionOrNull(), R.string.save_failed))
+            if (saved && (thenFinish || finishAfterSave)) {
+                finish()
+                return@run
+            }
+            finishAfterSave = false
+            // Re-seed the fields in stored form unless the user kept typing during the save.
+            if (saved && nickname.text.toString() == name && note.text.toString() == noteText) {
+                inputsInitialized = false
+            }
+            load()
         }
         updateSaveState()
     }
@@ -266,13 +336,22 @@ class MemberDetailActivity : BaseActivity() {
                     Feedback.show(this, R.string.member_deleted)
                     finish()
                 } else {
-                    Feedback.show(this, R.string.member_delete_failed)
+                    Feedback.show(this, platoonDataFailureMessage(result.exceptionOrNull(), R.string.member_delete_failed))
                 }
             }
         }
     }
 
-    private fun editMembershipPeriod(status: MemberStatus, period: MembershipPeriod) {
+    /** A membership editor that was open before recreation comes back with what was typed. */
+    private fun reopenMembershipDialog(status: MemberStatus) {
+        takeDialogDraft(ADD_PERIOD_DIALOG)?.let(::addMembershipPeriod)
+        takeDialogDraft(EDIT_PERIOD_DIALOG)?.let { draft ->
+            val period = status.membershipPeriods.firstOrNull { it.id == draft.arguments.getLong(ARG_PERIOD_ID) }
+            period?.let { editMembershipPeriod(status, it, draft) }
+        }
+    }
+
+    private fun editMembershipPeriod(status: MemberStatus, period: MembershipPeriod, restored: DialogDraft? = null) {
         val zone = model?.zone ?: return
         val joined = DateTimePickerInput(
             context = this,
@@ -283,6 +362,7 @@ class MemberDetailActivity : BaseActivity() {
             dateRequired = true,
             editable = period.isJoinedBoundaryEditable,
             zone = zone,
+            stateId = R.id.dialog_joined_input,
         )
         val left = DateTimePickerInput(
             context = this,
@@ -292,8 +372,9 @@ class MemberDetailActivity : BaseActivity() {
             initialTimeKnown = period.leftTimeKnown ?: (period.leftAt != null),
             editable = period.isLeftBoundaryEditable,
             zone = zone,
+            stateId = R.id.dialog_left_input,
         )
-        val noteInput = textField(getString(R.string.membership_note_hint), singleLine = false, maxLength = ManualTextPolicy.MAX_NOTE_CHARS).apply { setText(period.note) }
+        val noteInput = textField(getString(R.string.membership_note_hint), id = R.id.dialog_note_input, singleLine = false, maxLength = ManualTextPolicy.MAX_NOTE_CHARS).apply { setText(period.note) }
         val error = errorLine()
         val canDelete = status.membershipPeriods.size > 1
         val body = Dialogs.content(this) {
@@ -309,7 +390,8 @@ class MemberDetailActivity : BaseActivity() {
             .setNegativeButton(R.string.cancel, null)
             .setPositiveButton(R.string.save_member, null)
         if (canDelete) builder.setNeutralButton(R.string.delete, null)
-        Dialogs.show(builder) { dialog ->
+        val arguments = Bundle().apply { putLong(ARG_PERIOD_ID, period.id) }
+        Dialogs.showRestorable(builder, EDIT_PERIOD_DIALOG, body, arguments, restored) { dialog ->
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.apply {
                 setTextColor(getColor(R.color.destructive_action))
                 setOnClickListener { confirmMembershipPeriodDeletion(dialog, period) }
@@ -319,6 +401,16 @@ class MemberDetailActivity : BaseActivity() {
                 val leftBoundary = left.boundary
                 if (joinedBoundary == null || !isValidMembershipRange(joinedBoundary, leftBoundary)) {
                     error.showMessage(getString(R.string.invalid_date))
+                    return@setOnClickListener
+                }
+                // Packet-linked sides are read-only and follow the server clock, so only editable
+                // sides must not lie in the future.
+                val futureJoin = period.isJoinedBoundaryEditable &&
+                    !isMembershipBoundaryWithinPresent(joinedBoundary, zone)
+                val futureLeft = period.isLeftBoundaryEditable && leftBoundary != null &&
+                    !isMembershipBoundaryWithinPresent(leftBoundary, zone)
+                if (futureJoin || futureLeft) {
+                    error.showMessage(getString(R.string.invalid_future_date))
                     return@setOnClickListener
                 }
                 button.isEnabled = false
@@ -332,7 +424,9 @@ class MemberDetailActivity : BaseActivity() {
                         Feedback.show(this, R.string.saved)
                         load()
                     } else {
-                        error.showMessage(getString(R.string.membership_period_save_failed))
+                        error.showMessage(
+                            getString(platoonDataFailureMessage(result.exceptionOrNull(), R.string.membership_period_save_failed)),
+                        )
                     }
                 }
             }
@@ -354,17 +448,21 @@ class MemberDetailActivity : BaseActivity() {
                     Feedback.show(this, R.string.membership_period_deleted)
                     load()
                 } else {
-                    Feedback.show(this, R.string.membership_period_delete_failed, long = true)
+                    Feedback.show(
+                        this,
+                        platoonDataFailureMessage(result.exceptionOrNull(), R.string.membership_period_delete_failed),
+                        long = true,
+                    )
                 }
             }
         }
     }
 
-    private fun addMembershipPeriod() {
+    private fun addMembershipPeriod(restored: DialogDraft? = null) {
         val zone = model?.zone ?: return
-        val joined = DateTimePickerInput(this, getString(R.string.join_label), dateRequired = true, zone = zone)
-        val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_label), zone = zone)
-        val noteInput = textField(getString(R.string.membership_note_hint), singleLine = false, maxLength = ManualTextPolicy.MAX_NOTE_CHARS)
+        val joined = DateTimePickerInput(this, getString(R.string.join_label), dateRequired = true, zone = zone, stateId = R.id.dialog_joined_input)
+        val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_label), zone = zone, stateId = R.id.dialog_left_input)
+        val noteInput = textField(getString(R.string.membership_note_hint), id = R.id.dialog_note_input, singleLine = false, maxLength = ManualTextPolicy.MAX_NOTE_CHARS)
         val error = errorLine()
         val body = Dialogs.content(this) {
             addView(joined, lp())
@@ -372,18 +470,25 @@ class MemberDetailActivity : BaseActivity() {
             addView(LabeledField(context, getString(R.string.membership_note_hint), noteInput), lp(top = 12))
             addView(error, lp(top = 8))
         }
-        Dialogs.show(
+        Dialogs.showRestorable(
             Dialogs.builder(this)
                 .setTitle(R.string.add_membership_history)
                 .setView(body)
                 .setNegativeButton(R.string.cancel, null)
                 .setPositiveButton(R.string.add, null),
+            key = ADD_PERIOD_DIALOG,
+            content = body,
+            restored = restored,
         ) { dialog ->
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { button ->
                 val joinedBoundary = joined.boundary
                 val withdrewBoundary = withdrew.boundary
                 if (joinedBoundary == null || !isValidMembershipRange(joinedBoundary, withdrewBoundary)) {
                     error.showMessage(getString(R.string.invalid_date))
+                    return@setOnClickListener
+                }
+                if (listOfNotNull(joinedBoundary, withdrewBoundary).any { !isMembershipBoundaryWithinPresent(it, zone) }) {
+                    error.showMessage(getString(R.string.invalid_future_date))
                     return@setOnClickListener
                 }
                 button.isEnabled = false
@@ -396,7 +501,9 @@ class MemberDetailActivity : BaseActivity() {
                         dialog.dismiss()
                         load()
                     } else {
-                        error.showMessage(getString(R.string.membership_period_overlap))
+                        error.showMessage(
+                            getString(platoonDataFailureMessage(result.exceptionOrNull(), R.string.membership_period_overlap)),
+                        )
                     }
                 }
             }
@@ -421,6 +528,7 @@ class MemberDetailActivity : BaseActivity() {
             EvidenceSource.SNAPSHOT -> R.string.source_roster
             EvidenceSource.MANUAL -> R.string.source_manual
             EvidenceSource.LEGACY_IMPORT -> R.string.source_legacy
+            EvidenceSource.ACTIVITY -> R.string.source_activity
         },
     )
 
@@ -436,5 +544,8 @@ class MemberDetailActivity : BaseActivity() {
         private const val SAVE = "save"
         private const val DELETE = "delete"
         private const val STATE_INPUTS_INITIALIZED = "member.inputs_initialized"
+        private const val ADD_PERIOD_DIALOG = "membership.add"
+        private const val EDIT_PERIOD_DIALOG = "membership.edit"
+        private const val ARG_PERIOD_ID = "period_id"
     }
 }

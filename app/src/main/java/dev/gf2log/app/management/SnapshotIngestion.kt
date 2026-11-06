@@ -21,6 +21,7 @@ internal object SnapshotIngestion {
         source: EvidenceSource,
         historicalOnly: Boolean,
         deferHistoricalMembershipReconciliation: Boolean,
+        now: Instant = Instant.now(),
     ): SnapshotIngestResult {
         require(snapshot.members.isNotEmpty()) { "A Platoon snapshot cannot be empty" }
         require(snapshot.members.size <= GuildMembersCsv.MAX_ROSTER_MEMBERS) {
@@ -29,6 +30,9 @@ internal object SnapshotIngestion {
         require(snapshot.members.all { it.name.length <= GuildMembersCsv.MAX_MEMBER_NAME_CHARS }) {
             "A Platoon snapshot contains an oversized member name"
         }
+        require(snapshot.members.all { it.uid > 0 }) {
+            "A Platoon snapshot contains an invalid member identity"
+        }
         require(snapshot.members.map(SnapshotMember::uid).distinct().size == snapshot.members.size) {
             "A Platoon snapshot cannot contain duplicate UIDs"
         }
@@ -36,12 +40,16 @@ internal object SnapshotIngestion {
             if (snapshot.sourceFile != null && sourceFileExists(db, snapshot.sourceFile)) {
                 return@inTransaction SnapshotIngestResult.duplicate()
             }
+            // A caller placing a batch as history has already ordered it against the stored
+            // rosters; every other roster first checks the stored ones against this clock reading.
+            val clockReviewChanged = !historicalOnly &&
+                SnapshotClockReview.review(db, now, newestLogin(snapshot))
             val priorCapturedAt = latestSnapshotCapturedAt(db)
             // A roster older than the stored current one cannot describe current presence (a
             // late packet or a clock moved backwards), so it is replayed chronologically.
             val historical = historicalOnly ||
                 priorCapturedAt?.let(snapshot.capturedAt::isBefore) == true
-            if (historical) {
+            val result = if (historical) {
                 require(priorCapturedAt != null && !snapshot.capturedAt.isAfter(priorCapturedAt)) {
                     "Historical snapshots must not be newer than current structured data"
                 }
@@ -51,8 +59,15 @@ internal object SnapshotIngestion {
             } else {
                 ingestCurrent(db, snapshot, source, priorCapturedAt)
             }
+            result.copy(clockReviewChanged = clockReviewChanged)
         }
     }
+
+    /** The roster's newest login, a server time that bounds how far the present has come. */
+    private fun newestLogin(snapshot: PlatoonSnapshot): Instant? =
+        snapshot.members.maxOfOrNull(SnapshotMember::lastLogin)
+            ?.takeIf { it > 0L }
+            ?.let(Instant::ofEpochSecond)
 
     private fun ingestCurrent(
         db: SQLiteDatabase,
@@ -226,15 +241,28 @@ internal object SnapshotIngestion {
             from = priorCapturedAt,
             observedAt = observedAt,
         )
-        val membershipPeriodId = exactMembershipPeriodId ?: closeLatestMembershipPeriod(
+        if (exactMembershipPeriodId != null) {
+            // The exact withdrawal closed its period; the omission still ends any other one.
+            MembershipRows.closeOpenMembershipPeriods(
+                db = db,
+                uid = member.uid,
+                memberName = member.name,
+                leftAt = observedAt,
+                precision = EvidencePrecision.INFERRED,
+                source = source,
+            )
+            recordLastSeen(db, member.uid, observedAt)
+            return
+        }
+        val membershipPeriodId = closeLatestMembershipPeriod(
             db = db,
             uid = member.uid,
+            memberName = member.name,
             leftAt = observedAt,
             precision = EvidencePrecision.INFERRED,
             source = source,
         )
         recordLastSeen(db, member.uid, observedAt)
-        if (exactMembershipPeriodId != null) return
         insertSnapshotBoundaryEvent(
             db,
             membershipPeriodId,
@@ -294,12 +322,19 @@ internal object SnapshotIngestion {
     }
 
     private fun upsertMember(db: SQLiteDatabase, member: SnapshotMember, observedAt: Instant) {
-        val existing = ContentValues().apply {
-            put("current_name", member.name)
-            put("current_level", member.level)
-            put("last_seen_at", observedAt.toEpochMilli())
+        // First seen never stays after a sighting, such as one recorded by a roster later set aside.
+        val updated = db.compileStatement(
+            "UPDATE members SET current_name = ?, current_level = ?, last_seen_at = ?, " +
+                "first_seen_at = MIN(first_seen_at, ?) WHERE uid = ?",
+        ).use { statement ->
+            statement.bindString(1, member.name)
+            statement.bindLong(2, member.level)
+            statement.bindLong(3, observedAt.toEpochMilli())
+            statement.bindLong(4, observedAt.toEpochMilli())
+            statement.bindLong(5, member.uid)
+            statement.executeUpdateDelete()
         }
-        if (db.update("members", existing, "uid = ?", arrayOf(member.uid.toString())) == 0) {
+        if (updated == 0) {
             MembershipRows.insertMember(
                 db = db,
                 uid = member.uid,
@@ -346,8 +381,9 @@ internal object SnapshotIngestion {
     private fun sourceFileExists(db: SQLiteDatabase, sourceFile: String): Boolean =
         db.exists("SELECT 1 FROM snapshots WHERE source_file = ? LIMIT 1", sourceFile)
 
+    /** The current roster's capture time; a roster set aside by [SnapshotClockReview] is never current. */
     fun latestSnapshotCapturedAt(db: SQLiteDatabase): Instant? =
-        db.rawQuery("SELECT MAX(captured_at) FROM snapshots", null).use { cursor ->
+        db.rawQuery("SELECT MAX(captured_at) FROM snapshots WHERE clock_suspect = 0", null).use { cursor ->
             if (cursor.moveToFirst()) cursor.getNullableInstant(0) else null
         }
 }

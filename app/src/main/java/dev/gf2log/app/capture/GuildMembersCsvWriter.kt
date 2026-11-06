@@ -1,16 +1,16 @@
 package dev.gf2log.app.capture
 
 import dev.gf2log.app.history.AtomicFiles
+import dev.gf2log.app.management.RosterFileNames
 import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.LogTime
 import dev.gf2log.protocol.model.GuildMember
 import dev.gf2log.protocol.model.GuildMembersData
 import dev.gf2log.protocol.model.ParsedPayload
 import java.io.File
+import java.io.FileOutputStream
 import java.time.Clock
 import java.time.Instant
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
 
 /**
  * Writes each completed logical roster dataset once, deduplicated by UID. The stream parser
@@ -19,36 +19,47 @@ import java.time.format.DateTimeFormatter
  * boundary ends the dataset; it is discarded instead of being merged with a later, unrelated roster.
  * An empty `.partial` file reserves the final name while the CSV is written; it is deleted when
  * writing or publication fails, and [deleteStalePartials] removes any a process death left behind.
+ * The working file's data is synced before it is renamed into place, so a power loss can never
+ * leave an empty or truncated CSV under its final name.
  */
 class GuildMembersCsvWriter(
     private val outputDirectory: File,
     private val clock: Clock = Clock.systemUTC(),
     private val publisher: (File, File) -> Unit = AtomicFiles::move,
     private val onBatchClosed: (CompletedBatch) -> Unit = {},
+    private val sync: (FileOutputStream) -> Unit = AtomicFiles::sync,
 ) {
+    /**
+     * [receivedAt] names the file and becomes every row's `logTime`: a roster held for admission
+     * is dated when it arrived, not when it was confirmed.
+     */
     @Synchronized
-    fun accept(payload: ParsedPayload): SaveResult? {
+    fun accept(payload: ParsedPayload, receivedAt: Instant = Instant.now(clock)): SaveResult? {
         val data = payload.data as? GuildMembersData ?: return null
         if (payload.messageId == 0 || !payload.isEndOfMessage) return null
         val members = linkedMapOf<UInt, GuildMember>()
-        data.members.forEach { member -> members[member.uid] = member }
+        // UID 0 is the protobuf default of a member whose UID field is missing: no identity.
+        data.members.forEach { member -> if (member.uid != 0u) members[member.uid] = member }
         if (members.isEmpty()) return null
         // Bounded after deduplication: merged continuation frames may repeat a member.
         val roster = members.values.toList()
         check(GuildMembersCsv.hasValidMemberBounds(roster)) {
             "Platoon roster exceeds the member or name limit"
         }
-        return publish(roster)
+        return publish(roster, receivedAt)
     }
 
-    private fun publish(members: List<GuildMember>): SaveResult {
-        val batch = reserve(Instant.now(clock), members)
+    private fun publish(members: List<GuildMember>, receivedAt: Instant): SaveResult {
+        val batch = reserve(receivedAt, members)
         try {
-            batch.workingFile.bufferedWriter(Charsets.UTF_8).use { writer ->
+            AtomicFiles.writeSynced(batch.workingFile, sync) { output ->
+                // Flushed rather than closed: writeSynced syncs and then closes the stream.
+                val writer = output.bufferedWriter(Charsets.UTF_8)
                 writer.appendLine(GuildMembersCsv.HEADER)
                 members.forEach { member ->
                     writer.appendLine(GuildMembersCsv.row(member, batch.completed.logTime))
                 }
+                writer.flush()
             }
             publishWithRetry(batch.workingFile, batch.completed.file)
         } catch (error: Exception) {
@@ -68,7 +79,7 @@ class GuildMembersCsvWriter(
         check(outputDirectory.isDirectory || outputDirectory.mkdirs()) {
             "Unable to create the roster directory"
         }
-        val filenameStem = "gf2log_platoonmembers_${FILE_TIME_FORMAT.format(instant)}"
+        val filenameStem = RosterFileNames.capturedStem(instant)
         var suffix = 1
         while (true) {
             val name = if (suffix == 1) "$filenameStem.csv" else "${filenameStem}_$suffix.csv"
@@ -122,9 +133,5 @@ class GuildMembersCsvWriter(
             directory.listFiles { file -> file.isFile && file.name.endsWith(WORKING_SUFFIX) }
                 ?.forEach(File::delete)
         }
-
-        private val FILE_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter
-            .ofPattern("yyyyMMdd'T'HHmmss'Z'")
-            .withZone(ZoneOffset.UTC)
     }
 }

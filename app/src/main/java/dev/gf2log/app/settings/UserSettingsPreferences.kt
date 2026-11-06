@@ -2,6 +2,7 @@ package dev.gf2log.app.settings
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import dev.gf2log.app.LanguagePreferences
 import dev.gf2log.app.TargetPackagePreferences
 import dev.gf2log.protocol.PayloadCatalog
@@ -9,6 +10,7 @@ import java.time.ZoneId
 
 internal object UserSettingsPreferences {
     private const val PREFERENCES = "user_settings"
+    private const val TAG = "GF2Settings"
     private const val SCHEMA_VERSION = 4
     private const val LEGACY_UNIFIED_SCHEMA_VERSION = 1
     private const val KEY_SCHEMA_VERSION = "schema_version"
@@ -104,26 +106,27 @@ internal object UserSettingsPreferences {
     fun setPayloadHistoryEnabled(context: Context, payloadType: Int, enabled: Boolean) =
         edit(context) { putBoolean(payloadKey(payloadType), enabled) }
 
-    fun memberOrder(context: Context): List<Long> = synchronized(lock) {
-        parseMemberOrder(
-            preferencesLocked(context.applicationContext).getString(KEY_MEMBER_ORDER, null),
-        )
-    }
+    fun memberOrder(context: Context): List<Long> = synchronized(lock) { legacyMemberOrder(context).read() }
 
+    /** Like a Platoon's own order, a failed commit keeps the previous order readable. */
     fun setMemberOrder(context: Context, uids: List<Long>): Boolean = synchronized(lock) {
-        preferencesLocked(context.applicationContext).edit()
-            .putString(KEY_MEMBER_ORDER, uids.filter { it > 0L }.distinct().joinToString(","))
-            .commit()
+        legacyMemberOrder(context).write(uids)
     }
 
-    fun clearMemberOrder(context: Context) = edit(context) { remove(KEY_MEMBER_ORDER) }
+    fun clearMemberOrder(context: Context): Boolean = synchronized(lock) { legacyMemberOrder(context).clear() }
+
+    private fun legacyMemberOrder(context: Context) =
+        ScopedMemberOrder(preferencesLocked(context.applicationContext), KEY_MEMBER_ORDER)
 
     fun weeklyCutlines(context: Context): WeeklyCutlines = synchronized(lock) {
         readCutlines(preferencesLocked(context.applicationContext))
     }
 
-    fun setWeeklyCutlines(context: Context, cutlines: WeeklyCutlines) = edit(context) {
-        putWeeklyCutlines(cutlines, WeeklyCutlineField::settingsKey)
+    /** Like a Platoon's own cutlines, a failed commit keeps the previous cutlines readable. */
+    fun setWeeklyCutlines(context: Context, cutlines: WeeklyCutlines): Boolean = synchronized(lock) {
+        preferencesLocked(context.applicationContext).commitOrRevert(
+            WeeklyCutlineField.entries.map(WeeklyCutlineField::settingsKey),
+        ) { putWeeklyCutlines(cutlines, WeeklyCutlineField::settingsKey) }
     }
 
     fun targetPackage(context: Context): String = synchronized(lock) {
@@ -146,8 +149,23 @@ internal object UserSettingsPreferences {
         editor.apply()
     }
 
-    private fun preferencesLocked(context: Context): SharedPreferences {
-        val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+    private fun preferencesLocked(context: Context): SharedPreferences = migratedLocked(
+        preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE),
+        readLegacy = { readLegacy(context) },
+        notPersisted = { Log.w(TAG, "Settings migration not persisted; will retry") },
+    )
+
+    /**
+     * Brings [preferences] to the current schema. A commit that cannot reach the disk, such as on
+     * a full device, has still updated the in-memory values, so this process reads the migrated
+     * settings and the next one migrates again from the untouched sources instead of crashing at
+     * every cold start. [replace] keeps its strict check: a user's explicit change must persist.
+     */
+    internal fun migratedLocked(
+        preferences: SharedPreferences,
+        readLegacy: () -> AppBackupSettings,
+        notPersisted: () -> Unit,
+    ): SharedPreferences {
         val storedVersion = preferences.getInt(KEY_SCHEMA_VERSION, 0)
         if (storedVersion == SCHEMA_VERSION) return preferences
         val migrated = if (storedVersion in LEGACY_UNIFIED_SCHEMA_VERSION until SCHEMA_VERSION) {
@@ -163,11 +181,9 @@ internal object UserSettingsPreferences {
                     .orEmpty(),
             )
         } else {
-            readLegacy(context)
+            readLegacy()
         }
-        check(writeSettings(preferences.edit().clear(), migrated).commit()) {
-            "Unable to migrate app settings"
-        }
+        if (!writeSettings(preferences.edit().clear(), migrated).commit()) notPersisted()
         return preferences
     }
 
@@ -189,7 +205,7 @@ internal object UserSettingsPreferences {
             category.payloadType to
                 (category.isRequired || preferences.getBoolean(payloadKey(category.payloadType), false))
         },
-        memberOrder = parseMemberOrder(preferences.getString(KEY_MEMBER_ORDER, null)),
+        memberOrder = ScopedMemberOrder.parse(preferences.getString(KEY_MEMBER_ORDER, null)),
         weeklyCutlines = readCutlines(preferences),
     )
 
@@ -205,7 +221,7 @@ internal object UserSettingsPreferences {
             "payload_history_options",
             Context.MODE_PRIVATE,
         )
-        val memberOrder = parseMemberOrder(
+        val memberOrder = ScopedMemberOrder.parse(
             context.getSharedPreferences("weekly_member_order", Context.MODE_PRIVATE)
                 .safeString("uids"),
         )
@@ -314,13 +330,6 @@ internal object UserSettingsPreferences {
 
     private fun SharedPreferences.safeInt(key: String): Int? =
         runCatching { getInt(key, 0) }.getOrNull().takeIf { contains(key) }
-
-    /** Only positive UIDs are member identities; anything else would fail settings validation. */
-    private fun parseMemberOrder(value: String?): List<Long> = value.orEmpty()
-        .split(',')
-        .mapNotNull(String::toLongOrNull)
-        .filter { it > 0L }
-        .distinct()
 
     private fun payloadKey(payloadType: Int) = "payload_$payloadType"
 

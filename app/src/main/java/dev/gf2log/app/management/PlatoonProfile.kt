@@ -262,7 +262,7 @@ internal class PlatoonProfileRegistry(context: Context) {
         require(region in ClientServerRegionPreferences.allowedFor(client.packageName)) {
             "The server region does not belong to this client"
         }
-        require(platoonId in 1L..UInt.MAX_VALUE.toLong()) { "Platoon ID is invalid" }
+        require(platoonId in GAME_ID_RANGE) { "Platoon ID is invalid" }
         require(readAllLocked().none { it.hasIdentity(client, region, platoonId) }) {
             "That client/server Platoon profile already exists"
         }

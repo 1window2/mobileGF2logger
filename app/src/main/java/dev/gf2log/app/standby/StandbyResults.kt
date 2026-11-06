@@ -2,6 +2,7 @@ package dev.gf2log.app.standby
 
 import android.content.Context
 import androidx.core.content.edit
+import dev.gf2log.app.SupportedClientTrust
 import dev.gf2log.app.settings.GameServerRegion
 import org.json.JSONArray
 import org.json.JSONObject
@@ -17,6 +18,9 @@ internal enum class StandbyOutcome {
     /** No roster arrived before the run's time ran out. */
     TIMED_OUT,
 
+    /** The game logged in, but capture could not verify which client sent its data. */
+    CLIENT_UNVERIFIED,
+
     /** The run never started because an earlier one or the deadline left no time. */
     MISSED,
 
@@ -28,6 +32,12 @@ internal enum class StandbyOutcome {
 
     /** The game client is not installed. */
     NOT_INSTALLED,
+
+    /** The installed client is signed by another signer than the trusted one, so it was not opened. */
+    CLIENT_SIGNER_CHANGED,
+
+    /** The installed client was never seen while GF2logger was in use, so it is not trusted yet. */
+    CLIENT_NOT_TRUSTED,
 
     /** The capture service failed to start or stopped on its own. */
     CAPTURE_FAILED,
@@ -43,6 +53,17 @@ internal enum class StandbyOutcome {
 
     /** A scheduled recording could not get past the lock screen. */
     LOCK_SCREEN_STAYED,
+    ;
+
+    companion object {
+        /** How a run ends before the game opens because of its client's signer, or null when it may open. */
+        fun forClient(trust: SupportedClientTrust): StandbyOutcome? = when (trust) {
+            SupportedClientTrust.VERIFIED -> null
+            SupportedClientTrust.NOT_INSTALLED -> NOT_INSTALLED
+            SupportedClientTrust.MISMATCH -> CLIENT_SIGNER_CHANGED
+            SupportedClientTrust.UNPINNED -> CLIENT_NOT_TRUSTED
+        }
+    }
 }
 
 internal data class StandbyResult(

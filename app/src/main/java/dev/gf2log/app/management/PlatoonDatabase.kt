@@ -23,6 +23,7 @@ internal class PlatoonDatabase private constructor(
         databaseName,
         null,
         PlatoonSchema.CURRENT_VERSION,
+        PlatoonDatabaseDamage.errorHandler(context.applicationContext, storageScope, databaseName),
     ) {
     constructor(
         context: Context,
@@ -34,6 +35,26 @@ internal class PlatoonDatabase private constructor(
 
     private fun gameZone(): ZoneId = GameTimeZonePreferences.get(appContext, storageScope.storageId)
 
+    /**
+     * Opening the scope's live database must never create an empty one over a quarantined
+     * corrupt file, nor recreate storage for a Platoon that was deleted meanwhile.
+     */
+    private fun requireLiveStorageUsable() {
+        if (databaseName != storageScope.databaseName) return
+        PlatoonDatabaseDamage.requireUsable(appContext, storageScope)
+        PlatoonProfileAdministration.requireStorageAllowed(appContext, storageScope)
+    }
+
+    override fun getWritableDatabase(): SQLiteDatabase {
+        requireLiveStorageUsable()
+        return super.getWritableDatabase()
+    }
+
+    override fun getReadableDatabase(): SQLiteDatabase {
+        requireLiveStorageUsable()
+        return super.getReadableDatabase()
+    }
+
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
         db.setForeignKeyConstraintsEnabled(true)
@@ -43,6 +64,7 @@ internal class PlatoonDatabase private constructor(
         super.onOpen(db)
         if (!db.isReadOnly) {
             PlatoonDatabaseSchema.ensureMaintenanceObjects(db)
+            MembershipRows.ensureActiveStateRule(db)
             ActivityIngestion.trimPlatoonActivity(db)
         }
     }
@@ -69,13 +91,19 @@ internal class PlatoonDatabase private constructor(
         source: EvidenceSource,
         historicalOnly: Boolean = false,
         deferHistoricalMembershipReconciliation: Boolean = false,
+        now: Instant = Instant.now(),
     ): SnapshotIngestResult = SnapshotIngestion.ingest(
         writableDatabase,
         snapshot,
         source,
         historicalOnly,
         deferHistoricalMembershipReconciliation,
+        now,
     )
+
+    /** Rosters kept but set aside because their capture time lay ahead of the clock. */
+    @Synchronized
+    fun setAsideSnapshotCount(): Int = SnapshotClockReview.setAsideCount(readableDatabase)
 
     /** Replays every retained roster after late historical imports; see [RosterHistoryReplay]. */
     @Synchronized
@@ -152,6 +180,13 @@ internal class PlatoonDatabase private constructor(
     fun listMemberStatuses(activeOnly: Boolean = false): List<MemberStatus> =
         PlatoonReadQueries.listMemberStatuses(readableDatabase, activeOnly)
 
+    /** In-game names without nicknames: the baseline roster ingestion detects renames against. */
+    @Synchronized
+    fun memberCurrentNames(): Map<Long, String> =
+        readableDatabase.rawQuery("SELECT uid, current_name FROM members", null).use { cursor ->
+            buildMap { while (cursor.moveToNext()) put(cursor.getLong(0), cursor.getString(1)) }
+        }
+
     @Synchronized
     fun listEvents(
         from: Instant,
@@ -222,6 +257,7 @@ internal class PlatoonDatabase private constructor(
         fingerprint: String,
         payload: ByteArray,
         clearActiveOnChange: Boolean,
+        zoneId: ZoneId? = null,
     ): Long = WeeklyHistoryStore.record(
         writableDatabase,
         periodStartEpochDay,
@@ -229,7 +265,22 @@ internal class PlatoonDatabase private constructor(
         fingerprint,
         payload,
         clearActiveOnChange,
+        zoneId,
     )
+
+    /** The [uids] without a row in `members`, read in chunks that stay under SQLite's bound-argument limit. */
+    @Synchronized
+    fun missingMemberUids(uids: Collection<Long>): Set<Long> {
+        val db = readableDatabase
+        val missing = uids.toMutableSet()
+        uids.distinct().chunked(MAX_BOUND_ARGUMENTS).forEach { chunk ->
+            db.rawQuery(
+                "SELECT uid FROM members WHERE uid IN (${chunk.joinToString(",") { "?" }})",
+                chunk.map(Long::toString).toTypedArray(),
+            ).use { cursor -> while (cursor.moveToNext()) missing -= cursor.getLong(0) }
+        }
+        return missing
+    }
 
     @Synchronized
     fun listWeeklyReportHistory(periodStartEpochDay: Long): List<WeeklyReportHistoryEntry> =
@@ -252,8 +303,14 @@ internal class PlatoonDatabase private constructor(
         WeeklyHistoryStore.clearActive(writableDatabase, periodStartEpochDay)
 
     @Synchronized
-    internal fun replaceWeeklyReportHistory(replacements: List<WeeklyReportHistoryReplacement>) =
-        WeeklyHistoryStore.replace(writableDatabase, replacements)
+    internal fun replaceWeeklyReportHistory(
+        replacements: List<WeeklyReportHistoryReplacement>,
+        zoneId: ZoneId? = null,
+    ) = WeeklyHistoryStore.replace(writableDatabase, replacements, zoneId)
+
+    @Synchronized
+    internal fun isWeeklyHistoryBucketedIn(zoneId: ZoneId): Boolean =
+        WeeklyHistoryStore.isBucketedIn(writableDatabase, zoneId)
 
     companion object {
         /** A fresh current-schema database that never touches storage, for schema comparison. */
@@ -268,5 +325,6 @@ internal class PlatoonDatabase private constructor(
         const val DAILY_PATROL_REWARD_ACTION_ID = 802001L
         internal const val MAX_STORED_ACTIVITY_OBSERVATIONS = 10_000
         internal const val MAX_WEEKLY_REPORT_HISTORY = 15
+        private const val MAX_BOUND_ARGUMENTS = 500
     }
 }

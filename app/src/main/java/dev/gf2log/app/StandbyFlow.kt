@@ -167,7 +167,7 @@ internal class StandbyFlow(
     }
 
     private fun rememberedKeys(): Set<String> =
-        prefs().getStringSet(KEY_SELECTED, emptySet()).orEmpty()
+        prefs().getStringSet(KEY_SELECTED, emptySet()).orEmpty().mapTo(HashSet(), StandbyPlanner::selectionKey)
 
     private fun remember(chosen: List<StandbyServer>) {
         prefs().edit { putStringSet(KEY_SELECTED, chosen.mapTo(HashSet(), StandbyServer::key)) }

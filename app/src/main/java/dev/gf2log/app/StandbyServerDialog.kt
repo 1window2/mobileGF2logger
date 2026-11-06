@@ -55,7 +55,7 @@ internal object StandbyServerDialog {
             val valid = StandbyPlanner.isValidSelection(checked)
             val planned = if (valid) StandbyPlanner.plan(checked, now).associate { it.server to it.startAt } else emptyMap()
             boxes.forEach { (server, box) ->
-                box.text = label(server, planned[server] ?: StandbyPlanner.nextReset(server.zone, now).minus(StandbyPlanner.LEAD))
+                box.text = label(server, planned[server] ?: StandbyPlanner.nextReset(server, now).minus(StandbyPlanner.LEAD))
             }
             dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = valid
         }
@@ -74,7 +74,7 @@ internal object StandbyServerDialog {
                 // Default to the preselected server of this client, if it still exists.
                 val preferred = clientServers.firstOrNull { it.key in preselected }
                 clientServers.forEach { server ->
-                    val start = StandbyPlanner.nextReset(server.zone, now).minus(StandbyPlanner.LEAD)
+                    val start = StandbyPlanner.nextReset(server, now).minus(StandbyPlanner.LEAD)
                     val box = activity.checkBox(label(server, start), server == preferred) { checked ->
                         // A client logs in to one server at a time: checking one clears its siblings.
                         if (checked) {

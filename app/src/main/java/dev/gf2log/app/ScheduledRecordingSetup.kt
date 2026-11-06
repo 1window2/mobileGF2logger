@@ -67,6 +67,8 @@ internal class ScheduledRecordingSetup(
     private fun status(enabled: Boolean, blocked: Boolean): String = when {
         blocked -> activity.getString(R.string.scheduled_blocked)
         !enabled -> activity.getString(R.string.scheduled_off)
+        // The chosen servers lost their Platoons: say so instead of showing them as active.
+        ScheduledRecording.isSelectionStale(activity) -> activity.getString(R.string.scheduled_stale)
         else -> {
             val next = ScheduledRecording.next(activity)?.let(::nextText) ?: activity.getString(R.string.scheduled_nothing)
             if (ScheduledRecording.canScheduleExactAlarms(activity)) {
@@ -83,7 +85,7 @@ internal class ScheduledRecordingSetup(
         Labels.format(Labels.DATE_TIME, next.startAt, ZoneId.systemDefault()),
     )
 
-    private fun chosenSummary(): String? = ScheduledRecording.selectedKeys(activity)
+    private fun chosenSummary(): String? = ScheduledRecording.chosenKeys(activity)
         .map { key -> GameServerRegion.fromStored(key.split('|').getOrNull(1)) }
         .sortedBy(GameServerRegion::ordinal)
         .joinToString(", ") { Labels.region(activity, it) }

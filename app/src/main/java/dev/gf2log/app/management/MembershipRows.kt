@@ -528,6 +528,123 @@ internal object MembershipRows {
 
     private class LaterExit(val id: Long, val joinedAt: Long?, val note: String, val values: ContentValues)
 
+    /**
+     * Before v14 a 21960 withdrawal that followed an activity-dated one for the same change found
+     * no period to close, so it created a period of its own with an unknown join and a second
+     * withdrawal event. Each such shadow period folds into the activity-dated period it repeats:
+     * within the Updates correlation window, or with no roster showing the member between the two
+     * withdrawals, and with no join between them. The activity-dated period takes the exact
+     * withdrawal and keeps one withdrawal event, the Updates one.
+     */
+    fun foldActivityShadowedExits(db: SQLiteDatabase) {
+        val pairs = db.rawQuery(
+            """
+            SELECT shadow.id, dated.id
+            FROM membership_periods shadow
+            JOIN membership_periods dated ON dated.uid = shadow.uid AND dated.id != shadow.id
+            WHERE shadow.joined_at IS NULL
+              AND shadow.left_at IS NOT NULL
+              AND shadow.left_source = ?
+              AND shadow.left_precision = ?
+              AND dated.left_at IS NOT NULL
+              AND dated.left_source = ?
+              AND (dated.joined_at IS NULL OR dated.joined_at <= shadow.left_at)
+              AND (
+                ABS(dated.left_at - shadow.left_at) <= ${ExactBoundaryCorrelation.EXACT_UPDATE_CORRELATION_WINDOW_MILLIS}
+                OR NOT EXISTS (
+                  SELECT 1
+                  FROM snapshot_members roster_member
+                  JOIN snapshots roster ON roster.id = roster_member.snapshot_id
+                  WHERE roster_member.uid = shadow.uid
+                    AND roster.clock_suspect = 0
+                    AND roster.captured_at > MIN(dated.left_at, shadow.left_at)
+                    AND roster.captured_at < MAX(dated.left_at, shadow.left_at)
+                )
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM membership_periods other
+                WHERE other.uid = shadow.uid
+                  AND other.joined_at > MIN(dated.left_at, shadow.left_at)
+                  AND other.joined_at < MAX(dated.left_at, shadow.left_at)
+              )
+            ORDER BY shadow.id, ABS(dated.left_at - shadow.left_at), dated.id
+            """.trimIndent(),
+            arrayOf(EvidenceSource.GAME_UPDATES.name, EvidencePrecision.EXACT.name, EvidenceSource.ACTIVITY.name),
+        ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getLong(0) to cursor.getLong(1)) } }
+        val folded = mutableSetOf<Long>()
+        pairs.forEach { (shadowId, datedId) ->
+            if (shadowId in folded || datedId in folded) return@forEach
+            if (foldShadowedExit(db, shadowId, datedId)) {
+                folded += shadowId
+                folded += datedId
+            }
+        }
+    }
+
+    private fun foldShadowedExit(db: SQLiteDatabase, shadowId: Long, datedId: Long): Boolean {
+        val shadow = arrayOf(shadowId.toString())
+        val dated = arrayOf(datedId.toString())
+        val (exact, shadowNote) = db.rawQuery(
+            "SELECT left_at, left_date, left_time_known, note FROM membership_periods WHERE id = ?",
+            shadow,
+        ).use { cursor ->
+            check(cursor.moveToFirst())
+            ContentValues().apply {
+                put("left_at", cursor.getLong(0))
+                putNullableLong("left_date", cursor.getNullableLong(1))
+                if (cursor.isNull(2)) putNull("left_time_known") else put("left_time_known", cursor.getLong(2))
+                put("left_precision", EvidencePrecision.EXACT.name)
+                put("left_source", EvidenceSource.GAME_UPDATES.name)
+            } to cursor.getString(3)
+        }
+        val datedNote = db.rawQuery("SELECT note FROM membership_periods WHERE id = ?", dated)
+            .use { cursor -> check(cursor.moveToFirst()); cursor.getString(0) }
+        val mergedNote = listOf(datedNote, shadowNote).filter(String::isNotBlank).joinToString("\n")
+        if (mergedNote.length > ManualTextPolicy.MAX_NOTE_CHARS) return false
+        val withdrawalTypes = MembershipBoundary.WITHDRAW.eventTypes.map(MemberEventType::name)
+        fun withdrawalEvent(periodId: String, source: EvidenceSource): Long? = db.rawQuery(
+            "SELECT id FROM member_events WHERE membership_period_id = ? AND source = ? " +
+                "AND event_type IN (?, ?) ORDER BY id LIMIT 1",
+            arrayOf(periodId, source.name, withdrawalTypes[0], withdrawalTypes[1]),
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
+        val kept = withdrawalEvent(shadow[0], EvidenceSource.GAME_UPDATES)
+        val activityDated = withdrawalEvent(dated[0], EvidenceSource.ACTIVITY)
+        db.update("membership_periods", exact.apply { put("note", mergedNote) }, "id = ?", dated)
+        db.update(
+            "member_events",
+            ContentValues().apply { put("membership_period_id", datedId) },
+            "membership_period_id = ?",
+            shadow,
+        )
+        if (activityDated != null) {
+            if (kept != null) {
+                // The activity fact now cites the Updates withdrawal that replaced its own.
+                db.update(
+                    "platoon_activity",
+                    ContentValues().apply { put("member_event_id", kept) },
+                    "member_event_id = ?",
+                    arrayOf(activityDated.toString()),
+                )
+                deleteEvents(db, "id = ?", arrayOf(activityDated.toString()))
+            } else {
+                db.update(
+                    "member_events",
+                    ContentValues().apply {
+                        put("occurred_at", exact.getAsLong("left_at"))
+                        putNullableLong("event_date", exact.getAsLong("left_date"))
+                        put("time_known", exact.getAsLong("left_time_known") ?: 1L)
+                        put("precision", EvidencePrecision.EXACT.name)
+                        put("source", EvidenceSource.GAME_UPDATES.name)
+                    },
+                    "id = ?",
+                    arrayOf(activityDated.toString()),
+                )
+            }
+        }
+        db.delete("membership_periods", "id = ?", shadow)
+        return true
+    }
+
     private val ACTIVE_STATE_UPDATE =
         "UPDATE members SET is_active = CASE WHEN EXISTS (${effectiveOpenPeriod("members.uid")}) " +
             "THEN 1 ELSE 0 END"

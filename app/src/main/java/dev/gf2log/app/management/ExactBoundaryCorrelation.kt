@@ -727,5 +727,5 @@ internal object ExactBoundaryCorrelation {
         PlatoonUpdateEffect.REMOVED to (MemberEventType.REMOVED to MembershipBoundary.WITHDRAW),
     )
 
-    private const val EXACT_UPDATE_CORRELATION_WINDOW_MILLIS = 48L * 60L * 60L * 1000L
+    internal const val EXACT_UPDATE_CORRELATION_WINDOW_MILLIS = 48L * 60L * 60L * 1000L
 }

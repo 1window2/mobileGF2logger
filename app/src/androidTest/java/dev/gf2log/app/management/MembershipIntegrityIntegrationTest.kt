@@ -468,6 +468,50 @@ class MembershipIntegrityIntegrationTest {
         assertForeignKeysValid()
     }
 
+    @Test
+    fun schemaFourteenUpgradeFoldsTheShadowPeriodAnUpdatesWithdrawalCreatedAfterAnActivityDatedOne() {
+        insertMember(TARGET_UID, active = false)
+        val joinedAt = T0
+        val actedAt = T0.plusSeconds(5 * HOUR)
+        val updatesAt = T0.plusSeconds(6 * HOUR)
+        // 2.7.1: the activity-dated withdrawal closed the period as exact Updates evidence ...
+        val dated = insertOpenPeriod(TARGET_UID, joinedAt, EvidencePrecision.EXACT, EvidenceSource.GAME_UPDATES)
+        insertJoinEvent(dated, joinedAt)
+        closeExactly(dated, actedAt)
+        val activityEvent = insertExactWithdrawalEvent(dated, actedAt)
+        insertCitingActivity(activityEvent, actedAt)
+        // ... and the 21960 withdrawal of the same change found nothing open, so it made its own.
+        val shadow = database.writableDatabase.insertOrThrow(
+            "membership_periods",
+            null,
+            ContentValues().apply {
+                put("uid", TARGET_UID)
+                put("joined_precision", EvidencePrecision.UNKNOWN.name)
+                put("joined_source", EvidenceSource.GAME_UPDATES.name)
+            },
+        )
+        closeExactly(shadow, updatesAt)
+        val updatesEvent = insertExactWithdrawalEvent(shadow, updatesAt)
+        upgradeFromThirteen()
+
+        val period = status(TARGET_UID).membershipPeriods.single()
+        assertEquals(joinedAt, period.joinedAt)
+        assertEquals(updatesAt, period.leftAt)
+        assertEquals(EvidenceSource.GAME_UPDATES, period.leftSource)
+        assertEquals(EvidencePrecision.EXACT, period.leftPrecision)
+        assertEquals(1L, count("member_events", "uid = $TARGET_UID AND event_type = 'LEFT'"))
+        assertEquals(
+            1L,
+            count(
+                "member_events",
+                "id = $updatesEvent AND membership_period_id = ${period.id} AND occurred_at = ${updatesAt.toEpochMilli()}",
+            ),
+        )
+        assertEquals(1L, count("platoon_activity", "member_event_id = $updatesEvent"))
+        assertFalse(status(TARGET_UID).isActive)
+        assertForeignKeysValid()
+    }
+
     private fun insertMember(uid: Long, active: Boolean) {
         database.writableDatabase.execSQL(
             "INSERT INTO members(uid, current_name, current_level, is_active, first_seen_at, last_seen_at) " +

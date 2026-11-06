@@ -38,6 +38,7 @@ internal object PlatoonDatabaseMigrations {
             // Read under the pre-v14 rule, which re-labelling activity-dated joins changes.
             val superseded = MembershipRows.supersededOpenUpdatesJoins(db)
             markActivityDatedBoundaries(db)
+            MembershipRows.foldActivityShadowedExits(db)
             MembershipRows.closeRelabelledSupersededPeriods(db, superseded)
             InvalidMemberIdentityRepair.repair(db)
             MembershipRows.foldAllDuplicateOpenPeriods(db)

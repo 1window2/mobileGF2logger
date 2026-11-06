@@ -398,8 +398,9 @@ internal class PlatoonRepository(
                 reportEvents = roster.reportEvents,
                 revisionEvents = roster.revisionEvents,
                 overrides = database.listWeeklyOverrides(periodStart.toEpochDay()),
+                // From the day before the week: its Daily Patrol bounds a near-reset tail.
                 dailyPatrolFacts = database.listDailyPatrolFacts(
-                    PlatoonPeriods.periodStartInstant(periodStart, zoneId),
+                    PlatoonPeriods.periodStartInstant(periodStart.minusDays(1), zoneId),
                     PlatoonPeriods.periodStartInstant(periodStart.plusDays(7), zoneId),
                 ),
                 notes = database.listWeeklyNotes(periodStart.toEpochDay()),

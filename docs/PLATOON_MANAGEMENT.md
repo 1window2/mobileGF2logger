@@ -111,9 +111,11 @@ transitions.
   captured Weekly Merit checkpoints. A 21917 recent-login time proves the
   member logged in on its 05:00-based game day and narrows that day to 50 or
   90; an exact Daily Patrol event fixes it at 90. A Standard day never shows
-  more than 90: a delta above the cap after a near-reset baseline contains the
-  previous day's login or patrol tail, so the day keeps a value only when a
-  single split of that delta remains.
+  more than 90: any delta after a near-reset baseline can contain the previous
+  day's login or patrol tail, so the day keeps a value only when a single split
+  of that delta remains. Login times and Daily Patrol events at the baseline
+  and at the day's latest capture narrow the split, and a capture after the day
+  whose login time is still before it makes the day, Sunday included, 0.
 - Values shared by every compatible allocation are exact. Ambiguous completed
   days remain unknown instead of displaying an arbitrary allocation, while an
   unfinished day displays only its confirmed positive lower bound until it

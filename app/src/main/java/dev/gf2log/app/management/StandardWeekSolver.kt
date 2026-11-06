@@ -29,6 +29,7 @@ object StandardWeekSolver {
             zoneId = zoneId,
             snapshots = snapshots,
             cells = cells,
+            asOf = asOf,
         ).toMutableList()
         val observations = snapshots.mapNotNull { snapshot ->
             snapshot.member(uid)?.let { member ->
@@ -67,18 +68,7 @@ object StandardWeekSolver {
         if (activeIndexes.isEmpty()) return Resolution(mutable, null)
 
         val confirmedNoLoginDays = activeIndexes.mapNotNull { index ->
-            val day = days[index]
-            val start = PlatoonPeriods.periodStartInstant(day, zoneId)
-            val end = PlatoonPeriods.periodStartInstant(day.plusDays(1), zoneId)
-            day.takeIf {
-                !end.isAfter(asOf) &&
-                    snapshots.any { snapshot ->
-                        !snapshot.capturedAt.isBefore(end) &&
-                            snapshot.member(uid)?.lastLogin?.takeIf { it > 0L }?.let {
-                                Instant.ofEpochSecond(it).isBefore(start)
-                            } == true
-                    }
-            }
+            days[index].takeIf { isConfirmedNoLoginDay(uid, it, zoneId, snapshots, asOf) }
         }.toSet()
         val compatible = compatibleAllocations(
             indexes = activeIndexes,
@@ -165,17 +155,63 @@ object StandardWeekSolver {
         )
     }
 
+    /**
+     * Whether a capture at or after [day]'s end still shows a login before its start, so the
+     * member did not log in, and earned nothing, that day.
+     */
+    private fun isConfirmedNoLoginDay(
+        uid: Long,
+        day: LocalDate,
+        zoneId: ZoneId,
+        snapshots: List<PlatoonSnapshot>,
+        asOf: Instant,
+    ): Boolean {
+        val start = PlatoonPeriods.periodStartInstant(day, zoneId)
+        val end = PlatoonPeriods.periodStartInstant(day.plusDays(1), zoneId)
+        return !end.isAfter(asOf) &&
+            snapshots.any { snapshot ->
+                !snapshot.capturedAt.isBefore(end) &&
+                    snapshot.member(uid)?.lastLogin?.takeIf { it > 0L }?.let {
+                        Instant.ofEpochSecond(it).isBefore(start)
+                    } == true
+            }
+    }
+
+    /**
+     * Completes Sunday, the last day of the previous counter week, outside the Monday-to-Saturday
+     * allocation. Like every other day, a confirmed no-login Sunday is 0; otherwise its observed
+     * prefix, consistent with the latest Sunday capture's login time, is extended by the merit the
+     * first later capture shows after it.
+     */
     private fun inferSundayMerit(
         uid: Long,
         days: List<LocalDate>,
         zoneId: ZoneId,
         snapshots: List<PlatoonSnapshot>,
         cells: List<WeeklyReportBuilder.DayCell>,
+        asOf: Instant,
     ): List<WeeklyReportBuilder.DayCell> {
         val sundayCell = cells.first()
-        if (sundayCell.manualOverride != null || sundayCell.hasClosingBoundary) {
-            return cells
+        if (sundayCell.manualOverride != null) return cells
+        if (
+            !sundayCell.hasDailyPatrolFact &&
+            !sundayCell.hasLoginFact &&
+            isConfirmedNoLoginDay(uid, days.first(), zoneId, snapshots, asOf)
+        ) {
+            return cells.toMutableList().apply {
+                this[0] = sundayCell.copy(
+                    meritDelta = 0L,
+                    scoreDelta = 0L,
+                    inference = ActivityInference.infer(
+                        meritDelta = 0L,
+                        scoreDelta = 0L,
+                        gunsmokeActive = false,
+                    ),
+                    evidence = DailyEvidence.ATTRIBUTED,
+                )
+            }
         }
+        if (sundayCell.hasClosingBoundary) return cells
         val monday = days.first().plusDays(1)
         val mondayStart = PlatoonPeriods.periodStartInstant(monday, zoneId)
         val sundayObservation = snapshots.lastOrNull { snapshot ->
@@ -196,6 +232,18 @@ object StandardWeekSolver {
         if (remainingSundayMerit < 0L) return cells
 
         val observedSundayPrefix = sundayCell.meritDelta ?: return cells
+        val sundayStart = PlatoonPeriods.periodStartInstant(days.first(), zoneId)
+        val prefixMatchesLogin = sundayMember.lastLogin.takeIf { it > 0L }
+            ?.let(Instant::ofEpochSecond)
+            ?.let { login ->
+                if (login.isBefore(sundayStart)) {
+                    observedSundayPrefix == 0L
+                } else {
+                    observedSundayPrefix == LOGIN_MERIT || observedSundayPrefix == PATROL_MERIT
+                }
+            }
+            ?: (observedSundayPrefix in DAILY_STAGE)
+        if (!prefixMatchesLogin) return cells
         val merit = observedSundayPrefix + remainingSundayMerit
         if (merit !in DAILY_STAGE) return cells
         return cells.toMutableList().apply {

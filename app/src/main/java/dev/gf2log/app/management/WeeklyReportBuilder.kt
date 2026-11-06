@@ -299,8 +299,9 @@ object WeeklyReportBuilder {
             snapshots = sortedSnapshots,
             overridesByCell = overridesByCell,
             dailyPatrolFacts = dailyPatrolFacts,
+            // The day before the week is kept too: its Daily Patrol bounds a near-reset tail.
             patrolFactsByMemberDay = dailyPatrolFacts
-                .filter { PlatoonPeriods.gameDay(it.occurredAt, zoneId) in days }
+                .filter { PlatoonPeriods.gameDay(it.occurredAt, zoneId) in start.minusDays(1)..days.last() }
                 .groupBy { it.uid to PlatoonPeriods.gameDay(it.occurredAt, zoneId) }
                 .mapValues { (_, facts) -> facts.minBy(DailyPatrolFact::occurredAt) },
             loginFactsByMemberDay = loginFactsByMemberDay(sortedSnapshots, days, zoneId),
@@ -430,6 +431,7 @@ object WeeklyReportBuilder {
                 isGunsmoke = week.isGunsmoke,
                 manualOverride = week.overridesByCell[uid to day],
                 dailyPatrolFact = week.patrolFactsByMemberDay[uid to day],
+                previousDayPatrolFact = week.patrolFactsByMemberDay[uid to day.minusDays(1)],
                 hasLoginFact = uid to day in week.loginFactsByMemberDay,
             )
         }
@@ -536,6 +538,7 @@ object WeeklyReportBuilder {
         isGunsmoke: Boolean,
         manualOverride: WeeklyCellOverride?,
         dailyPatrolFact: DailyPatrolFact?,
+        previousDayPatrolFact: DailyPatrolFact?,
         hasLoginFact: Boolean,
     ): DayCell {
         if (manualOverride != null) {
@@ -547,6 +550,7 @@ object WeeklyReportBuilder {
                 isGunsmoke = isGunsmoke,
                 manualOverride = null,
                 dailyPatrolFact = dailyPatrolFact,
+                previousDayPatrolFact = previousDayPatrolFact,
                 hasLoginFact = hasLoginFact,
             )
             return overlayManualOverride(derived, manualOverride, isGunsmoke)
@@ -634,15 +638,40 @@ object WeeklyReportBuilder {
         } else {
             val lastKnown = after ?: before
             val intervalMerit = ActivityInference.counterDelta(before.totalMerit, lastKnown.totalMerit)
-            meritDelta = if (
-                !isGunsmoke &&
-                baselineSnapshot.capturedAt != start &&
-                intervalMerit > STANDARD_PATROL_MERIT
-            ) {
+            meritDelta = if (!isGunsmoke && baselineSnapshot.capturedAt != start) {
                 // A near-reset baseline can leave the previous day's login or patrol in the
-                // delta. Above the daily cap that tail is certain, so the day is kept only when
-                // exactly one split remains; it is never shown above the cap.
-                standardPrefixesAfterTail(intervalMerit).singleOrNull()
+                // delta, so the day is kept only when exactly one split remains; it is never
+                // shown above the cap. Login times and Daily Patrol events at either capture
+                // narrow the stage each day can have reached.
+                val previousDay = day.minusDays(1)
+                val previousStart = PlatoonPeriods.periodStartInstant(previousDay, zoneId)
+                nearResetStandardPrefix(
+                    delta = intervalMerit,
+                    // Only a Gunsmoke Saturday's tail can hold attempts, and they move its score.
+                    previousDayHasAttempts = PlatoonPeriods.isGunsmokeWeek(previousDay) &&
+                        lastKnown.totalScore != before.totalScore,
+                    previousReachedStages = standardStagesAt(
+                        capturedAt = baselineSnapshot.capturedAt,
+                        lastLogin = before.lastLogin,
+                        dayStart = previousStart,
+                        dayEnd = start,
+                        patrolAt = previousDayPatrolFact?.occurredAt,
+                    ),
+                    previousFinalStages = if (previousDayPatrolFact != null) {
+                        setOf(STANDARD_PATROL_MERIT)
+                    } else {
+                        STANDARD_STAGES.toSet()
+                    },
+                    prefixStages = lastObservation?.let { (snapshot, member) ->
+                        standardStagesAt(
+                            capturedAt = snapshot.capturedAt,
+                            lastLogin = member.lastLogin,
+                            dayStart = start,
+                            dayEnd = end,
+                            patrolAt = dailyPatrolFact?.occurredAt,
+                        )
+                    } ?: STANDARD_STAGES.toSet(),
+                )
                     ?: return withActivityFacts(
                         DayCell(
                             gameDay = day,
@@ -673,7 +702,8 @@ object WeeklyReportBuilder {
                 // boundary: merit can change before reset. Exactness is
                 // established later by the counter constraint solver.
                 evidence = if (!isGunsmoke && before != null && meritDelta == STANDARD_PATROL_MERIT) {
-                    // The 90-point cap completes a Standard day before its reset.
+                    // The 90-point cap completes a Standard day before its reset. After a
+                    // near-reset baseline it is the only split left, so no tail remains in it.
                     DailyEvidence.ATTRIBUTED
                 } else {
                     DailyEvidence.PARTIAL_DAY
@@ -739,11 +769,51 @@ object WeeklyReportBuilder {
     }
 
     /**
-     * The Standard-day prefixes that leave a valid previous-day tail in [delta]. A tail can only
-     * add the login, the Daily Patrol, or both to a day that had not finished them yet.
+     * The new Standard day's prefix in [delta], a counter change measured from a baseline just
+     * before its 05:00 reset, or null unless exactly one split remains. The previous day finishes
+     * at one of [previousFinalStages] at or above a stage of [previousReachedStages] it had
+     * reached by the baseline; that difference is its tail, so a tail can only add the login, the
+     * Daily Patrol, or both to a day that had not finished them yet; a Gunsmoke tail with attempts
+     * ([previousDayHasAttempts]) can also add attempt merit, so any tail fits. The new day has
+     * reached one of [prefixStages] by its latest capture.
      */
-    private fun standardPrefixesAfterTail(delta: Long): List<Long> =
-        STANDARD_STAGES.filter { prefix -> delta - prefix in STANDARD_TAILS }
+    internal fun nearResetStandardPrefix(
+        delta: Long,
+        previousReachedStages: Set<Long>,
+        previousFinalStages: Set<Long>,
+        prefixStages: Set<Long>,
+        previousDayHasAttempts: Boolean = false,
+    ): Long? {
+        val tails = previousReachedStages.flatMapTo(mutableSetOf()) { reached ->
+            previousFinalStages.filter { it >= reached }.map { it - reached }
+        }
+        return STANDARD_STAGES.filter { prefix ->
+            val tail = delta - prefix
+            prefix in prefixStages && (tail in tails || (previousDayHasAttempts && tail >= 0L))
+        }.singleOrNull()
+    }
+
+    /**
+     * The Standard stages a day running from [dayStart] to [dayEnd] can have reached by a capture
+     * at [capturedAt]. Its first Daily Patrol at [patrolAt] completes it at the cap, a login time
+     * before the day proves it has not started, and one during the day proves the login.
+     */
+    private fun standardStagesAt(
+        capturedAt: Instant,
+        lastLogin: Long,
+        dayStart: Instant,
+        dayEnd: Instant,
+        patrolAt: Instant?,
+    ): Set<Long> {
+        if (patrolAt != null && !patrolAt.isAfter(capturedAt)) return setOf(STANDARD_PATROL_MERIT)
+        val withoutPatrol = if (patrolAt != null) STANDARD_STAGES - STANDARD_PATROL_MERIT else STANDARD_STAGES
+        val login = lastLogin.takeIf { it > 0L }?.let(Instant::ofEpochSecond)
+        return when {
+            login == null || !login.isBefore(dayEnd) -> withoutPatrol
+            login.isBefore(dayStart) -> setOf(0L)
+            else -> withoutPatrol - 0L
+        }.toSet()
+    }
 
     private fun List<PlatoonSnapshot>.lastBefore(instant: Instant): PlatoonSnapshot? =
         lastOrNull { it.capturedAt.isBefore(instant) }
@@ -799,10 +869,4 @@ object WeeklyReportBuilder {
     private const val STANDARD_LOGIN_MERIT = ActivityInference.LOGIN_MERIT
     private const val STANDARD_PATROL_MERIT = ActivityInference.LOGIN_AND_PATROL_MERIT
     private val STANDARD_STAGES = listOf(0L, STANDARD_LOGIN_MERIT, STANDARD_PATROL_MERIT)
-    private val STANDARD_TAILS = setOf(
-        0L,
-        ActivityInference.DAILY_PATROL_MERIT,
-        STANDARD_LOGIN_MERIT,
-        STANDARD_PATROL_MERIT,
-    )
 }

@@ -6,6 +6,8 @@
     <string name="capture_notice_native_unavailable">The native forwarding core is unavailable in this build</string>
     <string name="capture_notice_history_import_failed">Unable to import previous Platoon history</string>
     <string name="capture_notice_no_supported_client">Install a supported HaoPlay or Darkwinter client first</string>
+    <string name="capture_notice_client_signer_changed">The game client\'s signature changed since GF2logger trusted it, so it is not captured. Review it in Settings › Capture.</string>
+    <string name="capture_notice_client_not_trusted">The installed game client is not trusted yet. Open GF2logger once, or review it in Settings › Capture.</string>
     <string name="capture_notice_vpn_establish_failed">Unable to establish VPN: %1$s</string>
     <string name="capture_notice_vpn_permission_revoked">VPN permission was revoked</string>
     <string name="capture_notice_native_start_failed">Native forwarding core failed to start</string>

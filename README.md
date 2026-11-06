@@ -61,6 +61,9 @@ never stored.
   Selecting a detected Platoon automatically follows that profile's saved region.
 - Registers the HaoPlay (`com.haoplay.game.and.exilium`) and Darkwinter
   (`com.Sunborn.SnqxExilium.Glo`) Android clients as separate VPN targets.
+  The signing certificate first seen for each client is trusted; a client
+  reinstalled under another signer is neither captured nor opened until you
+  trust it again in Settings.
 - Creates UTF-8 Platoon-member CSV files with this column order:
 
 ```text

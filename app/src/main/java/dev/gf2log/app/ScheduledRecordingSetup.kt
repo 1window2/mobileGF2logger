@@ -98,6 +98,8 @@ internal class ScheduledRecordingSetup(
 
     private fun turnOn() {
         if (ScheduledRecording.isBlockedByScreenLock(activity)) return stop(R.string.scheduled_blocked)
+        // Scheduled runs only read the pins, so the clients installed now are trusted here, by the user.
+        SupportedClientSigners.of(activity).pinFirstSeen()
         work.run(task = { StandbyPlanner.servers(StandbyProfiles.load(activity)) }) { result ->
             servers = result.getOrDefault(emptyList())
             when {

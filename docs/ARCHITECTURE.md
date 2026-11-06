@@ -70,9 +70,52 @@ Android 10 and newer, the capture service also resolves the original connection
 tuple to the owning supported package through Android's VPN owner API. Remote
 IP addresses and DNS/SNI labels are diagnostic endpoint metadata only; they are
 not currently collected as server identity and are not persistence keys.
-Android 8–9 falls back only when exactly one supported client is installed.
-Management payloads are not persisted until a flow has both a verified
-supported owner and valid `21905`.
+Android 8–9 falls back only when exactly one verified supported client is
+installed. Management payloads are not persisted until a flow has both a
+verified supported owner and valid `21905`.
+
+### Supported-client signer trust
+
+A supported client is a package name plus a pinned signer. The publishers'
+certificate digests are not shipped with the app, so `SupportedClientSigner`
+pins trust on first use: per supported package, the SHA-256 digests of the
+signing certificates installed when GF2logger first sees it while the user is
+using the app. Only user-facing entry points pin: Home's resume (skipped while
+standby is armed, since automation can briefly resume Home), Home's capture
+start, the standby button, and turning scheduled recording on. The capture
+service, standby runs, and scheduled wake-ups only read the pins, so nothing
+installed while nobody is using the app is trusted by being routed or launched.
+
+| State | Meaning | Capture | Standby/scheduled run |
+| --- | --- | --- | --- |
+| `NOT_INSTALLED` | Package absent; its pin, if any, is kept | not routed | `NOT_INSTALLED` |
+| `UNPINNED` | Installed, never seen while the app was in use | not routed | `CLIENT_NOT_TRUSTED` |
+| `VERIFIED` | Every pinned certificate still signs it | routed and attributed | opened |
+| `MISMATCH` | Signed by another certificate than the pinned one | not routed | `CLIENT_SIGNER_CHANGED` |
+
+Verification on Android 9 and newer is `PackageManager.hasSigningCertificate`
+with `CERT_INPUT_SHA256`, which also accepts a pinned certificate the client
+has since rotated away from under APK Signature Scheme v3; Android 8 compares
+the current `GET_SIGNATURES` digests. `CaptureVpnService` adds only `VERIFIED`
+packages as allowed applications; when none qualifies it stops with
+`CLIENT_SIGNER_CHANGED`, `CLIENT_NOT_TRUSTED`, or `NO_SUPPORTED_CLIENT`, in that
+order. `CaptureFlowOwnerResolver` maps only verified packages' UIDs, so the
+Android 8–9 single-client fallback never counts an unverified install.
+`StandbyAutomation` checks the trust before a run starts capture and again just
+before it opens the game. Home marks a changed or untrusted client, and
+Settings › Capture lists each client's state; a changed or untrusted one opens a
+confirmation that shows the installed certificate's fingerprint (the first 16
+hex digits) and pins exactly the digests shown, refusing if the package changed
+behind the dialog.
+
+The trust boundary is that of any trust on first use: the first install
+GF2logger sees under a supported package name is trusted, whoever signed it.
+Uninstalling keeps the pin, so a reinstall by the same signer still matches and
+one by any other signer is refused until the user re-trusts it. Pins live in the
+private `supported_client_signers` preferences; `backup_rules.xml` and
+`data_extraction_rules.xml` exclude all preferences, and the `.gf2backup`
+settings codec has no key for them, so pins never leave the device, a restore
+leaves them as they are, and a new device starts with none.
 
 For a previously unknown `(client package, Platoon ID)`, decoded payloads enter
 a bounded process-memory admission queue. Returning to the app presents the
@@ -91,7 +134,8 @@ is initially derived from `(client package, selected server region, Platoon ID)`
 when available, with a random collision-safe fallback, but later server edits do
 not rename or move the scope. Every database, import, retained CSV, checkpoint,
 weekly setting, and backup path remains bound to that opaque ID. Client identity
-is read-only because it comes from Android's VPN owner API; server metadata can
+is read-only because it comes from Android's VPN owner API, limited to clients
+whose signer is verified; server metadata can
 be corrected only within that client's compatible regions. Unscoped v2.3.x
 files remain untouched for forensic safety but are not registered, selectable,
 or reachable through production management paths. Captured packets require a

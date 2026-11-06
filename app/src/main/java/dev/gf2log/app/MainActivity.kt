@@ -22,6 +22,7 @@ import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.RosterCsvExport
 import dev.gf2log.app.management.SnapshotComparison
 import dev.gf2log.app.standby.ScheduledRecording
+import dev.gf2log.app.standby.StandbyAutomation
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.CaptureGuard
 import dev.gf2log.app.ui.BarAction
@@ -156,6 +157,9 @@ class MainActivity : BaseActivity() {
             recreate()
             return
         }
+        // Home shown to the user trusts clients installed since; a Home briefly resumed while
+        // standby runs unattended does not.
+        if (!StandbyAutomation.isArmed) SupportedClientSigners.of(this).pinFirstSeen()
         capturePanel.renderClients()
         packetHistory.load()
         loadRosterSummary()
@@ -244,6 +248,8 @@ class MainActivity : BaseActivity() {
             startPending = false
             return
         }
+        // A start from Home is the user's own: clients installed since the last one are trusted now.
+        SupportedClientSigners.of(this).pinFirstSeen()
         startForegroundService(
             Intent(this, CaptureVpnService::class.java)
                 .setAction(CaptureVpnService.ACTION_START)

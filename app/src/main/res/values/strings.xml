@@ -557,6 +557,19 @@
     <string name="choose_file">Choose file</string>
     <string name="client_installed">Installed</string>
     <string name="client_not_installed">Not installed</string>
+    <string name="client_signer_changed_badge">Signature changed</string>
+    <string name="client_signer_untrusted_badge">Not trusted</string>
+    <string name="client_signer_title">%1$s signature</string>
+    <string name="client_signer_trusted">Trusted signer %1$s</string>
+    <string name="client_signer_not_installed_pinned">Not installed. A reinstall must match the trusted signer %1$s.</string>
+    <string name="client_signer_unpinned">Installed but not trusted yet. Tap to review.</string>
+    <string name="client_signer_changed">Signed by a different certificate. Not captured or opened until you review it.</string>
+    <string name="client_signer_review_title">Trust this %1$s client?</string>
+    <string name="client_signer_changed_message">%1$s is now signed by a different certificate than the one GF2logger trusted.\n\nTrusted: %2$s\nInstalled: %3$s\n\nTrust it only if you reinstalled %1$s yourself from its official source. Until then GF2logger neither captures nor opens it. The change applies from the next capture.</string>
+    <string name="client_signer_unpinned_message">GF2logger has not trusted this %1$s install yet.\n\nInstalled: %2$s\n\nTrust it only if you installed %1$s from its official source.</string>
+    <string name="client_signer_trust">Trust this signer</string>
+    <string name="client_signer_trusted_feedback">Trusted the %1$s signer</string>
+    <string name="client_signer_changed_again">%1$s changed again. Review it once more.</string>
     <string name="copied">Copied</string>
     <string name="copy">Copy</string>
     <string name="csv_import_choose_destination">Roster CSV files do not identify their Platoon. Choose where these files belong.</string>
@@ -602,6 +615,7 @@
     <string name="settings_about">About</string>
     <string name="settings_capture">Capture</string>
     <string name="settings_capture_servers_detail">The server is used when a new Platoon is first detected on each client.</string>
+    <string name="settings_client_signers_detail">GF2logger trusts the signing certificate it first sees for each client, and captures or opens a client only while that certificate signs it.</string>
     <string name="settings_display">Display</string>
     <string name="settings_platoon">Platoon</string>
     <string name="show_all_count">Show all (%1$d)</string>
@@ -668,6 +682,8 @@
     <string name="standby_outcome_no_accessibility">Accessibility service was off</string>
     <string name="standby_outcome_no_vpn">VPN consent was missing</string>
     <string name="standby_outcome_not_installed">Game client not installed</string>
+    <string name="standby_outcome_client_signer_changed">Not opened: the game client\'s signature changed</string>
+    <string name="standby_outcome_client_not_trusted">Not opened: the game client is not trusted yet</string>
     <string name="standby_outcome_capture_failed">Capture could not start</string>
     <string name="standby_outcome_cancelled">Cancelled because the phone was used</string>
     <string name="standby_outcome_in_use">Skipped because the phone was in use</string>

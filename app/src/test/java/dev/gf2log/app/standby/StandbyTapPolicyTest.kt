@@ -17,6 +17,8 @@ class StandbyTapPolicyTest {
             CaptureNotice.IDENTIFIED_FLOW_BUFFER_OVERFLOW,
             CaptureNotice.PLATOON_DETECTED,
             CaptureNotice.ROSTER_SAVED,
+            // A save into a damaged Platoon follows an identified, logged-in flow too.
+            CaptureNotice.DATABASE_DAMAGED,
         ).forEach { notice -> assertTrue("$notice", StandbyTapPolicy.stopsTaps(notice)) }
     }
 

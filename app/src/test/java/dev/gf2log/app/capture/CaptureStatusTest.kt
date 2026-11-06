@@ -127,6 +127,27 @@ class CaptureStatusTest {
     }
 
     @Test
+    fun aDamagedDatabaseStaysShownWhileRunningUntilAnotherErrorReplacesIt() {
+        CaptureStatus.markRunning(listOf("pkg"))
+        CaptureStatus.report(CaptureNotice.DATABASE_DAMAGED, "Alpha")
+        CaptureStatus.report(CaptureNotice.ROSTER_SAVED, "3", "Bravo")
+        CaptureStatus.report(CaptureNotice.PLATOON_DETECTED, "Bravo", "2", "HaoPlay")
+        CaptureStatus.report(CaptureNotice.PARSER_OVERLOADED, "1")
+        CaptureStatus.report(CaptureNotice.TRAFFIC, "64", "0", "1", "0", "0")
+        assertEquals(CaptureNotice.DATABASE_DAMAGED, CaptureStatus.snapshot().notice?.notice)
+        assertEquals(listOf("Alpha"), CaptureStatus.snapshot().notice?.args)
+
+        CaptureStatus.report(CaptureNotice.UPDATES_SAVE_FAILED)
+        assertEquals(CaptureNotice.UPDATES_SAVE_FAILED, CaptureStatus.snapshot().notice?.notice)
+
+        // Once stopped, an admission decision reports its outcome as usual.
+        CaptureStatus.markStopping(CaptureNotice.DATABASE_DAMAGED, "Alpha")
+        CaptureStatus.markTornDown()
+        CaptureStatus.report(CaptureNotice.PENDING_DISCARDED)
+        assertEquals(CaptureNotice.PENDING_DISCARDED, CaptureStatus.snapshot().notice?.notice)
+    }
+
+    @Test
     fun workDrainedDuringTeardownKeepsTheStopReasonUnlessItIsWorse() {
         CaptureStatus.markRunning(listOf("pkg"))
         CaptureStatus.markStopping(CaptureNotice.CAPTURE_ONCE_COMPLETE)

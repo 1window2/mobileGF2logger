@@ -136,12 +136,16 @@ internal class CaptureFlowEngine(
         val storageId = session.profile.storageId
         saveHistory(storageId, payload)
         val routed = session.dispatch(payload, receivedAt)
+        val reportFailure = { failure: Throwable, fallback: CaptureNotice ->
+            val (notice, args) = PlatoonCaptureSession.saveFailureNotice(failure, session.profile.platoonName, fallback)
+            CaptureStatus.report(notice, *args.toTypedArray())
+        }
         routed.activity
             ?.onSuccess { if (it) tracker?.mark(storageId, Gfl2PayloadDecoder.TYPE_PLATOON_ACTIVITY) }
-            ?.onFailure { CaptureStatus.report(CaptureNotice.ACTIVITY_SAVE_FAILED) }
+            ?.onFailure { reportFailure(it, CaptureNotice.ACTIVITY_SAVE_FAILED) }
         routed.updates
             ?.onSuccess { if (it) tracker?.mark(storageId, Gfl2PayloadDecoder.TYPE_PLATOON_UPDATES) }
-            ?.onFailure { CaptureStatus.report(CaptureNotice.UPDATES_SAVE_FAILED) }
+            ?.onFailure { reportFailure(it, CaptureNotice.UPDATES_SAVE_FAILED) }
         routed.members
             ?.onSuccess { saved ->
                 if (saved != null) {
@@ -152,7 +156,7 @@ internal class CaptureFlowEngine(
                     )
                 }
             }
-            ?.onFailure { CaptureStatus.report(CaptureNotice.ROSTER_SAVE_FAILED) }
+            ?.onFailure { reportFailure(it, CaptureNotice.ROSTER_SAVE_FAILED) }
         if (payload.payloadType == Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE) {
             tracker?.mark(storageId, Gfl2PayloadDecoder.TYPE_PLATOON_PROFILE)
         }

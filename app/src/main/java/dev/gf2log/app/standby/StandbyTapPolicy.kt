@@ -33,6 +33,8 @@ internal object StandbyTapPolicy {
         CaptureNotice.ROSTER_SAVE_FAILED,
         CaptureNotice.ACTIVITY_SAVE_FAILED,
         CaptureNotice.UPDATES_SAVE_FAILED,
+        // Reported in place of those once the Platoon's database turns out damaged.
+        CaptureNotice.DATABASE_DAMAGED,
     )
 
     fun stopsTaps(notice: CaptureNotice): Boolean = notice in LOGGED_IN_NOTICES

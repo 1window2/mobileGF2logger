@@ -106,6 +106,7 @@ typedef struct zdtun_conn {
   proxy_mode_t proxy_mode;
   socks5_status_t socks5_status;
   uint8_t socks5_skip;
+  uint8_t purge_rank; // see zdtun_purge_expired
 
   union {
     struct {
@@ -120,6 +121,7 @@ typedef struct zdtun_conn {
       struct {
         uint8_t fin_ack_sent:1;
         uint8_t client_closed:1;
+        uint8_t client_fin_pending:1; // client FIN waits for tx_queue to reach the server
       };
     } tcp;
   };
@@ -834,7 +836,8 @@ static void check_dns_request(zdtun_conn_t *conn, char *l4_payload, uint16_t l4_
 
   dns = (struct dns_packet*)l4_payload;
 
-  if((dns->flags & DNS_FLAGS_MASK) == DNS_TYPE_REQUEST)
+  // flags is in network byte order; the mask selects the QR bit
+  if((ntohs(dns->flags) & DNS_FLAGS_MASK) == DNS_TYPE_REQUEST)
     conn->dns.pending_queries++;
 }
 
@@ -849,7 +852,7 @@ static int check_dns_purge(zdtun_t *tun, zdtun_conn_t *conn,
 
     dns = (struct dns_packet*)l4_payload;
 
-    if(((dns->flags & DNS_FLAGS_MASK) == DNS_TYPE_RESPONSE)
+    if(((ntohs(dns->flags) & DNS_FLAGS_MASK) == DNS_TYPE_RESPONSE)
         && (conn->dns.pending_queries > 0)) {
       conn->dns.pending_queries--;
 
@@ -1172,7 +1175,10 @@ static int handle_tcp_fwd(zdtun_t *tun, const zdtun_pkt_t *pkt,
 
     if(tcp_sock == INVALID_SOCKET) {
       error("Cannot create TCP socket[%d]", socket_errno);
-      conn->status = CONN_STATUS_SOCKET_ERROR;
+      // Close through zdtun_conn_close so on_connection_close runs for the user data, and the
+      // client gets an RST that acknowledges its SYN instead of retrying until it times out.
+      conn->tcp.client_seq = ntohl(data->th_seq) + 1;
+      zdtun_conn_close(tun, conn, CONN_STATUS_SOCKET_ERROR);
       return -1;
     }
 
@@ -1293,6 +1299,29 @@ static int handle_tcp_fwd(zdtun_t *tun, const zdtun_pkt_t *pkt,
     int rv;
 
     debug("Got TCP FIN+ACK from client");
+
+    if(conn->tcp.client_closed) {
+      // A retransmitted FIN. While it waits for the queue it is not ACKed yet; once forwarded,
+      // ACK it again without counting it twice.
+      if(conn->tcp.client_fin_pending)
+        return 0;
+
+      build_reply_tcpip(tun, conn, TH_ACK, 0, 0);
+      return send_to_client(tun, conn, TCP_HEADER_LEN);
+    }
+
+    if((conn->sock != INVALID_SOCKET) && ((pkt->l7_len > 0) || conn->tcp.tx_queue)) {
+      // The FIN follows bytes the server has not received yet: queue its own payload (pushed,
+      // since nothing follows it) and let handle_queued_tcp_data forward the FIN and ACK it
+      // once everything before it has been sent.
+      if((pkt->l7_len > 0) &&
+          (enqueue_tcp_data(tun, conn, pkt->l7, pkt->l7_len, data->th_flags | TH_PUSH) != 0))
+        return -1;
+
+      conn->tcp.client_fin_pending = 1;
+      conn->tcp.client_closed = 1;
+      return 0;
+    }
 
     if(conn->sock != INVALID_SOCKET) {
       // Half close the socket to possibly signal the remote server
@@ -1572,7 +1601,7 @@ static int handle_icmp_fwd(zdtun_t *tun, const zdtun_pkt_t *pkt, zdtun_conn_t *c
 
     if(icmp_sock == INVALID_SOCKET) {
       error("Cannot create ICMP socket[%d]", socket_errno);
-      conn->status = CONN_STATUS_SOCKET_ERROR;
+      zdtun_conn_close(tun, conn, CONN_STATUS_SOCKET_ERROR);
       return -1;
     }
 
@@ -1749,6 +1778,18 @@ static int handle_tcp_reply(zdtun_t *tun, zdtun_conn_t *conn) {
     close_socket(tun, conn->sock);
     conn->sock = INVALID_SOCKET;
 
+    if(conn->tcp.client_fin_pending) {
+      // The bytes queued before the client FIN can no longer be delivered: ACK them and the FIN
+      // as for a write after the server closed, so the client can finish its close.
+      conn->tcp.client_fin_pending = 0;
+      conn->tcp.client_seq += conn->tcp.tx_queue_size + 1;
+      conn->tcp.tx_queue_size = 0;
+      build_reply_tcpip(tun, conn, TH_ACK, 0, 0);
+
+      if(send_to_client(tun, conn, TCP_HEADER_LEN) != 0)
+        return 0;
+    }
+
     if(conn->tcp.client_closed)
       // Both the client and the server have closed, terminate the connection
       zdtun_conn_close(tun, conn, CONN_STATUS_CLOSED);
@@ -1914,9 +1955,21 @@ static int handle_queued_tcp_data(zdtun_t *tun, zdtun_conn_t *conn) {
     // no more data to send
     FD_CLR(conn->sock, &tun->write_fds);
 
-  if(sent > 0) {
+  uint32_t acked = sent;
+
+  if(!conn->tcp.tx_queue && conn->tcp.client_fin_pending) {
+    // Everything before the client FIN reached the server: forward the FIN and ACK it too
+    conn->tcp.client_fin_pending = 0;
+
+    if(shutdown(conn->sock, SHUT_WR) != 0)
+      debug("shutdown failed[%d] %s", errno, strerror(errno));
+
+    acked += 1;
+  }
+
+  if(acked > 0) {
     // ACK the sent packets
-    conn->tcp.client_seq += sent;
+    conn->tcp.client_seq += acked;
     conn->tcp.tx_queue_size -= sent;
     build_reply_tcpip(tun, conn, TH_ACK, 0, 0);
 
@@ -1967,9 +2020,30 @@ int zdtun_handle_fd(zdtun_t *tun, const fd_set *rd_fds, const fd_set *wr_fds) {
 
 /* ******************************************************* */
 
+// Force purge order, cheapest loss first. Connections without a socket free nothing the cap
+// counts, so they go first and are not counted; UDP and ICMP are cheap to reopen; then TCP;
+// the connections on_purge_priority asks to keep go last.
+#define PURGE_RANK_NO_SOCKET 0
+#define PURGE_RANK_DATAGRAM 1
+#define PURGE_RANK_TCP 2
+#define PURGE_RANK_KEEP 3
+
+static uint8_t purge_rank(zdtun_t *tun, const zdtun_conn_t *conn) {
+  if((conn->status >= CONN_STATUS_CLOSED) || (conn->sock == INVALID_SOCKET))
+    return PURGE_RANK_NO_SOCKET;
+
+  if(tun->callbacks.on_purge_priority && (tun->callbacks.on_purge_priority(tun, conn) != 0))
+    return PURGE_RANK_KEEP;
+
+  return (conn->tuple.ipproto == IPPROTO_TCP) ? PURGE_RANK_TCP : PURGE_RANK_DATAGRAM;
+}
+
 // negative, zero, or positive <=> A before, equal to, or after B
-static inline int zdtun_conn_cmp_timestamp_asc(zdtun_conn_t *a, zdtun_conn_t *b) {
-  return(a->tstamp - b->tstamp);
+static inline int zdtun_conn_cmp_purge_order(zdtun_conn_t *a, zdtun_conn_t *b) {
+  if(a->purge_rank != b->purge_rank)
+    return((int)a->purge_rank - (int)b->purge_rank);
+
+  return((a->tstamp > b->tstamp) - (a->tstamp < b->tstamp));
 }
 
 // purges old connections. Harvests the closed connections (set by close_conn)
@@ -2005,14 +2079,22 @@ void zdtun_purge_expired(zdtun_t *tun) {
 
     debug("FORCE PURGE %d items", to_purge);
 
-    HASH_SORT(tun->conn_table, zdtun_conn_cmp_timestamp_asc);
+    HASH_ITER(hh, tun->conn_table, conn, tmp) {
+      conn->purge_rank = purge_rank(tun, conn);
+    }
+
+    HASH_SORT(tun->conn_table, zdtun_conn_cmp_purge_order);
 
     HASH_ITER(hh, tun->conn_table, conn, tmp) {
-      if(to_purge == 0)
+      if(to_purge <= 0)
         break;
 
+      uint8_t frees_socket = (conn->purge_rank != PURGE_RANK_NO_SOCKET);
+
       destroy_conn(tun, conn);
-      to_purge--;
+
+      if(frees_socket)
+        to_purge--;
     }
   }
 }

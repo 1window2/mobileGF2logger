@@ -320,6 +320,17 @@ typedef struct zdtun_callbacks {
    * @param conn_info information about the connection. User provided user_data should be manually freed.
    */
   void (*on_connection_close) (zdtun_t *tun, const zdtun_conn_t *conn_info);
+
+  /*
+   * @brief (optional) Called when the open sockets reach the cap and the oldest connections must
+   * be purged, for each connection that holds a socket.
+   *
+   * @param tun the zdtun instance
+   * @param conn_info information about the connection
+   *
+   * @return != 0 to purge this connection only after every UDP, ICMP and other TCP connection
+   */
+  int (*on_purge_priority) (zdtun_t *tun, const zdtun_conn_t *conn_info);
 } zdtun_callbacks_t;
 
 /*

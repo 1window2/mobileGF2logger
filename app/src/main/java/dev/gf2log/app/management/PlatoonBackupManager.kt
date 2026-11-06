@@ -1,7 +1,9 @@
 package dev.gf2log.app.management
 
 import android.content.Context
+import android.database.DatabaseErrorHandler
 import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteDatabaseCorruptException
 import android.database.sqlite.SQLiteException
 import android.util.AtomicFile
 import android.util.Log
@@ -70,11 +72,43 @@ class PlatoonBackupManager internal constructor(
      * Returns a stable digest of the primary evidence after closing SQLite so WAL state is
      * checkpointed; derived weekly history does not change it (see [PlatoonEvidenceDigest]).
      */
-    internal fun currentDatabaseSha256(): String =
+    internal fun currentDatabaseSha256(createIfMissing: Boolean = true): String =
         PlatoonRepository.withExclusiveDatabase(storageScope) {
-            ensureDatabaseExists()
-            PlatoonEvidenceDigest.sha256(databaseFile)
+            if (createIfMissing) ensureDatabaseExists()
+            liveEvidenceSha256()
         }
+
+    /**
+     * Digests the live file, which must exist: hashing a database created on the spot would only
+     * ever describe an empty Platoon. Corruption met while reading moves the file aside under the
+     * damage marker instead of deleting it, and surfaces as [PlatoonDatabaseDamagedException].
+     */
+    private fun liveEvidenceSha256(): String {
+        if (!databaseFile.isFile) {
+            throw PlatoonDatabaseDamagedException("The Platoon database is missing")
+        }
+        var corruptionReported = false
+        val quarantining = PlatoonDatabaseDamage.errorHandler(appContext, storageScope, storageScope.databaseName)
+        val handler = DatabaseErrorHandler { database ->
+            corruptionReported = true
+            quarantining.onCorruption(database)
+        }
+        return try {
+            PlatoonEvidenceDigest.sha256(databaseFile, handler)
+        } catch (error: SQLiteDatabaseCorruptException) {
+            // Corruption met while compiling a statement (a damaged schema page) never reaches the
+            // handler; the connection is closed by now, so the file moves aside here instead.
+            if (!corruptionReported) {
+                runCatching { PlatoonDatabaseDamage.quarantine(appContext, storageScope, databaseFile) }
+                    .exceptionOrNull()
+                    ?.let(error::addSuppressed)
+            }
+            throw PlatoonDatabaseDamagedException("The Platoon database is damaged", error)
+        } catch (error: SQLiteException) {
+            if (!corruptionReported) throw error
+            throw PlatoonDatabaseDamagedException("The Platoon database is damaged", error)
+        }
+    }
 
     fun exportFull(output: OutputStream) {
         PlatoonRepository(appContext, storageScope).reconcileRetainedCsvFiles()
@@ -291,8 +325,7 @@ class PlatoonBackupManager internal constructor(
         val previousRetainedCsvDirectory = storageScope.previousRetainedCsvDirectory(appContext)
         PlatoonRepository.withExclusiveDatabase(storageScope) {
             if (expectedDatabaseSha256 != null) {
-                ensureDatabaseExists()
-                check(PlatoonEvidenceDigest.sha256(databaseFile) == expectedDatabaseSha256) {
+                check(liveEvidenceSha256() == expectedDatabaseSha256) {
                     "Platoon data changed after the CSV import; undo would overwrite newer changes"
                 }
             }

@@ -277,6 +277,60 @@ class StorageHardeningIntegrationTest {
     }
 
     @Test
+    fun corruptionFoundByTheUndoDigestKeepsTheDatabaseAndTheCheckpoint() {
+        val repository = PlatoonRepository(context, scope)
+        repeat(40) { index ->
+            repository.ingest(
+                CAPTURED_AT.plusSeconds(index * 3_600L),
+                (1..50).map { member(it.toLong(), "Member $it with a long enough name $index") },
+                "roster-$index.csv",
+            )
+        }
+        CsvImportCheckpointManager(context, scope).apply {
+            create(emptySet())
+            seal()
+        }
+        val checkpoint = File(scope.rootDirectory(context), "csv-import-checkpoint")
+        assertTrue(File(checkpoint, "platoon.gf2backup").isFile)
+        val database = context.getDatabasePath(scope.databaseName)
+        val originalLength = database.length()
+        // Row pages only: the schema stays readable, so the damage surfaces while rows are read.
+        corruptPagesFrom(database, firstPage = database.length() / 4_096L / 2)
+
+        val first = runCatching { CsvImportCheckpointManager(context, scope).restore() }.exceptionOrNull()
+
+        assertTrue(first.toString(), first is PlatoonDatabaseDamagedException)
+        // Moved aside under the marker, never deleted by the platform's default handler.
+        assertFalse(database.exists())
+        assertTrue(PlatoonDatabaseDamage.isDamaged(context, scope))
+        assertTrue(
+            PlatoonDatabaseDamage.quarantinedFiles(context, scope).any { it.length() == originalLength },
+        )
+        assertTrue(File(checkpoint, "platoon.gf2backup").isFile)
+
+        // A second Undo neither creates an empty database nor discards the last pre-import copy.
+        val second = runCatching { CsvImportCheckpointManager(context, scope).restore() }.exceptionOrNull()
+
+        assertTrue(second.toString(), second is PlatoonDatabaseDamagedException)
+        assertFalse(database.exists())
+        assertTrue(File(checkpoint, "platoon.gf2backup").isFile)
+    }
+
+    private fun corruptPagesFrom(database: File, firstPage: Long) {
+        PlatoonRepository.withExclusiveDatabase(scope) {
+            RandomAccessFile(database, "rw").use { file ->
+                val pageSize = 4_096L
+                var page = maxOf(1L, firstPage)
+                while ((page + 1) * pageSize <= file.length()) {
+                    file.seek(page * pageSize)
+                    file.write(ByteArray(64) { 0x5a })
+                    page += 1
+                }
+            }
+        }
+    }
+
+    @Test
     fun aQuarantinedDatabaseIsNeverRecreatedEmptyUntilARestoreOrRebuild() {
         val repository = PlatoonRepository(context, scope)
         repository.ingest(CAPTURED_AT, listOf(member(1, "One")), "roster.csv")

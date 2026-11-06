@@ -1,6 +1,7 @@
 package dev.gf2log.app.management
 
 import android.database.Cursor
+import android.database.DatabaseErrorHandler
 import android.database.sqlite.SQLiteDatabase
 import java.io.File
 import java.nio.ByteBuffer
@@ -32,9 +33,13 @@ internal object PlatoonEvidenceDigest {
             table != "android_metadata" &&
             !table.startsWith("sqlite_")
 
-    /** Opens [databaseFile] read-only; the caller holds the exclusive database section. */
-    fun sha256(databaseFile: File): String =
-        SQLiteDatabase.openDatabase(databaseFile.path, null, SQLiteDatabase.OPEN_READONLY).use(::sha256)
+    /**
+     * Opens [databaseFile] read-only; the caller holds the exclusive database section. The caller
+     * names the [errorHandler]: the platform default would delete a live database it finds corrupt.
+     */
+    fun sha256(databaseFile: File, errorHandler: DatabaseErrorHandler): String =
+        SQLiteDatabase.openDatabase(databaseFile.path, null, SQLiteDatabase.OPEN_READONLY, errorHandler)
+            .use(::sha256)
 
     fun sha256(db: SQLiteDatabase): String {
         val hasher = Hasher(db.version)

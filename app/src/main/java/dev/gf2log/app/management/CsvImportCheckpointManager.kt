@@ -178,8 +178,11 @@ class CsvImportCheckpointManager internal constructor(
             require(expectedDigest.matches(SHA256)) { "Invalid CSV checkpoint digest" }
             // Fails fast before quarantining anything; the authoritative comparison runs again
             // inside the exclusive section that installs the checkpoint. A changed database never
-            // returns to the sealed digest, so the checkpoint and its pre-import copy go now.
-            if (backupManager().currentDatabaseSha256() != expectedDigest) {
+            // returns to the sealed digest, so the checkpoint and its pre-import copy go now. Only
+            // a digest that was actually read can show that: a missing or damaged database throws
+            // here and keeps the checkpoint, the last full copy from before the import.
+            val current = backupManager().currentDatabaseSha256(createIfMissing = false)
+            if (current != expectedDigest) {
                 discardSettled(profileRoot)
                 throw CsvCheckpointExpiredException()
             }

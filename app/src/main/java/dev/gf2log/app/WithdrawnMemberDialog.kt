@@ -6,6 +6,7 @@ import android.app.AlertDialog
 import android.text.InputType
 import android.view.View
 import dev.gf2log.app.management.PlatoonRepository
+import dev.gf2log.app.management.isMembershipBoundaryWithinPresent
 import dev.gf2log.app.management.isValidMembershipRange
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.Dialogs
@@ -26,7 +27,7 @@ internal object WithdrawnMemberDialog {
         onAdded: () -> Unit,
     ) = with(activity) {
         val zone = repository.gameZone()
-        val uid = LabeledField(this, getString(R.string.uid), textField(getString(R.string.uid_hint), inputType = InputType.TYPE_CLASS_NUMBER))
+        val uid = LabeledField(this, getString(R.string.uid), textField(getString(R.string.uid_hint), inputType = InputType.TYPE_CLASS_NUMBER, maxLength = MAX_UID_DIGITS))
         val nickname = LabeledField(this, getString(R.string.member_nickname), textField(getString(R.string.member_nickname), maxLength = ManualTextPolicy.MAX_MEMBER_NAME_CHARS))
         val joined = DateTimePickerInput(this, getString(R.string.join_label), dateRequired = true, zone = zone)
         val withdrew = DateTimePickerInput(this, getString(R.string.withdraw_label), dateRequired = true, zone = zone)
@@ -49,7 +50,9 @@ internal object WithdrawnMemberDialog {
                 .setPositiveButton(R.string.add, null),
         ) { dialog ->
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { button ->
-                val uidValue = uid.input.text.toString().trim().toLongOrNull()?.takeIf { it > 0 }
+                // Game UIDs are unsigned 32-bit values; a larger number could never match a packet.
+                val uidValue = uid.input.text.toString().trim().toLongOrNull()
+                    ?.takeIf { it in 1L..UInt.MAX_VALUE.toLong() }
                 val name = nickname.input.text.toString().trim()
                 val joinedBoundary = joined.boundary
                 val withdrewBoundary = withdrew.boundary
@@ -59,6 +62,8 @@ internal object WithdrawnMemberDialog {
                     name.isEmpty() -> R.string.invalid_nickname
                     joinedBoundary == null || withdrewBoundary == null -> R.string.invalid_dates_required
                     !isValidMembershipRange(joinedBoundary, withdrewBoundary) -> R.string.invalid_date_order
+                    !isMembershipBoundaryWithinPresent(joinedBoundary, zone) ||
+                        !isMembershipBoundaryWithinPresent(withdrewBoundary, zone) -> R.string.invalid_future_date
                     else -> null
                 }
                 if (problem != null || uidValue == null || joinedBoundary == null || withdrewBoundary == null) {
@@ -82,4 +87,7 @@ internal object WithdrawnMemberDialog {
             }
         }
     }
+
+    /** UInt.MAX_VALUE has ten digits. */
+    private const val MAX_UID_DIGITS = 10
 }

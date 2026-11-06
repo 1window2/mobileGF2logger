@@ -20,11 +20,15 @@ internal object MembershipEditing {
         joined: MembershipBoundaryValue,
         withdrew: MembershipBoundaryValue,
         note: String,
+        now: Instant = Instant.now(),
     ): Boolean {
-        require(uid > 0)
+        require(uid in VALID_UID_RANGE) { "A member UID must be a game UID" }
         val storedName = ManualTextPolicy.memberName(name)
         val storedNote = ManualTextPolicy.note(note)
         require(isValidMembershipRange(joined, withdrew))
+        val zoneId = gameZone()
+        require(isMembershipBoundaryWithinPresent(joined, zoneId, now)) { FUTURE_BOUNDARY }
+        require(isMembershipBoundaryWithinPresent(withdrew, zoneId, now)) { FUTURE_BOUNDARY }
         return db.inTransaction {
             if (memberExists(db, uid)) return@inTransaction false
             MembershipRows.insertMember(
@@ -50,9 +54,15 @@ internal object MembershipEditing {
         joined: MembershipBoundaryValue,
         withdrew: MembershipBoundaryValue?,
         note: String,
+        now: Instant = Instant.now(),
     ): Boolean {
         val storedNote = ManualTextPolicy.note(note)
         require(isValidMembershipRange(joined, withdrew))
+        val zoneId = gameZone()
+        require(isMembershipBoundaryWithinPresent(joined, zoneId, now)) { FUTURE_BOUNDARY }
+        require(withdrew == null || isMembershipBoundaryWithinPresent(withdrew, zoneId, now)) {
+            FUTURE_BOUNDARY
+        }
         return db.inTransaction {
             val memberName = memberName(db, uid) ?: return@inTransaction false
             if (!canStoreMembershipPeriod(db, gameZone(), uid, null, joined, withdrew)) {
@@ -145,6 +155,7 @@ internal object MembershipEditing {
         joined: MembershipBoundaryValue,
         left: MembershipBoundaryValue?,
         note: String,
+        now: Instant = Instant.now(),
     ): Boolean {
         val storedNote = ManualTextPolicy.note(note)
         return db.inTransaction {
@@ -175,6 +186,21 @@ internal object MembershipEditing {
                 requested = left,
                 source = period.leftSource,
             )
+            // Only a newly entered boundary is checked; stored packet times follow the server.
+            val zoneId = gameZone()
+            require(!joinedChanged || isMembershipBoundaryWithinPresent(joined, zoneId, now)) {
+                FUTURE_BOUNDARY
+            }
+            require(!leftChanged || left == null || isMembershipBoundaryWithinPresent(left, zoneId, now)) {
+                FUTURE_BOUNDARY
+            }
+            // A manual date replaces an activity dating, so its event and fact link go too.
+            if (joinedChanged && period.joinedSource == EvidenceSource.ACTIVITY) {
+                deleteActivityBoundaryEvents(db, membershipPeriodId, MembershipBoundary.JOIN)
+            }
+            if (leftChanged && period.leftSource == EvidenceSource.ACTIVITY) {
+                deleteActivityBoundaryEvents(db, membershipPeriodId, MembershipBoundary.WITHDRAW)
+            }
             val updated = db.update(
                 "membership_periods",
                 ContentValues().apply {
@@ -341,6 +367,23 @@ internal object MembershipEditing {
         }
     }
 
+    private fun deleteActivityBoundaryEvents(
+        db: SQLiteDatabase,
+        membershipPeriodId: Long,
+        boundary: MembershipBoundary,
+    ) {
+        MembershipRows.deleteSupersededEvents(
+            db,
+            "membership_period_id = ? AND source = ? AND event_type IN (?, ?)",
+            arrayOf(
+                membershipPeriodId.toString(),
+                EvidenceSource.ACTIVITY.name,
+                boundary.eventTypes[0].name,
+                boundary.eventTypes[1].name,
+            ),
+        )
+    }
+
     private fun memberName(db: SQLiteDatabase, uid: Long): String? =
         db.rawQuery(
             "SELECT COALESCE(custom_name, current_name) FROM members WHERE uid = ?",
@@ -383,6 +426,10 @@ internal object MembershipEditing {
             )
         }
     }
+
+    /** Game UIDs are unsigned 32-bit values; any other number can never match a packet. */
+    private val VALID_UID_RANGE = 1L..UInt.MAX_VALUE.toLong()
+    private const val FUTURE_BOUNDARY = "A membership boundary cannot be in the future"
 
     private data class MembershipPeriodForUpdate(
         val uid: Long,

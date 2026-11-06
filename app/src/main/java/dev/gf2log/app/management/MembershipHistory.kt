@@ -1,5 +1,6 @@
 package dev.gf2log.app.management
 
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -15,6 +16,26 @@ data class MembershipBoundaryValue(
     val instant: Instant,
     val timeKnown: Boolean,
 )
+
+/** How far a manual boundary may run ahead of the device clock, as for a roster CSV import. */
+internal val MAX_MANUAL_BOUNDARY_CLOCK_SKEW: Duration = Duration.ofHours(1)
+
+/** The latest calendar date in [zone] that a manual membership boundary may carry at [now]. */
+fun latestMembershipBoundaryDate(zone: ZoneId, now: Instant = Instant.now()): LocalDate =
+    now.plus(MAX_MANUAL_BOUNDARY_CLOCK_SKEW).atZone(zone).toLocalDate()
+
+/**
+ * Whether a manual join or withdrawal has already happened at [now]: its calendar date is not
+ * after [latestMembershipBoundaryDate], and a known time is not after [now] beyond the clock
+ * skew. A future withdrawal would mark a current member withdrawn at once and overlap the next
+ * roster's period, and any future boundary would add phantom weeks.
+ */
+fun isMembershipBoundaryWithinPresent(
+    boundary: MembershipBoundaryValue,
+    zone: ZoneId,
+    now: Instant = Instant.now(),
+): Boolean = !boundary.date.isAfter(latestMembershipBoundaryDate(zone, now)) &&
+    (!boundary.timeKnown || !boundary.instant.isAfter(now.plus(MAX_MANUAL_BOUNDARY_CLOCK_SKEW)))
 
 fun isValidMembershipRange(
     joined: MembershipBoundaryValue,

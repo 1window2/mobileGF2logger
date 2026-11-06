@@ -15,6 +15,7 @@ import dev.gf2log.app.management.MembershipPeriod
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.management.isJoinedBoundaryEditable
+import dev.gf2log.app.management.isMembershipBoundaryWithinPresent
 import dev.gf2log.app.management.isLeftBoundaryEditable
 import dev.gf2log.app.management.isValidMembershipRange
 import dev.gf2log.app.ui.onTextChanged
@@ -342,6 +343,16 @@ class MemberDetailActivity : BaseActivity() {
                     error.showMessage(getString(R.string.invalid_date))
                     return@setOnClickListener
                 }
+                // Packet-linked sides are read-only and follow the server clock, so only editable
+                // sides must not lie in the future.
+                val futureJoin = period.isJoinedBoundaryEditable &&
+                    !isMembershipBoundaryWithinPresent(joinedBoundary, zone)
+                val futureLeft = period.isLeftBoundaryEditable && leftBoundary != null &&
+                    !isMembershipBoundaryWithinPresent(leftBoundary, zone)
+                if (futureJoin || futureLeft) {
+                    error.showMessage(getString(R.string.invalid_future_date))
+                    return@setOnClickListener
+                }
                 button.isEnabled = false
                 val noteText = noteInput.text.toString()
                 work.run(
@@ -405,6 +416,10 @@ class MemberDetailActivity : BaseActivity() {
                 val withdrewBoundary = withdrew.boundary
                 if (joinedBoundary == null || !isValidMembershipRange(joinedBoundary, withdrewBoundary)) {
                     error.showMessage(getString(R.string.invalid_date))
+                    return@setOnClickListener
+                }
+                if (listOfNotNull(joinedBoundary, withdrewBoundary).any { !isMembershipBoundaryWithinPresent(it, zone) }) {
+                    error.showMessage(getString(R.string.invalid_future_date))
                     return@setOnClickListener
                 }
                 button.isEnabled = false

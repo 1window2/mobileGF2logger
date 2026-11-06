@@ -9,6 +9,7 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 import dev.gf2log.app.management.MembershipBoundaryValue
+import dev.gf2log.app.management.latestMembershipBoundaryDate
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.TextRole
@@ -97,19 +98,25 @@ internal class DateTimePickerInput(
     }
 
     private fun showDatePicker() {
-        val seed = selection.date ?: LocalDate.now(zone)
-        Dialogs.showTracked(
-            DatePickerDialog(
-                context,
-                { _, year, month, day ->
-                    selection.selectDate(LocalDate.of(year, month + 1, day))
-                    renderValue()
-                },
-                seed.year,
-                seed.monthValue - 1,
-                seed.dayOfMonth,
-            ),
+        val latest = latestMembershipBoundaryDate(zone)
+        val seed = minOf(selection.date ?: LocalDate.now(zone), latest)
+        val dialog = DatePickerDialog(
+            context,
+            { _, year, month, day ->
+                selection.selectDate(LocalDate.of(year, month + 1, day))
+                renderValue()
+            },
+            seed.year,
+            seed.monthValue - 1,
+            seed.dayOfMonth,
         )
+        // A membership boundary cannot lie in the future. DatePicker reads its bound in the
+        // device timezone, so the last allowed day ends there rather than in the game zone.
+        dialog.datePicker.maxDate = latest.atTime(LocalTime.MAX)
+            .atZone(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+        Dialogs.showTracked(dialog)
     }
 
     private fun showTimePicker() {

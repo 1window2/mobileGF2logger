@@ -403,9 +403,10 @@
     <string name="filter_everyone">All</string>
     <string name="filter_withdrawn">Withdrawn</string>
     <string name="invalid_date_order">Withdrawal must be after the join date.</string>
+    <string name="invalid_future_date">Join and withdrawal dates can\'t be in the future.</string>
     <string name="invalid_dates_required">Select both the join and withdrawal dates.</string>
     <string name="invalid_nickname">Enter a nickname.</string>
-    <string name="invalid_uid">Enter a positive numeric UID.</string>
+    <string name="invalid_uid">Enter a numeric UID from 1 to 4294967295.</string>
     <string name="last_login">Last login</string>
     <string name="last_login_short">Login %1$s</string>
     <string name="level">Level</string>

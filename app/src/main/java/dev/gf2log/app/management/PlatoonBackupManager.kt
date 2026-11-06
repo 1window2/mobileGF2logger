@@ -97,7 +97,10 @@ class PlatoonBackupManager internal constructor(
     }
 
     /**
-     * Restores a same-device, current-schema checkpoint without retiring retained CSV evidence.
+     * Restores a same-device checkpoint of this or an older schema without retiring retained CSV
+     * evidence. An older checkpoint (written before an app update, for an import or undo that was
+     * interrupted) is migrated by [rebuildValidated], which installs only a current-schema copy; a
+     * checkpoint newer than this app is still refused.
      * Used only after the caller removes deterministic files planned by the reverted import. With
      * [expectedDatabaseSha256], the live database must still match it inside the exclusive section
      * that installs the checkpoint; otherwise nothing is replaced.
@@ -110,7 +113,7 @@ class PlatoonBackupManager internal constructor(
                     staged.settings != null,
                 )
                 requireArchiveMatchesScope(staged)
-                validateDatabase(stagedDatabase, requireCurrentSchema = true)
+                validateDatabase(stagedDatabase, requireCurrentSchema = false)
                 rebuildValidated(stagedDatabase)
             }
             replaceRestoredState(

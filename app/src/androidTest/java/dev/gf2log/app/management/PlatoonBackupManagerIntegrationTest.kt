@@ -861,6 +861,38 @@ class PlatoonBackupManagerIntegrationTest {
     }
 
     @Test
+    fun anUnsealedCheckpointFromTheOlderSchemaStillRollsBackAfterAnUpgrade() {
+        seedDatabase(ARCHIVED_UID, "Before interrupted import", "before-interrupted-import.csv")
+        // A 2.7.1 import wrote its checkpoint at schema 13; the process died, then the app updated.
+        val databaseFile = context.getDatabasePath(storageScope.databaseName)
+        PlatoonRepository.withExclusiveDatabase(storageScope) {
+            SQLiteDatabase.openDatabase(databaseFile.path, null, SQLiteDatabase.OPEN_READWRITE).use {
+                it.version = 13
+            }
+        }
+        val archive = ByteArrayOutputStream().also { output ->
+            BackupArchive.write(output, databaseFile, null, PlatoonProfileRegistry(context).active())
+        }.toByteArray()
+        replaceDatabaseForCheckpoint(CURRENT_UID, "Interrupted import", "interrupted-import.csv")
+        val checkpoint = FilePaths.csvCheckpointDirectory(context)
+        assertTrue(checkpoint.mkdirs())
+        java.io.File(checkpoint, "platoon.gf2backup").writeBytes(archive)
+        java.io.File(checkpoint, "planned-files.txt").writeText("\n", Charsets.UTF_8)
+
+        CsvImportCheckpointManager(context, storageScope)
+
+        assertFalse(checkpoint.exists())
+        PlatoonDatabase(context).use { database ->
+            val db = database.readableDatabase
+            assertEquals(PlatoonSchema.CURRENT_VERSION, db.version)
+            assertEquals(1L, count(db, "members", "uid = ?", ARCHIVED_UID))
+            assertEquals(0L, count(db, "members", "uid = ?", CURRENT_UID))
+        }
+        val members = PlatoonRepository(context, storageScope).listMemberStatuses()
+        assertTrue(members.any { it.uid == ARCHIVED_UID })
+    }
+
+    @Test
     fun checkpointInstallRefusesADatabaseThatChangedSinceTheUndoCheck() {
         seedDatabase(ARCHIVED_UID, "Before import", "before-import.csv")
         val checkpoint = ByteArrayOutputStream().also { output ->

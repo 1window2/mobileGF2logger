@@ -189,7 +189,7 @@ class OptionsActivity : BaseActivity() {
                     Intent(this@OptionsActivity, OnboardingActivity::class.java).putExtra(OnboardingActivity.EXTRA_REPLAY, true),
                 )
             },
-            navigationRow(getString(R.string.app_version), versionName(), R.drawable.ic_code, showChevron = false) {},
+            navigationRow(getString(R.string.app_version), versionName(), R.drawable.ic_code, showChevron = false),
         )), lp())
     }
 

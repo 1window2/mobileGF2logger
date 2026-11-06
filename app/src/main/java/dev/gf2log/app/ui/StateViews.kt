@@ -4,6 +4,7 @@ import android.content.Context
 import android.view.Gravity
 import android.view.View
 import android.widget.ProgressBar
+import android.widget.TextView
 import androidx.annotation.DrawableRes
 import dev.gf2log.app.R
 
@@ -17,10 +18,10 @@ internal object StateViews {
             indeterminateTintList = android.content.res.ColorStateList.valueOf(context.getColor(R.color.accent))
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }, context.lp(36, 36))
-        addView(context.text(message, TextRole.SECONDARY) {
+        addView(context.text(null, TextRole.SECONDARY) {
             gravity = Gravity.CENTER
             setPadding(0, context.dp(12), 0, 0)
-            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            announceWhenAttached(message)
         }, context.lp())
     }
 
@@ -35,9 +36,10 @@ internal object StateViews {
         gravity = Gravity.CENTER_HORIZONTAL
         setPadding(context.dp(24), context.dp(40), context.dp(24), context.dp(40))
         addView(context.icon(icon, R.color.outline_strong, sizeDp = 40), context.lp(40, 40))
-        addView(context.text(title, TextRole.SUBTITLE) {
+        addView(context.text(null, TextRole.SUBTITLE) {
             gravity = Gravity.CENTER
             setPadding(0, context.dp(12), 0, 0)
+            announceWhenAttached(title)
         }, context.lp())
         detail?.let {
             addView(context.text(it, TextRole.SECONDARY) {
@@ -60,4 +62,21 @@ internal object StateViews {
         actionLabel = context.getString(R.string.retry),
         onAction = onRetry,
     )
+}
+
+/**
+ * A live region announces changes, not its own arrival, and a state view replaces the previous
+ * one as a new view. The message is therefore set just after the view is attached, so screen
+ * readers hear that a screen finished loading, came back empty, or failed.
+ */
+private fun TextView.announceWhenAttached(message: CharSequence) {
+    accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+    addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+        override fun onViewAttachedToWindow(view: View) {
+            view.removeOnAttachStateChangeListener(this)
+            view.post { text = message }
+        }
+
+        override fun onViewDetachedFromWindow(view: View) = Unit
+    })
 }

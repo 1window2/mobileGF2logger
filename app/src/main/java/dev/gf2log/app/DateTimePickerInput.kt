@@ -12,6 +12,7 @@ import dev.gf2log.app.management.MembershipBoundaryValue
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Labels
 import dev.gf2log.app.ui.TextRole
+import dev.gf2log.app.ui.column
 import dev.gf2log.app.ui.dp
 import dev.gf2log.app.ui.dpf
 import dev.gf2log.app.ui.iconButton
@@ -63,8 +64,16 @@ internal class DateTimePickerInput(
             setPadding(context.dp(4), 0, context.dp(4), context.dp(4))
         }, context.lp())
         addView(context.row {
-            addView(dateField, context.lp(width = 0, weight = 1.3f))
-            addView(timeField, context.lp(width = 0, weight = 1f, start = 8))
+            if (stacksPickerFields(context.resources.configuration.fontScale)) {
+                // Side by side, large digits would not fit a narrow dialog; each field gets the row.
+                addView(context.column {
+                    addView(dateField, context.lp())
+                    addView(timeField, context.lp(top = 8))
+                }, context.lp(width = 0, weight = 1f))
+            } else {
+                addView(dateField, context.lp(width = 0, weight = 1.3f))
+                addView(timeField, context.lp(width = 0, weight = 1f, start = 8))
+            }
             addView(clearButton, context.lp(48, 48, start = 4))
         }, context.lp())
         if (!editable) {
@@ -80,7 +89,6 @@ internal class DateTimePickerInput(
         // Grows with the font size instead of clipping; 48dp stays the minimum touch target.
         minHeight = context.dp(48)
         setPadding(context.dp(12), context.dp(6), context.dp(8), context.dp(6))
-        maxLines = 1
         background = GradientDrawable().apply {
             setColor(context.getColor(R.color.surface_variant))
             cornerRadius = context.dpf(12f)
@@ -146,5 +154,9 @@ internal class DateTimePickerInput(
         clearButton.contentDescription = context.getString(
             if (time != null) R.string.clear_time else R.string.clear_date,
         )
+        clearButton.tooltipText = clearButton.contentDescription
     }
 }
+
+/** Large text stacks the date and time fields so neither picked value is clipped. */
+internal fun stacksPickerFields(fontScale: Float): Boolean = fontScale >= 1.3f

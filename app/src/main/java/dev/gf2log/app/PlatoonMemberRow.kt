@@ -40,10 +40,8 @@ internal class PlatoonMemberRow(private val context: Context) {
         ellipsize = TextUtils.TruncateAt.END
     }
     private val status = context.badge("")
-    private val detail = context.text(null, TextRole.CAPTION) {
-        maxLines = 1
-        ellipsize = TextUtils.TruncateAt.END
-    }
+    // Wraps at large font sizes: the last login is the active sort key and must stay readable.
+    private val detail = context.text(null, TextRole.CAPTION)
     private val merit = context.text(null, TextRole.SUBTITLE) { gravity = Gravity.END }
 
     init {

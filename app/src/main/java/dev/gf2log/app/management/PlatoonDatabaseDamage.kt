@@ -51,19 +51,36 @@ internal object PlatoonDatabaseDamage {
         }
     }
 
-    /** The handler for the live database of [scope]; other files are only closed, never deleted. */
+    /**
+     * The handler for the live database of [scope]; other files are only closed, never deleted.
+     *
+     * Corruption found while the platform opens a file calls this handler and then retries the
+     * open on the same object. That object is not open yet, so closing it would release it for
+     * good and the retry would hand back a closed database; and once the live file has moved
+     * aside the retry would create an empty one in its place, which the marker no longer blocks.
+     * So a live database found corrupt while opening throws the typed damage instead.
+     */
     fun errorHandler(context: Context, scope: PlatoonStorageScope, databaseName: String?) =
         DatabaseErrorHandler { database ->
             val path = database.path
-            runCatching { database.close() }
+            val opening = !database.isOpen
+            closeIfOpen(database)
             if (databaseName == scope.databaseName && path != null) {
                 runCatching { quarantine(context, scope, File(path)) }
                     .onFailure { Log.e(TAG, "Unable to quarantine a corrupt Platoon database", it) }
+                if (opening) throw PlatoonDatabaseDamagedException("The Platoon database is damaged")
             }
         }
 
-    /** A handler that keeps every file, for read-only checks of files the app does not own. */
-    val keepFiles = DatabaseErrorHandler { database -> runCatching { database.close() } }
+    /**
+     * A handler that keeps every file, for read-only checks of files the app does not own. A file
+     * found corrupt while opening fails the platform's retry with the corruption itself.
+     */
+    val keepFiles = DatabaseErrorHandler(::closeIfOpen)
+
+    private fun closeIfOpen(database: SQLiteDatabase) {
+        if (database.isOpen) runCatching { database.close() }
+    }
 
     /**
      * Writes the marker first, then moves the journals and finally the main file, so a process death

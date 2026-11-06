@@ -272,6 +272,8 @@ class StorageHardeningIntegrationTest {
         // Either still in place (integrity check) or moved aside by the corruption handler.
         val kept = (listOf(database) + PlatoonDatabaseDamage.quarantinedFiles(context, scope)).filter(File::isFile)
         assertTrue(kept.any { it.length() >= 4_096L })
+        // The platform's retry of a failed open never leaves an empty database in its place.
+        assertFalse(database.isFile && database.length() < 4_096L)
     }
 
     @Test
@@ -286,7 +288,9 @@ class StorageHardeningIntegrationTest {
 
         assertThrows(PlatoonDatabaseDamagedException::class.java) { repository.listSnapshots() }
         assertFalse(database.exists())
-        assertEquals(1, PlatoonDatabaseDamage.quarantinedFiles(context, scope).size)
+        // One quarantined database; its rollback journal, when SQLite kept one, moves beside it.
+        val quarantined = PlatoonDatabaseDamage.quarantinedFiles(context, scope)
+        assertEquals(1, quarantined.count { !it.name.endsWith("-journal") && !it.name.endsWith("-wal") })
 
         PlatoonBackupManager.restoreSelected(context, ByteArrayInputStream(archive))
         assertEquals(1, PlatoonRepository(context, scope).listSnapshots().size)

@@ -166,9 +166,10 @@ class PlatoonRepositoryIntegrationTest {
         )
         assertEquals(listOf(UID), latestStoredRevision(repository, CLOSING_WEEK)?.members?.map { it.uid })
 
-        // Monday's roster shows B; the exact join it correlates lies in the closing week.
+        // Sunday's roster after the reset shows B; the join it dates lies in the closing week,
+        // and the activity falls within the correlation window's lead before that roster.
         repository.ingest(
-            Instant.parse("2026-08-03T12:00:00Z"),
+            Instant.parse("2026-08-02T10:00:00Z"),
             listOf(member(UID, "A"), member(OTHER_UID, "B")),
             "b.csv",
         )

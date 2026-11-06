@@ -6,8 +6,9 @@ package dev.gf2log.app.management
 internal object PlatoonSchema {
     const val DATABASE_NAME = "platoon.db"
     /**
-     * v14 stores activity-dated boundaries as [EvidenceSource.ACTIVITY] and marks rosters set
-     * aside for a capture time ahead of the clock (`snapshots.clock_suspect`).
+     * v14 stores activity-dated boundaries as [EvidenceSource.ACTIVITY], marks rosters set aside
+     * for a capture time ahead of the clock (`snapshots.clock_suspect`), and removes rows of
+     * members without a real UID.
      */
     const val CURRENT_VERSION = 14
     const val MIN_BACKUP_VERSION = 1

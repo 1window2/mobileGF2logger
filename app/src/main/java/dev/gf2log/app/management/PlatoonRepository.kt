@@ -418,7 +418,11 @@ internal class PlatoonRepository(
         ))
     }
 
-    /** Every input of one weekly revision, read under a single consistent database state. */
+    /**
+     * Every input of one weekly revision, read under a single consistent database state. Only
+     * real UIDs pass: a stored UID 0 or below, which ingestion and the v14 repair both reject,
+     * must never fail a whole week's consistency check.
+     */
     private fun readRevisionInputs(
         periodStart: LocalDate,
         zoneId: ZoneId,
@@ -428,16 +432,16 @@ internal class PlatoonRepository(
             val roster = readRosterInputs(database, periodStart, zoneId, asOf)
             RevisionInputs(
                 snapshots = roster.snapshots,
-                reportEvents = roster.reportEvents,
-                revisionEvents = roster.revisionEvents,
-                overrides = database.listWeeklyOverrides(periodStart.toEpochDay()),
+                reportEvents = roster.reportEvents.filter { it.uid > 0L },
+                revisionEvents = roster.revisionEvents.filter { it.uid > 0L },
+                overrides = database.listWeeklyOverrides(periodStart.toEpochDay()).filter { it.uid > 0L },
                 // From the day before the week: its Daily Patrol bounds a near-reset tail.
                 dailyPatrolFacts = database.listDailyPatrolFacts(
                     PlatoonPeriods.periodStartInstant(periodStart.minusDays(1), zoneId),
                     PlatoonPeriods.periodStartInstant(periodStart.plusDays(7), zoneId),
                 ),
                 notes = database.listWeeklyNotes(periodStart.toEpochDay()),
-                statuses = database.listMemberStatuses(),
+                statuses = database.listMemberStatuses().filter { it.uid > 0L },
             )
         }
     }

@@ -36,6 +36,7 @@ internal object PlatoonDatabaseMigrations {
         if (oldVersion < 13) MembershipRows.synchronizeAllActiveStates(db)
         if (oldVersion < 14) {
             markActivityDatedBoundaries(db)
+            InvalidMemberIdentityRepair.repair(db)
             MembershipRows.foldAllDuplicateOpenPeriods(db)
             MembershipRows.synchronizeAllActiveStates(db)
         }

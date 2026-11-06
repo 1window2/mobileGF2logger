@@ -327,7 +327,12 @@ lossless form. The one residue is a lossless file whose real name is an
 apostrophe followed by a formula character, which loses that apostrophe on
 import. A roster import ignores one leading UTF-8 byte order mark, and a row
 with UID 0, the protobuf default of a missing UID, is rejected; captured
-rosters drop such a member instead.
+rosters drop such a member instead. A database written by an earlier version
+loses every row of such a member when it upgrades to schema v14, and every
+restored backup is repaired the same way: its roster rows, membership periods,
+events, weekly overrides, and the weekly revisions that showed it go, a
+name-resolved activity fact becomes unresolved again, and a roster left with
+no member is removed. Weekly tables also ignore any such identity they read.
 The same neutralization is applied to captured roster, activity, Updates, and
 formation packet tables before they can be copied or opened in spreadsheet
 software.

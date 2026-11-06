@@ -251,8 +251,11 @@ index. Schema v13 repairs the derived active-member projection from canonical
 membership periods during upgrade, and every writable open re-derives it once
 more whenever the rule's `active_state_rule` version changes. Schema v14 marks
 activity-dated roster boundaries as `ACTIVITY` evidence, folds duplicate open
-periods, and adds `snapshots.clock_suspect`; supported older backups are
-upgraded before strict current-schema validation.
+periods, adds `snapshots.clock_suspect`, and removes every row of a member
+stored without a real UID (UID 0 or below); supported older backups are
+upgraded before strict current-schema validation, and every restored database
+runs the same UID repair after its rows are rebuilt, so an archive already at
+v14 cannot bring such a member back.
 
 `SnapshotClockReview` keeps a roster captured with the phone clock set ahead
 from becoming the permanent current roster. Before each roster that may

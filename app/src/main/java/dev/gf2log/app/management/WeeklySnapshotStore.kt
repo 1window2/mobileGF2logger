@@ -5,7 +5,8 @@ import java.time.Instant
 
 /**
  * Read-only SQL boundary for roster snapshots consumed by weekly projections and by every screen
- * that shows the latest roster. A roster set aside by [SnapshotClockReview] is never listed.
+ * that shows the latest roster. A roster set aside by [SnapshotClockReview] is never listed, and
+ * a stored member without a real UID never appears in a listed roster.
  * Schema/migration and write transactions remain owned by PlatoonDatabase.
  */
 internal object WeeklySnapshotStore {
@@ -62,7 +63,7 @@ internal object WeeklySnapshotStore {
                member.uid, member.name, member.level, member.weekly_merit,
                member.total_merit, member.high_score, member.total_score, member.last_login
         FROM ($selectedSnapshotsSql) AS selected
-        LEFT JOIN snapshot_members AS member ON member.snapshot_id = selected.id
+        LEFT JOIN snapshot_members AS member ON member.snapshot_id = selected.id AND member.uid > 0
         ORDER BY selected.captured_at DESC, selected.id DESC,
                  member.name COLLATE NOCASE, member.uid
         """.trimIndent(),

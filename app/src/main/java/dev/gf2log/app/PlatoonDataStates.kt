@@ -11,6 +11,7 @@ import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.CaptureGuard
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.Dialogs
+import dev.gf2log.app.ui.DocumentAccess
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.StateViews
 
@@ -115,6 +116,14 @@ internal fun platoonDataFailureMessage(error: Throwable?, @StringRes fallback: I
         PlatoonAccessFailure.IMPORT_IN_PROGRESS -> R.string.platoon_csv_import_in_progress
         PlatoonAccessFailure.OTHER -> fallback
     }
+
+/**
+ * An export's failure: a refused document provider names the locations that work; anything else
+ * reads as [platoonDataFailureMessage].
+ */
+@StringRes
+internal fun platoonExportFailureMessage(error: Throwable?, @StringRes fallback: Int): Int =
+    DocumentAccess.exportFailureMessage(error, platoonDataFailureMessage(error, fallback))
 
 /** The outcome of a rebuild; a refusal says what to wait for, since the damaged copy is kept. */
 @StringRes

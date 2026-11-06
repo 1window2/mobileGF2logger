@@ -61,7 +61,7 @@ internal class WeeklyExportFlow(
                 Feedback.show(
                     activity,
                     result.fold({ R.string.weekly_csv_exported }) {
-                        DocumentAccess.exportFailureMessage(it, platoonDataFailureMessage(it, R.string.weekly_csv_export_failed))
+                        platoonExportFailureMessage(it, R.string.weekly_csv_export_failed)
                     },
                 )
             },

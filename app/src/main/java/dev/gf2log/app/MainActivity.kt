@@ -105,7 +105,7 @@ class MainActivity : BaseActivity() {
                 Feedback.show(
                     this,
                     result.fold({ R.string.roster_csv_exported }) {
-                        DocumentAccess.exportFailureMessage(it, platoonDataFailureMessage(it, R.string.status_export_failed))
+                        platoonExportFailureMessage(it, R.string.status_export_failed)
                     },
                 )
             },

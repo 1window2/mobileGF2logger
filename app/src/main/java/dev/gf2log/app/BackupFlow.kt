@@ -45,7 +45,7 @@ internal class BackupFlow(
             progress = R.string.backup_exporting,
             success = if (complete) R.string.full_backup_exported else R.string.status_backup_exported,
             failure = {
-                DocumentAccess.exportFailureMessage(it, platoonDataFailureMessage(it, backupExportFailureMessage(complete)))
+                platoonExportFailureMessage(it, backupExportFailureMessage(complete))
             },
         ) {
             DocumentAccess.writeExport(activity.contentResolver, uri) { output ->

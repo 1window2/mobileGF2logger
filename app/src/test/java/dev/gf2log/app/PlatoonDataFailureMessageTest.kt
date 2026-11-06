@@ -5,6 +5,7 @@ import dev.gf2log.app.management.CsvImportInProgressException
 import dev.gf2log.app.management.InvalidBackupException
 import dev.gf2log.app.management.PlatoonDatabaseDamagedException
 import dev.gf2log.app.ui.CaptureGuard
+import dev.gf2log.app.ui.UntrustedDocumentProviderException
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -19,6 +20,20 @@ class PlatoonDataFailureMessageTest {
         assertEquals(R.string.save_failed, platoonDataFailureMessage(IllegalArgumentException("overlap"), R.string.save_failed))
         // A stored `false` has no failure to explain.
         assertEquals(R.string.note_delete_failed, platoonDataFailureMessage(null, R.string.note_delete_failed))
+    }
+
+    @Test
+    fun `an export names a refused provider first and then what the Platoon data says`() {
+        assertEquals(
+            R.string.export_location_unsupported,
+            platoonExportFailureMessage(UntrustedDocumentProviderException(), R.string.status_export_failed),
+        )
+        assertEquals(R.string.platoon_database_damaged_short, platoonExportFailureMessage(damaged, R.string.status_export_failed))
+        assertEquals(R.string.platoon_csv_import_in_progress, platoonExportFailureMessage(importing, R.string.status_export_failed))
+        assertEquals(
+            R.string.status_export_failed,
+            platoonExportFailureMessage(IllegalStateException("io"), R.string.status_export_failed),
+        )
     }
 
     @Test

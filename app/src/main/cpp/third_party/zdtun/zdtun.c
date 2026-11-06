@@ -1172,7 +1172,10 @@ static int handle_tcp_fwd(zdtun_t *tun, const zdtun_pkt_t *pkt,
 
     if(tcp_sock == INVALID_SOCKET) {
       error("Cannot create TCP socket[%d]", socket_errno);
-      conn->status = CONN_STATUS_SOCKET_ERROR;
+      // Close through zdtun_conn_close so on_connection_close runs for the user data, and the
+      // client gets an RST that acknowledges its SYN instead of retrying until it times out.
+      conn->tcp.client_seq = ntohl(data->th_seq) + 1;
+      zdtun_conn_close(tun, conn, CONN_STATUS_SOCKET_ERROR);
       return -1;
     }
 
@@ -1572,7 +1575,7 @@ static int handle_icmp_fwd(zdtun_t *tun, const zdtun_pkt_t *pkt, zdtun_conn_t *c
 
     if(icmp_sock == INVALID_SOCKET) {
       error("Cannot create ICMP socket[%d]", socket_errno);
-      conn->status = CONN_STATUS_SOCKET_ERROR;
+      zdtun_conn_close(tun, conn, CONN_STATUS_SOCKET_ERROR);
       return -1;
     }
 

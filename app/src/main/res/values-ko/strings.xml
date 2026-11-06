@@ -184,7 +184,9 @@
     <string name="delete_platoon_description">%1$s 삭제</string>
     <string name="delete_platoon_first_warning">%1$s 서클을 삭제하면 멤버, 주간 표, 설정, 체크포인트 및 보관된 근거 자료가 영구적으로 제거됩니다. 복구할 수 없습니다.</string>
     <string name="delete_platoon_name_warning">삭제하려면 서클 이름을 정확하게 입력하세요: %1$s</string>
+    <string name="delete_platoon_id_warning">삭제하려면 서클 ID를 정확하게 입력하세요: %1$d</string>
     <string name="type_platoon_name">정확한 서클 이름 입력</string>
+    <string name="type_platoon_id">서클 ID 입력</string>
     <string name="platoon_delete_failed">서클 삭제를 완료할 수 없습니다. 안전하게 다시 정리합니다.</string>
     <string name="server_reset_summary">%1$s · 이 기기의 다음 초기화 %2$s (%3$s)</string>
     <string name="manual_reset_region_summary">수동 · %1$s (기기: %2$s)</string>

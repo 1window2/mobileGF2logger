@@ -184,7 +184,9 @@
     <string name="delete_platoon_description">Delete %1$s</string>
     <string name="delete_platoon_first_warning">Deleting %1$s permanently removes its members, weekly tables, settings, checkpoints, and retained evidence. This cannot be undone.</string>
     <string name="delete_platoon_name_warning">To delete this Platoon, enter its name exactly: %1$s</string>
+    <string name="delete_platoon_id_warning">To delete this Platoon, enter its ID exactly: %1$d</string>
     <string name="type_platoon_name">Enter the exact Platoon name</string>
+    <string name="type_platoon_id">Enter the Platoon ID</string>
     <string name="platoon_delete_failed">Unable to finish deleting the Platoon. Cleanup will be retried safely.</string>
     <string name="server_reset_summary">%1$s · next reset %2$s on this phone (%3$s)</string>
     <string name="manual_reset_region_summary">Manual · %1$s (phone: %2$s)</string>

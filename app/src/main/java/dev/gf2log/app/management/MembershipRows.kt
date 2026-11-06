@@ -396,33 +396,137 @@ internal object MembershipRows {
         SELECT 1 FROM membership_periods current_period
         WHERE current_period.uid = $uid
           AND current_period.left_at IS NULL
-          AND NOT (
-            current_period.joined_source = '${EvidenceSource.GAME_UPDATES.name}'
-            AND (
-              EXISTS (
-                SELECT 1 FROM membership_periods later_exit
-                WHERE later_exit.uid = current_period.uid
-                  AND later_exit.id != current_period.id
-                  AND later_exit.left_at > current_period.joined_at
+          AND NOT ($SUPERSEDED_UPDATES_JOIN)
+        """.trimIndent()
+
+    /** An open `current_period` whose exact Updates join later exit evidence supersedes. */
+    private val SUPERSEDED_UPDATES_JOIN =
+        """
+        current_period.joined_source = '${EvidenceSource.GAME_UPDATES.name}'
+        AND (
+          EXISTS (
+            SELECT 1 FROM membership_periods later_exit
+            WHERE later_exit.uid = current_period.uid
+              AND later_exit.id != current_period.id
+              AND later_exit.left_at > current_period.joined_at
+          )
+          OR EXISTS (
+            SELECT 1 FROM snapshots latest_roster
+            WHERE latest_roster.captured_at =
+                (SELECT MAX(captured_at) FROM snapshots WHERE clock_suspect = 0)
+              AND latest_roster.clock_suspect = 0
+              AND latest_roster.captured_at > current_period.joined_at
+              AND NOT EXISTS (
+                SELECT 1
+                FROM snapshot_members roster_member
+                JOIN snapshots roster ON roster.id = roster_member.snapshot_id
+                WHERE roster_member.uid = current_period.uid
+                  AND roster.captured_at = latest_roster.captured_at
+                  AND roster.clock_suspect = 0
               )
-              OR EXISTS (
-                SELECT 1 FROM snapshots latest_roster
-                WHERE latest_roster.captured_at =
-                    (SELECT MAX(captured_at) FROM snapshots WHERE clock_suspect = 0)
-                  AND latest_roster.clock_suspect = 0
-                  AND latest_roster.captured_at > current_period.joined_at
+          )
+        )
+        """.trimIndent()
+
+    /**
+     * Open periods whose Updates join is superseded, so they do not keep their member active.
+     * The v14 step reads them before re-labelling activity-dated joins, which the rule no longer
+     * supersedes; see [closeRelabelledSupersededPeriods].
+     */
+    fun supersededOpenUpdatesJoins(db: SQLiteDatabase): List<Long> = db.rawQuery(
+        "SELECT current_period.id FROM membership_periods current_period " +
+            "WHERE current_period.left_at IS NULL AND $SUPERSEDED_UPDATES_JOIN",
+        null,
+    ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getLong(0)) } }
+
+    /**
+     * Before v14 an activity-dated join was stored as exact Updates evidence, and the active rule
+     * let later exit evidence supersede it. Re-labelled [EvidenceSource.ACTIVITY], such a period
+     * would count as open again and reactivate a departed member. Each of [periodIds] that the
+     * re-labelling turned into an activity join therefore ends the way the old rule read it:
+     *
+     * - with a later exit by another period of the member, it folds into that period when both
+     *   describe one membership (no roster between the two joins omitted the member), or else
+     *   takes that period's exit, without a second withdrawal event;
+     * - with only a newer roster omitting the member, it closes at the first such roster, as a
+     *   roster-observed withdrawal would have.
+     */
+    fun closeRelabelledSupersededPeriods(db: SQLiteDatabase, periodIds: Collection<Long>) {
+        periodIds.forEach { periodId ->
+            val id = arrayOf(periodId.toString())
+            val period = db.rawQuery(
+                "SELECT uid, joined_at, note FROM membership_periods " +
+                    "WHERE id = ? AND left_at IS NULL AND joined_at IS NOT NULL AND joined_source = ?",
+                arrayOf(periodId.toString(), EvidenceSource.ACTIVITY.name),
+            ).use { cursor ->
+                if (cursor.moveToFirst()) Triple(cursor.getLong(0), cursor.getLong(1), cursor.getString(2)) else null
+            } ?: return@forEach
+            val (uid, joinedAt, note) = period
+            val exit = db.rawQuery(
+                "SELECT id, joined_at, note, left_at, left_date, left_time_known, left_precision, left_source " +
+                    "FROM membership_periods WHERE uid = ? AND id != ? AND left_at > ? ORDER BY left_at, id LIMIT 1",
+                arrayOf(uid.toString(), periodId.toString(), joinedAt.toString()),
+            ).use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                LaterExit(
+                    id = cursor.getLong(0),
+                    joinedAt = cursor.getNullableLong(1),
+                    note = cursor.getString(2),
+                    values = ContentValues().apply {
+                        put("left_at", cursor.getLong(3))
+                        putNullableLong("left_date", cursor.getNullableLong(4))
+                        if (cursor.isNull(5)) putNull("left_time_known") else put("left_time_known", cursor.getLong(5))
+                        put("left_precision", cursor.getString(6))
+                        put("left_source", cursor.getString(7))
+                    },
+                )
+            }
+            if (exit != null) {
+                val mergedNote = listOf(exit.note, note).filter(String::isNotBlank).joinToString("\n")
+                val sameMembership = exit.joinedAt != null &&
+                    !rosterOmittedBetween(db, uid, joinedAt, exit.joinedAt) &&
+                    mergedNote.length <= ManualTextPolicy.MAX_NOTE_CHARS
+                if (sameMembership) {
+                    if (mergedNote != exit.note) {
+                        db.update(
+                            "membership_periods",
+                            ContentValues().apply { put("note", mergedNote) },
+                            "id = ?",
+                            arrayOf(exit.id.toString()),
+                        )
+                    }
+                    deleteSupersededEvents(db, "membership_period_id = ?", id)
+                    db.delete("membership_periods", "id = ?", id)
+                } else {
+                    db.update("membership_periods", exit.values, "id = ?", id)
+                }
+                return@forEach
+            }
+            val omittedAt = db.rawQuery(
+                """
+                SELECT MIN(roster.captured_at) FROM snapshots roster
+                WHERE roster.clock_suspect = 0
+                  AND roster.captured_at > ?
                   AND NOT EXISTS (
                     SELECT 1
                     FROM snapshot_members roster_member
-                    JOIN snapshots roster ON roster.id = roster_member.snapshot_id
-                    WHERE roster_member.uid = current_period.uid
-                      AND roster.captured_at = latest_roster.captured_at
-                      AND roster.clock_suspect = 0
+                    JOIN snapshots same_time ON same_time.id = roster_member.snapshot_id
+                    WHERE roster_member.uid = ?
+                      AND same_time.captured_at = roster.captured_at
+                      AND same_time.clock_suspect = 0
                   )
-              )
-            )
-          )
-        """.trimIndent()
+                """.trimIndent(),
+                arrayOf(joinedAt.toString(), uid.toString()),
+            ).use { cursor -> if (cursor.moveToFirst()) cursor.getNullableLong(0) else null } ?: return@forEach
+            val name = db.rawQuery("SELECT current_name FROM members WHERE uid = ?", arrayOf(uid.toString()))
+                .use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else "" }
+            val leftAt = Instant.ofEpochMilli(omittedAt)
+            closeMembershipPeriod(db, periodId, leftAt, EvidencePrecision.INFERRED, EvidenceSource.SNAPSHOT)
+            insertSnapshotBoundaryEvent(db, periodId, uid, name, MemberEventType.LEFT, leftAt, EvidenceSource.SNAPSHOT)
+        }
+    }
+
+    private class LaterExit(val id: Long, val joinedAt: Long?, val note: String, val values: ContentValues)
 
     private val ACTIVE_STATE_UPDATE =
         "UPDATE members SET is_active = CASE WHEN EXISTS (${effectiveOpenPeriod("members.uid")}) " +

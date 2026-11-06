@@ -440,6 +440,96 @@ class MembershipIntegrityIntegrationTest {
     }
 
     @Test
+    fun schemaFourteenUpgradeKeepsADepartedMemberWhoseActivityDatedJoinAnUpdatesJoinSuperseded() {
+        insertMember(TARGET_UID, active = false)
+        // 2.7.1: an activity-dated join stored as exact Updates evidence, left open, ...
+        val actedAt = T0.plusSeconds(20 * 60)
+        val activityDated = insertOpenPeriod(TARGET_UID, actedAt, EvidencePrecision.EXACT, EvidenceSource.GAME_UPDATES)
+        insertCitingActivity(insertJoinEvent(activityDated, actedAt), actedAt)
+        // ... then the 21960 join of the same change opened a second period, which a leave closed.
+        val updatesJoin = T0.plusSeconds(2 * HOUR)
+        val leftAt = T0.plusSeconds(10 * HOUR)
+        val updates = insertOpenPeriod(TARGET_UID, updatesJoin, EvidencePrecision.EXACT, EvidenceSource.GAME_UPDATES)
+        insertJoinEvent(updates, updatesJoin)
+        closeExactly(updates, leftAt)
+        insertExactWithdrawalEvent(updates, leftAt)
+        upgradeFromThirteen()
+
+        val target = status(TARGET_UID)
+        assertFalse(target.isActive)
+        assertTrue(target.membershipPeriods.none { it.leftAt == null })
+        assertEquals(listOf(leftAt), target.membershipPeriods.map { it.leftAt })
+        assertEquals(1L, count("member_events", "uid = $TARGET_UID AND event_type = 'LEFT'"))
+
+        roster(leftAt.plusSeconds(2 * HOUR), member(OTHER_UID, "Other"))
+
+        assertFalse(status(TARGET_UID).isActive)
+        assertEquals(1L, count("member_events", "uid = $TARGET_UID AND event_type = 'LEFT'"))
+        assertForeignKeysValid()
+    }
+
+    private fun insertMember(uid: Long, active: Boolean) {
+        database.writableDatabase.execSQL(
+            "INSERT INTO members(uid, current_name, current_level, is_active, first_seen_at, last_seen_at) " +
+                "VALUES(?, ?, 60, ?, ?, ?)",
+            arrayOf<Any>(uid, "Target", if (active) 1 else 0, T0.toEpochMilli(), T0.toEpochMilli()),
+        )
+    }
+
+    private fun insertCitingActivity(eventId: Long, actedAt: Instant) {
+        database.writableDatabase.insertOrThrow(
+            "platoon_activity",
+            null,
+            ContentValues().apply {
+                put("occurred_at", actedAt.toEpochMilli())
+                put("action_id", 701_001L)
+                put("kind", 1L)
+                put("member_name", "Target")
+                put("captured_at", actedAt.toEpochMilli())
+                put("resolved_uid", TARGET_UID)
+                put("resolution", ActivityResolution.MEMBERSHIP_CORRELATION.name)
+                put("member_event_id", eventId)
+            },
+        )
+    }
+
+    private fun closeExactly(membershipPeriodId: Long, leftAt: Instant) {
+        database.writableDatabase.update(
+            "membership_periods",
+            ContentValues().apply {
+                put("left_at", leftAt.toEpochMilli())
+                put("left_time_known", 1)
+                put("left_precision", EvidencePrecision.EXACT.name)
+                put("left_source", EvidenceSource.GAME_UPDATES.name)
+            },
+            "id = ?",
+            arrayOf(membershipPeriodId.toString()),
+        )
+    }
+
+    private fun insertExactWithdrawalEvent(membershipPeriodId: Long, occurredAt: Instant): Long =
+        MembershipRows.insertEvent(
+            db = database.writableDatabase,
+            uid = TARGET_UID,
+            type = MemberEventType.LEFT,
+            occurredAt = occurredAt,
+            observedAt = occurredAt,
+            precision = EvidencePrecision.EXACT,
+            source = EvidenceSource.GAME_UPDATES,
+            note = "Target",
+            membershipPeriodId = membershipPeriodId,
+        )
+
+    private fun upgradeFromThirteen() {
+        database.close()
+        context.openOrCreateDatabase(TEST_DATABASE, Context.MODE_PRIVATE, null).use { legacy ->
+            legacy.version = 13
+        }
+        database = PlatoonDatabase(context, TEST_DATABASE, TEST_SCOPE)
+        assertEquals(PlatoonSchema.CURRENT_VERSION, database.writableDatabase.version)
+    }
+
+    @Test
     fun schemaFiveUpgradeKeepsOneEventForAManuallyEditedTenure() {
         val databaseName = "platoon-v5-manual-tenure-test.db"
         context.deleteDatabase(databaseName)

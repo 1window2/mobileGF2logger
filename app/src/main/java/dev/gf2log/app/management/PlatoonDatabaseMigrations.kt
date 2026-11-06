@@ -35,7 +35,10 @@ internal object PlatoonDatabaseMigrations {
         if (oldVersion < 12) PlatoonDatabaseSchema.createWeeklyReportHistoryTables(db)
         if (oldVersion < 13) MembershipRows.synchronizeAllActiveStates(db)
         if (oldVersion < 14) {
+            // Read under the pre-v14 rule, which re-labelling activity-dated joins changes.
+            val superseded = MembershipRows.supersededOpenUpdatesJoins(db)
             markActivityDatedBoundaries(db)
+            MembershipRows.closeRelabelledSupersededPeriods(db, superseded)
             InvalidMemberIdentityRepair.repair(db)
             MembershipRows.foldAllDuplicateOpenPeriods(db)
             MembershipRows.synchronizeAllActiveStates(db)

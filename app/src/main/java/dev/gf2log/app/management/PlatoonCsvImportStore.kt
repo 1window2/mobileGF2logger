@@ -124,11 +124,6 @@ class PlatoonCsvImportStore(
         /** Allows a phone clock a little behind the PC that wrote the CSV. */
         private val MAX_CLOCK_SKEW: Duration = Duration.ofHours(1)
 
-        internal fun latestRetainedFile(directory: File): File? = directory.listFiles()
-            .orEmpty()
-            .filter { it.isFile && it.extension.equals("csv", ignoreCase = true) }
-            .maxWithOrNull(compareBy<File>(File::lastModified).thenBy(File::getName))
-
         private const val MAX_BYTES = 2 * 1024 * 1024
         private const val READ_BUFFER_BYTES = 8 * 1024
         private const val HASH_BYTES = 10

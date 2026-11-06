@@ -8,6 +8,11 @@
     <item name="platoon_search_input" type="id" />
     <item name="weekly_note_input" type="id" />
     <item name="webhook_input" type="id" />
+    <item name="dialog_uid_input" type="id" />
+    <item name="dialog_nickname_input" type="id" />
+    <item name="dialog_joined_input" type="id" />
+    <item name="dialog_left_input" type="id" />
+    <item name="dialog_note_input" type="id" />
     <item name="action_move_up" type="id" />
     <item name="action_move_down" type="id" />
     <item name="cutline_daily_merit" type="id" />

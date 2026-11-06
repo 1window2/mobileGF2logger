@@ -4,10 +4,13 @@ import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
 import android.graphics.drawable.GradientDrawable
+import android.os.Bundle
+import android.os.Parcelable
 import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.os.BundleCompat
 import dev.gf2log.app.management.MembershipBoundaryValue
 import dev.gf2log.app.ui.Dialogs
 import dev.gf2log.app.ui.Labels
@@ -40,6 +43,8 @@ internal class DateTimePickerInput(
     private val dateRequired: Boolean = false,
     private val editable: Boolean = true,
     private val zone: ZoneId = ZoneId.systemDefault(),
+    /** A stable id makes the picked value survive recreation of a restorable dialog. */
+    stateId: Int = View.NO_ID,
 ) : LinearLayout(context) {
     private val selection = MembershipBoundaryDraft(
         initialValue = initialValue,
@@ -59,6 +64,7 @@ internal class DateTimePickerInput(
     }
 
     init {
+        if (stateId != View.NO_ID) id = stateId
         orientation = VERTICAL
         addView(context.text(label, TextRole.LABEL) {
             setPadding(context.dp(4), 0, context.dp(4), context.dp(4))
@@ -115,15 +121,17 @@ internal class DateTimePickerInput(
         Dialogs.showTracked(
             DatePickerDialog(
                 context,
-                { _, year, month, day ->
-                    selection.selectDate(LocalDate.of(year, month + 1, day))
-                    renderValue()
-                },
+                { _, year, month, day -> selectDate(LocalDate.of(year, month + 1, day)) },
                 seed.year,
                 seed.monthValue - 1,
                 seed.dayOfMonth,
             ),
         )
+    }
+
+    internal fun selectDate(value: LocalDate) {
+        selection.selectDate(value)
+        renderValue()
     }
 
     private fun showTimePicker() {
@@ -140,6 +148,27 @@ internal class DateTimePickerInput(
                 android.text.format.DateFormat.is24HourFormat(context),
             ),
         )
+    }
+
+    override fun onSaveInstanceState(): Parcelable = Bundle().apply {
+        putParcelable(STATE_SUPER, super.onSaveInstanceState())
+        // Only a changed value is saved: an untouched one is rebuilt exactly from its original.
+        if (selection.changed) {
+            putBoolean(STATE_CHANGED, true)
+            selection.date?.let { putLong(STATE_DATE, it.toEpochDay()) }
+            selection.time?.let { putInt(STATE_TIME, it.toSecondOfDay()) }
+        }
+    }
+
+    override fun onRestoreInstanceState(state: Parcelable?) {
+        val saved = state as? Bundle ?: return super.onRestoreInstanceState(state)
+        super.onRestoreInstanceState(BundleCompat.getParcelable(saved, STATE_SUPER, Parcelable::class.java))
+        if (!saved.getBoolean(STATE_CHANGED)) return
+        selection.restoreChanged(
+            date = saved.takeIf { it.containsKey(STATE_DATE) }?.getLong(STATE_DATE)?.let(LocalDate::ofEpochDay),
+            time = saved.takeIf { it.containsKey(STATE_TIME) }?.getInt(STATE_TIME)?.toLong()?.let(LocalTime::ofSecondOfDay),
+        )
+        renderValue()
     }
 
     private fun renderValue() {
@@ -163,6 +192,11 @@ internal class DateTimePickerInput(
         clearButton.tooltipText = clearButton.contentDescription
     }
 }
+
+private const val STATE_SUPER = "picker.super"
+private const val STATE_CHANGED = "picker.changed"
+private const val STATE_DATE = "picker.date"
+private const val STATE_TIME = "picker.time"
 
 /** Large text stacks the date and time fields so neither picked value is clipped. */
 internal fun stacksPickerFields(fontScale: Float): Boolean = fontScale >= 1.3f

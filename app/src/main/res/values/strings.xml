@@ -504,6 +504,7 @@
     <string name="total_not_editable">Totals are calculated from the daily cells.</string>
     <string name="unsaved_changes_message">Save your changes before leaving?</string>
     <string name="unsaved_changes_title">Unsaved changes</string>
+    <string name="platoon_changed_unsaved_message">Another Platoon is now selected. Save these changes to the previous Platoon first?</string>
     <string name="week_range">%1$s – %2$s</string>
     <string name="week_reset_zone">Reset 05:00 · %1$s</string>
     <string name="server_time_zone">Server time · %1$s</string>

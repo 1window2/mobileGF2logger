@@ -76,7 +76,14 @@ class WeeklySettingsActivity : BaseActivity() {
     }
 
     override fun onScreenResumed() {
-        if (!profileBinding.isSameStorage(this)) finish()
+        if (profileBinding.isSameStorage(this)) return
+        // These cutlines belong to the previous Platoon; unsaved changes are not dropped silently.
+        val values = readValues()
+        if (values != null && current(values) == initial) {
+            finish()
+        } else {
+            confirmDraftBeforeScopeChange(R.string.save_settings, ::save, ::finish)
+        }
     }
 
     private fun LinearLayout.threshold(id: Int, label: Int, value: Long?, maximum: Int?) {

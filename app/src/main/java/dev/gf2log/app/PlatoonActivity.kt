@@ -28,6 +28,7 @@ import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
 import dev.gf2log.app.ui.BarAction
 import dev.gf2log.app.ui.Dialogs
+import dev.gf2log.app.ui.DialogDraft
 import dev.gf2log.app.ui.DocumentAccess
 import dev.gf2log.app.ui.Feedback
 import dev.gf2log.app.ui.Labels
@@ -136,6 +137,7 @@ class PlatoonActivity : BaseActivity() {
             setPadding(dp(16), 0, dp(16), dp(24))
         })
         setSelecting(selecting)
+        takeDialogDraft(WithdrawnMemberDialog.KEY)?.let(::addWithdrawnMember)
     }
 
     override fun onScreenResumed() {
@@ -353,11 +355,7 @@ class PlatoonActivity : BaseActivity() {
                     }),
                     overflow = listOf(
                         MenuEntry(getString(R.string.select_members)) { setSelecting(true) },
-                        MenuEntry(getString(R.string.add_withdrawn_member)) {
-                            WithdrawnMemberDialog.show(this, work, repository, { uid ->
-                                model?.statuses?.any { it.uid == uid } == true
-                            }, ::load)
-                        },
+                        MenuEntry(getString(R.string.add_withdrawn_member)) { addWithdrawnMember() },
                         MenuEntry(getString(R.string.edit_member_order)) {
                             startActivity(Intent(this, MemberOrderActivity::class.java))
                         },
@@ -365,6 +363,12 @@ class PlatoonActivity : BaseActivity() {
                 )
         }
         memberAdapter.notifyItemRangeChanged(0, memberAdapter.itemCount)
+    }
+
+    private fun addWithdrawnMember(restored: DialogDraft? = null) {
+        WithdrawnMemberDialog.show(this, work, repository, { uid ->
+            model?.statuses?.any { it.uid == uid } == true
+        }, ::load, restored)
     }
 
     private fun toggle(uid: Long) {

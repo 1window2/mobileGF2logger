@@ -498,6 +498,7 @@
     <string name="total_not_editable">합계는 일별 칸에서 계산됩니다.</string>
     <string name="unsaved_changes_message">나가기 전에 변경 내용을 저장할까요?</string>
     <string name="unsaved_changes_title">저장하지 않은 변경</string>
+    <string name="platoon_changed_unsaved_message">다른 서클이 선택되었습니다. 이 변경 사항을 이전 서클에 먼저 저장할까요?</string>
     <string name="week_range">%1$s – %2$s</string>
     <string name="week_reset_zone">초기화 05:00 · %1$s</string>
     <string name="server_time_zone">서버 시간 · %1$s</string>

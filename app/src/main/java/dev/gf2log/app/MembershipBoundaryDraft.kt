@@ -73,6 +73,16 @@ internal class MembershipBoundaryDraft(
         dirty = true
     }
 
+    /** Whether the user changed the value; an unchanged draft keeps the original exactly. */
+    val changed: Boolean get() = dirty
+
+    /** Reapplies a changed selection saved across recreation; a time needs a date. */
+    fun restoreChanged(date: LocalDate?, time: LocalTime?) {
+        this.date = date
+        this.time = time?.takeIf { date != null }
+        dirty = true
+    }
+
     fun clearTime() {
         if (time != null) {
             time = null

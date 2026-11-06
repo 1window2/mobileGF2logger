@@ -18,6 +18,7 @@ import dev.gf2log.app.capture.CaptureStatus
 import dev.gf2log.app.capture.CaptureVpnService
 import dev.gf2log.app.capture.format
 import dev.gf2log.app.management.CsvImportCheckpointManager
+import dev.gf2log.app.management.PlatoonAccessFailure
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.RosterCsvExport
 import dev.gf2log.app.management.SnapshotComparison
@@ -103,7 +104,7 @@ class MainActivity : BaseActivity() {
                 Feedback.show(
                     this,
                     result.fold({ R.string.roster_csv_exported }) {
-                        DocumentAccess.exportFailureMessage(it, R.string.status_export_failed)
+                        DocumentAccess.exportFailureMessage(it, platoonDataFailureMessage(it, R.string.status_export_failed))
                     },
                 )
             },
@@ -218,6 +219,12 @@ class MainActivity : BaseActivity() {
 
     private fun beginCapture(once: Boolean) {
         if (startPending || captureActive) return
+        // Capture would refuse to start anyway. This also catches an import whose progress this
+        // screen no longer shows, such as one started before a recreation.
+        if (CsvImportCheckpointManager.anyBusy()) {
+            Feedback.show(this, R.string.capture_notice_csv_import_in_progress, long = true)
+            return
+        }
         startPending = true
         captureOnceRequested = once
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -261,6 +268,8 @@ class MainActivity : BaseActivity() {
     private fun showProgress(message: CharSequence?) {
         progressBanner.visibility = if (message == null) View.GONE else View.VISIBLE
         progressText.text = message
+        // A capture started now would make the import roll back, or be refused while it runs.
+        capturePanel.startBlocked = message != null
         if (message == null) {
             // An import or undo just finished: the roster and the undo checkpoint may have changed.
             loadRosterSummary()
@@ -282,7 +291,10 @@ class MainActivity : BaseActivity() {
             return
         }
         work.run(task = { RosterCsvExport.latest(PlatoonRepository(this, scope))?.let(RosterCsvExport::fileName) }) { result ->
-            val name = result.getOrNull()
+            val name = result.getOrElse {
+                Feedback.show(this, platoonDataFailureMessage(it, R.string.status_export_failed), long = true)
+                return@run
+            }
             if (name == null) Feedback.show(this, R.string.status_no_platoon_csv) else exportRoster.launch(name)
         }
     }
@@ -306,13 +318,22 @@ class MainActivity : BaseActivity() {
                 }
             },
         ) { result ->
+            rosterSummary.removeAllViews()
+            // A damaged database blocks the Platoon here as on its own screens; the rest of Home,
+            // capture and packet history included, stays usable.
+            if (PlatoonAccessFailure.of(result.exceptionOrNull()) == PlatoonAccessFailure.DATABASE_DAMAGED) {
+                rosterSummary.visibility = View.VISIBLE
+                rosterSummary.addView(panel(outlined = true) {
+                    addView(PlatoonDataStates.damaged(this@MainActivity, work, scope), lp())
+                }, lp())
+                return@run
+            }
             val summary = result.getOrNull()
             if (summary == null) {
                 rosterSummary.visibility = View.GONE
                 return@run
             }
             val (latest, comparison, setAside) = summary
-            rosterSummary.removeAllViews()
             rosterSummary.visibility = View.VISIBLE
             val detail = buildList {
                 add(resources.getQuantityString(R.plurals.member_count, latest.members.size, latest.members.size))

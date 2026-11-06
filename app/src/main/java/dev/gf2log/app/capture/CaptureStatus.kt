@@ -21,6 +21,10 @@ enum class CaptureNotice(@StringRes val messageRes: Int, val severity: Severity)
     CAPTURING(R.string.capture_notice_capturing, Severity.INFO),
     NATIVE_UNAVAILABLE(R.string.capture_notice_native_unavailable, Severity.ERROR),
     HISTORY_IMPORT_FAILED(R.string.capture_notice_history_import_failed, Severity.ERROR),
+    /** Args: Platoon name. Its database was set aside; nothing more is saved into it. */
+    DATABASE_DAMAGED(R.string.capture_notice_database_damaged, Severity.ERROR),
+    /** A CSV import or undo holds a Platoon, so capture did not start; trying again later works. */
+    CSV_IMPORT_IN_PROGRESS(R.string.capture_notice_csv_import_in_progress, Severity.WARNING),
     NO_SUPPORTED_CLIENT(R.string.capture_notice_no_supported_client, Severity.ERROR),
     /** Args: failure reason. */
     VPN_ESTABLISH_FAILED(R.string.capture_notice_vpn_establish_failed, Severity.ERROR),
@@ -221,6 +225,8 @@ object CaptureStatus {
      * Whether a reported [notice] may replace what [current] shows. Traffic counters are routine
      * progress: they appear only while running and never hide a warning or error. While stopping,
      * work drained from the queue cannot replace why capture stopped unless it is more severe.
+     * While running, a damaged database stays shown until another error replaces it: every later
+     * save into that Platoon fails too, and a routine notice from another Platoon must not hide why.
      */
     internal fun shows(current: CaptureSnapshot, notice: CaptureNotice): Boolean {
         val shown = current.notice?.notice?.severity ?: CaptureNotice.Severity.INFO
@@ -228,6 +234,8 @@ object CaptureStatus {
             notice == CaptureNotice.TRAFFIC ->
                 current.phase == CapturePhase.RUNNING && shown == CaptureNotice.Severity.INFO
             current.phase == CapturePhase.STOPPING -> notice.severity > shown
+            current.phase == CapturePhase.RUNNING && current.notice?.notice == CaptureNotice.DATABASE_DAMAGED ->
+                notice.severity == CaptureNotice.Severity.ERROR
             else -> true
         }
     }

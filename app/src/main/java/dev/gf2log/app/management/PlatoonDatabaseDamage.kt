@@ -102,10 +102,21 @@ internal object PlatoonDatabaseDamage {
      */
     fun setAsideForRebuild(context: Context, scope: PlatoonStorageScope) {
         PlatoonRepository.withExclusiveDatabase(scope) {
+            // An import's rollback would otherwise install its checkpoint over the rebuilt copy.
+            CsvImportCheckpointManager.requireAccessAllowed(scope)
             val database = context.applicationContext.getDatabasePath(scope.databaseName)
             if (database.exists()) quarantine(context, scope, database)
             clear(context, scope)
         }
+    }
+
+    /**
+     * The rebuild every screen offers: sets the damaged database aside, then repopulates a fresh
+     * one from the retained roster CSVs. Everything the rosters do not carry starts empty.
+     */
+    fun rebuildFromRetainedCsv(context: Context, scope: PlatoonStorageScope): PlatoonRepository.ImportResult {
+        setAsideForRebuild(context, scope)
+        return PlatoonRepository(context, scope).reconcileRetainedCsvFiles()
     }
 
     /** Removes the marker; callers hold the exclusive gate or have just installed a database. */

@@ -58,7 +58,11 @@ class SnapshotComparisonActivity : BaseActivity() {
             content.removeAllViews()
             result.fold(
                 onSuccess = ::render,
-                onFailure = { content.addView(StateViews.failure(this, getString(R.string.platoon_load_failed)) { recreate() }) },
+                onFailure = { error ->
+                    content.addView(
+                        PlatoonDataStates.failure(this, work, scope, error, getString(R.string.platoon_load_failed)) { recreate() },
+                    )
+                },
             )
         }
     }

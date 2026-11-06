@@ -408,6 +408,29 @@ the repository maintenance lock, the database helper, the profile registry,
 then settings stores. Restore recovery runs only when durable restore artifacts
 exist, so constructing a repository never takes the exclusive gate.
 
+`PlatoonAccessFailure` classifies why a Platoon could not be read or written
+the same way for screens, capture, and maintenance. A damaged database (moved
+aside under `.corrupt-<time>`, or SQLite corruption met while reading) blocks
+Home's roster summary and the Platoon, Weekly, member, order, comparison, and
+history screens with Restore backup, which opens Settings' restore
+confirmation, and Rebuild, which `PlatoonDatabaseDamage.rebuildFromRetainedCsv`
+performs once capture is stopped: the database is set aside, its damaged copy
+kept, and a fresh one repopulated from the retained roster CSVs. While another
+thread's CSV import, rollback, or undo holds a Platoon's claim, every
+repository call for it refuses with `CsvImportInProgressException`, as
+do a second import or undo, a backup restore, a rebuild, and Platoon deletion.
+Screens then show an import-in-progress state with Retry and actions say to try
+again shortly instead of reporting a failure; Home also disables its start
+actions while its own import or undo runs and refuses a start while any claim
+is held. Capture start fails closed: a held claim stops it with
+`CSV_IMPORT_IN_PROGRESS` before recovery runs, and a damaged scope stops it with
+`DATABASE_DAMAGED` naming the Platoon. During a run, a save into a damaged
+database reports `DATABASE_DAMAGED`, which stays shown until another error
+replaces it, and a failed roster ingest is not "recovered" by reconciling the
+retained CSVs into a roster-only copy; its CSV is already retained, so a later
+reconcile ingests it. Standby and scheduled recording treat such a refused start
+as a failed run and try again at the next planned run.
+
 ## Parsed-packet history
 
 Every completed recognized payload is formatted in protocol order and written

@@ -7,6 +7,7 @@ import android.widget.Button
 import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import dev.gf2log.app.management.PlatoonAccessFailure
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.WeeklyEvidenceAnalyzer
 import dev.gf2log.app.management.WeeklyReportBuilder
@@ -74,6 +75,17 @@ class WeeklyTableHistoryPreviewActivity : BaseActivity() {
             },
         ) { result ->
             val (report, cutlines) = result.getOrNull() ?: (null to null)
+            // A damaged or busy Platoon is explained; a revision that cannot be read stays unavailable.
+            if (PlatoonAccessFailure.of(result.exceptionOrNull()) != PlatoonAccessFailure.OTHER) {
+                topAdapter.view = PlatoonDataStates.failure(
+                    this,
+                    work,
+                    scope,
+                    result.exceptionOrNull(),
+                    getString(R.string.weekly_table_history_unavailable),
+                ) { recreate() }
+                return@run
+            }
             if (report == null || cutlines == null) {
                 topAdapter.view = StateViews.empty(this, R.drawable.ic_history_restore, getString(R.string.weekly_table_history_unavailable))
                 return@run
@@ -119,7 +131,11 @@ class WeeklyTableHistoryPreviewActivity : BaseActivity() {
                     finish()
                 } else {
                     restoreButton?.isEnabled = true
-                    Feedback.show(this, R.string.weekly_table_history_restore_failed, long = true)
+                    Feedback.show(
+                        this,
+                        platoonDataFailureMessage(result.exceptionOrNull(), R.string.weekly_table_history_restore_failed),
+                        long = true,
+                    )
                 }
             }
         }

@@ -331,9 +331,8 @@ class CsvImportCheckpointManager internal constructor(
 
     private fun claimOperation() {
         synchronized(scopeState) {
-            check(!scopeState.operationInProgress) {
-                "Another CSV checkpoint operation is in progress"
-            }
+            // Typed, so a second import or undo started meanwhile is told to wait, not that it failed.
+            if (scopeState.operationInProgress) throw CsvImportInProgressException()
             scopeState.owner = Thread.currentThread()
         }
     }
@@ -410,6 +409,10 @@ class CsvImportCheckpointManager internal constructor(
 
         /** Whether an import, rollback, undo or recovery currently holds [storageId]'s claim. */
         internal fun isBusy(storageId: String): Boolean = claimOwner(storageId) != null
+
+        /** Whether any Platoon's claim is held, for a capture start that would ingest into all. */
+        internal fun anyBusy(): Boolean =
+            synchronized(SCOPE_STATES) { SCOPE_STATES.values.any { it.operationInProgress } }
 
         /**
          * Refuses database access to [scope] from any thread but its claim holder. Never waits,

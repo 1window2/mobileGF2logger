@@ -9,6 +9,8 @@ import android.view.Gravity
 import android.view.View
 import android.widget.ImageView
 import android.widget.LinearLayout
+import dev.gf2log.app.management.CsvImportCheckpointManager
+import dev.gf2log.app.management.CsvImportInProgressException
 import dev.gf2log.app.management.PlatoonProfile
 import dev.gf2log.app.management.PlatoonProfileAdministration
 import dev.gf2log.app.management.PlatoonProfileRegistry
@@ -276,6 +278,8 @@ internal object PlatoonProfileSelector {
                 }
                 dialog.dismiss()
                 runMaintenance(activity, R.string.platoon_delete_failed) {
+                    // Deletion refuses a Platoon whose import is running; say to wait, not that it failed.
+                    if (CsvImportCheckpointManager.isBusy(profile.storageId)) throw CsvImportInProgressException()
                     check(PlatoonProfileAdministration(activity).deleteProfile(profile.storageId)) {
                         "Unable to delete the Platoon profile"
                     }
@@ -303,7 +307,7 @@ internal object PlatoonProfileSelector {
             val message = if (result.exceptionOrNull() is CaptureGuard.CaptureActiveException) {
                 R.string.stop_capture_before_profile_change
             } else {
-                failureMessage
+                platoonDataFailureMessage(result.exceptionOrNull(), failureMessage)
             }
             // A rotation may have replaced the caller; refresh whichever screen is showing now.
             val current = screen.get()?.takeUnless { it.isFinishing || it.isDestroyed }

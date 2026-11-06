@@ -295,8 +295,8 @@ class PlatoonBackupManager internal constructor(
             }
             // A CSV import's later rollback or undo would silently put back the pre-restore data.
             // The checkpoint's own restore runs under that import's claim and is exempt.
-            check(!retireRetainedCsv || !CsvImportCheckpointManager.isBusy(storageScope.storageId)) {
-                "A CSV import or undo is still running for this Platoon"
+            if (retireRetainedCsv && CsvImportCheckpointManager.isBusy(storageScope.storageId)) {
+                throw CsvImportInProgressException()
             }
             // Without a pending transaction a rollback copy is stale, for example one left beside
             // a deleted Platoon's database; a rollback must never install it over live data.

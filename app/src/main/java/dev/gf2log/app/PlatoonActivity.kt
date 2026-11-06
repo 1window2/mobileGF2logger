@@ -23,6 +23,7 @@ import dev.gf2log.app.management.matchesSearch
 import dev.gf2log.app.management.PlatoonMemberCsv
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonSnapshot
+import dev.gf2log.app.management.PlatoonStorageScope
 import dev.gf2log.app.management.SnapshotMember
 import dev.gf2log.app.ui.searchField
 import dev.gf2log.app.ui.Controls
@@ -54,6 +55,7 @@ import java.time.ZoneId
 class PlatoonActivity : BaseActivity() {
 
     private lateinit var profileBinding: ActivePlatoonScopeBinding
+    private lateinit var scope: PlatoonStorageScope
     private lateinit var repository: PlatoonRepository
     private lateinit var screen: Screen
     private val work = BackgroundWork(this, "GF2Platoon")
@@ -98,7 +100,7 @@ class PlatoonActivity : BaseActivity() {
                 Feedback.show(
                     this,
                     result.fold({ R.string.members_exported }) {
-                        DocumentAccess.exportFailureMessage(it, R.string.status_export_failed)
+                        DocumentAccess.exportFailureMessage(it, platoonDataFailureMessage(it, R.string.status_export_failed))
                     },
                 )
             },
@@ -114,7 +116,7 @@ class PlatoonActivity : BaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         profileBinding = ActivePlatoonScopeBinding(this)
-        val scope = profileBinding.scope ?: run {
+        scope = profileBinding.scope ?: run {
             Feedback.show(this, R.string.no_platoon_detected_detail, long = true)
             finish()
             return
@@ -195,16 +197,24 @@ class PlatoonActivity : BaseActivity() {
                     val rebind = model?.let { it.latest != loaded.latest || it.zone != loaded.zone } == true
                     model = loaded
                     selected.retainAll(loaded.statuses.mapTo(mutableSetOf(), MemberStatus::uid))
-                    if (selecting) setSelecting(true)
+                    if (selecting) setSelecting(true) else updateTopBar()
                     renderSummary(loaded)
                     renderMembers()
                     if (rebind) memberAdapter.notifyItemRangeChanged(0, memberAdapter.itemCount)
                 },
-                onFailure = {
+                onFailure = { error ->
                     // Search or filter changes must not bring back rows from before the failure.
                     model = null
                     memberAdapter.submitList(emptyList())
-                    stateAdapter.view = StateViews.failure(this, getString(R.string.platoon_load_failed)) { load() }
+                    // Edits wait for data again, whether it is damaged or held by an import.
+                    setSelecting(false)
+                    stateAdapter.view = PlatoonDataStates.failure(
+                        this,
+                        work,
+                        scope,
+                        error,
+                        getString(R.string.platoon_load_failed),
+                    ) { load() }
                 },
             )
         }
@@ -334,8 +344,18 @@ class PlatoonActivity : BaseActivity() {
         selecting = enabled
         if (!enabled) selected.clear()
         exitSelection.isEnabled = enabled
+        updateTopBar()
+        memberAdapter.notifyItemRangeChanged(0, memberAdapter.itemCount)
+    }
+
+    /**
+     * Without loaded data, as while the database is damaged or a CSV import holds the Platoon,
+     * the entries that edit members are disabled; they would only be refused.
+     */
+    private fun updateTopBar() {
         val bar = screen.topBar
-        if (enabled) {
+        val loaded = model != null
+        if (selecting) {
             bar.setNavigationIcon(R.drawable.ic_close, getString(R.string.cancel_selection))
                 .setNavigation { setSelecting(false) }
                 .setTitle(resources.getQuantityString(R.plurals.selected_count, selected.size, selected.size))
@@ -355,15 +375,14 @@ class PlatoonActivity : BaseActivity() {
                         startActivity(Intent(this, SnapshotComparisonActivity::class.java))
                     }),
                     overflow = listOf(
-                        MenuEntry(getString(R.string.select_members)) { setSelecting(true) },
-                        MenuEntry(getString(R.string.add_withdrawn_member)) { addWithdrawnMember() },
-                        MenuEntry(getString(R.string.edit_member_order)) {
+                        MenuEntry(getString(R.string.select_members), loaded) { setSelecting(true) },
+                        MenuEntry(getString(R.string.add_withdrawn_member), loaded) { addWithdrawnMember() },
+                        MenuEntry(getString(R.string.edit_member_order), loaded) {
                             startActivity(Intent(this, MemberOrderActivity::class.java))
                         },
                     ),
                 )
         }
-        memberAdapter.notifyItemRangeChanged(0, memberAdapter.itemCount)
     }
 
     private fun addWithdrawnMember(restored: DialogDraft? = null) {

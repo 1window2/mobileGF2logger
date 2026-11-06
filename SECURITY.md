@@ -48,11 +48,30 @@ plaintext protocol. Parsed data and backups therefore provide local integrity
 and management convenience, not cryptographic proof that a remote payload is
 genuine.
 
+A package name alone does not make an app a supported client. The publishers'
+signing certificates are not known in advance, so GF2logger pins, per supported
+package, the SHA-256 digests of the signing certificates it first sees installed
+while the user is using the app: when Home is shown, or when capture, standby,
+or scheduled recording is started from the app. Capture routes, attributes, and
+standby or scheduled recording opens a client only while every pinned
+certificate still signs it (Android 9 and newer ask `hasSigningCertificate`,
+which honours APK Signature Scheme v3 key rotation; Android 8 compares the
+current signatures). Background work never pins. Uninstalling a client keeps its
+pin, so the same publisher's reinstall matches and an app installed under that
+package name by anyone else is left outside the VPN, never attributed, and never
+launched, with a capture notice or standby result saying why, until the user
+reviews the new certificate's fingerprint in Settings and trusts it explicitly.
+The limit is that of any trust on first use: whatever is installed under a
+supported package name the first time GF2logger sees it is trusted. Pins are
+kept in app-private preferences, which Android backup excludes and `.gf2backup`
+archives never contain.
+
 On Android 10 and newer, the active VPN asks Android for the UID owning an
 original connection tuple and maps that UID only to the fixed supported package
-IDs. Remote IP addresses and DNS/SNI labels are diagnostic hints, not trusted
-client or server identities. Android 8–9 falls back only when exactly one
-supported client is installed; ambiguous flows remain quarantined. Payload
+IDs whose signer is verified. Remote IP addresses and DNS/SNI labels are
+diagnostic hints, not trusted client or server identities. Android 8–9 falls
+back only when exactly one verified supported client is installed; ambiguous
+flows remain quarantined. Payload
 `21905` supplies a bounded Platoon identity for its own decoded flow. Its banner
 frame and mark are accepted only as scalar IDs in the closed game-defined range
 `1..6`; unknown values remain undisplayed rather than selecting arbitrary local

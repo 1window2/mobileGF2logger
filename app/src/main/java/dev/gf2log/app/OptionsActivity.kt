@@ -132,6 +132,8 @@ class OptionsActivity : BaseActivity() {
                 R.drawable.ic_shield,
             ) { chooseCaptureRegion(packageName) }
         }), lp())
+        addView(caption(getString(R.string.settings_client_signers_detail)), lp(top = 12))
+        addView(ClientSignerRows(this@OptionsActivity).view(), lp())
         val capturePreferences = CapturePreferences(this@OptionsActivity)
         val payloads = PayloadHistoryPreferences(this@OptionsActivity)
         addView(panel(padding = 8) {

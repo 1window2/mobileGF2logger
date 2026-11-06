@@ -1,11 +1,9 @@
 package dev.gf2log.app
 
 import android.content.Context
-import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.os.Build
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
@@ -91,13 +89,26 @@ internal class HomeCapturePanel(
         renderClients()
     }
 
-    /** Rebuilt on every resume so installing or removing a client shows up immediately. */
+    /**
+     * Rebuilt on every resume so installing or removing a client shows up immediately. A client
+     * whose signer is not the trusted one is marked, since capture leaves it out.
+     */
     fun renderClients() = with(context) {
         clients.removeAllViews()
+        val signers = SupportedClientSigners.of(this)
         SupportedGamePackages.all.forEachIndexed { index, packageName ->
-            val installed = isInstalled(packageName)
+            val trust = signers.trust(packageName)
+            val installed = trust == SupportedClientTrust.VERIFIED
             val client = clientName(packageName)
-            val status = getString(if (installed) R.string.client_installed else R.string.client_not_installed)
+            val status = getString(
+                when (trust) {
+                    SupportedClientTrust.VERIFIED -> R.string.client_installed
+                    SupportedClientTrust.NOT_INSTALLED -> R.string.client_not_installed
+                    SupportedClientTrust.MISMATCH -> R.string.client_signer_changed_badge
+                    SupportedClientTrust.UNPINNED -> R.string.client_signer_untrusted_badge
+                },
+            )
+            val untrusted = trust == SupportedClientTrust.MISMATCH || trust == SupportedClientTrust.UNPINNED
             clients.addView(row {
                 minimumHeight = dp(40)
                 isFocusable = true
@@ -115,8 +126,16 @@ internal class HomeCapturePanel(
                 addView(badge(
                     status,
                     // Page-colored fill keeps the badge legible on the green running panel too.
-                    if (installed) R.color.app_background else R.color.surface_variant,
-                    if (installed) R.color.success_text else R.color.text_secondary,
+                    when {
+                        installed -> R.color.app_background
+                        untrusted -> R.color.warning_surface
+                        else -> R.color.surface_variant
+                    },
+                    when {
+                        installed -> R.color.success_text
+                        untrusted -> R.color.warning_text
+                        else -> R.color.text_secondary
+                    },
                 ).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, lp(WRAP, WRAP, start = 8))
             }, lp(top = if (index == 0) 0 else 6))
         }
@@ -246,14 +265,4 @@ internal class HomeCapturePanel(
             )
         }
     }
-
-    private fun isInstalled(packageName: String): Boolean = runCatching {
-        val packages = context.packageManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            packages.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
-        } else {
-            @Suppress("DEPRECATION")
-            packages.getPackageInfo(packageName, 0)
-        }
-    }.isSuccess
 }

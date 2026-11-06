@@ -8,6 +8,8 @@
     <string name="capture_notice_database_damaged">The database of %1$s is damaged and was set aside. Restore a backup or rebuild it in the app.</string>
     <string name="capture_notice_csv_import_in_progress">A CSV import or undo is still running. Start capture again once it finishes.</string>
     <string name="capture_notice_no_supported_client">Install a supported HaoPlay or Darkwinter client first</string>
+    <string name="capture_notice_client_signer_changed">The game client\'s signature changed since GF2logger trusted it, so it is not captured. Review it in Settings › Capture.</string>
+    <string name="capture_notice_client_not_trusted">The installed game client is not trusted yet. Open GF2logger once, or review it in Settings › Capture.</string>
     <string name="capture_notice_vpn_establish_failed">Unable to establish VPN: %1$s</string>
     <string name="capture_notice_vpn_permission_revoked">VPN permission was revoked</string>
     <string name="capture_notice_native_start_failed">Native forwarding core failed to start</string>

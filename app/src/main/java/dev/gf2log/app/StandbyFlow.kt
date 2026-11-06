@@ -50,6 +50,8 @@ internal class StandbyFlow(
     }
 
     fun start() {
+        // The user is here to arm standby: trust the clients installed now, before any run opens one.
+        SupportedClientSigners.of(activity).pinFirstSeen()
         if (StandbyUnlockedWarning.shouldWarn(activity)) return warnUnlocked()
         if (!StandbyBatteryPrompt.shouldAsk(activity)) return prepareRecording()
         Dialogs.show(
@@ -208,6 +210,8 @@ internal class StandbyFlow(
         StandbyOutcome.NO_ACCESSIBILITY -> R.string.standby_outcome_no_accessibility
         StandbyOutcome.NO_VPN_CONSENT -> R.string.standby_outcome_no_vpn
         StandbyOutcome.NOT_INSTALLED -> R.string.standby_outcome_not_installed
+        StandbyOutcome.CLIENT_SIGNER_CHANGED -> R.string.standby_outcome_client_signer_changed
+        StandbyOutcome.CLIENT_NOT_TRUSTED -> R.string.standby_outcome_client_not_trusted
         StandbyOutcome.CAPTURE_FAILED -> R.string.standby_outcome_capture_failed
         StandbyOutcome.CANCELLED -> R.string.standby_outcome_cancelled
         StandbyOutcome.SKIPPED_IN_USE -> R.string.standby_outcome_in_use

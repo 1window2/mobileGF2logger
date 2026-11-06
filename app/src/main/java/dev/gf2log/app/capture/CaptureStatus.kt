@@ -26,6 +26,10 @@ enum class CaptureNotice(@StringRes val messageRes: Int, val severity: Severity)
     /** A CSV import or undo holds a Platoon, so capture did not start; trying again later works. */
     CSV_IMPORT_IN_PROGRESS(R.string.capture_notice_csv_import_in_progress, Severity.WARNING),
     NO_SUPPORTED_CLIENT(R.string.capture_notice_no_supported_client, Severity.ERROR),
+    /** Nothing could be captured, and an installed client is signed by another signer than the trusted one. */
+    CLIENT_SIGNER_CHANGED(R.string.capture_notice_client_signer_changed, Severity.ERROR),
+    /** Nothing could be captured, and an installed client has not been trusted yet. */
+    CLIENT_NOT_TRUSTED(R.string.capture_notice_client_not_trusted, Severity.ERROR),
     /** Args: failure reason. */
     VPN_ESTABLISH_FAILED(R.string.capture_notice_vpn_establish_failed, Severity.ERROR),
     VPN_PERMISSION_REVOKED(R.string.capture_notice_vpn_permission_revoked, Severity.ERROR),

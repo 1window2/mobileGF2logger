@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import dev.gf2log.app.StandbyActivity
+import dev.gf2log.app.SupportedClientSigners
 import dev.gf2log.app.capture.CapturePhase
 import dev.gf2log.app.capture.CaptureSnapshot
 import dev.gf2log.app.capture.CaptureStatus
@@ -214,6 +215,7 @@ internal object StandbyAutomation {
         if (appContext.packageManager.getLaunchIntentForPackage(run.server.packageName) == null) {
             return skip(StandbyOutcome.NOT_INSTALLED)
         }
+        clientRefusal(run.server.packageName)?.let { return skip(it) }
         service.holdScreenOn(minOf(run.deadline.toEpochMilli(), deadlineMillis))
         enter(Phase.STARTING_CAPTURE)
         val target = run.server.storageIds.first()
@@ -303,6 +305,8 @@ internal object StandbyAutomation {
         val run = runs[index]
         val launch = appContext.packageManager.getLaunchIntentForPackage(run.server.packageName)
             ?: return endRun(StandbyOutcome.NOT_INSTALLED)
+        // Checked again here: the client may have been replaced since the run began.
+        clientRefusal(run.server.packageName)?.let { return endRun(it) }
         // A game left running from earlier would skip its login, and the roster comes with login.
         killInBackground(run.server.packageName)
         val opener = standby.get()?.takeUnless { it.isFinishing } ?: StandbyAutomationService.instance
@@ -471,6 +475,14 @@ internal object StandbyAutomation {
         phase = next
         phaseStartedAt = System.currentTimeMillis()
     }
+
+    /**
+     * Why [packageName] must not be opened, or null when its signer is the trusted one. Standby
+     * never pins: an app installed under a client's package name while nobody uses GF2logger is
+     * not trusted by being launched.
+     */
+    private fun clientRefusal(packageName: String): StandbyOutcome? =
+        StandbyOutcome.forClient(SupportedClientSigners.of(appContext).trust(packageName))
 
     private fun isLocked(): Boolean =
         appContext.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true

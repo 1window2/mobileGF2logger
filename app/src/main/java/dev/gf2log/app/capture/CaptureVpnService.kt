@@ -11,6 +11,8 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import dev.gf2log.app.LanguagePreferences
 import dev.gf2log.app.R
+import dev.gf2log.app.SupportedClientSigners
+import dev.gf2log.app.SupportedClientTrust
 import dev.gf2log.app.SupportedGamePackages
 import dev.gf2log.app.management.CsvImportCheckpointManager
 import dev.gf2log.app.management.CsvImportInProgressException
@@ -231,7 +233,11 @@ class CaptureVpnService : VpnService() {
             builder.setMetered(false)
         }
 
-        val installedTargets = SupportedGamePackages.all.filter { targetPackage ->
+        // Only a client signed by its trusted signer is routed: another app installed under the same
+        // package name stays outside the VPN until the user trusts it in Settings.
+        val signers = SupportedClientSigners.of(this)
+        val trust = SupportedGamePackages.all.associateWith(signers::trust)
+        val installedTargets = trust.filterValues { it == SupportedClientTrust.VERIFIED }.keys.filter { targetPackage ->
             try {
                 builder.addAllowedApplication(targetPackage)
                 true
@@ -240,7 +246,7 @@ class CaptureVpnService : VpnService() {
             }
         }
         if (installedTargets.isEmpty()) {
-            stop(CaptureNotice.NO_SUPPORTED_CLIENT)
+            stop(CaptureTargetPolicy.noTargetNotice(trust.values))
             return
         }
 

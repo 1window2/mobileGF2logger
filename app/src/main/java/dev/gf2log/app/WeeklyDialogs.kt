@@ -8,6 +8,7 @@ import android.view.View
 import dev.gf2log.app.management.MetricCertainty
 import dev.gf2log.app.management.WeeklyEvidenceAnalyzer
 import dev.gf2log.app.management.WeeklyEvidenceAnalyzer.Metric
+import dev.gf2log.app.management.WeeklyMetricPresentation
 import dev.gf2log.app.management.WeeklyOverrideEditing
 import dev.gf2log.app.management.WeeklyOverrideEditing.Choice
 import dev.gf2log.app.management.WeeklyReportBuilder
@@ -72,8 +73,8 @@ internal object WeeklyDialogs {
     }
 
     /**
-     * Edits one member-day. Fields start from the displayed values; only fields the user changes
-     * become edits, so untouched derived values keep their certainty.
+     * Edits one member-day. Exact values start filled in; only fields the user changes become
+     * edits, so untouched derived values keep their certainty.
      */
     fun showEdit(
         activity: Activity,
@@ -85,18 +86,22 @@ internal object WeeklyDialogs {
         next: (() -> Unit)? = null,
         onDone: (WeeklyOverrideEditing.CellEdit) -> Unit,
     ) {
-        fun numberField(label: Int, initial: String, hint: Int): Pair<LabeledField, String> {
-            val field = activity.textField(activity.getString(hint), inputType = InputType.TYPE_CLASS_NUMBER).apply { setText(initial) }
-            return LabeledField(activity, activity.getString(label), field) to initial
+        // A minimum or unknown value starts empty with its notation as the hint, so typing the
+        // shown number confirms it instead of reading as "unchanged".
+        fun numberField(label: Int, field: WeeklyCellEditor.Field, hint: Int): Pair<LabeledField, String> {
+            val start = WeeklyCellEditor.start(cell, current, field)
+            val hintText = start.notation?.let { activity.getString(R.string.captured_value_hint, it) } ?: activity.getString(hint)
+            val input = activity.textField(hintText, inputType = InputType.TYPE_CLASS_NUMBER).apply { setText(start.text) }
+            return LabeledField(activity, activity.getString(label), input) to start.text
         }
-        val (merit, meritInitial) = numberField(R.string.merit_short, current?.merit ?: cell.meritDelta?.toString().orEmpty(), R.string.blank_clears)
+        val (merit, meritInitial) = numberField(R.string.merit_short, WeeklyCellEditor.Field.MERIT, R.string.blank_clears)
         val score = if (isGunsmokeWeek) {
-            numberField(R.string.point_short, current?.score ?: cell.scoreDelta?.toString().orEmpty(), R.string.blank_clears)
+            numberField(R.string.point_short, WeeklyCellEditor.Field.SCORE, R.string.blank_clears)
         } else {
             null
         }
         val attempts = if (isGunsmokeWeek) {
-            numberField(R.string.attempt_short, current?.attempts ?: cell.attempts?.toString().orEmpty(), R.string.attempts_range)
+            numberField(R.string.attempt_short, WeeklyCellEditor.Field.ATTEMPTS, R.string.attempts_range)
         } else {
             null
         }
@@ -129,7 +134,7 @@ internal object WeeklyDialogs {
         if (next != null) builder.setNeutralButton(R.string.apply_and_next_day, null)
         Dialogs.show(builder) { dialog ->
             fun changed(field: Pair<LabeledField, String>?): String? =
-                field?.let { (view, initial) -> view.input.text.toString().takeIf { it != initial } }
+                field?.let { (view, initial) -> WeeklyCellEditor.changed(view.input.text.toString(), initial) }
             fun finish(edit: WeeklyOverrideEditing.CellEdit, then: (() -> Unit)? = null) {
                 val probe = WeeklyOverrideEditing.merge(
                     cell.manualOverride?.periodStart ?: cell.gameDay,
@@ -287,4 +292,41 @@ internal object WeeklyDialogs {
         WeeklyEvidenceAnalyzer.Fact.SPARSE_INFERENCE -> R.string.evidence_fact_sparse
         WeeklyEvidenceAnalyzer.Fact.AMBIGUOUS_ALLOCATION -> R.string.evidence_fact_ambiguous
     }
+}
+
+/** The pure part of the cell editor: what each number field starts with and what counts as a change. */
+internal object WeeklyCellEditor {
+    enum class Field { MERIT, SCORE, ATTEMPTS }
+
+    /**
+     * [text] fills the field; [notation] is the displayed value (`≥90`, `?`) shown as a hint when
+     * the field starts empty because that value is not exact.
+     */
+    data class Start(val text: String, val notation: String? = null)
+
+    /**
+     * A field is filled in only with an unsaved draft value or an exact value (a manual override
+     * is exact). Prefilling a minimum or an unknown would make the confirmed number impossible to
+     * enter, because typing the same digits leaves the field "unchanged".
+     */
+    fun start(cell: WeeklyReportBuilder.DayCell, current: WeeklyOverrideEditing.CellEdit?, field: Field): Start {
+        val draft = when (field) {
+            Field.MERIT -> current?.merit
+            Field.SCORE -> current?.score
+            Field.ATTEMPTS -> current?.attempts
+        }
+        if (draft != null) return Start(draft)
+        val (value, certainty) = when (field) {
+            Field.MERIT -> cell.meritDelta to cell.meritCertainty
+            Field.SCORE -> cell.scoreDelta to cell.scoreCertainty
+            Field.ATTEMPTS -> cell.attempts to cell.attemptsCertainty
+        }
+        if (value != null && certainty == MetricCertainty.EXACT) return Start(value.toString())
+        // Same notation as the table cell, including its "-" for attempts on a manual cell.
+        val missing = if (field == Field.ATTEMPTS && cell.manualOverride != null) "-" else "?"
+        return Start("", WeeklyMetricPresentation.format(value, certainty, missing))
+    }
+
+    /** The typed text when it differs from what the field started with, otherwise null. */
+    fun changed(input: String, start: String): String? = input.takeIf { it != start }
 }

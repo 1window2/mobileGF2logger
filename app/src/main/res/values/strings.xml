@@ -459,6 +459,7 @@
     <string name="attempts_range">0–3 · blank clears</string>
     <string name="below_cutline">below cutline</string>
     <string name="blank_clears">Leave blank to clear</string>
+    <string name="captured_value_hint">Captured: %1$s</string>
     <string name="cancel_editing">Cancel editing</string>
     <string name="choice_unset">Auto</string>
     <string name="clear_manual_values">Clear manual values</string>

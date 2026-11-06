@@ -339,13 +339,16 @@ internal class PlatoonRepository(
         return activeRevision(live) ?: live
     }
 
-    /** The selected historical revision, [live] when none is selected, or null if undecodable. */
-    private fun activeRevision(live: WeeklyTableRevision): WeeklyTableRevision? {
+    /**
+     * The selected historical revision, [live] when none is selected, or null when the selection
+     * cannot be read or decoded, so the caller falls back to [live].
+     */
+    private fun activeRevision(live: WeeklyTableRevision): WeeklyTableRevision? = runCatching {
         val payload = access {
             it.activeWeeklyReportHistoryPayload(live.report.periodStart.toEpochDay())
         } ?: return live
-        return runCatching { WeeklyReportHistoryCodec.decodeRevision(payload) }.getOrNull()
-    }
+        WeeklyReportHistoryCodec.decodeRevision(payload)
+    }.getOrNull()
 
     private fun buildLiveWeeklyRevision(
         referenceDay: LocalDate,
@@ -465,8 +468,10 @@ internal class PlatoonRepository(
         access { it.listWeeklyReportHistory(periodStart.toEpochDay()) }
 
     fun weeklyReportHistory(id: Long, periodStart: LocalDate): WeeklyReportBuilder.Report? =
-        access { it.weeklyReportHistoryPayload(id, periodStart.toEpochDay()) }
-            ?.let { payload -> runCatching { WeeklyReportHistoryCodec.decode(payload) }.getOrNull() }
+        runCatching {
+            access { it.weeklyReportHistoryPayload(id, periodStart.toEpochDay()) }
+                ?.let(WeeklyReportHistoryCodec::decode)
+        }.getOrNull()
 
     fun restoreWeeklyReportHistory(id: Long, periodStart: LocalDate): Boolean =
         access { it.activateWeeklyReportHistory(id, periodStart.toEpochDay()) }

@@ -1,6 +1,7 @@
 package dev.gf2log.app.management
 
 import android.content.ContentValues
+import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import dev.gf2log.app.management.PlatoonDatabase.Companion.MAX_WEEKLY_REPORT_HISTORY
 import java.time.Instant
@@ -92,19 +93,30 @@ internal object WeeklyHistoryStore {
             }
         }
 
+    /**
+     * The stored revision, null when absent, or an empty [INVALID_PAYLOAD] when its blob is outside
+     * the payload limit, which is never loaded into the cursor window.
+     */
     fun payload(db: SQLiteDatabase, id: Long, periodStartEpochDay: Long): ByteArray? =
         db.rawQuery(
-            "SELECT report_blob FROM weekly_report_history WHERE id = ? AND period_start = ?",
+            "SELECT $BOUNDED_PAYLOAD FROM weekly_report_history WHERE id = ? AND period_start = ?",
             arrayOf(id.toString(), periodStartEpochDay.toString()),
-        ).use { cursor -> if (cursor.moveToFirst()) cursor.getBlob(0) else null }
+        ).use(::boundedPayload)
 
+    /** The selected revision, null when none is selected, or [INVALID_PAYLOAD] as in [payload]. */
     fun activePayload(db: SQLiteDatabase, periodStartEpochDay: Long): ByteArray? =
         db.rawQuery(
-            "SELECT history.report_blob FROM weekly_report_history_state state " +
+            "SELECT $BOUNDED_PAYLOAD FROM weekly_report_history_state state " +
                 "JOIN weekly_report_history history ON history.id = state.active_history_id " +
                 "WHERE state.period_start = ? AND history.period_start = state.period_start",
             arrayOf(periodStartEpochDay.toString()),
-        ).use { cursor -> if (cursor.moveToFirst()) cursor.getBlob(0) else null }
+        ).use(::boundedPayload)
+
+    private fun boundedPayload(cursor: Cursor): ByteArray? = when {
+        !cursor.moveToFirst() -> null
+        cursor.isNull(0) -> INVALID_PAYLOAD
+        else -> cursor.getBlob(0)
+    }
 
     fun activate(db: SQLiteDatabase, id: Long, periodStartEpochDay: Long): Boolean {
         val exists = db.exists(
@@ -179,4 +191,12 @@ internal object WeeklyHistoryStore {
     }
 
     private val FINGERPRINT = Regex("[0-9a-f]{64}")
+
+    /** Selects report_blob only within the payload limit, otherwise NULL. */
+    private val BOUNDED_PAYLOAD =
+        "CASE WHEN length(report_blob) BETWEEN 1 AND ${WeeklyReportHistoryCodec.MAX_PAYLOAD_BYTES} " +
+            "THEN report_blob END"
+
+    /** A payload no codec accepts, standing for a stored blob outside the payload limit. */
+    val INVALID_PAYLOAD = ByteArray(0)
 }

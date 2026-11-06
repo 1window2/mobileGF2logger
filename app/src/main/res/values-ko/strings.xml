@@ -147,6 +147,7 @@
     <string name="delete_note">비고 삭제</string>
     <string name="delete">삭제</string>
     <string name="note_deleted">비고를 삭제했습니다</string>
+    <string name="note_delete_failed">비고를 삭제할 수 없습니다</string>
     <string name="export_weekly_csv">주간 CSV 내보내기</string>
     <string name="weekly_csv_exported">주간 CSV를 내보냈습니다</string>
     <string name="weekly_csv_export_failed">주간 CSV를 내보낼 수 없습니다</string>
@@ -250,7 +251,8 @@
     <string name="cutline_value">최소값</string>
     <string name="save_settings">설정 저장</string>
     <string name="member_order">멤버 순서</string>
-    <string name="member_order_description">주간 표는 이 순서로 멤버를 표시합니다. 손잡이를 끌어 조정하면 자동으로 저장됩니다.</string>
+    <string name="member_order_description">순서를 정하면 주간 표가 이 순서로 멤버를 표시합니다. 손잡이를 끌어 조정하면 자동으로 저장됩니다.</string>
+    <string name="member_order_ranked_default">아직 직접 정한 순서가 없습니다. 주간 표는 공적 순(흙먼지 주간에는 점수 순)으로 표시하며, 아래 목록은 조정하기 쉽도록 가입일 순으로 시작합니다.</string>
     <string name="sort_criterion">정렬 기준</string>
     <string name="sort_direction">정렬 방향</string>
     <string name="sort_join_date">가입일</string>
@@ -429,7 +431,7 @@
     <string name="platoon_load_failed">서클 데이터를 불러오지 못했습니다.</string>
     <string name="present">현재</string>
     <string name="reset">초기화</string>
-    <string name="reset_member_order_warning">기본 가입일 순서로 되돌릴까요? 직접 정한 순서는 삭제됩니다.</string>
+    <string name="reset_member_order_warning">직접 정한 순서를 삭제할까요? 주간 표는 다시 공적 순(흙먼지 주간에는 점수 순)으로 멤버를 표시합니다.</string>
     <string name="select_all">모두 선택</string>
     <string name="select_members">멤버 선택</string>
     <string name="selected">선택됨</string>
@@ -455,6 +457,7 @@
     <string name="attempts_range">0–3 · 비우면 해제</string>
     <string name="below_cutline">커트라인 미달</string>
     <string name="blank_clears">비우면 해제</string>
+    <string name="captured_value_hint">캡처: %1$s</string>
     <string name="cancel_editing">수정 취소</string>
     <string name="choice_unset">자동</string>
     <string name="clear_manual_values">수동 값 지우기</string>
@@ -487,7 +490,7 @@
     <string name="note_day">게임 일자</string>
     <string name="note_required">비고를 입력하세요.</string>
     <string name="patrol_initial">과</string>
-    <string name="png_evidence_summary">근거: 관측 %1$d/%2$d일\n확정 %3$d · 최솟값 %4$d · 미확인 %5$d</string>
+    <string name="png_evidence_summary">근거: 관측 %1$d/%2$d일 · 확정 %3$d · 최솟값 %4$d · 미확인 %5$d</string>
     <string name="rank_description">%1$d위</string>
     <string name="select_week">주 선택</string>
     <string name="share_private_notes_detail">민감한 정보입니다. 기본값은 꺼짐입니다.</string>

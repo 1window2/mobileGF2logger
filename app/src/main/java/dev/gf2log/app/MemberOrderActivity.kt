@@ -23,6 +23,7 @@ import dev.gf2log.app.management.MemberSortField
 import dev.gf2log.app.management.MemberStatus
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.SnapshotMember
+import dev.gf2log.app.settings.MemberOrderMerge
 import dev.gf2log.app.settings.MemberOrderPreferences
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
@@ -60,7 +61,10 @@ class MemberOrderActivity : BaseActivity() {
     private val stateAdapter = SingleViewAdapter()
     private lateinit var touchHelper: ItemTouchHelper
     private var members = mutableListOf<MemberStatus>()
+    /** The order as loaded or last saved; a drag that ends where it started saves nothing. */
+    private var shownOrder = emptyList<Long>()
     private var latestMembers = emptyMap<Long, SnapshotMember>()
+    private lateinit var rankedDefault: TextView
     private var sortField = MemberSortField.JOIN_DATE
     private var sortDirection = MemberSortDirection.ASCENDING
     private lateinit var fieldButton: TextView
@@ -111,6 +115,9 @@ class MemberOrderActivity : BaseActivity() {
 
     private fun buildHeader(): View = column {
         addView(text(getString(R.string.member_order_description), TextRole.SECONDARY), lp(top = 4))
+        // Without a saved order the tables keep their ranking; the list only offers a start point.
+        rankedDefault = text(getString(R.string.member_order_ranked_default), TextRole.SECONDARY) { visibility = View.GONE }
+        addView(rankedDefault, lp(top = 8))
         fieldButton = choiceChip { chooseField() }
         directionButton = choiceChip { toggleDirection() }
         addView(panel(padding = 12) {
@@ -146,14 +153,18 @@ class MemberOrderActivity : BaseActivity() {
             task = {
                 val active = repository.listMemberStatuses(activeOnly = true)
                 val defaults = MemberOrderSorter.sort(active, emptyMap(), MemberSortField.JOIN_DATE, MemberSortDirection.ASCENDING)
-                val ordered = if (preferences.read().isEmpty()) defaults else preferences.apply(defaults, MemberStatus::uid)
-                ordered to repository.listSnapshots(1).firstOrNull()?.members.orEmpty().associateBy(SnapshotMember::uid)
+                val saved = preferences.read()
+                val ordered = if (saved.isEmpty()) defaults else MemberOrderMerge.apply(saved, defaults, MemberStatus::uid)
+                val latest = repository.listSnapshots(1).firstOrNull()?.members.orEmpty().associateBy(SnapshotMember::uid)
+                Triple(ordered, latest, saved.isEmpty())
             },
         ) { result ->
             result.fold(
-                onSuccess = { (ordered, latest) ->
+                onSuccess = { (ordered, latest, unsaved) ->
                     members = ordered.toMutableList()
+                    shownOrder = ordered.map(MemberStatus::uid)
                     latestMembers = latest
+                    rankedDefault.visibility = if (unsaved) View.VISIBLE else View.GONE
                     stateAdapter.view = if (members.isEmpty()) {
                         StateViews.empty(this, R.drawable.ic_group, getString(R.string.no_active_members))
                     } else {
@@ -211,8 +222,8 @@ class MemberOrderActivity : BaseActivity() {
 
     private fun confirmReset() {
         Dialogs.confirm(this, R.string.reset_member_order, R.string.reset_member_order_warning, R.string.reset) {
-            work.run(task = { preferences.clear() }) {
-                Feedback.show(this, R.string.member_order_reset)
+            work.run(task = { preferences.clear() }) { result ->
+                Feedback.show(this, if (result.isSuccess) R.string.member_order_reset else R.string.save_failed)
                 load()
             }
         }
@@ -225,10 +236,20 @@ class MemberOrderActivity : BaseActivity() {
         adapter.notifyItemRangeChanged(minOf(from, to), kotlin.math.abs(from - to) + 1, POSITION_PAYLOAD)
     }
 
+    /**
+     * Saves the active members' arrangement; withdrawn members keep their saved places. A failed
+     * save reloads the list so it shows the order the tables still use.
+     */
     private fun persist() {
         val order = members.map(MemberStatus::uid)
-        work.run(task = { check(preferences.write(order)) }) { result ->
-            if (result.isFailure) Feedback.show(this, R.string.save_failed)
+        shownOrder = order
+        work.run(task = { check(preferences.writeActive(order)) }) { result ->
+            if (result.isSuccess) {
+                rankedDefault.visibility = View.GONE
+            } else {
+                Feedback.show(this, R.string.save_failed)
+                load()
+            }
         }
     }
 
@@ -338,7 +359,8 @@ class MemberOrderActivity : BaseActivity() {
         override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
             super.clearView(recyclerView, viewHolder)
             viewHolder.itemView.background?.setTint(getColor(R.color.surface))
-            persist()
+            // A touch or long-press that moves nobody must not turn the ranking into a saved order.
+            if (MemberOrderMerge.changed(shownOrder, members.map(MemberStatus::uid))) persist()
         }
     }
 

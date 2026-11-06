@@ -106,6 +106,7 @@ typedef struct zdtun_conn {
   proxy_mode_t proxy_mode;
   socks5_status_t socks5_status;
   uint8_t socks5_skip;
+  uint8_t purge_rank; // see zdtun_purge_expired
 
   union {
     struct {
@@ -1970,9 +1971,30 @@ int zdtun_handle_fd(zdtun_t *tun, const fd_set *rd_fds, const fd_set *wr_fds) {
 
 /* ******************************************************* */
 
+// Force purge order, cheapest loss first. Connections without a socket free nothing the cap
+// counts, so they go first and are not counted; UDP and ICMP are cheap to reopen; then TCP;
+// the connections on_purge_priority asks to keep go last.
+#define PURGE_RANK_NO_SOCKET 0
+#define PURGE_RANK_DATAGRAM 1
+#define PURGE_RANK_TCP 2
+#define PURGE_RANK_KEEP 3
+
+static uint8_t purge_rank(zdtun_t *tun, const zdtun_conn_t *conn) {
+  if((conn->status >= CONN_STATUS_CLOSED) || (conn->sock == INVALID_SOCKET))
+    return PURGE_RANK_NO_SOCKET;
+
+  if(tun->callbacks.on_purge_priority && (tun->callbacks.on_purge_priority(tun, conn) != 0))
+    return PURGE_RANK_KEEP;
+
+  return (conn->tuple.ipproto == IPPROTO_TCP) ? PURGE_RANK_TCP : PURGE_RANK_DATAGRAM;
+}
+
 // negative, zero, or positive <=> A before, equal to, or after B
-static inline int zdtun_conn_cmp_timestamp_asc(zdtun_conn_t *a, zdtun_conn_t *b) {
-  return(a->tstamp - b->tstamp);
+static inline int zdtun_conn_cmp_purge_order(zdtun_conn_t *a, zdtun_conn_t *b) {
+  if(a->purge_rank != b->purge_rank)
+    return((int)a->purge_rank - (int)b->purge_rank);
+
+  return((a->tstamp > b->tstamp) - (a->tstamp < b->tstamp));
 }
 
 // purges old connections. Harvests the closed connections (set by close_conn)
@@ -2008,14 +2030,22 @@ void zdtun_purge_expired(zdtun_t *tun) {
 
     debug("FORCE PURGE %d items", to_purge);
 
-    HASH_SORT(tun->conn_table, zdtun_conn_cmp_timestamp_asc);
+    HASH_ITER(hh, tun->conn_table, conn, tmp) {
+      conn->purge_rank = purge_rank(tun, conn);
+    }
+
+    HASH_SORT(tun->conn_table, zdtun_conn_cmp_purge_order);
 
     HASH_ITER(hh, tun->conn_table, conn, tmp) {
-      if(to_purge == 0)
+      if(to_purge <= 0)
         break;
 
+      uint8_t frees_socket = (conn->purge_rank != PURGE_RANK_NO_SOCKET);
+
       destroy_conn(tun, conn);
-      to_purge--;
+
+      if(frees_socket)
+        to_purge--;
     }
   }
 }

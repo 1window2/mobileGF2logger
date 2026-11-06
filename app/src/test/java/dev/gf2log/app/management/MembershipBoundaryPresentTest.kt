@@ -29,8 +29,8 @@ class MembershipBoundaryPresentTest {
 
     @Test
     fun `a known time may run ahead only by the clock skew`() {
-        assertTrue(within(timed(now.plus(MAX_MANUAL_BOUNDARY_CLOCK_SKEW))))
-        assertFalse(within(timed(now.plus(MAX_MANUAL_BOUNDARY_CLOCK_SKEW).plusMillis(1))))
+        assertTrue(within(timed(now.plus(SnapshotClockPolicy.MAX_CLOCK_SKEW))))
+        assertFalse(within(timed(now.plus(SnapshotClockPolicy.MAX_CLOCK_SKEW).plusMillis(1))))
     }
 
     @Test

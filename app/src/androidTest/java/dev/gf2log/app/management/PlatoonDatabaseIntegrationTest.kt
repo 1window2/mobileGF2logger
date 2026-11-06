@@ -887,7 +887,8 @@ class PlatoonDatabaseIntegrationTest {
         val writable = database.writableDatabase
         writable.beginTransaction()
         try {
-            repeat(PlatoonDatabase.MAX_STORED_ACTIVITY_OBSERVATIONS) { index ->
+            // One 21935 fact over the cap; the exact Daily Patrol fact never counts toward it.
+            repeat(PlatoonDatabase.MAX_STORED_ACTIVITY_OBSERVATIONS + 1) { index ->
                 writable.insertOrThrow(
                     "platoon_activity",
                     null,
@@ -920,7 +921,7 @@ class PlatoonDatabaseIntegrationTest {
 
         assertEquals(1, result.patrolFacts)
         assertEquals(
-            PlatoonDatabase.MAX_STORED_ACTIVITY_OBSERVATIONS.toLong(),
+            PlatoonDatabase.MAX_STORED_ACTIVITY_OBSERVATIONS.toLong() + 1,
             count("platoon_activity", "id > ?", 0),
         )
         assertEquals(0L, count("platoon_activity", "action_id = ?", 1))

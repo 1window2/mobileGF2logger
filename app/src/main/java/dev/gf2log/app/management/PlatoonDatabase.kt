@@ -43,6 +43,7 @@ internal class PlatoonDatabase private constructor(
         super.onOpen(db)
         if (!db.isReadOnly) {
             PlatoonDatabaseSchema.ensureMaintenanceObjects(db)
+            MembershipRows.ensureActiveStateRule(db)
             ActivityIngestion.trimPlatoonActivity(db)
         }
     }

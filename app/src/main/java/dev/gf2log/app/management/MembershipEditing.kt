@@ -102,6 +102,7 @@ internal object MembershipEditing {
             if (!memberExists(db, uid)) return@inTransaction false
             val uidArgument = arrayOf(uid.toString())
             db.delete("weekly_overrides", "uid = ?", uidArgument)
+            deleteUnresolvedActivityOwnedBy(db, uid)
             db.delete(
                 "platoon_activity",
                 "resolved_uid = ? OR member_event_id IN " +
@@ -115,6 +116,37 @@ internal object MembershipEditing {
             check(deleted) { "Member disappeared during deletion" }
             true
         }
+    }
+
+    /**
+     * Unresolved activity facts carry only a name. A name that no other member ever held can
+     * belong to nobody else, so those facts leave with the member instead of resolving later to
+     * a member re-added under that name. A shared name keeps its facts, whose owner is unknown.
+     */
+    private fun deleteUnresolvedActivityOwnedBy(db: SQLiteDatabase, uid: Long) {
+        db.execSQL(
+            """
+            DELETE FROM platoon_activity
+            WHERE resolved_uid IS NULL
+              AND member_name IN (
+                SELECT owned.name
+                FROM (
+                  SELECT current_name AS name FROM members WHERE uid = ?
+                  UNION
+                  SELECT name FROM snapshot_members WHERE uid = ?
+                ) owned
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM members other
+                    WHERE other.uid != ? AND other.current_name = owned.name COLLATE BINARY
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM snapshot_members other
+                    WHERE other.uid != ? AND other.name = owned.name COLLATE BINARY
+                  )
+              )
+            """.trimIndent(),
+            arrayOf(uid, uid, uid, uid),
+        )
     }
 
     /**

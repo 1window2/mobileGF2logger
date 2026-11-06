@@ -385,8 +385,8 @@ internal object MembershipRows {
      * The one rule for `members.is_active`: a member is active while an effective open period
      * remains. An open period started by an exact Updates join is superseded by later exit
      * evidence: another period exiting after that join, or a newer authoritative roster that
-     * omits the member. When rosters and Updates agree this is simply "some period is open",
-     * the projection the schema-v13 upgrade repairs.
+     * omits the member. When rosters and Updates agree this is simply "some period is open".
+     * Any change to this rule must raise [ACTIVE_STATE_RULE_VERSION].
      */
     private fun effectiveOpenPeriod(uid: String): String =
         """
@@ -436,6 +436,35 @@ internal object MembershipRows {
     fun synchronizeAllActiveStates(db: SQLiteDatabase) {
         db.execSQL(ACTIVE_STATE_UPDATE)
     }
+
+    /**
+     * Guarantees that every stored active flag was derived at least once with the current rule,
+     * independent of the schema version: a v13 database written before 2.5.0 changed the rule,
+     * or a restored backup of one, still holds flags from the older any-open-period rule.
+     */
+    fun ensureActiveStateRule(db: SQLiteDatabase) {
+        val derivedWith = db.rawQuery(
+            "SELECT value FROM platoon_maintenance_state WHERE key = ?",
+            arrayOf(ACTIVE_STATE_RULE_KEY),
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
+        if (derivedWith != null && derivedWith >= ACTIVE_STATE_RULE_VERSION) return
+        db.inTransaction {
+            synchronizeAllActiveStates(db)
+            db.insertWithOnConflict(
+                "platoon_maintenance_state",
+                null,
+                ContentValues().apply {
+                    put("key", ACTIVE_STATE_RULE_KEY)
+                    put("value", ACTIVE_STATE_RULE_VERSION)
+                },
+                SQLiteDatabase.CONFLICT_REPLACE,
+            )
+        }
+    }
+
+    /** Version 2 is the effective-open-period rule introduced in 2.5.0. */
+    const val ACTIVE_STATE_RULE_VERSION = 2L
+    const val ACTIVE_STATE_RULE_KEY = "active_state_rule"
 
     private const val MAX_BOUND_ARGUMENTS = 500
 }

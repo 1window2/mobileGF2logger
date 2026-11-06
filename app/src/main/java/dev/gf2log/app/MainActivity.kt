@@ -277,11 +277,10 @@ class MainActivity : BaseActivity() {
             key = SUMMARY,
             task = {
                 val repository = PlatoonRepository(this, scope)
-                val snapshots = repository.listSnapshots(2)
-                val latest = snapshots.firstOrNull()
-                latest?.let {
-                    it to snapshots.getOrNull(1)?.let { older ->
-                        SnapshotComparison.compare(older, it, repository.gameZone())
+                val snapshots = repository.listSnapshots(SnapshotComparison.COMPARISON_LOOKBACK)
+                SnapshotComparison.latestComparablePair(snapshots)?.let { (latest, baseline) ->
+                    latest to baseline?.let { older ->
+                        SnapshotComparison.compare(older, latest, repository.gameZone())
                     }
                 }
             },

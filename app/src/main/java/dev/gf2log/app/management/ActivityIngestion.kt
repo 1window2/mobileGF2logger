@@ -202,8 +202,11 @@ internal object ActivityIngestion {
     }
 
     /**
-     * Caps network-derived activity evidence to the newest bounded history. Runs on open and after
-     * each ingest so an older oversized database self-heals.
+     * Caps network-derived 21935 activity evidence to the newest bounded history. Runs on open
+     * and after each ingest so an older oversized database self-heals. Exact 21960 Daily Patrol
+     * facts share the table but not the cap: they are the only Daily Patrol evidence and are
+     * bounded by their own identity (one per UID, kind, and instant), so newer activity never
+     * evicts them.
      */
     fun trimPlatoonActivity(db: SQLiteDatabase) {
         db.execSQL(
@@ -212,6 +215,7 @@ internal object ActivityIngestion {
             WHERE id IN (
                 SELECT id
                 FROM platoon_activity
+                WHERE resolution != '${ActivityResolution.EXACT_UPDATE.name}'
                 ORDER BY captured_at DESC, id DESC
                 LIMIT -1 OFFSET $MAX_STORED_ACTIVITY_OBSERVATIONS
             )

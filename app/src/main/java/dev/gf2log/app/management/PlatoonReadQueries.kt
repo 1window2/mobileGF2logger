@@ -128,7 +128,10 @@ internal object PlatoonReadQueries {
         null,
         null,
         null,
-        "uid, CASE WHEN joined_at IS NULL THEN 1 ELSE 0 END, joined_at, id",
+        // Chronological: by join, or by withdrawal when the join is unknown; an undated open
+        // period is the current one and sorts last. Every stored boundary keeps its instant.
+        "uid, CASE WHEN COALESCE(joined_at, left_at) IS NULL THEN 1 ELSE 0 END, " +
+            "COALESCE(joined_at, left_at), id",
     ).use { cursor ->
         val periods = mutableMapOf<Long, MutableList<MembershipPeriod>>()
         while (cursor.moveToNext()) {

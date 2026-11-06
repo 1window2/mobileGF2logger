@@ -34,7 +34,7 @@ class MemberOrderPreferences(
 
     fun clear() {
         if (isLegacy) {
-            UserSettingsPreferences.clearMemberOrder(appContext)
+            check(UserSettingsPreferences.clearMemberOrder(appContext)) { "Unable to clear the member order" }
         } else {
             check(scoped.clear()) { "Unable to clear the member order" }
         }
@@ -51,21 +51,29 @@ class MemberOrderPreferences(
     }
 }
 
-/** One Platoon's order inside the shared per-Platoon file, stored as comma-separated UIDs. */
+/**
+ * One member order stored as comma-separated UIDs under [key]: a Platoon's in the shared
+ * per-Platoon file, or the legacy Platoon's in the app settings.
+ */
 internal class ScopedMemberOrder(
     private val preferences: SharedPreferences,
     private val key: String,
 ) {
-    fun read(): List<Long> = preferences.getString(key, null).orEmpty()
-        .split(',')
-        .mapNotNull(String::toLongOrNull)
-        .filter { it > 0L }
-        .distinct()
+    fun read(): List<Long> = parse(preferences.getString(key, null))
 
     fun write(uids: List<Long>): Boolean =
         preferences.commitOrRevert(key) { putString(key, uids.filter { it > 0L }.distinct().joinToString(",")) }
 
     fun clear(): Boolean = preferences.commitOrRevert(key) { remove(key) }
+
+    companion object {
+        /** Only positive UIDs are member identities; anything else would fail settings validation. */
+        fun parse(value: String?): List<Long> = value.orEmpty()
+            .split(',')
+            .mapNotNull(String::toLongOrNull)
+            .filter { it > 0L }
+            .distinct()
+    }
 }
 
 /** Pure ordering rules shared by the weekly tables and the Member order screen. */

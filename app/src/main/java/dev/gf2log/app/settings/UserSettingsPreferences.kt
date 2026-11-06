@@ -106,26 +106,27 @@ internal object UserSettingsPreferences {
     fun setPayloadHistoryEnabled(context: Context, payloadType: Int, enabled: Boolean) =
         edit(context) { putBoolean(payloadKey(payloadType), enabled) }
 
-    fun memberOrder(context: Context): List<Long> = synchronized(lock) {
-        parseMemberOrder(
-            preferencesLocked(context.applicationContext).getString(KEY_MEMBER_ORDER, null),
-        )
-    }
+    fun memberOrder(context: Context): List<Long> = synchronized(lock) { legacyMemberOrder(context).read() }
 
+    /** Like a Platoon's own order, a failed commit keeps the previous order readable. */
     fun setMemberOrder(context: Context, uids: List<Long>): Boolean = synchronized(lock) {
-        preferencesLocked(context.applicationContext).edit()
-            .putString(KEY_MEMBER_ORDER, uids.filter { it > 0L }.distinct().joinToString(","))
-            .commit()
+        legacyMemberOrder(context).write(uids)
     }
 
-    fun clearMemberOrder(context: Context) = edit(context) { remove(KEY_MEMBER_ORDER) }
+    fun clearMemberOrder(context: Context): Boolean = synchronized(lock) { legacyMemberOrder(context).clear() }
+
+    private fun legacyMemberOrder(context: Context) =
+        ScopedMemberOrder(preferencesLocked(context.applicationContext), KEY_MEMBER_ORDER)
 
     fun weeklyCutlines(context: Context): WeeklyCutlines = synchronized(lock) {
         readCutlines(preferencesLocked(context.applicationContext))
     }
 
-    fun setWeeklyCutlines(context: Context, cutlines: WeeklyCutlines) = edit(context) {
-        putWeeklyCutlines(cutlines, WeeklyCutlineField::settingsKey)
+    /** Like a Platoon's own cutlines, a failed commit keeps the previous cutlines readable. */
+    fun setWeeklyCutlines(context: Context, cutlines: WeeklyCutlines): Boolean = synchronized(lock) {
+        preferencesLocked(context.applicationContext).commitOrRevert(
+            WeeklyCutlineField.entries.map(WeeklyCutlineField::settingsKey),
+        ) { putWeeklyCutlines(cutlines, WeeklyCutlineField::settingsKey) }
     }
 
     fun targetPackage(context: Context): String = synchronized(lock) {
@@ -204,7 +205,7 @@ internal object UserSettingsPreferences {
             category.payloadType to
                 (category.isRequired || preferences.getBoolean(payloadKey(category.payloadType), false))
         },
-        memberOrder = parseMemberOrder(preferences.getString(KEY_MEMBER_ORDER, null)),
+        memberOrder = ScopedMemberOrder.parse(preferences.getString(KEY_MEMBER_ORDER, null)),
         weeklyCutlines = readCutlines(preferences),
     )
 
@@ -220,7 +221,7 @@ internal object UserSettingsPreferences {
             "payload_history_options",
             Context.MODE_PRIVATE,
         )
-        val memberOrder = parseMemberOrder(
+        val memberOrder = ScopedMemberOrder.parse(
             context.getSharedPreferences("weekly_member_order", Context.MODE_PRIVATE)
                 .safeString("uids"),
         )
@@ -329,13 +330,6 @@ internal object UserSettingsPreferences {
 
     private fun SharedPreferences.safeInt(key: String): Int? =
         runCatching { getInt(key, 0) }.getOrNull().takeIf { contains(key) }
-
-    /** Only positive UIDs are member identities; anything else would fail settings validation. */
-    private fun parseMemberOrder(value: String?): List<Long> = value.orEmpty()
-        .split(',')
-        .mapNotNull(String::toLongOrNull)
-        .filter { it > 0L }
-        .distinct()
 
     private fun payloadKey(payloadType: Int) = "payload_$payloadType"
 

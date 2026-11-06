@@ -56,13 +56,12 @@ class WeeklyCutlinePreferences(
     }
 
     fun write(cutlines: WeeklyCutlines) {
-        if (isLegacy) {
+        val saved = if (isLegacy) {
             UserSettingsPreferences.setWeeklyCutlines(appContext, cutlines)
-            return
+        } else {
+            scoped.write(cutlines)
         }
-        check(scoped.write(cutlines)) {
-            "Unable to persist weekly cutlines"
-        }
+        check(saved) { "Unable to persist weekly cutlines" }
     }
 
     fun clear() {

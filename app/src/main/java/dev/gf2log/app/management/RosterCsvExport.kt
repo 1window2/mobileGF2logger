@@ -3,8 +3,6 @@ package dev.gf2log.app.management
 import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.LogTime
 import dev.gf2log.protocol.model.GuildMember
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
 
 /**
  * Home's "Export roster CSV" of [PlatoonRepository.latestSnapshot], the roster Home summarizes.
@@ -31,10 +29,7 @@ internal object RosterCsvExport {
     /** The roster's own retained name when it has one, otherwise the capture naming scheme. */
     fun fileName(snapshot: PlatoonSnapshot): String =
         snapshot.sourceFile?.takeIf { it.matches(SAFE_FILE_NAME) }
-            ?: "gf2log_platoonmembers_${FILE_TIME.format(snapshot.capturedAt)}.csv"
+            ?: "${RosterFileNames.capturedStem(snapshot.capturedAt)}.csv"
 
     private val SAFE_FILE_NAME = Regex("[A-Za-z0-9._-]{1,120}\\.csv")
-    private val FILE_TIME: DateTimeFormatter = DateTimeFormatter
-        .ofPattern("yyyyMMdd'T'HHmmss'Z'")
-        .withZone(ZoneOffset.UTC)
 }

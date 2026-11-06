@@ -12,8 +12,6 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.time.Instant
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
 
 /** Validates and durably retains user-selected Platoon roster CSV evidence. */
 class PlatoonCsvImportStore(
@@ -56,7 +54,7 @@ class PlatoonCsvImportStore(
             encoded = encoded,
             snapshot = parsed,
             capturedAt = capturedAt,
-            fileName = "import-" + FILE_TIME.format(capturedAt) + "-" + hash + ".csv",
+            fileName = "import-" + RosterFileNames.CAPTURE_TIME.format(capturedAt) + "-" + hash + ".csv",
         )
     }
 
@@ -156,8 +154,5 @@ class PlatoonCsvImportStore(
         private const val MAX_BYTES = 2 * 1024 * 1024
         private const val READ_BUFFER_BYTES = 8 * 1024
         private const val HASH_BYTES = 10
-        private val FILE_TIME: DateTimeFormatter = DateTimeFormatter
-            .ofPattern("yyyyMMdd'T'HHmmss'Z'")
-            .withZone(ZoneOffset.UTC)
     }
 }

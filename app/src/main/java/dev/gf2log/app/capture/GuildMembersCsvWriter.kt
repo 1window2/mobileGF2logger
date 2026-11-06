@@ -1,6 +1,7 @@
 package dev.gf2log.app.capture
 
 import dev.gf2log.app.history.AtomicFiles
+import dev.gf2log.app.management.RosterFileNames
 import dev.gf2log.protocol.GuildMembersCsv
 import dev.gf2log.protocol.LogTime
 import dev.gf2log.protocol.model.GuildMember
@@ -10,8 +11,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.time.Clock
 import java.time.Instant
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
 
 /**
  * Writes each completed logical roster dataset once, deduplicated by UID. The stream parser
@@ -80,7 +79,7 @@ class GuildMembersCsvWriter(
         check(outputDirectory.isDirectory || outputDirectory.mkdirs()) {
             "Unable to create the roster directory"
         }
-        val filenameStem = "gf2log_platoonmembers_${FILE_TIME_FORMAT.format(instant)}"
+        val filenameStem = RosterFileNames.capturedStem(instant)
         var suffix = 1
         while (true) {
             val name = if (suffix == 1) "$filenameStem.csv" else "${filenameStem}_$suffix.csv"
@@ -134,9 +133,5 @@ class GuildMembersCsvWriter(
             directory.listFiles { file -> file.isFile && file.name.endsWith(WORKING_SUFFIX) }
                 ?.forEach(File::delete)
         }
-
-        private val FILE_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter
-            .ofPattern("yyyyMMdd'T'HHmmss'Z'")
-            .withZone(ZoneOffset.UTC)
     }
 }

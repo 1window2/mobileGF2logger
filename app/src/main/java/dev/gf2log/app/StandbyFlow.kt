@@ -88,7 +88,8 @@ internal class StandbyFlow(
 
     /**
      * Shows the last standby session's results when Home opens; they count as seen only once the
-     * user closes them, so a Home briefly resumed during automation cannot use them up.
+     * user closes them (OK, Back, or a touch outside), so neither a Home briefly resumed during
+     * automation nor one closed or recreated with the dialog open can use them up.
      */
     fun showUnseenResults() {
         if (StandbyAutomation.isArmed || resultsDialog?.isShowing == true) return
@@ -103,11 +104,15 @@ internal class StandbyFlow(
                 Labels.format(Labels.DATE_TIME, Instant.ofEpochMilli(result.atMillis), zone),
             )
         }
-        resultsDialog = Dialogs.message(activity, activity.getString(R.string.standby_results_title), lines).apply {
-            setOnDismissListener {
-                StandbyResults.markSeen(activity, results)
-                resultsDialog = null
-            }
+        resultsDialog = Dialogs.show(
+            Dialogs.builder(activity)
+                .setTitle(R.string.standby_results_title)
+                .setMessage(lines)
+                .setOnCancelListener { StandbyResults.markSeen(activity, results) }
+                .setPositiveButton(android.R.string.ok) { _, _ -> StandbyResults.markSeen(activity, results) },
+        ).apply {
+            // Also dismissed, without the user, when Home is destroyed; that must not mark them seen.
+            setOnDismissListener { resultsDialog = null }
         }
     }
 

@@ -68,6 +68,62 @@ class GunsmokeWeekSolverTest {
     }
 
     @Test
+    fun aStoredNoThatAPatrolFactDisprovesDoesNotDiscardTheRestOfTheWeek() {
+        // Exact 05:00 captures of a member who logs in, patrols, and plays one 5,000-point
+        // attempt every day: 50 + 40 + 30 + 500 = 620 merit a day.
+        val dailyMerit = 620L
+        val snapshots = (0..7).map { completedDays ->
+            PlatoonSnapshot(
+                id = completedDays.toLong(),
+                capturedAt = start.plusDays(completedDays.toLong()).atTime(5, 0).atZone(zone).toInstant(),
+                members = listOf(
+                    member(
+                        totalMerit = 10_000 + completedDays * dailyMerit,
+                        totalScore = completedDays * 5_000L,
+                        weeklyMerit = when (completedDays) {
+                            0 -> 540
+                            1 -> 540 + dailyMerit
+                            else -> (completedDays - 1) * dailyMerit
+                        },
+                    ),
+                ),
+            )
+        }
+        val wednesday = start.plusDays(3)
+        val facts = listOf(DailyPatrolFact(UID, wednesday.atTime(12, 0).atZone(zone).toInstant()))
+
+        fun row(overrides: List<WeeklyCellOverride>) = WeeklyReportBuilder.build(
+            referenceDay = start,
+            zoneId = zone,
+            snapshots = snapshots,
+            overrides = overrides,
+            dailyPatrolFacts = facts,
+            asOf = start.plusDays(8).atStartOfDay(zone).toInstant(),
+        ).members.single()
+
+        val clean = row(emptyList())
+        val contradicted = row(
+            listOf(WeeklyCellOverride(UID, start, wednesday, null, null, null, null, dailyPatrol = false)),
+        )
+
+        assertEquals(true, contradicted.days[3].dailyPatrol)
+        listOf(4, 5, 6).forEach { index ->
+            val expected = clean.days[index]
+            val actual = contradicted.days[index]
+            assertEquals(expected.meritDelta, actual.meritDelta)
+            assertEquals(expected.meritCertainty, actual.meritCertainty)
+            assertEquals(expected.attempts, actual.attempts)
+            assertEquals(expected.dailyPatrol, actual.dailyPatrol)
+        }
+        assertEquals(7 * dailyMerit, contradicted.totalMerit)
+        assertEquals(MetricCertainty.EXACT, contradicted.totalMeritCertainty)
+        assertEquals(7, contradicted.totalAttempts)
+        assertEquals(MetricCertainty.EXACT, contradicted.totalAttemptsCertainty)
+        assertEquals(7, contradicted.patrolDays)
+        assertEquals(MetricCertainty.EXACT, contradicted.patrolDaysCertainty)
+    }
+
+    @Test
     fun nearResetUncappedAnchorDoesNotCreditTheSaturdayTailToTheGunsmokeSunday() {
         // Sunday 04:55 with 500 weekly merit, then Saturday's Daily Patrol at 04:57 (+40). Sunday
         // itself is a login and one 1,000-point attempt: 50 + 30 + 100 = 180.

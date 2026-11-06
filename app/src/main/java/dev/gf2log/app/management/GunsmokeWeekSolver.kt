@@ -1415,11 +1415,26 @@ internal object GunsmokeWeekSolver {
         if (facts.isNotEmpty() && !option.patrol) return false
         if (cell.hasLoginFact && !option.attended) return false
         val override = cell.manualOverride ?: return true
+        val (attended, patrol) = honouredChoices(cell, patrolProven = facts.isNotEmpty())
         return (override.meritDelta == null || override.meritDelta in merit) &&
             (override.scoreDelta == null || override.scoreDelta in score) &&
             (override.attempts == null || override.attempts == option.attempts) &&
-            (override.attended == null || override.attended == option.attended) &&
-            (override.dailyPatrol == null || override.dailyPatrol == option.patrol)
+            (attended == null || attended == option.attended) &&
+            (patrol == null || patrol == option.patrol)
+    }
+
+    /**
+     * The manual Login and Daily Patrol choices of [cell] the solver holds paths to. As on the
+     * displayed cell, a "no" that a fact or counter evidence disproves yields to it, so a stored
+     * contradiction cannot empty every path of a run and discard the rest of the week.
+     */
+    private fun honouredChoices(
+        cell: WeeklyReportBuilder.DayCell,
+        patrolProven: Boolean,
+    ): Pair<Boolean?, Boolean?> {
+        val override = cell.manualOverride ?: return null to null
+        return override.attended?.takeUnless { !it && cell.attendanceProven } to
+            override.dailyPatrol?.takeUnless { !it && patrolProven }
     }
 
     private fun extends(
@@ -1841,9 +1856,10 @@ internal object GunsmokeWeekSolver {
             }
         }.filter { option ->
             val override = cell.manualOverride
+            val (attended, patrol) = honouredChoices(cell, patrolProven = cell.hasDailyPatrolFact)
             (override?.attempts == null || override.attempts == option.attempts) &&
-                (override?.attended == null || override.attended == option.attended) &&
-                (override?.dailyPatrol == null || override.dailyPatrol == option.patrol) &&
+                (attended == null || attended == option.attended) &&
+                (patrol == null || patrol == option.patrol) &&
                 (!cell.hasLoginFact || option.attended) &&
                 (!cell.hasDailyPatrolFact || option.patrol) &&
                 (

@@ -228,13 +228,15 @@ object WeeklyReportBuilder {
                 else -> MetricCertainty.LOWER_BOUND
             }
 
+        /** Whether the displayed Login is yes ahead of a manual choice, which then yields to it. */
+        val attendanceProven: Boolean
+            get() = hasDailyPatrolFact || manualOverride?.dailyPatrol == true || hasLoginFact ||
+                scoreDelta?.let { it > 0L } == true ||
+                attempts?.let { it > 0 } == true ||
+                inference?.attended == true
+
         val attended: Boolean?
-            get() = true.takeIf {
-                hasDailyPatrolFact || manualOverride?.dailyPatrol == true || hasLoginFact ||
-                    scoreDelta?.let { it > 0L } == true ||
-                    attempts?.let { it > 0 } == true ||
-                    inference?.attended == true
-            } ?: manualOverride?.attended
+            get() = true.takeIf { attendanceProven } ?: manualOverride?.attended
                 ?: solvedAttended
                 ?: inference?.attended?.takeIf { evidence == DailyEvidence.ATTRIBUTED }
 

@@ -606,6 +606,8 @@
     <string name="capture_stop_timeout_title">캡처를 아직 중지하는 중입니다</string>
     <string name="capture_stop_timeout_message">캡처가 끝나지 않아 아무것도 바꾸지 않았습니다. 홈에 준비됨이 표시되면 다시 시도하세요.</string>
     <string name="invalid_activity_choice">출석이 아니요이면 과업을 예로 둘 수 없습니다.</string>
+    <string name="invalid_activity_evidence">기록된 활동에 이미 이 출석 또는 과업이 있어 아니요로 둘 수 없습니다.</string>
+    <string name="invalid_standard_merit">0부터 %1$d 사이의 공적을 입력하거나 비워 두세요.</string>
     <string name="open_standby_mode">대기 모드 켜기</string>
     <string name="standby_running">대기 모드 실행 중</string>
     <string name="standby_touch_to_leave">화면을 누르면 대기 모드가 해제됩니다.</string>

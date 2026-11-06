@@ -142,4 +142,63 @@ class WeeklyOverrideEditingTest {
             }
         }
     }
+
+    @Test
+    fun manualCountersStayWithinTheDaysDomain() {
+        fun merge(gunsmoke: Boolean, edit: CellEdit) =
+            WeeklyOverrideEditing.merge(week, gunsmoke, emptyList(), listOf(edit))
+
+        // A Standard day caps at its login and Daily Patrol.
+        assertEquals(Result.Invalid(7, day, Field.MERIT), merge(false, CellEdit(7, day, merit = "91")))
+        assertEquals(
+            Result.Invalid(7, day, Field.MERIT),
+            merge(false, CellEdit(7, day, merit = Long.MAX_VALUE.toString())),
+        )
+        assertEquals(listOf(stored(merit = 90)), valid(merge(false, CellEdit(7, day, merit = "90"))))
+        assertTrue(valid(merge(false, CellEdit(7, day, merit = ""))).isEmpty())
+        // A Gunsmoke day also holds its attempts, but no sum can overflow.
+        assertEquals(listOf(stored(merit = 1_000)), valid(merge(true, CellEdit(7, day, merit = "1000"))))
+        assertEquals(
+            Result.Invalid(7, day, Field.MERIT),
+            merge(true, CellEdit(7, day, merit = Long.MAX_VALUE.toString())),
+        )
+        assertEquals(
+            Result.Invalid(7, day, Field.SCORE),
+            merge(true, CellEdit(7, day, score = (WeeklyOverrideEditing.MAX_DAILY_SCORE + 1).toString())),
+        )
+        assertEquals(
+            listOf(stored(score = WeeklyOverrideEditing.MAX_DAILY_SCORE)),
+            valid(merge(true, CellEdit(7, day, score = WeeklyOverrideEditing.MAX_DAILY_SCORE.toString()))),
+        )
+    }
+
+    @Test
+    fun aNoThatRecordedActivityDisprovesIsAContradiction() {
+        fun cell(patrolFact: Boolean = false, loginFact: Boolean = false, score: Long? = null) =
+            WeeklyReportBuilder.DayCell(
+                gameDay = day,
+                meritDelta = null,
+                scoreDelta = score,
+                inference = null,
+                evidence = DailyEvidence.PARTIAL_DAY,
+                hasDailyPatrolFact = patrolFact,
+                hasLoginFact = loginFact,
+                isGunsmokeWeek = true,
+            )
+        val noPatrol = CellEdit(7, day, dailyPatrol = Choice.NO)
+        val noLogin = CellEdit(7, day, attended = Choice.NO)
+
+        assertTrue(WeeklyOverrideEditing.contradictsEvidence(cell(patrolFact = true), noPatrol))
+        assertTrue(WeeklyOverrideEditing.contradictsEvidence(cell(patrolFact = true), noLogin))
+        assertTrue(WeeklyOverrideEditing.contradictsEvidence(cell(loginFact = true), noLogin))
+        assertTrue(WeeklyOverrideEditing.contradictsEvidence(cell(score = 1_000), noLogin))
+        assertTrue(WeeklyOverrideEditing.contradictsEvidence(cell(), noLogin.copy(attempts = "1")))
+        // Correcting the score and attempts to 0 in the same edit removes the evidence they supplied.
+        assertTrue(
+            !WeeklyOverrideEditing.contradictsEvidence(cell(score = 1_000), noLogin.copy(score = "0", attempts = "0")),
+        )
+        assertTrue(!WeeklyOverrideEditing.contradictsEvidence(cell(loginFact = true), noPatrol))
+        assertTrue(!WeeklyOverrideEditing.contradictsEvidence(cell(), noLogin))
+        assertTrue(!WeeklyOverrideEditing.contradictsEvidence(cell(patrolFact = true), CellEdit(7, day, attended = Choice.UNSET)))
+    }
 }

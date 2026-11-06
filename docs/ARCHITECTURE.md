@@ -116,10 +116,13 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   Quarantine is advanced from frame metadata before protobuf decoding, so even
   a malformed terminal fragment clears the discarded dataset deterministically.
 - One serial `CaptureWorker` owns every parser, flow, session, and admission
-  structure, so that state needs no locks. Native callbacks share a budget of
-  256 queued chunks; lifecycle, confirm, and discard tasks bypass that budget
-  and are never rejected, so a pending Platoon can be confirmed or discarded
-  after capture stops. `CaptureFlowEngine` routes payloads,
+  structure, so that state needs no locks. Native flow opens and chunks share
+  a budget of 256 queued chunks, and a flow that loses either is ignored until
+  it closes; flow closes, lifecycle, confirm, and discard tasks bypass that
+  budget and are never rejected, so every closed flow releases its state and a
+  pending Platoon can be confirmed or discarded after capture stops. Each
+  payload keeps the time it arrived, so one held for identity or confirmation
+  is still dated by that time. `CaptureFlowEngine` routes payloads,
   `PlatoonAdmissionCoordinator` owns pending admission, and the service is
   lifecycle glue whose fields are main-thread only.
 - Stopping capture never blocks the main thread: the worker stops the native
@@ -128,9 +131,12 @@ IP geolocation, and CDN addresses are not accepted as identity evidence.
   for that whole teardown and becomes `STOPPED` only once it completes, even
   when the service is destroyed meanwhile, so nothing that waits for `STOPPED`
   can overlap the native loop or the drain.
-- Before identity is established, each flow retains at most 32 decoded payload
-  objects. Overflow rejects that flow until closure. The profile registry holds
-  at most 16 bounded identities.
+- Before identity is established, each flow retains at most 32 roster,
+  activity, and updates payloads (128 across flows); overflow rejects that flow
+  until closure. Other payloads are held only for enabled parsed-packet history,
+  under a separate budget of the same size that drops instead of rejecting, and
+  are otherwise discarded. The profile registry holds at most 16 bounded
+  identities.
 - Unconfirmed profile admission is capped at 4 candidates, 64 decoded payloads
   per candidate, and 128 payloads total. Overflow rejects every flow belonging
   to that candidate rather than partially persisting it.

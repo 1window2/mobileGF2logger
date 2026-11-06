@@ -2,6 +2,94 @@
 
 All notable changes to mobileGF2logger are documented here.
 
+## 2.7.2 - 2026-11-07
+
+### Security
+
+- Pin each supported game client's signing certificate the first time it is
+  seen and refuse to route or record traffic from a client whose signer
+  changed. Home's client rows show the trust state, and Settings lists the
+  pinned signers. After upgrading, a scheduled or standby run records "client
+  not trusted" until Home has been opened once.
+- Bound every decoded payload to 32,768 elements, and every held pre-identity
+  payload and admission to 65,536 elements in total, so a small packet can no
+  longer expand into an outsized decode.
+- Rebuild every restored `.gf2backup` into the app's own table definitions
+  instead of installing the archive's DDL. Refuse rows the app could never read
+  back (out-of-range counters and IDs, unknown enum values, oversized text,
+  BLOBs), and drop maintenance keys the app never writes. A live database that
+  still carries DDL from a restore made before 2.7.2 is rebuilt on its first
+  access.
+- Keep Discord webhook tokens out of failure messages and logcat.
+- Native forwarding: forward a client FIN only after the bytes before it, close
+  TCP and ICMP flows whose socket cannot be opened, purge datagram and web
+  flows before inspected TCP at the socket cap, and read the DNS QR bit in host
+  byte order. Host regression tests cover each fix.
+- Never delete a picked export document on a provider the app refuses, or when
+  opening it fails.
+
+### Fixed
+
+- Quarantine a Platoon database found corrupt, whether while opening or while
+  hashing for a CSV undo, instead of letting it be recreated empty. Platoon
+  screens and capture notices report a damaged database and offer a rebuild,
+  including after the Settings screen that ran the backup is gone.
+- Wait out a running CSV import on Platoon screens and in capture, and refuse
+  capture while an import recovery is incomplete.
+- Roll back an interrupted import from a checkpoint written by the older schema.
+- Re-check that capture is stopped wherever Platoon maintenance runs.
+- Membership: store activity-dated joins and withdrawals as their own evidence
+  source and let Updates replace them. On upgrade, repair stale active flags,
+  duplicate open periods and the shadow periods older versions created, keeping
+  departed members inactive. Remove stored members without a real UID, and
+  never store a roster member with UID 0.
+- Set aside rosters captured with the phone clock set ahead, rather than letting
+  them become the latest roster.
+- Rebuild restored weekly history recorded under another reset zone, ignore
+  stored weekly overrides outside one day's domain, skip a weekly revision that
+  names a member deleted since it was built, and fall back to the live weekly
+  table when the active revision cannot be read.
+- Gunsmoke Frontline: stop treating a near-reset capture as a closed opening
+  anchor, keep a near-reset Standard day exact only when one split remains, and
+  compare Updates correlation instants as integers. The 48-hour correlation
+  window now applies as intended, which can change a correlated join that older
+  versions placed outside it.
+- Deliver every flow close, date held payloads by their arrival, rotate recent
+  history by a persisted recording sequence, and fsync history and roster files
+  before renaming them into place.
+- CSV: keep quoted text exact, make the roster export importable without
+  changing names (a reversible prefix protects formula-like names in
+  spreadsheets), recognize re-imported rosters, and export Home's roster CSV
+  from the latest stored roster.
+- Input: reject future manual membership dates and out-of-range UIDs and
+  Platoon IDs, validate manual weekly edits against the day's range and
+  evidence, compare a typed Platoon name in its typeable form before deleting,
+  and truncate Platoon text on a code point boundary.
+- Standby: stop taps at any notice that follows a login, keep scheduled
+  recording matched to the saved Platoons, warn that a phone with a screen lock
+  stays unlocked, and mark results seen only when the user closes them.
+- Keep open drafts, including the weekly cell editor's typed values, when the
+  Platoon changes or a screen is recreated, with each draft bound to its own
+  Platoon.
+- Accessibility: announce state changes and capture stop reasons, add
+  tooltips, keep large-font values and every weekly cutline warning visible, and
+  let Home's capture notice wrap in full.
+- Open the app and offer Stop from the capture notification, word English
+  capture counts correctly for one, and fit long cells in the weekly PNG.
+- Commit the legacy Platoon's member order and cutlines like a scoped
+  Platoon's, and save member order only on real changes.
+
+### Changed
+
+- Platoon database schema 14 adds a set-aside flag for clock-suspect rosters.
+- The CSV undo check is now a digest of primary evidence only, so a checkpoint
+  sealed by 2.7.1 is refused once.
+- Report roster comparison deltas with honest certainty, and label game-zone
+  times when the phone clock reads differently.
+- Consolidate the game ID range, SQLite identifier quoting, roster file naming,
+  export failure messages, screen-lock checks and the latest-roster read into
+  one place each.
+
 ## 2.7.1 - 2026-10-25
 
 ### Fixed

@@ -9,14 +9,21 @@ import java.security.MessageDigest
 /**
  * Digests the primary Platoon evidence of a database for the CSV import undo guard.
  *
- * Every table counts except the derived weekly history, its restored selection, and SQLite or
- * Android bookkeeping, so recording or selecting a weekly revision never makes an otherwise valid
+ * Every table counts except the derived weekly history, its restored selection, and app, SQLite,
+ * or Android bookkeeping, so recording or selecting a weekly revision never makes an otherwise valid
  * undo look like newer work, while any evidence, membership, note, or manual-value change does.
  * Rows are hashed in content order, independent of where SQLite stores them.
  */
 internal object PlatoonEvidenceDigest {
-    /** Derived tables that the undo checkpoint restores as well but that never hold evidence. */
-    private val DERIVED_TABLES = setOf("weekly_report_history", "weekly_report_history_state")
+    /**
+     * Derived tables that the undo checkpoint restores as well but that never hold evidence. The
+     * maintenance state keeps bookkeeping only: the activity-resolution cursor and history zone.
+     */
+    private val DERIVED_TABLES = setOf(
+        "weekly_report_history",
+        "weekly_report_history_state",
+        "platoon_maintenance_state",
+    )
 
     /** Whether [table] holds evidence the digest covers. */
     fun covers(table: String): Boolean =

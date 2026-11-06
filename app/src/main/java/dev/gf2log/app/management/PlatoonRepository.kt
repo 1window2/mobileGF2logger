@@ -318,7 +318,7 @@ internal class PlatoonRepository(
     ): WeeklyTableRevision {
         val live = buildLiveWeeklyRevision(referenceDay, zoneId, asOf)
         try {
-            recordHistory(live, Instant.now(), clearActiveOnChange = false)
+            recordHistory(live, zoneId, Instant.now(), clearActiveOnChange = false)
         } catch (error: Exception) {
             Log.e(TAG, "Unable to record weekly history for ${live.report.periodStart}", error)
         }
@@ -495,7 +495,30 @@ internal class PlatoonRepository(
                         payload = encoded.payload,
                     )
                 }
-            access { it.replaceWeeklyReportHistory(replacements) }
+            access { it.replaceWeeklyReportHistory(replacements, zoneId) }
+        }
+    }
+
+    /**
+     * Rebuilds the derived weekly history unless it is known to be bucketed in this Platoon's
+     * reset zone, as after restoring an archive made under another zone or before the zone was
+     * kept. History is a derived audit trail, so a rebuild that fails clears it instead; live
+     * revisions are always recomputed from evidence. Never throws. Returns whether it rebuilt.
+     */
+    fun reconcileWeeklyHistoryZone(): Boolean = withExclusiveDatabase(storageScope) {
+        try {
+            val zone = gameZone()
+            if (access { it.isWeeklyHistoryBucketedIn(zone) }) return@withExclusiveDatabase false
+            try {
+                rebuildWeeklyHistoryForTimeZoneChange(zone)
+            } catch (error: Exception) {
+                Log.e(TAG, "Unable to rebuild weekly history for $zone; clearing it", error)
+                access { it.replaceWeeklyReportHistory(emptyList(), zone) }
+            }
+            true
+        } catch (error: Exception) {
+            Log.e(TAG, "Unable to reconcile weekly history with its reset zone", error)
+            false
         }
     }
 
@@ -600,6 +623,7 @@ internal class PlatoonRepository(
 
     private fun recordHistory(
         revision: WeeklyTableRevision,
+        zoneId: ZoneId,
         recordedAt: Instant,
         clearActiveOnChange: Boolean,
     ) {
@@ -611,6 +635,7 @@ internal class PlatoonRepository(
                 fingerprint = encoded.fingerprint,
                 payload = encoded.payload,
                 clearActiveOnChange = clearActiveOnChange,
+                zoneId = zoneId,
             )
         }
     }
@@ -629,6 +654,7 @@ internal class PlatoonRepository(
             val now = Instant.now()
             recordHistory(
                 buildLiveWeeklyRevision(periodStart, zone, now),
+                zone,
                 now,
                 clearActiveOnChange = true,
             )

@@ -234,6 +234,10 @@ transitions.
   dates and report mode, in-period notes, and valid contextual identities.
 - Changing the configured game timezone clears incompatible derived history
   and rebuilds it from the unchanged UTC evidence using the new 05:00 boundary.
+  The database records the zone its history is bucketed in, so a committed
+  restore whose history was recorded under another effective zone, or before
+  the zone was recorded, rebuilds it the same way; one in the same zone keeps
+  its revisions and selection.
 - Captured evidence refreshes every listed week that reads it, not only the
   week of its game day. A roster captured exactly at Sunday 05:00 is the
   closing Saturday capture of the week it ends, so that week is re-recorded

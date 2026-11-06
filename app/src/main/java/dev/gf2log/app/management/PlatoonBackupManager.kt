@@ -304,6 +304,9 @@ class PlatoonBackupManager internal constructor(
                     previousRetainedCsvDirectory,
                     previousDatabaseFile(appContext, storageScope),
                 )
+                // Once committed, so constructing the repository cannot roll the restore back:
+                // derived weekly history follows the restored scope's effective reset zone.
+                PlatoonRepository(appContext, storageScope).reconcileWeeklyHistoryZone()
             } catch (error: Exception) {
                 runCatching {
                     recoverInterruptedFullRestore(appContext, settingsStore, storageScope)

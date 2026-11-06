@@ -4,8 +4,10 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import dev.gf2log.app.management.PlatoonDatabase.Companion.MAX_WEEKLY_REPORT_HISTORY
+import java.nio.ByteBuffer
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 
 internal data class WeeklyReportHistoryReplacement(
     val periodStartEpochDay: Long,
@@ -22,6 +24,7 @@ internal object WeeklyHistoryStore {
      * [clearActiveOnChange] and the live fingerprint changed. Returns the existing or new ID.
      * Recency is the AUTOINCREMENT ID, never the wall-clock [recordedAt]: after the device clock
      * steps backwards a new revision must still be the latest rather than be trimmed at once.
+     * History recorded before its reset zone was kept is adopted as [zoneId]'s (see [markZone]).
      */
     fun record(
         db: SQLiteDatabase,
@@ -30,9 +33,11 @@ internal object WeeklyHistoryStore {
         fingerprint: String,
         payload: ByteArray,
         clearActiveOnChange: Boolean,
+        zoneId: ZoneId? = null,
     ): Long {
         requireValidRevision(fingerprint, payload)
         return db.inTransaction {
+            zoneId?.let { markZone(db, it, replace = false) }
             val latest = db.rawQuery(
                 "SELECT id, fingerprint FROM weekly_report_history " +
                     "WHERE period_start = ? ORDER BY id DESC LIMIT 1",
@@ -148,11 +153,16 @@ internal object WeeklyHistoryStore {
      * Replaces every derived weekly revision in one SQLite transaction, validating the complete
      * replacement before deleting existing history.
      */
-    fun replace(db: SQLiteDatabase, replacements: List<WeeklyReportHistoryReplacement>) {
+    fun replace(
+        db: SQLiteDatabase,
+        replacements: List<WeeklyReportHistoryReplacement>,
+        zoneId: ZoneId? = null,
+    ) {
         require(replacements.map { it.periodStartEpochDay }.distinct().size == replacements.size)
         replacements.forEach { requireValidRevision(it.fingerprint, it.payload) }
         db.inTransaction {
             deleteAll(db)
+            zoneId?.let { markZone(db, it, replace = true) }
             replacements.forEach { replacement ->
                 db.insertOrThrow(
                     "weekly_report_history",
@@ -167,6 +177,41 @@ internal object WeeklyHistoryStore {
             }
         }
     }
+
+    /**
+     * Whether the stored history is known to be bucketed at [zoneId]'s 05:00 resets. The zone
+     * travels inside the database, so an archive restored under another reset zone, or one made
+     * before the zone was kept, reports false.
+     */
+    fun isBucketedIn(db: SQLiteDatabase, zoneId: ZoneId): Boolean {
+        PlatoonDatabaseSchema.createPlatoonMaintenanceStateTable(db)
+        return db.rawQuery(
+            "SELECT value FROM platoon_maintenance_state WHERE key = ?",
+            arrayOf(HISTORY_ZONE_KEY),
+        ).use { cursor -> cursor.moveToFirst() && cursor.getLong(0) == zoneValue(zoneId) }
+    }
+
+    /**
+     * Keeps the reset zone the history is bucketed in: a rebuild [replace]s it, while an ordinary
+     * write only adopts its zone for history recorded before the zone was kept. A zone change or a
+     * restore rebuilds the history, so an ordinary write never meets another recorded zone.
+     */
+    private fun markZone(db: SQLiteDatabase, zoneId: ZoneId, replace: Boolean) {
+        PlatoonDatabaseSchema.createPlatoonMaintenanceStateTable(db)
+        db.insertWithOnConflict(
+            "platoon_maintenance_state",
+            null,
+            ContentValues().apply {
+                put("key", HISTORY_ZONE_KEY)
+                put("value", zoneValue(zoneId))
+            },
+            if (replace) SQLiteDatabase.CONFLICT_REPLACE else SQLiteDatabase.CONFLICT_IGNORE,
+        )
+    }
+
+    /** A stable 64-bit identity of the zone ID, as the maintenance table stores integers. */
+    private fun zoneValue(zoneId: ZoneId): Long =
+        ByteBuffer.wrap(zoneId.id.toByteArray(Charsets.UTF_8).sha256()).long
 
     private fun deleteAll(db: SQLiteDatabase) {
         db.delete("weekly_report_history_state", null, null)
@@ -191,6 +236,7 @@ internal object WeeklyHistoryStore {
     }
 
     private val FINGERPRINT = Regex("[0-9a-f]{64}")
+    private const val HISTORY_ZONE_KEY = "weekly_history_zone"
 
     /** Selects report_blob only within the payload limit, otherwise NULL. */
     private val BOUNDED_PAYLOAD =

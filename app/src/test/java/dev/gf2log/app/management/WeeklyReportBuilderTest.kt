@@ -1453,6 +1453,46 @@ class WeeklyReportBuilderTest {
         assertEquals(MetricCertainty.UNKNOWN, tuesday.attemptsCertainty)
     }
 
+    @Test
+    fun storedOverridesOutsideTheDaysDomainAreIgnored() {
+        // A Standard week (the Gunsmoke cycle never starts in the week before one that does).
+        val periodStart = (0L..3L).map { LocalDate.of(2026, 7, 5).plusWeeks(it) }
+            .first { !PlatoonPeriods.isGunsmokeWeek(it) }
+        fun override(day: Long, merit: Long?, attended: Boolean? = null) = WeeklyCellOverride(
+            uid = 1,
+            periodStart = periodStart,
+            gameDay = periodStart.plusDays(day),
+            meritDelta = merit,
+            scoreDelta = null,
+            attempts = null,
+            attended = attended,
+            dailyPatrol = null,
+        )
+        fun build(vararg overrides: WeeklyCellOverride) = WeeklyReportBuilder.build(
+            referenceDay = periodStart,
+            zoneId = zone,
+            snapshots = listOf(
+                snapshotWithMembers("2026-07-01T00:00:00Z", member(uid = 1, name = "Stored", weekly = 0, score = 0)),
+            ),
+            overrides = overrides.toList(),
+            asOf = periodStart.plusDays(7).atStartOfDay(zone).toInstant(),
+        ).members.single()
+        val derived = build(override(1, 90))
+
+        // 2.7.1 stored any non-negative number; summing it used to wrap the weekly total.
+        val overflowing = build(override(0, Long.MAX_VALUE), override(1, 90))
+
+        assertTrue(overflowing.totalMerit >= 0)
+        assertEquals(derived.totalMerit, overflowing.totalMerit)
+        assertEquals(derived.days.first().meritDelta, overflowing.days.first().meritDelta)
+
+        // A Standard day never earns 1000 merit, so it is not shown as an exact manual value.
+        val implausible = build(override(0, 1_000, attended = true)).days.first()
+        assertNull(implausible.manualOverride?.meritDelta)
+        assertEquals(true, implausible.manualOverride?.attended)
+        assertFalse(implausible.meritDelta == 1_000L)
+    }
+
     private fun snapshot(time: String, weekly: Long, score: Long) =
         PlatoonSnapshot(
             id = 0,

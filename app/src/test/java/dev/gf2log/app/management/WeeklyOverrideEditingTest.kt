@@ -201,4 +201,26 @@ class WeeklyOverrideEditingTest {
         assertTrue(!WeeklyOverrideEditing.contradictsEvidence(cell(), noLogin))
         assertTrue(!WeeklyOverrideEditing.contradictsEvidence(cell(patrolFact = true), CellEdit(7, day, attended = Choice.UNSET)))
     }
+
+    @Test
+    fun savingAnotherCellCleansAStoredValueOutsideTheDaysDomain() {
+        val other = day.plusDays(1)
+        val existing = listOf(
+            stored(merit = Long.MAX_VALUE, attended = true),
+            WeeklyCellOverride(7, week, other, 1_000, null, null, null, null),
+        )
+
+        val merged = valid(
+            WeeklyOverrideEditing.merge(week, false, existing, listOf(CellEdit(8, day, merit = "50"))),
+        )
+
+        // The out-of-range merit is dropped, the rest of its cell kept, and a cell left empty goes.
+        assertEquals(
+            listOf(
+                stored(attended = true),
+                WeeklyCellOverride(8, week, day, 50, null, null, null, null),
+            ),
+            merged,
+        )
+    }
 }

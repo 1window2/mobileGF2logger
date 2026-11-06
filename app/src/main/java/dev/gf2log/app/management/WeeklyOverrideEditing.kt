@@ -51,7 +51,10 @@ object WeeklyOverrideEditing {
         existing: Collection<WeeklyCellOverride>,
         edits: Collection<CellEdit>,
     ): Result {
-        val existingByCell = existing.associateBy { it.uid to it.gameDay }
+        // A stored value outside the week's domain is dropped, so saving any cell cleans the row.
+        val existingByCell = existing
+            .mapNotNull { withinDailyDomain(it, isGunsmokeWeek) }
+            .associateBy { it.uid to it.gameDay }
         val editsByCell = edits.filterNot(CellEdit::isEmpty).associateBy { it.uid to it.gameDay }
         val merged = (existingByCell.keys + editsByCell.keys).mapNotNull { cell ->
             val stored = existingByCell[cell]
@@ -114,6 +117,21 @@ object WeeklyOverrideEditing {
             positive(edit.attempts, cell.attempts?.toLong())
         return (edit.dailyPatrol == Choice.NO && cell.hasDailyPatrolFact) ||
             (edit.attended == Choice.NO && loginProven)
+    }
+
+    /**
+     * [override] without a merit, score or attempt count outside one day's domain; null once no
+     * value remains. The editor never stores such values, but 2.7.1 did and a backup may carry them.
+     */
+    internal fun withinDailyDomain(override: WeeklyCellOverride, isGunsmokeWeek: Boolean): WeeklyCellOverride? {
+        val merit = override.meritDelta?.takeIf { it in 0..maximumDailyMerit(isGunsmokeWeek) }
+        val score = override.scoreDelta?.takeIf { it in 0..MAX_DAILY_SCORE }
+        val attempts = override.attempts?.takeIf { it in 0..ActivityInference.MAX_DAILY_ATTEMPTS }
+        if (merit == override.meritDelta && score == override.scoreDelta && attempts == override.attempts) {
+            return override
+        }
+        return override.copy(meritDelta = merit, scoreDelta = score, attempts = attempts)
+            .takeIf { it.hasAnyValue() }
     }
 
     private class Parsed<T>(val value: T?)

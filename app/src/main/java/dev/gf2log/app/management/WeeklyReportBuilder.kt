@@ -290,8 +290,11 @@ object WeeklyReportBuilder {
         val start = PlatoonPeriods.weekStart(referenceDay)
         val isGunsmoke = PlatoonPeriods.isGunsmokeWeek(start)
         val days = (0L..6L).map(start::plusDays)
+        // A stored value outside one day's domain (written by 2.7.1 or arriving in a backup) is
+        // ignored as if that field were not overridden, so it can never overflow a weekly sum.
         val overridesByCell = overrides
             .filter { it.periodStart == start && it.gameDay in days }
+            .mapNotNull { WeeklyOverrideEditing.withinDailyDomain(it, isGunsmoke) }
             .associateBy { it.uid to it.gameDay }
         val sortedSnapshots = snapshots.sortedBy(PlatoonSnapshot::capturedAt)
         val week = WeekInputs(

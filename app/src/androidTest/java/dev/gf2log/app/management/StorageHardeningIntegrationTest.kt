@@ -219,6 +219,61 @@ class StorageHardeningIntegrationTest {
     }
 
     @Test
+    fun aLiveDatabaseAnOlderRestoreLeftWithForeignDdlIsRebuiltOnFirstAccess() {
+        // Seeded below the repository, so this scope's first access in the process comes later.
+        PlatoonDatabase(context, scope.databaseName).use { database ->
+            database.ingestSnapshot(snapshot(CAPTURED_AT, "before.csv", 1, 2), EvidenceSource.SNAPSHOT)
+        }
+        // What a crafted archive restored by 2.7.1 or earlier leaves in place.
+        PlatoonRepository.withExclusiveDatabase(scope) {
+            writable(context.getDatabasePath(scope.databaseName)) { db ->
+                db.execSQL("PRAGMA legacy_alter_table = ON")
+                db.execSQL("ALTER TABLE members RENAME TO members_old")
+                db.execSQL(
+                    """
+                    CREATE TABLE members (
+                        uid INTEGER PRIMARY KEY,
+                        current_name TEXT NOT NULL,
+                        custom_name TEXT,
+                        current_level INTEGER NOT NULL CHECK (current_level < 1000),
+                        is_active INTEGER NOT NULL,
+                        first_seen_at INTEGER NOT NULL,
+                        last_seen_at INTEGER NOT NULL,
+                        note TEXT NOT NULL DEFAULT '',
+                        UNIQUE(current_name) ON CONFLICT IGNORE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("INSERT INTO members SELECT * FROM members_old")
+                db.execSQL("DROP TABLE members_old")
+            }
+        }
+
+        val repository = PlatoonRepository(context, scope)
+        assertEquals(listOf(1L, 2L), repository.listMemberStatuses().map { it.uid }.sorted())
+
+        PlatoonRepository.withExclusiveDatabase(scope) {
+            readOnlyLive { live ->
+                PlatoonDatabase.inMemory(context, scope).use { reference ->
+                    assertEquals(
+                        DatabaseSchemaContract.readTableSql(reference.readableDatabase),
+                        DatabaseSchemaContract.readTableSql(live),
+                    )
+                }
+                assertEquals(2L, count(live, "members"))
+            }
+        }
+        // The archive's constraints no longer refuse or swallow later writes.
+        repository.ingest(
+            CAPTURED_AT.plusSeconds(3_600),
+            listOf(member(1, "One", level = 5_000u), member(3, "Member 1")),
+            "later.csv",
+        )
+        assertEquals(listOf(1L, 2L, 3L), repository.listMemberStatuses().map { it.uid }.sorted())
+        assertFalse(File(scope.rootDirectory(context), "platoon-full-restore").exists())
+    }
+
+    @Test
     fun restoreRejectsWeeklyHistoryTheAppCouldNotHaveWritten() {
         val repository = PlatoonRepository(context, scope)
         repository.ingest(CAPTURED_AT, listOf(member(1, "One")), "roster.csv")

@@ -125,7 +125,10 @@ ON CONFLICT, COLLATE, STRICT, WITHOUT ROWID) are discarded and the installed
 DDL must equal the app's own text exactly. The copied rows are refused, and the
 restore fails as an invalid backup, when an enum column holds a name the app
 does not define, a text value is oversized, or a row id or AUTOINCREMENT
-counter is out of range; maintenance keys the app never writes are dropped.
+counter is out of range; maintenance keys the app never writes are dropped. A
+Platoon restored before 2.7.2, which installed the selected file as it was, is
+checked once per launch before its first use: table DDL the app never wrote is
+rebuilt into the app's own schema the same way, keeping every row.
 While a Platoon's CSV import or
 undo holds its checkpoint claim, captures, edits, and backup restores of that
 Platoon are refused instead of being sealed into, or later erased by, the

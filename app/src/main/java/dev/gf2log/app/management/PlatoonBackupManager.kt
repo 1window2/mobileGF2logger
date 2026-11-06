@@ -222,6 +222,49 @@ class PlatoonBackupManager internal constructor(
         return rebuilt
     }
 
+    /**
+     * Rebuilds the live database into app-authored DDL when it still carries table DDL a restore
+     * before 2.7.2 installed from the selected file ([LiveSchemaAudit]). Runs under the exclusive
+     * gate and installs the rebuilt copy through the journaled restore replace, so a failure leaves
+     * the live file as it was. Returns false when it must run again later: a CSV import or undo
+     * holds the Platoon, or a restore transaction is still pending.
+     */
+    internal fun sanitizeLiveSchema(): Boolean = PlatoonRepository.withExclusiveDatabase(storageScope) {
+        if (!databaseFile.isFile || PlatoonDatabaseDamage.isDamaged(appContext, storageScope)) {
+            return@withExclusiveDatabase true
+        }
+        if (CsvImportCheckpointManager.isBusy(storageScope.storageId) ||
+            restoreTransactionDirectory(appContext, storageScope).exists()
+        ) {
+            return@withExclusiveDatabase false
+        }
+        // Opening through the helper finishes any upgrade and rolls back a hot journal first.
+        val actual = PlatoonDatabase(appContext, storageScope.databaseName).use { helper ->
+            DatabaseSchemaContract.readTableSql(helper.readableDatabase)
+        }
+        val reference = PlatoonDatabase.inMemory(appContext, storageScope).use { helper ->
+            DatabaseSchemaContract.readTableSql(helper.readableDatabase)
+        }
+        if (!LiveSchemaAudit.carriesForeignDdl(actual, reference)) return@withExclusiveDatabase true
+        check(restoreDirectory.mkdirs() || restoreDirectory.isDirectory) {
+            "Unable to create the restore staging directory"
+        }
+        val staged = File(restoreDirectory, "platoon.db.sanitize")
+        try {
+            deleteStagedFiles(staged)
+            listOf("-wal", "-journal").map { File(databaseFile.path + it) }.forEach { journal ->
+                check(!journal.exists() || journal.length() == 0L) { "The Platoon database was not checkpointed" }
+            }
+            databaseFile.copyTo(staged, overwrite = true)
+            val rebuilt = rebuildValidated(staged)
+            replaceRestoredState(rebuilt, restoredSettings = null, retireRetainedCsv = false)
+        } finally {
+            deleteStagedFiles(staged)
+        }
+        Log.i(TAG, "Rebuilt a Platoon database that carried table DDL the app never wrote")
+        true
+    }
+
     private fun managerFor(staged: BackupArchive.StagedArchive): RestoreTarget {
         val registry = PlatoonProfileRegistry(appContext)
         val restoredProfile = staged.scopedProfile().toProfile()
@@ -662,6 +705,20 @@ class PlatoonBackupManager internal constructor(
                 deleteStagedFiles(stagedDatabase)
                 stagingDirectory.delete()
             }
+        }
+
+        private val SANITIZED_SCOPES = mutableSetOf<String>()
+
+        /**
+         * Runs [sanitizeLiveSchema] once per process for [scope], before its first access. A
+         * failure is logged and never refuses the access; the next repository retries it.
+         */
+        internal fun sanitizeLiveSchemaOnce(context: Context, scope: PlatoonStorageScope) {
+            if (synchronized(SANITIZED_SCOPES) { scope.storageId in SANITIZED_SCOPES }) return
+            val settled = runCatching { PlatoonBackupManager(context, scope).sanitizeLiveSchema() }
+                .onFailure { Log.e(TAG, "Unable to rebuild the Platoon database schema; trying again later", it) }
+                .getOrDefault(false)
+            if (settled) synchronized(SANITIZED_SCOPES) { SANITIZED_SCOPES += scope.storageId }
         }
 
         private fun rebuiltDatabaseFile(staged: File) = File(staged.path + REBUILT_SUFFIX)

@@ -753,6 +753,8 @@ internal class PlatoonRepository(
         if (accessPrepared || holdsMaintenanceLock()) return
         PlatoonBackupManager.recoverInterruptedFullRestore(appContext, storageScope)
         CsvImportCheckpointManager.recoverOnce(appContext, storageScope)
+        // A profile restored before 2.7.2 may still carry the selected file's table DDL.
+        PlatoonBackupManager.sanitizeLiveSchemaOnce(appContext, storageScope)
         accessPrepared = true
     }
 

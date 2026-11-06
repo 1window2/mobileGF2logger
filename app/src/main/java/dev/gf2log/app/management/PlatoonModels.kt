@@ -40,6 +40,10 @@ data class MembershipPeriod(
     val note: String,
 )
 
+/**
+ * [name] is the display name: [customName] when the user set one, otherwise [currentName], the
+ * latest in-game name.
+ */
 data class MemberStatus(
     val uid: Long,
     val name: String,
@@ -49,7 +53,23 @@ data class MemberStatus(
     val lastSeenAt: Instant,
     val note: String,
     val membershipPeriods: List<MembershipPeriod>,
+    val currentName: String = name,
+    val customName: String? = null,
 )
+
+/**
+ * Whether a member-list search [query] finds this member: the display name, the in-game name
+ * behind a nickname, or the UID, which may be typed as shown (`#1234`).
+ */
+fun MemberStatus.matchesSearch(query: String): Boolean {
+    val trimmed = query.trim()
+    if (trimmed.isEmpty()) return true
+    if (name.contains(trimmed, ignoreCase = true) || currentName.contains(trimmed, ignoreCase = true)) {
+        return true
+    }
+    val uidQuery = trimmed.removePrefix("#").trim()
+    return uidQuery.isNotEmpty() && uidQuery.all(Char::isDigit) && uid.toString().contains(uidQuery)
+}
 
 /**
  * The membership period a member list shows: the open period, or the most recently closed one

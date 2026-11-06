@@ -65,12 +65,25 @@ internal object MembershipEditing {
         }
     }
 
+    /**
+     * Stores the nickname and private note. A blank nickname, or one equal to the in-game name,
+     * clears the override so later in-game renames keep showing.
+     */
     fun updateMember(db: SQLiteDatabase, uid: Long, name: String, note: String): Boolean {
-        val values = ContentValues().apply {
-            put("custom_name", ManualTextPolicy.memberName(name))
-            put("note", ManualTextPolicy.note(note))
+        val storedNote = ManualTextPolicy.note(note)
+        return db.inTransaction {
+            val currentName = db.rawQuery(
+                "SELECT current_name FROM members WHERE uid = ?",
+                arrayOf(uid.toString()),
+            ).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+                ?: return@inTransaction false
+            val values = ContentValues().apply {
+                val customName = ManualTextPolicy.customName(name, currentName)
+                if (customName == null) putNull("custom_name") else put("custom_name", customName)
+                put("note", storedNote)
+            }
+            db.update("members", values, "uid = ?", arrayOf(uid.toString())) == 1
         }
-        return db.update("members", values, "uid = ?", arrayOf(uid.toString())) == 1
     }
 
     fun deleteMember(db: SQLiteDatabase, uid: Long): Boolean {

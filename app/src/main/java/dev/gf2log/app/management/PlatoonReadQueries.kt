@@ -109,6 +109,8 @@ internal object PlatoonReadQueries {
                             lastSeenAt = Instant.ofEpochMilli(cursor.getLong(5)),
                             note = cursor.getString(6),
                             membershipPeriods = periodsByUid[uid].orEmpty(),
+                            currentName = cursor.getString(7),
+                            customName = cursor.getNullableString(8),
                         ),
                     )
                 }
@@ -258,6 +260,8 @@ internal object PlatoonReadQueries {
         "first_seen_at",
         "last_seen_at",
         "note",
+        "current_name",
+        "custom_name",
     )
     private val EVENT_COLUMNS = arrayOf(
         "id",

@@ -19,6 +19,7 @@ import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import dev.gf2log.app.capture.RosterEvents
 import dev.gf2log.app.management.MemberStatus
+import dev.gf2log.app.management.matchesSearch
 import dev.gf2log.app.management.PlatoonMemberCsv
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.PlatoonSnapshot
@@ -269,7 +270,7 @@ class PlatoonActivity : BaseActivity() {
                     Filter.ALL -> true
                 }
             }
-            .filter { query.isEmpty() || it.name.contains(query, ignoreCase = true) || it.uid.toString().contains(query) }
+            .filter { it.matchesSearch(query) }
             .let { sorted(it, loaded) }
         resultCount.text = resources.getQuantityString(R.plurals.member_count, visible.size, visible.size)
         stateAdapter.view = when {

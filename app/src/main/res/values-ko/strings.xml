@@ -102,7 +102,7 @@
     <string name="add_membership_history">가입 이력 추가</string>
     <string name="add_membership_history_short">가입 이력 추가</string>
     <string name="delete_member">멤버 삭제</string>
-    <string name="delete_member_warning">멤버를 삭제하면 가입 이력, 개인 메모, 주간 과업표 수정 내용이 영구적으로 삭제됩니다. 이후 명단에서 다시 추가될 수 있지만 삭제된 정보는 복구되지 않습니다.</string>
+    <string name="delete_member_warning">멤버를 삭제하면 가입 이력, 개인 메모, 주간 과업표 수정 내용과 이 멤버가 표시된 저장된 주간 표 기록이 모두 영구적으로 삭제됩니다. 이후 명단에서 다시 추가될 수 있지만 삭제된 정보는 복구되지 않습니다. 패킷 기록에 캡처된 패킷은 원본 근거 자료라서 그곳에서 직접 삭제할 때까지 남아 있습니다.</string>
     <string name="member_deleted">멤버를 삭제했습니다</string>
     <string name="packet_too_large_to_copy">패킷이 너무 커서 클립보드에 복사할 수 없습니다.</string>
     <string name="packet_raw_truncated">전체 %2$s자 중 처음 %1$s자만 표시합니다.</string>

@@ -3,6 +3,12 @@ package dev.gf2log.app.management
 import java.time.Instant
 import java.time.LocalDate
 
+/**
+ * Member UIDs and Platoon IDs the game can send: unsigned 32-bit values, where 0 is the protobuf
+ * default of a missing field. Any other number can never match a packet.
+ */
+internal val GAME_ID_RANGE: LongRange = 1L..UInt.MAX_VALUE.toLong()
+
 data class PlatoonSnapshot(
     val id: Long,
     val capturedAt: Instant,

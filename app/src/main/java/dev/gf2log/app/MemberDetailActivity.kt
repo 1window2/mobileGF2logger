@@ -19,6 +19,7 @@ import dev.gf2log.app.management.isJoinedBoundaryEditable
 import dev.gf2log.app.management.isMembershipBoundaryWithinPresent
 import dev.gf2log.app.management.isLeftBoundaryEditable
 import dev.gf2log.app.management.isValidMembershipRange
+import dev.gf2log.app.management.member
 import dev.gf2log.app.ui.onTextChanged
 import dev.gf2log.app.ui.Controls
 import dev.gf2log.app.ui.BackgroundWork
@@ -153,7 +154,7 @@ class MemberDetailActivity : BaseActivity() {
                 status?.let {
                     Model(
                         status = it,
-                        latest = repository.latestSnapshot()?.members?.firstOrNull { member -> member.uid == uid },
+                        latest = repository.latestSnapshot()?.member(uid),
                         zone = repository.gameZone(),
                     )
                 }

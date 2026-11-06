@@ -22,7 +22,7 @@ internal object MembershipEditing {
         note: String,
         now: Instant = Instant.now(),
     ): Boolean {
-        require(uid in VALID_UID_RANGE) { "A member UID must be a game UID" }
+        require(uid in GAME_ID_RANGE) { "A member UID must be a game UID" }
         val storedName = ManualTextPolicy.memberName(name)
         val storedNote = ManualTextPolicy.note(note)
         require(isValidMembershipRange(joined, withdrew))
@@ -460,8 +460,6 @@ internal object MembershipEditing {
         }
     }
 
-    /** Game UIDs are unsigned 32-bit values; any other number can never match a packet. */
-    private val VALID_UID_RANGE = 1L..UInt.MAX_VALUE.toLong()
     private const val FUTURE_BOUNDARY = "A membership boundary cannot be in the future"
 
     private data class MembershipPeriodForUpdate(

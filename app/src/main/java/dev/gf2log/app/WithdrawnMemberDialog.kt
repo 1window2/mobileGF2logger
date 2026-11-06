@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.text.InputType
 import android.view.View
+import dev.gf2log.app.management.GAME_ID_RANGE
 import dev.gf2log.app.management.PlatoonRepository
 import dev.gf2log.app.management.isMembershipBoundaryWithinPresent
 import dev.gf2log.app.management.isValidMembershipRange
@@ -58,9 +59,7 @@ internal object WithdrawnMemberDialog {
             restored = restored,
         ) { dialog ->
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener { button ->
-                // Game UIDs are unsigned 32-bit values; a larger number could never match a packet.
-                val uidValue = uid.input.text.toString().trim().toLongOrNull()
-                    ?.takeIf { it in 1L..UInt.MAX_VALUE.toLong() }
+                val uidValue = uid.input.text.toString().trim().toLongOrNull()?.takeIf { it in GAME_ID_RANGE }
                 val name = nickname.input.text.toString().trim()
                 val joinedBoundary = joined.boundary
                 val withdrewBoundary = withdrew.boundary

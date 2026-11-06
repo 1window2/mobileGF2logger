@@ -121,6 +121,7 @@ typedef struct zdtun_conn {
       struct {
         uint8_t fin_ack_sent:1;
         uint8_t client_closed:1;
+        uint8_t client_fin_pending:1; // client FIN waits for tx_queue to reach the server
       };
     } tcp;
   };
@@ -1299,6 +1300,29 @@ static int handle_tcp_fwd(zdtun_t *tun, const zdtun_pkt_t *pkt,
 
     debug("Got TCP FIN+ACK from client");
 
+    if(conn->tcp.client_closed) {
+      // A retransmitted FIN. While it waits for the queue it is not ACKed yet; once forwarded,
+      // ACK it again without counting it twice.
+      if(conn->tcp.client_fin_pending)
+        return 0;
+
+      build_reply_tcpip(tun, conn, TH_ACK, 0, 0);
+      return send_to_client(tun, conn, TCP_HEADER_LEN);
+    }
+
+    if((conn->sock != INVALID_SOCKET) && ((pkt->l7_len > 0) || conn->tcp.tx_queue)) {
+      // The FIN follows bytes the server has not received yet: queue its own payload (pushed,
+      // since nothing follows it) and let handle_queued_tcp_data forward the FIN and ACK it
+      // once everything before it has been sent.
+      if((pkt->l7_len > 0) &&
+          (enqueue_tcp_data(tun, conn, pkt->l7, pkt->l7_len, data->th_flags | TH_PUSH) != 0))
+        return -1;
+
+      conn->tcp.client_fin_pending = 1;
+      conn->tcp.client_closed = 1;
+      return 0;
+    }
+
     if(conn->sock != INVALID_SOCKET) {
       // Half close the socket to possibly signal the remote server
       // (e.g. in after an HTTP request is completed).
@@ -1754,6 +1778,18 @@ static int handle_tcp_reply(zdtun_t *tun, zdtun_conn_t *conn) {
     close_socket(tun, conn->sock);
     conn->sock = INVALID_SOCKET;
 
+    if(conn->tcp.client_fin_pending) {
+      // The bytes queued before the client FIN can no longer be delivered: ACK them and the FIN
+      // as for a write after the server closed, so the client can finish its close.
+      conn->tcp.client_fin_pending = 0;
+      conn->tcp.client_seq += conn->tcp.tx_queue_size + 1;
+      conn->tcp.tx_queue_size = 0;
+      build_reply_tcpip(tun, conn, TH_ACK, 0, 0);
+
+      if(send_to_client(tun, conn, TCP_HEADER_LEN) != 0)
+        return 0;
+    }
+
     if(conn->tcp.client_closed)
       // Both the client and the server have closed, terminate the connection
       zdtun_conn_close(tun, conn, CONN_STATUS_CLOSED);
@@ -1919,9 +1955,21 @@ static int handle_queued_tcp_data(zdtun_t *tun, zdtun_conn_t *conn) {
     // no more data to send
     FD_CLR(conn->sock, &tun->write_fds);
 
-  if(sent > 0) {
+  uint32_t acked = sent;
+
+  if(!conn->tcp.tx_queue && conn->tcp.client_fin_pending) {
+    // Everything before the client FIN reached the server: forward the FIN and ACK it too
+    conn->tcp.client_fin_pending = 0;
+
+    if(shutdown(conn->sock, SHUT_WR) != 0)
+      debug("shutdown failed[%d] %s", errno, strerror(errno));
+
+    acked += 1;
+  }
+
+  if(acked > 0) {
     // ACK the sent packets
-    conn->tcp.client_seq += sent;
+    conn->tcp.client_seq += acked;
     conn->tcp.tx_queue_size -= sent;
     build_reply_tcpip(tun, conn, TH_ACK, 0, 0);
 

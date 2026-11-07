@@ -27,6 +27,9 @@ All notable changes to mobileGF2logger are documented here.
   byte order. Host regression tests cover each fix.
 - Never delete a picked export document on a provider the app refuses, or when
   opening it fails.
+- Build with Gradle 9.8.1 and Android Gradle Plugin 9.4.1, and force the build
+  tooling's Guava to 33.7.2 (CompactHashMap deserialization advisory); none of
+  these ship in the APK. androidx.core moves to 1.18.0.
 
 ### Fixed
 
